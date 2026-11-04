@@ -187,3 +187,31 @@ fn an_engine_with_a_permission_matcher_of_the_tests_own_is_not_mapped() {
     assert_eq!(scenario.checked, 1);
     assert!(scenario.skipped[0].reason.contains("permission matcher"));
 }
+
+/// A publish the engine's Approvals afterConfigChange rewrote rows for: one
+/// that removes a gate, whose sign-offs it consumed, or removes Approvals,
+/// whose sign-offs it deleted; one that adds or changes a gate it rewrote
+/// nothing for.
+#[test]
+fn a_publish_that_removes_a_gate_is_one_the_engine_rewrote_rows_for() {
+    use superschematic_rules_testkit::replay::{approvals_rewrites, PUBLISH_REWRITES};
+    let gates = |states: &[&str]| {
+        let gates: serde_json::Map<String, Value> = states
+            .iter()
+            .map(|state| ((*state).to_owned(), json!({"count": 1, "permission": "p"})))
+            .collect();
+        json!({ "gates": gates })
+    };
+    let both = gates(&["approved", "published"]);
+    let one = gates(&["approved"]);
+    assert!(approvals_rewrites(Some(&both), Some(&one)));
+    assert!(approvals_rewrites(Some(&one), None));
+    assert!(!approvals_rewrites(None, Some(&one)));
+    assert!(!approvals_rewrites(Some(&one), Some(&both)));
+    let mut changed = one.clone();
+    changed["gates"]["approved"]["count"] = json!(2);
+    changed["resetOnChange"] = json!(false);
+    assert!(!approvals_rewrites(Some(&one), Some(&changed)));
+    let behaviors: Vec<&str> = PUBLISH_REWRITES.iter().map(|(name, ..)| *name).collect();
+    assert_eq!(behaviors, ["Timers", "Approvals"]);
+}

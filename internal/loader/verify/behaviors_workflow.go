@@ -3,11 +3,13 @@ package verify
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -154,23 +156,29 @@ func byProblem(schema *ir.Schema, td *ir.TypeDef, fields []behaviorlayout.Column
 }
 
 // checkWritableBy warns when an operation of the API updates a field of a
-// table that a Workflow transition's by on the table names (D104): by is
-// only as strong as its field, and a caller who may write the field may
-// name itself and then make the move. What the build sees of such an
-// update is an operation, in any set but a @behaviorOperations one, that
-// updates a row of the table (updatesARow), with an argument of a type of
-// the API that is @source of the table and carries the field, not
-// @virtual. The table is the @source target as the TypeScript frontend's
-// compiler resolves it (Input.ExternalTypes), or the API's database's when
-// the loader read it (Input.Database), so an API warns whether or not it
-// serves the table's behavior operations. A create is not warned of: whoever
-// creates a row names whom its fields hold. createdBy is never warned of: no
-// input carries it, and the repositories stamp it. It is a warning, not a
-// refusal: the escape hatch is the author's, and the docs and the agent
-// skill say what the build cannot see (an input of a plain type, code that
-// calls the repository's update, raw SQL, an API in a data format that
-// reads no database). One warning is given per operation, table, use and
-// field, in set, operation, argument and by order.
+// table that a by on the table names (D104): a Workflow transition's by,
+// which names who may make the move, or a StateRules state's by, which
+// names who may change the fields the state freezes. A by is only as strong
+// as its field, and a caller who may write the field may name itself and
+// then make the move or change what the state freezes. What the build sees
+// of such an update is an operation, in any set but a @behaviorOperations
+// one, that updates a row of the table (behaviorops.UpdatesARow), with an
+// argument of a type of the API that is @source of the table and carries
+// the field, not @virtual. The table is the @source target as the
+// TypeScript frontend's compiler resolves it (Input.ExternalTypes), or the
+// API's database's when the loader read it (Input.Database), so an API
+// warns whether or not it serves the table's behavior operations. A create
+// is not warned of: whoever creates a row names whom its fields hold.
+// createdBy is never warned of: no input carries it, and the repositories
+// stamp it. Nor is a field the table's Constants lists in fields: a
+// constant changes for no update, so naming oneself in it is no way past
+// by. It is a warning, not a refusal: the escape hatch is the author's, and
+// the docs and the agent skill say what the build cannot see (an input of a
+// plain type, code that calls the repository's update, raw SQL, an API in a
+// data format that reads no database). One warning is given per operation,
+// table, use and field, in set, operation, argument and use order (the
+// table's list, its implements uses before its field uses), each use's
+// fields in config order.
 func checkWritableBy(schema *ir.Schema, in Input, r *Result) {
 	uses := map[*ir.TypeDef][]byUse{}
 	for _, set := range schema.OperationSets {
@@ -187,7 +195,7 @@ func checkWritableBy(schema *ir.Schema, in Input, r *Result) {
 					continue
 				}
 				view, td := sourceTableOf(schema, in, arg.TypeRef.Name)
-				if td == nil || !updatesARow(op, td) {
+				if td == nil || !behaviorops.UpdatesARow(op, td) {
 					continue
 				}
 				byUses, read := uses[td]
@@ -198,13 +206,23 @@ func checkWritableBy(schema *ir.Schema, in Input, r *Result) {
 				for _, use := range byUses {
 					for _, field := range use.fields {
 						fd := sqlutil.FieldNamed(view, field)
-						at := td.Name + "." + use.field + "." + field
+						at := td.Name + "." + use.id + "." + field
 						if fd == nil || fd.Virtual || warned[at] {
 							continue
 						}
 						warned[at] = true
-						r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and the Workflow on %s.%s names %s in by for %s: a caller who may call %s can set %s to itself and then make that move. Keep %s out of the operation's input, or freeze it once StateRules or Constants run on the core (D104)",
-							schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, use.field, field, joinAnd(use.moves[field]), op.Name, field, field)
+						if use.behavior == stateRulesBehavior {
+							states := use.moves[field]
+							verb := "freezes"
+							if len(states) > 1 {
+								verb = "freeze"
+							}
+							r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and %s's StateRules names %s in by for %s: a caller who may call %s can set %s to itself and then change the fields %s %s. Keep %s out of the operation's input, or freeze it: list it in the fields of %s's Constants (D104)",
+								schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, field, joinAnd(states), op.Name, field, joinAnd(states), verb, field, td.Name)
+							continue
+						}
+						r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and the Workflow on %s.%s names %s in by for %s: a caller who may call %s can set %s to itself and then make that move. Keep %s out of the operation's input, or freeze it: list it in the fields of %s's Constants (D104)",
+							schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, use.id, field, joinAnd(use.moves[field]), op.Name, field, field, td.Name)
 					}
 				}
 			}
@@ -212,44 +230,89 @@ func checkWritableBy(schema *ir.Schema, in Input, r *Result) {
 	}
 }
 
-// byUse is a Workflow use on a field of a table whose transitions' by name
-// own fields: the use's field, those fields in by order, and the moves each
-// is named for, "<from> to <to>" in transition order.
+// byUse is a use of a table whose by names own fields (D104): a Workflow
+// on a field, whose id is the field and whose moves are each field's
+// transitions, "<from> to <to>" in transition order; or a StateRules,
+// whose moves are each field's states, in config order. fields are the
+// fields in config order.
 type byUse struct {
-	field  string
-	fields []string
-	moves  map[string][]string
+	id       string
+	behavior string
+	fields   []string
+	moves    map[string][]string
 }
 
-// writableByUses are td's Workflow uses on a field whose transitions' by
-// name a field an input may carry, in list order: every field a by names
-// but createdBy, which the repositories stamp.
+// add records that the use's by names entry for the move or state what.
+func (u *byUse) add(entry, what string) {
+	if !slices.Contains(u.fields, entry) {
+		u.fields = append(u.fields, entry)
+	}
+	if !slices.Contains(u.moves[entry], what) {
+		u.moves[entry] = append(u.moves[entry], what)
+	}
+}
+
+// writableByUses are td's uses whose by name a field an input may carry, in
+// the table's list order (D104): each Workflow use on a field, by its
+// transitions' by, and each StateRules use, by its states' by; every field
+// a by names but createdBy, which the repositories stamp, and a field the
+// table's Constants lists in fields, which no update changes.
 func writableByUses(td *ir.TypeDef) []byUse {
-	var uses []byUse
-	for _, ref := range td.FieldBehaviors() {
-		if ref.Name != workflowBehavior || len(ref.Config) == 0 {
+	constant := map[string]bool{}
+	for _, ref := range td.ImplementsBehaviors() {
+		if ref.Name != constantsBehavior || len(ref.Config) == 0 {
 			continue
 		}
 		var config struct {
-			Transitions []struct {
-				From string   `json:"from"`
-				To   string   `json:"to"`
-				By   []string `json:"by"`
-			} `json:"transitions"`
+			Fields []string `json:"fields"`
 		}
-		if json.Unmarshal(ref.Config, &config) != nil {
+		if json.Unmarshal(ref.Config, &config) == nil {
+			for _, field := range config.Fields {
+				constant[field] = true
+			}
+		}
+	}
+	writable := func(entry string) bool { return entry != sqlutil.AuditCreatedBy && !constant[entry] }
+	var uses []byUse
+	for _, ref := range td.TableBehaviors() {
+		if len(ref.Config) == 0 {
 			continue
 		}
-		use := byUse{field: ref.Field, moves: map[string][]string{}}
-		for _, transition := range config.Transitions {
-			for _, entry := range transition.By {
-				if entry == sqlutil.AuditCreatedBy {
-					continue
+		use := byUse{id: ref.UseID(), behavior: ref.Name, moves: map[string][]string{}}
+		switch {
+		case ref.Name == workflowBehavior && ref.FieldAnchored():
+			var config struct {
+				Transitions []struct {
+					From string   `json:"from"`
+					To   string   `json:"to"`
+					By   []string `json:"by"`
+				} `json:"transitions"`
+			}
+			if json.Unmarshal(ref.Config, &config) != nil {
+				continue
+			}
+			for _, transition := range config.Transitions {
+				for _, entry := range transition.By {
+					if writable(entry) {
+						use.add(entry, transition.From+" to "+transition.To)
+					}
 				}
-				if !slices.Contains(use.fields, entry) {
-					use.fields = append(use.fields, entry)
+			}
+		case ref.Name == stateRulesBehavior && !ref.FieldAnchored():
+			var config struct {
+				States map[string]struct {
+					By []string `json:"by"`
+				} `json:"states"`
+			}
+			if json.Unmarshal(ref.Config, &config) != nil {
+				continue
+			}
+			for _, state := range slices.Sorted(maps.Keys(config.States)) {
+				for _, entry := range config.States[state].By {
+					if writable(entry) {
+						use.add(entry, state)
+					}
 				}
-				use.moves[entry] = append(use.moves[entry], transition.From+" to "+transition.To)
 			}
 		}
 		if len(use.fields) > 0 {
@@ -257,29 +320,6 @@ func writableByUses(td *ir.TypeDef) []byUse {
 		}
 	}
 	return uses
-}
-
-// updatesARow reports whether op, whose method is not GET, writes a row of
-// td that exists: a PUT or a PATCH, or an operation of another method with
-// an argument named as a key field of td, which addresses the row (a POST
-// to questions/{id}/reassign that takes id). Any other is taken for a
-// create.
-func updatesARow(op *ir.FieldDef, td *ir.TypeDef) bool {
-	switch strings.ToUpper(op.HTTPMethod) {
-	case "PUT", "PATCH":
-		return true
-	}
-	for _, arg := range op.Arguments {
-		if arg == nil {
-			continue
-		}
-		for _, fd := range td.Fields {
-			if fd != nil && fd.Key && fd.Name == arg.Name {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // sourceTableOf is the type of schema named name when it is a @source view,

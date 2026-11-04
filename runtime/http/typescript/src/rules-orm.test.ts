@@ -268,6 +268,25 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     expect(await orm.order.status.transition(id, { to: 'shipped' }, { caller: { subject: 'sam', permissions: ['orders.ship'] } })).toEqual({ from: 'paid', to: 'shipped' });
   });
 
+  test("withBehaviorCaller runs the commands as its caller, kept by withUser's copy and a transaction, a call's caller still first, and null unsets it", async () => {
+    const shipper = orm.withBehaviorCaller({ subject: 'sam', permissions: ['orders.ship'] });
+    const paid = async () => {
+      const row = await shipper.order.createOne({ title: 'Crate' });
+      expect(await shipper.order.status.transition(row.id, { to: 'paid' })).toEqual({ from: 'draft', to: 'paid' });
+      return row.id;
+    };
+    const first = await paid();
+    await expect(orm.order.status.transition(first, { to: 'shipped' })).rejects.toMatchObject({ code: 'forbidden', status: 403 });
+    expect(await shipper.withUser('6fe1XoZ0UJpMNNdUOSMC2X').order.status.transition(first, { to: 'shipped' })).toEqual({ from: 'paid', to: 'shipped' });
+    const second = await paid();
+    expect(await shipper.transaction(tx => tx.order.status.transition(second, { to: 'shipped' }))).toEqual({ from: 'paid', to: 'shipped' });
+    const third = await paid();
+    await expect(shipper.order.status.transition(third, { to: 'shipped' }, { caller: { subject: 'ann', permissions: [] } })).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(shipper.withBehaviorCaller(null).order.status.transition(third, { to: 'shipped' })).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(shipper.transaction(async tx => tx.withBehaviorCaller(null).order.status.transition(third, { to: 'shipped' }))).rejects.toMatchObject({ code: 'forbidden' });
+    expect(await orm.order.getOne(third)).toMatchObject({ status: 'paid' });
+  });
+
   test('updateOne writes own fields through the core, and refuses an owned one', async () => {
     const row = await orm.order.updateOne(id, { title: 'Chair' });
     expect(row).toMatchObject({ title: 'Chair', status: 'shipped', _version: 4 });

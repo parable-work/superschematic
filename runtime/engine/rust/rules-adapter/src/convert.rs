@@ -1,8 +1,10 @@
 //! Values between the core's JSON and a table's columns (D103), by the
 //! layout's column: a timestamp the core holds as epoch milliseconds is
 //! the text `Date.prototype.toISOString` writes in a column, a UUID is
-//! base62 in the core and lowercase hyphenated text in a column (D79), and
-//! the rest is its JSON value, an object or an array as its JSON text.
+//! base62 in the core and lowercase hyphenated text in a column (D79), a
+//! JSON column's value is its JSON text whatever it is, and the rest is its
+//! JSON value, an object or an array as its JSON text and a double as
+//! JavaScript writes it (2, not 2.0).
 //!
 //! A value bound for a statement is a [`Bind`], which each store binds in
 //! its own way: Postgres every one as text, as node-pg does, and SQLite
@@ -98,10 +100,16 @@ pub(crate) fn key_value(table: &Table, key: &str) -> Result<Bind, Refusal> {
 
 /// A value of the core's as its column binds it: null for none; a
 /// timestamp's epoch milliseconds as its ISO text; a UUID's hyphenated
-/// text; an object or array as its JSON text; anything else as it is.
+/// text; a JSON column's value, whatever it is, as its JSON text, so a
+/// string, a number or a boolean reads back as the value it was (D104); an
+/// object or array in any other column as its JSON text; anything else as
+/// it is.
 pub(crate) fn to_column(value: &Value, column: &Column, table: &Table) -> Result<Bind, Refusal> {
     if value.is_null() {
         return Ok(Bind::Null);
+    }
+    if column.type_name == JSON_TYPE {
+        return Ok(Bind::Text(value.to_string()));
     }
     if column.convert == Some(Convert::EpochMillis) {
         return millis_of(value)
@@ -129,7 +137,8 @@ pub(crate) fn to_column(value: &Value, column: &Column, table: &Table) -> Result
 /// A column's value as the core holds it: `None` for NULL, which the row
 /// leaves absent; a timestamp as epoch milliseconds, from ISO text (any
 /// offset) or a number; a UUID as its base62 wire form; a boolean column's
-/// 1 or 0 as a boolean; a JSON column's SQLite text as its JSON.
+/// 1 or 0 as a boolean; a JSON column's SQLite text as its JSON; a double
+/// that is a whole number as its digits.
 pub(crate) fn from_cell(
     cell: Cell,
     column: &Column,
@@ -178,12 +187,31 @@ fn plain(cell: Cell) -> Value {
     match cell {
         Cell::Null => Value::Null,
         Cell::Int(n) => Value::from(n),
-        Cell::Real(x) => Number::from_f64(x).map_or(Value::Null, Value::Number),
+        Cell::Real(x) => real(x),
         Cell::Bool(flag) => Value::Bool(flag),
         Cell::Text(text) => Value::String(text),
         Cell::Blob(bytes) => Value::String(String::from_utf8_lossy(&bytes).into_owned()),
         Cell::Json(value) => value,
     }
+}
+
+/// A double as the core's JSON holds it, as JavaScript writes one: its
+/// shortest digits, and a whole number below 1e21 with no fraction, so
+/// SQLite's `REAL` 2.0 reads back as the 2 an update gave it, as Postgres's
+/// `to_jsonb` of a `DOUBLE PRECISION` writes it, and a message shows it so
+/// (D104); zero as 0; null for one JSON cannot hold.
+fn real(x: f64) -> Value {
+    if x == 0.0 {
+        return Value::from(0);
+    }
+    // Display writes a double's shortest digits in full, with no exponent
+    // and no fraction for a whole number.
+    if x.fract() == 0.0 && x.abs() < 1e21 {
+        if let Ok(whole) = format!("{x}").parse::<Number>() {
+            return Value::Number(whole);
+        }
+    }
+    Number::from_f64(x).map_or(Value::Null, Value::Number)
 }
 
 /// A cell as a refusal shows it.
@@ -203,7 +231,7 @@ fn timestamp_of(cell: &Cell) -> Option<Value> {
         }
         Cell::Blob(bytes) => parse_timestamp(std::str::from_utf8(bytes).ok()?).map(Value::from),
         Cell::Int(n) => Some(Value::from(*n)),
-        Cell::Real(x) => Number::from_f64(*x).map(Value::Number),
+        Cell::Real(x) if x.is_finite() => Some(real(*x)),
         Cell::Json(Value::Number(number)) => Some(Value::Number(number.clone())),
         _ => None,
     }
@@ -665,6 +693,22 @@ mod tests {
             Ok(Bind::Text("[1,2]".into()))
         );
         assert_eq!(to_column(&json!(true), &text, &table), Ok(Bind::Bool(true)));
+        // A JSON column binds every value as its JSON text, a string, a
+        // number and a boolean among them, so each reads back as it was.
+        let data = Column::new("data", "data", "Generic.JSON");
+        for (value, bound) in [
+            (json!({"a": [1]}), r#"{"a":[1]}"#),
+            (json!(["x", 2]), r#"["x",2]"#),
+            (json!("5"), r#""5""#),
+            (json!(5), "5"),
+            (json!(false), "false"),
+        ] {
+            assert_eq!(
+                to_column(&value, &data, &table),
+                Ok(Bind::Text(bound.into()))
+            );
+        }
+        assert_eq!(to_column(&Value::Null, &data, &table), Ok(Bind::Null));
         assert_eq!(
             to_column(&json!("Desk"), &text, &table),
             Ok(Bind::Text("Desk".into()))
@@ -748,6 +792,41 @@ mod tests {
         assert_eq!(
             read(Cell::Json(json!({"a": [1]})), &text),
             Ok(Some(json!({"a": [1]})))
+        );
+    }
+
+    #[test]
+    fn a_double_reads_as_javascript_writes_it_and_a_json_column_as_its_json() {
+        let table = order();
+        let at = Column::new("enteredAt", "entered_at", "Temporal.DateTime")
+            .converted(Convert::EpochMillis);
+        let data = Column::new("data", "data", "Generic.JSON");
+        let read = |cell: Cell, column: &Column| from_cell(cell, column, &table);
+        // A double that is a whole number reads as its digits, as
+        // JavaScript writes it and to_jsonb does: SQLite's REAL 2.0 is 2.
+        let number = Column::new("attempts", "attempts", "number");
+        let text_of =
+            |cell: Cell| read(cell, &number).map(|value| value.map(|value| value.to_string()));
+        assert_eq!(text_of(Cell::Real(2.0)), Ok(Some("2".into())));
+        assert_eq!(text_of(Cell::Real(-3.0)), Ok(Some("-3".into())));
+        assert_eq!(text_of(Cell::Real(-0.0)), Ok(Some("0".into())));
+        assert_eq!(text_of(Cell::Real(0.1)), Ok(Some("0.1".into())));
+        assert_eq!(
+            text_of(Cell::Real(12_345_678_901_234_567_000.0)),
+            Ok(Some("12345678901234567000".into()))
+        );
+        assert_eq!(text_of(Cell::Real(1e21)), Ok(Some("1e+21".into())));
+        assert_eq!(
+            read(Cell::Real(77.0), &at).map(|value| value.map(|value| value.to_string())),
+            Ok(Some("77".into()))
+        );
+        assert_eq!(
+            read(Cell::Text(r#""5""#.into()), &data),
+            Ok(Some(json!("5")))
+        );
+        assert_eq!(
+            read(Cell::Text("false".into()), &data),
+            Ok(Some(json!(false)))
         );
     }
 }

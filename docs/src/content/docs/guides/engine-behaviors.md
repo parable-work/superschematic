@@ -1379,6 +1379,10 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
   with `limitsPermission`. `Lease`'s `maxHoldField`, `Budget`'s
   `limitField` and `Presence`'s `principalField` keep rules of their own
   too; listing such a field in `Constants` as well adds its permission.
+- **A table's Constants.** `oneWay`, fields that only move one way after
+  the create, is a DB table's alone (D104,
+  [Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
+  the engine refuses it, naming the table form.
 
 The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#validating-fields)
 shows how a behavior of your own judges the fields a write stores.
@@ -1596,6 +1600,10 @@ engine.instances.update(me, 'invoices', 'march', { amount: 1300 });
   to and removed from a schema with instances. An instance that predates
   a requirement keeps working: only clearing a required field it holds
   is refused, until it next enters the state.
+- **A table's StateRules.** A state's `by`, the subjects who change a
+  frozen field, and the config's `status` are a DB table's alone (D104,
+  [Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
+  the engine refuses each, naming the table form.
 
 ## Approvals
 
@@ -1646,6 +1654,10 @@ engine.instances.get(alice, 'expenses', 'trip')?.behaviors.Approvals;
   `Approvals.withdrawSignOff` in `Lease`'s `exempt`, or the lease refuses
   every principal but its holder
   ([Work queues](/superschematic/guides/work-queues/#lease)).
+- **A table's Approvals.** A gate's `resetOn` and `pinned`, the config's
+  `status` and `signOff`'s `version` are a DB table's alone (D104,
+  [Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
+  the engine refuses each, naming the table form.
 
 ## Numbering
 

@@ -78,6 +78,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
@@ -176,11 +177,12 @@ type Table struct {
 	// Audit are the audit fields of the table the core reads beside its own
 	// fields and no command writes: createdBy (D87), a scalar column the
 	// repositories stamp with an operation's caller, when a Workflow
-	// transition's by names it (D104). A row read holds each in its own
+	// transition's by or a StateRules state's by names it, or an Approvals
+	// gate excludes the creator (D104). A row read holds each in its own
 	// fields by Field; a create's own fields, an update's patch and a change
 	// set never carry one, and a write's image (ImageColumns) leaves it out.
-	// Absent for a table without a scalar createdBy, and for one no by
-	// names it of.
+	// Absent for a table without a scalar createdBy, and for one whose
+	// behaviors read it of none.
 	Audit []Column `json:"audit,omitempty"`
 
 	// Uses are the type's table uses, implements and field uses, in the
@@ -739,6 +741,21 @@ func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 	return nil
 }
 
+// SpecFields are the fields of td, a table of schema, the core's spec of
+// the type lists (D103, D104): [OwnFields] in column order, then the
+// layout's audit, createdBy when a use reads it. A refusal of a config that
+// names a field the type lacks names them as the core's does ("its fields:
+// ..."), so the loader's checks that word it as the core does list these.
+// It is nil when schema's tables cannot be modelled, which the build
+// reports elsewhere.
+func SpecFields(schema *ir.Schema, td *ir.TypeDef) []Column {
+	model := modelOf(schema, td)
+	if model == nil {
+		return nil
+	}
+	return append(ownColumns(schema, model), readAudit(td, model)...)
+}
+
 // auditColumns are the audit fields of the table model holds that the core
 // reads (D104): its createdBy, when it is a scalar column of the type's own
 // (no relation, no list, no map), which the repositories stamp with an
@@ -753,36 +770,77 @@ func auditColumns(model *sqlutil.TableModel) []Column {
 }
 
 // readAudit are the audit columns of the table model holds that the
-// layout's audit names (D104): auditColumns when a Workflow transition's
-// by on td names createdBy, and none otherwise, so a table whose behaviors
-// read no audit field converts none in its row reads.
+// layout's audit names (D104): auditColumns when a use of td reads
+// createdBy, and none otherwise, so a table whose behaviors read no audit
+// field converts none in its row reads. A use reads it when a Workflow
+// transition's by names it, when a StateRules state's by names it, and when
+// an Approvals gate excludes the creator (excludeCreator absent or true),
+// which creator_cannot_sign reads it for.
 func readAudit(td *ir.TypeDef, model *sqlutil.TableModel) []Column {
-	for _, ref := range td.FieldBehaviors() {
-		if ref.Name != "Workflow" || len(ref.Config) == 0 {
-			continue
+	for _, ref := range td.TableBehaviors() {
+		if len(ref.Config) > 0 && readsCreatedBy(ref) {
+			return auditColumns(model)
 		}
+	}
+	return nil
+}
+
+// readsCreatedBy reports whether the table use ref reads the row's
+// createdBy (D104): a Workflow whose transition's by names it, a StateRules
+// whose state's by names it, or an Approvals with a gate that excludes the
+// creator. A config that does not read reads none; the loader refuses it.
+func readsCreatedBy(ref ir.BehaviorRef) bool {
+	switch ref.Name {
+	case "Workflow":
 		var config struct {
 			Transitions []struct {
 				By []string `json:"by"`
 			} `json:"transitions"`
 		}
 		if json.Unmarshal(ref.Config, &config) != nil {
-			continue
+			return false
 		}
 		for _, transition := range config.Transitions {
-			for _, entry := range transition.By {
-				if entry == sqlutil.AuditCreatedBy {
-					return auditColumns(model)
-				}
+			if slices.Contains(transition.By, sqlutil.AuditCreatedBy) {
+				return true
+			}
+		}
+	case "StateRules":
+		var config struct {
+			States map[string]struct {
+				By []string `json:"by"`
+			} `json:"states"`
+		}
+		if json.Unmarshal(ref.Config, &config) != nil {
+			return false
+		}
+		for _, rule := range config.States {
+			if slices.Contains(rule.By, sqlutil.AuditCreatedBy) {
+				return true
+			}
+		}
+	case "Approvals":
+		var config struct {
+			Gates map[string]struct {
+				ExcludeCreator *bool `json:"excludeCreator"`
+			} `json:"gates"`
+		}
+		if json.Unmarshal(ref.Config, &config) != nil {
+			return false
+		}
+		for _, gate := range config.Gates {
+			if gate.ExcludeCreator == nil || *gate.ExcludeCreator {
+				return true
 			}
 		}
 	}
-	return nil
+	return false
 }
 
 // AuditFields are td's audit fields, a table of schema, that a Workflow
-// transition's by may name (D104): its createdBy, when it is a scalar
-// column, which the layout's audit names when a by does. A by is held to
+// transition's by or a StateRules state's by may name, and an Approvals gate
+// that excludes the creator reads (D104): its createdBy, when it is a scalar
+// column, which the layout's audit names when a use reads it. A by is held to
 // them beside [OwnFields], by the core at a command (the spec's fields) and
 // by the loader's checks before it, so both list the same names. It is nil
 // for a table without one, and when schema's tables cannot be modelled,

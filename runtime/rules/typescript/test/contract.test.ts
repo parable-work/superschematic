@@ -227,7 +227,8 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Timers']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers']);
+  const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
   expect(workflow.fields?.map(f => ({ name: f.name, type: f.type }))).toEqual([
@@ -241,9 +242,33 @@ test('declarations are the registered files, each field typed and the value fiel
   expect(reactions.hearsChanges).toBe(true);
   expect(reactions.tables).toBeUndefined();
   expect(reactions.operations ?? []).toEqual([]);
+  // Constants and StateRules keep nothing and declare no operation; a
+  // oneWay field moved back is Constants' veto one_way (D104).
+  const constants = byName('Constants');
+  expect([constants.tables, constants.armsDeadlines, constants.hearsChanges, constants.operations ?? []]).toEqual([undefined, undefined, undefined, []]);
+  expect(constants.vetoes?.map(v => v.code)).toEqual(['one_way']);
+  const stateRules = byName('StateRules');
+  expect([stateRules.tables, stateRules.armsDeadlines, stateRules.hearsChanges, stateRules.operations ?? []]).toEqual([undefined, undefined, undefined, []]);
+  // Approvals keeps its sign-offs in a sub-table of the row, keyed by their
+  // number, and neither arms a deadline nor hears a write (D104).
+  const approvals = byName('Approvals');
+  expect([approvals.armsDeadlines, approvals.hearsChanges]).toEqual([undefined, undefined]);
+  expect(approvals.tables?.map(t => ({ name: t.name, key: t.key, fields: t.fields.map(f => `${f.name}: ${f.type}`) }))).toEqual([
+    {
+      name: 'signOffs',
+      key: 'number',
+      fields: ['number: string', 'state: string', 'subject: string', 'note: string', 'at: Temporal.DateTime', 'consumedAt: Temporal.DateTime'],
+    },
+  ]);
+  expect(approvals.operations?.map(o => [o.name, o.writes === true])).toEqual([
+    ['signOff', true],
+    ['withdrawSignOff', true],
+    ['listSignOffs', false],
+  ]);
+  expect(approvals.vetoes?.map(v => v.code)).toContain('stale');
   // Timers keeps its deadlines in a sub-table of the row, arms each, and
   // hears its row's writes, which reconcile them (D103).
-  const timers = declarations[2]!;
+  const timers = declarations[5]!;
   expect(timers.armsDeadlines).toBe(true);
   expect(timers.hearsChanges).toBe(true);
   expect(timers.tables?.map(t => ({ name: t.name, key: t.key, fields: t.fields.map(f => `${f.name}: ${f.type}`) }))).toEqual([

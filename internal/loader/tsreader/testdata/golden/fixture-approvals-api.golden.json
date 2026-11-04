@@ -1,0 +1,106 @@
+{
+  "name": "fixture-approvals-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-approvals-db",
+      "types": [
+        "Task"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-approvals-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "TaskAssignment": {
+      "name": "TaskAssignment",
+      "owner": "src/tasks.schema.ts",
+      "comment": "Who reviews a task and who owns it, as reassignTask takes them: a view of\nthe table that carries reviewer, which StateRules names in by, so the build\nwarns that a caller who may reassign a task may then edit its plan while\nit is working; and owner, which the Workflow names in by and Constants\nkeeps as its create gave it, so the build does not warn of it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-approvals-db.Task",
+        "omittedFromSource": [
+          "id",
+          "title",
+          "plan",
+          "proof",
+          "urgent",
+          "attempts",
+          "createdBy"
+        ]
+      },
+      "fields": [
+        {
+          "name": "reviewer",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "owner",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "TaskActions",
+      "comment": "A task's status and approvals operations (D104), for any signed-in\ncaller: the core decides who may move a task, sign it off and change what\nits state freezes.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Task"
+      },
+      "auth": true
+    },
+    {
+      "name": "TaskAdmin",
+      "comment": "Administration of tasks, for callers who hold tasks.admin.",
+      "operations": [
+        {
+          "name": "reassignTask",
+          "typeRef": {
+            "name": "Task"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskAssignment"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tasks.admin"
+          ],
+          "httpMethod": "PATCH",
+          "restPath": "tasks/{id}/assignment"
+        }
+      ]
+    }
+  ]
+}

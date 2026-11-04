@@ -1,0 +1,61 @@
+{
+  "functions": [
+    {
+      "name": "task.approvals.listSignOffs",
+      "description": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {"description":"A string value","type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "state": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "task.approvals.signOff",
+      "description": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "note": {"description":"A string value","maxLength":10000,"type":["string","null"]},
+          "state": {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
+          "version": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "state"]
+      }
+    },
+    {
+      "name": "task.approvals.withdrawSignOff",
+      "description": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "state": {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"}
+        },
+        "required": ["id", "state"]
+      }
+    },
+    {
+      "name": "task.status.transition",
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      }
+    }
+  ]
+}

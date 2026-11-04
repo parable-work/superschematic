@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { MAX_ATTEMPTS, RulesRefusal, execute, readRow, runCreate, runDelete, runOperation, type CoreAnswers, type CoreCaller, type CoreCommand, type CoreStep, type CoreTypeSpec, type RulesCore, type RulesHost, type RulesLayout, type RulesStore } from './rules';
+import { MAX_ATTEMPTS, RulesRefusal, execute, readRow, readSubRows, runCreate, runDelete, runOperation, runUpdate, type CoreAnswers, type CoreCaller, type CoreCommand, type CoreStep, type CoreTypeSpec, type RulesCore, type RulesHost, type RulesLayout, type RulesStore } from './rules';
 import { bumpVersion, columnTypes, core, postgresDatabase, rulesCore, rulesDsn, sqliteDatabase, type TestDatabase } from './rules.testing';
 
 // The adapter over a real database of each dialect, bun:sqlite through
@@ -7,8 +7,10 @@ import { bumpVersion, columnTypes, core, postgresDatabase, rulesCore, rulesDsn, 
 // transaction, whose savepoint is the unit), on a table written by hand as
 // sqlgen writes one that composes Workflow on status: the owned columns
 // status and status_entered_at beside the own title, and @optimistic's
-// _version, with its trigger on Postgres. The Postgres cases are skipped
-// without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
+// _version, with its trigger on Postgres; and tables whose own columns hold
+// subjects, a boolean, a number and JSON, one of which implements
+// Approvals and keeps its sub-table with no queue (D104). The Postgres
+// cases are skipped without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 
 const flow = {
   states: ['draft', 'paid', 'shipped'],
@@ -93,6 +95,86 @@ const questionLayout: RulesLayout = {
   },
 };
 
+/**
+ * A table whose own columns hold a boolean, a number and JSON beside a
+ * string (D104), and that implements Approvals, whose sub-table of
+ * sign-offs (signOffs, doc_approvals_sign_offs) it keeps with neither a
+ * deadline queue nor a change queue, as sqlgen writes one: a surrogate id,
+ * the row's key with ON DELETE CASCADE and the unique index of (row,
+ * number). The gate on sent excludes the creator, whom the audit
+ * created_by holds, and a change of title consumes its sign-offs.
+ */
+const docLayout: RulesLayout = {
+  types: {
+    Doc: {
+      type: 'Doc',
+      table: 'doc',
+      key: { field: 'id', column: 'id', type: 'string' },
+      version: '_version',
+      own: [
+        { field: 'title', column: 'title', type: 'string' },
+        { field: 'urgent', column: 'urgent', type: 'boolean' },
+        { field: 'attempts', column: 'attempts', type: 'number' },
+        { field: 'data', column: 'data', type: 'Generic.JSON' },
+      ],
+      audit: [{ field: 'createdBy', column: 'created_by', type: 'Identity.UUID' }],
+      uses: [
+        {
+          id: 'Approvals',
+          behavior: 'Approvals',
+          member: 'approvals',
+          fields: [],
+          operations: [
+            { name: 'signOff', writes: true },
+            { name: 'withdrawSignOff', writes: true },
+            { name: 'listSignOffs', writes: false },
+          ],
+          tables: [
+            {
+              name: 'signOffs',
+              table: 'doc_approvals_sign_offs',
+              row: 'doc_id',
+              key: { name: 'number', field: 'number', column: 'number', type: 'string' },
+              fields: [
+                { name: 'state', field: 'state', column: 'state', type: 'string' },
+                { name: 'subject', field: 'subject', column: 'subject', type: 'string' },
+                { name: 'note', field: 'note', column: 'note', type: 'string' },
+                { name: 'at', field: 'at', column: 'at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+                { name: 'consumedAt', field: 'consumedAt', column: 'consumed_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+              ],
+            },
+          ],
+        },
+        {
+          id: 'status',
+          behavior: 'Workflow',
+          anchor: 'status',
+          member: 'status',
+          fields: [
+            { name: 'status', field: 'status', column: 'status', type: 'string', value: true },
+            { name: 'enteredAt', field: 'statusEnteredAt', column: 'status_entered_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+          ],
+          operations: [{ name: 'transition', writes: true }],
+        },
+      ],
+      spec: {
+        name: 'Doc',
+        uses: [
+          { behavior: 'Approvals', config: { gates: { sent: { count: 1, permission: 'docs.review', resetOn: ['title'] } } }, anchor: 'type' },
+          { behavior: 'Workflow', config: { states: ['draft', 'sent'], transitions: [{ from: 'draft', to: 'sent' }] }, anchor: { field: 'status' } },
+        ],
+        fields: [
+          { name: 'title', type: 'string' },
+          { name: 'urgent', type: 'boolean' },
+          { name: 'attempts', type: 'number' },
+          { name: 'data', type: 'Generic.JSON' },
+          { name: 'createdBy', type: 'Identity.UUID' },
+        ],
+      },
+    },
+  },
+};
+
 /** A UUID's two forms, its column's hyphenated text and its base62 wire form: dana's, and erin's. */
 const DANA = { column: '0f8fad5b-d9cb-469f-a165-70867728950e', wire: 'TMXp8QPR6yGvKuV2GZQ10' };
 const ERIN = { column: '7c9e6679-7425-40de-944b-e07fc1f90ae7', wire: '3n9R8RlRyqVJBUQUv6toL1' };
@@ -166,6 +248,29 @@ for (const dialect of dialects) {
   _version ${t.version}
 )`);
       if (db.dialect === 'postgres') for (const ddl of bumpVersion('question')) await db.exec(ddl);
+      await db.exec(`CREATE TABLE doc (
+  id ${t.key},
+  title ${t.text} NOT NULL,
+  urgent ${t.boolean},
+  attempts ${t.number},
+  data ${t.json},
+  created_by ${uuid},
+  status ${t.text},
+  status_entered_at ${t.timestamp},
+  _version ${t.version}
+)`);
+      if (db.dialect === 'postgres') for (const ddl of bumpVersion('doc')) await db.exec(ddl);
+      await db.exec(`CREATE TABLE doc_approvals_sign_offs (
+  id ${db.dialect === 'postgres' ? 'UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY' : 'INTEGER PRIMARY KEY'},
+  doc_id ${t.text} NOT NULL REFERENCES doc (id) ON DELETE CASCADE,
+  number ${t.text} NOT NULL,
+  state ${t.text},
+  subject ${t.text},
+  note ${t.text},
+  at ${t.timestamp},
+  consumed_at ${t.timestamp}
+)`);
+      await db.exec('CREATE UNIQUE INDEX doc_approvals_sign_offs_row_key ON doc_approvals_sign_offs (doc_id, number)');
     });
     afterAll(async () => db?.close());
 
@@ -374,6 +479,68 @@ for (const dialect of dialects) {
       expect(await withdraw({ subject: DANA.column, permissions: [] })).toEqual({ from: 'open', to: 'withdrawn' });
       const [row] = await db.rows(`SELECT created_by, status, _version FROM question WHERE id = ${p(1)}`, ['q1']);
       expect({ createdBy: String(row!.created_by), status: row!.status, version: Number(row!._version) }).toEqual({ createdBy: DANA.column, status: 'withdrawn', version: 2 });
+    });
+
+    /** A host over a transaction of the database with docLayout, at the test's clock. */
+    const onDocs = (store: RulesStore): RulesHost => ({ core: core(), layout: docLayout, store, now: () => (clock += 1000) });
+    const readDoc = (id: string) => db.transaction(store => readRow(onDocs(store), 'Doc', id));
+
+    test("own columns read back as the core's JSON: a boolean, from SQLite's 1 and 0 too, a number, and a JSON column's object, list and string", async () => {
+      const data = { steps: [1, 'two', { three: 3 }], done: false, none: null };
+      await db.transaction(store => runCreate(onDocs(store), 'Doc', { title: 'Plan', urgent: true, attempts: 2.5, data }, alice, { id: 'd1' }));
+      expect(await readDoc('d1')).toEqual({
+        own: { title: 'Plan', urgent: true, attempts: 2.5, data },
+        owned: { status: { status: 'draft', enteredAt: expect.any(Number) } },
+        version: 1,
+      });
+      const [raw] = await db.rows(`SELECT urgent FROM doc WHERE id = ${p(1)}`, ['d1']);
+      expect(raw!.urgent).toBe(db.dialect === 'postgres' ? true : 1);
+      await db.transaction(store => runUpdate(onDocs(store), 'Doc', 'd1', { urgent: false, attempts: 3, data: ['a', 2] }, alice));
+      expect((await readDoc('d1'))?.own).toEqual({ title: 'Plan', urgent: false, attempts: 3, data: ['a', 2] });
+      // A JSON string is a string, "5" among them, never the number its
+      // text spells, and a JSON number a number.
+      await db.transaction(store => runUpdate(onDocs(store), 'Doc', 'd1', { data: '5' }, alice));
+      expect((await readDoc('d1'))?.own).toMatchObject({ data: '5' });
+      await db.transaction(store => runUpdate(onDocs(store), 'Doc', 'd1', { data: 5, urgent: null }, alice));
+      expect((await readDoc('d1'))?.own).toEqual({ title: 'Plan', attempts: 3, data: 5 });
+    });
+
+    test('a sub-table of a table with no deadline or change queue: a sign-off inserts its row, a read-only operation reads the rows and writes nothing, an update consumes them, a withdrawal deletes one, and a delete of the row deletes them', async () => {
+      const reviewer: CoreCaller = { subject: 'erin', permissions: ['docs.review'] };
+      const run = (operation: string, params: unknown, caller: CoreCaller) => db.transaction(store => runOperation(onDocs(store), 'Doc', 'd2', 'Approvals', operation, params, caller));
+      const version = async () => Number((await db.rows(`SELECT _version FROM doc WHERE id = ${p(1)}`, ['d2']))[0]!._version);
+      const subRows = () => db.transaction(store => readSubRows(onDocs(store), 'Doc', 'd2', 'Approvals', 'signOffs'));
+      await db.transaction(store => runCreate(onDocs(store), 'Doc', { title: 'Memo' }, alice, { id: 'd2' }));
+      // The audit column the repositories stamp, written past the adapter:
+      // the creator the gate excludes, whom a row read holds as createdBy.
+      await db.exec(`UPDATE doc SET created_by = ${p(1)} WHERE id = ${p(2)}`, [DANA.column, 'd2']);
+      await expect(run('signOff', { state: 'sent' }, { subject: DANA.wire, permissions: ['docs.review'] })).rejects.toMatchObject({
+        code: 'vetoed',
+        details: { vetoCode: 'creator_cannot_sign' },
+      });
+
+      const before = await version();
+      expect(await run('signOff', { state: 'sent', note: 'Fine' }, reviewer)).toMatchObject({ state: 'sent', subject: 'erin', note: 'Fine', signedBy: ['erin'], count: 1 });
+      expect(await version()).toBe(before + 1);
+      expect(await subRows()).toEqual([{ key: '0000000001', values: { state: 'sent', subject: 'erin', note: 'Fine', at: expect.any(Number) } }]);
+      // A read-only operation reads the sub-table rows and writes nothing.
+      expect(await run('listSignOffs', {}, reviewer)).toEqual({ items: [{ state: 'sent', subject: 'erin', note: 'Fine', at: expect.any(Number) }], next: null });
+      expect(await version()).toBe(before + 1);
+
+      // An update of the field the gate's resetOn names consumes its
+      // sign-off: an update of the sub-table row.
+      await db.transaction(store => runUpdate(onDocs(store), 'Doc', 'd2', { title: 'Memo, revised' }, alice));
+      expect((await subRows())[0]!.values).toEqual({ state: 'sent', subject: 'erin', note: 'Fine', at: expect.any(Number), consumedAt: expect.any(Number) });
+      // The next sign-off takes the next number, and its withdrawal deletes its row.
+      expect(await run('signOff', { state: 'sent' }, reviewer)).toMatchObject({ state: 'sent', subject: 'erin', signedBy: ['erin'], count: 1 });
+      expect((await subRows()).map(row => row.key)).toEqual(['0000000001', '0000000002']);
+      expect(await run('withdrawSignOff', { state: 'sent' }, reviewer)).toMatchObject({ state: 'sent', subject: 'erin' });
+      expect((await subRows()).map(row => row.key)).toEqual(['0000000001']);
+
+      // A delete of the row deletes its sub-table rows.
+      await db.transaction(store => runDelete(onDocs(store), 'Doc', 'd2', alice));
+      expect(await readDoc('d2')).toBeNull();
+      expect(await db.rows(`SELECT number FROM doc_approvals_sign_offs WHERE doc_id = ${p(1)}`, ['d2'])).toEqual([]);
     });
 
     if (dialect.name === 'Postgres') {

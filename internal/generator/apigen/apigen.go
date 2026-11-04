@@ -784,6 +784,16 @@ type Options struct {
 	// holds no engine type. The generator package reads it from the
 	// database's IR and config.
 	Engine *EngineInfo
+
+	// WritePermissions are the permissions the core checks on the writes
+	// of an operation that is not a behavior's (D104): the permission of
+	// each Constants and StateRules use of a table the operation updates a
+	// row of through a @source view of it, which the permission catalog
+	// lists under the operation beside the route's own. The generator
+	// package sets it to behaviorops.WritePermissions over the API and its
+	// dependencies, which apigen cannot call itself (behaviorops imports the
+	// registry, which imports apigen); nil lists none.
+	WritePermissions func(op *ir.FieldDef) []string
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -921,7 +931,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	output.OpenAPISpecRaw = rawSpec
 	output.OpenAPISpec = escapedSpec
 	output.Scalars = extractScalarJSONSchemaInfo(schema)
-	if output.PermissionCatalogJSON, err = permissionCatalog(output, schema); err != nil {
+	if output.PermissionCatalogJSON, err = permissionCatalog(output, schema, opts.WritePermissions); err != nil {
 		return nil, err
 	}
 
@@ -930,15 +940,27 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 
 // permissionCatalog is the API's permissions.json, from every endpoint, the
 // user model's included, a behavior operation's with the permissions its
-// behavior's config names, which the core checks (D103), and from the
-// engine its server mounts, whose permission policy asks <Type>.<action> of
-// each engine type (D58), or "" when none names a permission.
-func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
+// behavior's config names, which the core checks (D103), any other with
+// the permissions writes says the core checks on its writes (D104), and
+// from the engine its server mounts, whose permission policy asks
+// <Type>.<action> of each engine type (D58), or "" when none names a
+// permission.
+func permissionCatalog(output *APIOutput, schema *ir.Schema, writes func(op *ir.FieldDef) []string) (string, error) {
 	operations := make([]permcatalog.Operation, len(output.Endpoints))
 	for i, endpoint := range output.Endpoints {
+		permissions := endpoint.catalogPermissions()
+		if writes != nil && endpoint.Operation != nil && endpoint.BehaviorOperation() == nil {
+			for _, p := range writes(endpoint.Operation) {
+				if !slices.Contains(permissions, p) {
+					// A copy, so the endpoint's own requirements stay the
+					// route's.
+					permissions = append(slices.Clip(permissions), p)
+				}
+			}
+		}
 		operations[i] = permcatalog.Operation{
 			ID:          endpoint.HandlerName,
-			Permissions: endpoint.catalogPermissions(),
+			Permissions: permissions,
 			Identity:    endpoint.IdentityOperation != "",
 		}
 	}

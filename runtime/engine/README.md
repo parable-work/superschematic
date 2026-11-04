@@ -4169,7 +4169,7 @@ Fields of the type that its create sets and nothing changes after.
 
 | | |
 | --- | --- |
-| Config | `fields`: 1 to 64 of the type's own top-level fields, by JSON key; `permission`: the permission a caller needs to change them after the create, optional |
+| Config | `fields`: 1 to 64 of the type's own top-level fields, by JSON key; `permission`: the permission a caller needs to change them after the create, optional. A table's Constants' `oneWay`, which the declaration the engine shares lists (D104), is refused at define, naming the table form (`implements Constants<T, { ... }> on a DB table`), and the engine never answers its veto `one_way` |
 | Fields, operations | none |
 | Validates | an update, a caller's or an operation's `update()`, that changes a listed field: the rule `constant` at the field, unless the caller holds `permission` (`invalid_instance`). A create is never refused |
 | Refusals at define | a field that is not one of the type's own (`invalid_schema`); a behavior's field is not one, and changes only through the behavior's operations |
@@ -4425,7 +4425,7 @@ and the ones it freezes while the instance is in it (D56).
 
 | | |
 | --- | --- |
-| Config | `states`: 1 or more, by a state of the type's Workflow, each `{ required?, frozen? }`, at least one: `required`, 1 to 64 of the type's own top-level fields, by JSON key, the instance must hold to enter the state and keeps while it is in it; `frozen`, 1 to 64 of them that do not change while it is in it, or `"all"`, every own field; `permission`: the permission a caller needs to change a frozen field, optional. Requires `Workflow` |
+| Config | `states`: 1 or more, by a state of the type's Workflow, each `{ required?, frozen? }`, at least one: `required`, 1 to 64 of the type's own top-level fields, by JSON key, the instance must hold to enter the state and keeps while it is in it; `frozen`, 1 to 64 of them that do not change while it is in it, or `"all"`, every own field; `permission`: the permission a caller needs to change a frozen field, optional. Requires `Workflow`. A table's StateRules' members, which the declaration the engine shares lists (D104), are refused at define, each naming the table form (`implements StateRules<T, { ... }> on a DB table`): a state's `by` and the config's `status` |
 | Fields, operations | none |
 | Guards | a Workflow `transition` into a state, whoever asks, while a field the state requires is not held: `vetoed` (`missing_fields`). An update, a caller's or an operation's `update()`, while the instance is in a state: one that clears a field the state requires and the instance held, `vetoed` (`required_fields`), whoever asks; one that changes a frozen field, `vetoed` (`frozen_fields`), unless the caller holds `permission`. Details `{ state, fields }` |
 | Validates | a create, when the Workflow's initial state requires a field it does not give: the rule `required` at the field (`invalid_instance`) |
@@ -4476,7 +4476,7 @@ gate's permission have signed off.
 
 | | |
 | --- | --- |
-| Config | `gates` (at least one, by state of the type's Workflow): each `{ count, permission, from?, excludeCreator? }`, `count` 1 to 100, `from` the states a transition from is gated (every state when absent), `excludeCreator` whether the instance's creator is refused (`true` when absent); `resetOnChange`, whether a change of the own fields consumes every sign-off (`true` when absent); required. Requires `Workflow` |
+| Config | `gates` (at least one, by state of the type's Workflow): each `{ count, permission, from?, excludeCreator? }`, `count` 1 to 100, `from` the states a transition from is gated (every state when absent), `excludeCreator` whether the instance's creator is refused (`true` when absent); `resetOnChange`, whether a change of the own fields consumes every sign-off (`true` when absent); required. Requires `Workflow`. A table's Approvals' members, which the declaration the engine shares lists (D104), are refused at define, each naming the table form (`implements Approvals<T, { ... }> on a DB table`): a gate's `resetOn` and `pinned` and the config's `status`; `signOff`'s `version` is `invalid_argument` at `/version`, and the engine never answers its veto `stale` |
 | Fields | `gates`: `{ <state>: { signedBy } }`, the subjects whose sign-offs count, in the order they signed; a gate with none is absent, and with none at all it is `{}`. No count: the config holds it, and a publish that changed it writes no event |
 | Operations | `signOff({ state, note? })` -> `{ state, subject, note?, at, signedBy, count }`, writes; `withdrawSignOff({ state })` -> the sign-off, `{ state, subject, note?, at }`, writes; `listSignOffs({ state?, limit?, cursor? })` -> a page of `{ state, subject, note?, at, consumedAt? }`, the consumed ones included, read-only |
 | Guards | a Workflow `transition` of the instance into a gated state, from a state its `from` allows, whoever asks, with fewer sign-offs than `count`: `vetoed` (`approvals_missing`), details `{ state, required, count }`, `required` the gate's count and `count` the sign-offs it has. A move Workflow refuses is left to Workflow's veto, whichever of the two the type lists first |

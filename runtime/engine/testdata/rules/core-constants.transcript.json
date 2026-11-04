@@ -1,0 +1,2746 @@
+{
+  "file": "core-constants",
+  "source": "runtime/engine/testdata/scenarios/core-constants.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers"
+  ],
+  "scenarios": [
+    {
+      "name": "Constants (node) > an update that changes a listed field is refused at the field, whoever makes it; other fields stay open",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "runs",
+          "fields": [
+            {
+              "name": "key",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "labels",
+              "type": "array"
+            },
+            {
+              "name": "owner",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "runs",
+              "uses": [
+                {
+                  "behavior": "Constants",
+                  "config": {
+                    "fields": [
+                      "key",
+                      "labels",
+                      "owner"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "labels",
+                    "owner"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "labels",
+                    "owner"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "key": "r1",
+                "title": "First",
+                "labels": [
+                  "a"
+                ],
+                "owner": {
+                  "team": "core"
+                }
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "key": "r1",
+                "title": "First",
+                "labels": [
+                  "a"
+                ],
+                "owner": {
+                  "team": "core"
+                }
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "key": "r2"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: key: key is a constant of runs: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "key",
+                    "rule": "constant",
+                    "message": "key is a constant of runs: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1",
+                "title": "First",
+                "labels": [
+                  "a"
+                ],
+                "owner": {
+                  "team": "core"
+                }
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "labels": [
+                  "a",
+                  "b"
+                ],
+                "owner": {
+                  "lead": "ann"
+                },
+                "key": "r9"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: key: key is a constant of runs: its create sets it and nothing changes it after; labels: labels is a constant of runs: its create sets it and nothing changes it after; owner: owner is a constant of runs: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "key",
+                    "rule": "constant",
+                    "message": "key is a constant of runs: its create sets it and nothing changes it after"
+                  },
+                  {
+                    "path": "labels",
+                    "rule": "constant",
+                    "message": "labels is a constant of runs: its create sets it and nothing changes it after"
+                  },
+                  {
+                    "path": "owner",
+                    "rule": "constant",
+                    "message": "owner is a constant of runs: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1",
+                "title": "First",
+                "labels": [
+                  "a"
+                ],
+                "owner": {
+                  "team": "core"
+                }
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rita",
+              "permissions": [
+                "steps.rename"
+              ]
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "labels": null
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: labels: labels is a constant of runs: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "labels",
+                    "rule": "constant",
+                    "message": "labels is a constant of runs: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1",
+                "title": "First",
+                "labels": [
+                  "a"
+                ],
+                "owner": {
+                  "team": "core"
+                }
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "key": "r1",
+                "owner": {
+                  "team": "core"
+                },
+                "title": "Renamed"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r1",
+                "title": "Renamed",
+                "labels": [
+                  "a"
+                ],
+                "owner": {
+                  "team": "core"
+                }
+              },
+              "owned": {}
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 9,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Constants (node) > a field the create leaves absent stays absent, and absent and null are one value",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "runs",
+          "fields": [
+            {
+              "name": "key",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "labels",
+              "type": "array"
+            },
+            {
+              "name": "owner",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "runs",
+              "uses": [
+                {
+                  "behavior": "Constants",
+                  "config": {
+                    "fields": [
+                      "key",
+                      "kind"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "kind"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "kind"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "key": "r1"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "key": "r1"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "kind": "build"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: kind: kind is a constant of runs: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "kind",
+                    "rule": "constant",
+                    "message": "kind is a constant of runs: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "create",
+              "id": "r2",
+              "own": {
+                "key": "r2",
+                "kind": null
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "r2",
+            "row": {
+              "own": {
+                "key": "r2"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "update",
+              "key": "r2",
+              "patch": {
+                "kind": "build"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: kind: kind is a constant of runs: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "kind",
+                    "rule": "constant",
+                    "message": "kind is a constant of runs: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r2"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "update",
+              "key": "r2",
+              "patch": {
+                "kind": null
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r2"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "kind": null,
+                "title": "x"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r1",
+                "title": "x"
+              },
+              "owned": {}
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Constants (node) > a caller with the config's permission may change them, set them and remove them; any other caller may not",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "runs",
+          "fields": [
+            {
+              "name": "key",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "labels",
+              "type": "array"
+            },
+            {
+              "name": "owner",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "runs",
+              "uses": [
+                {
+                  "behavior": "Constants",
+                  "config": {
+                    "fields": [
+                      "key",
+                      "kind"
+                    ],
+                    "permission": "steps.rename"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "kind"
+                  ],
+                  "permission": "steps.rename"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "kind"
+                  ],
+                  "permission": "steps.rename"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "key": "r1"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "key": "r1"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "key": "r2"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: key: key is a constant of runs: its create sets it and nothing changes it after; only a caller with steps.rename may change it",
+              "details": {
+                "issues": [
+                  {
+                    "path": "key",
+                    "rule": "constant",
+                    "message": "key is a constant of runs: its create sets it and nothing changes it after; only a caller with steps.rename may change it"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rita",
+              "permissions": [
+                "steps.rename"
+              ]
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "key": "r2",
+                "kind": "build"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r2",
+                "kind": "build"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rita",
+              "permissions": [
+                "steps.rename"
+              ]
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "kind": null
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r2"
+              },
+              "owned": {}
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Constants (node) > an operation's update() is held to it too, and validateUpdate() reports it: Revisions refuses the proposal, and the approval of one made before",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 5,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 6,
+          "call": "schemas.define",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 7,
+          "call": "schemas.publish",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 8,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 9,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 11,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 12,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        },
+        {
+          "step": 13,
+          "call": "instances.get",
+          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+        }
+      ]
+    },
+    {
+      "name": "Constants (node) > its fields are the type's own; a new version may change them and the permission, and add or remove it on a schema with instances",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "runs",
+          "fields": [
+            {
+              "name": "key",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "labels",
+              "type": "array"
+            },
+            {
+              "name": "owner",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "runs",
+              "uses": [],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            },
+            {
+              "name": "runs",
+              "uses": [
+                {
+                  "behavior": "Constants",
+                  "config": {
+                    "fields": [
+                      "key"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            },
+            {
+              "name": "runs",
+              "uses": [
+                {
+                  "behavior": "Constants",
+                  "config": {
+                    "fields": [
+                      "key",
+                      "kind"
+                    ],
+                    "permission": "steps.rename"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            },
+            {
+              "name": "runs",
+              "uses": [
+                {
+                  "behavior": "Constants",
+                  "config": {
+                    "fields": [
+                      "kind"
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            },
+            {
+              "name": "runs",
+              "uses": [],
+              "fields": [
+                {
+                  "name": "key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "labels",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "Owner"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "nope"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type runs: behavior Constants config: fields: nope is not a field of runs (its fields: key, kind, title, labels, owner)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Constants",
+                    "index": 0,
+                    "behavior": "Constants",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type runs: behavior Constants config: fields: nope is not a field of runs (its fields: key, kind, title, labels, owner)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": []
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type runs: behavior Constants config: /fields: must NOT have fewer than 1 items",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Constants",
+                    "index": 0,
+                    "behavior": "Constants",
+                    "kind": "schema",
+                    "path": "/config/fields",
+                    "message": "must NOT have fewer than 1 items"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "status"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type runs: behavior Constants config: fields: status is not a field of runs (its fields: key, kind, title, labels, owner)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Constants",
+                    "index": 1,
+                    "behavior": "Constants",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type runs: behavior Constants config: fields: status is not a field of runs (its fields: key, kind, title, labels, owner)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "key": "r1",
+                "kind": "build"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "key": "r1",
+                "kind": "build"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "key": "r2"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: key: key is a constant of runs: its create sets it and nothing changes it after",
+              "details": {
+                "issues": [
+                  {
+                    "path": "key",
+                    "rule": "constant",
+                    "message": "key is a constant of runs: its create sets it and nothing changes it after"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1",
+                "kind": "build"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "kind"
+                  ],
+                  "permission": "steps.rename"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [
+                  {
+                    "behavior": "Constants",
+                    "config": {
+                      "fields": [
+                        "key"
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 12,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "key",
+                    "kind"
+                  ],
+                  "permission": "steps.rename"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [
+                  {
+                    "behavior": "Constants",
+                    "config": {
+                      "fields": [
+                        "key"
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 2,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "kind": "test"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_instance",
+              "status": 422,
+              "class": "InstanceValidationError",
+              "message": "runs: kind: kind is a constant of runs: its create sets it and nothing changes it after; only a caller with steps.rename may change it",
+              "details": {
+                "issues": [
+                  {
+                    "path": "kind",
+                    "rule": "constant",
+                    "message": "kind is a constant of runs: its create sets it and nothing changes it after; only a caller with steps.rename may change it"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "key": "r1",
+                "kind": "build"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 14,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "kind"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600013,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [
+                  {
+                    "behavior": "Constants",
+                    "config": {
+                      "fields": [
+                        "key",
+                        "kind"
+                      ],
+                      "permission": "steps.rename"
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 15,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [
+              {
+                "behavior": "Constants",
+                "config": {
+                  "fields": [
+                    "kind"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600014,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [
+                  {
+                    "behavior": "Constants",
+                    "config": {
+                      "fields": [
+                        "key",
+                        "kind"
+                      ],
+                      "permission": "steps.rename"
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 3,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600015,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "key": "r2"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r2",
+                "kind": "build"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 17,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600016,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [
+                  {
+                    "behavior": "Constants",
+                    "config": {
+                      "fields": [
+                        "kind"
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 18,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "runs",
+            "uses": [],
+            "fields": [
+              {
+                "name": "key",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "labels",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "Owner"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600017,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "runs",
+                "uses": [
+                  {
+                    "behavior": "Constants",
+                    "config": {
+                      "fields": [
+                        "kind"
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "labels",
+                    "type": "string"
+                  },
+                  {
+                    "name": "owner",
+                    "type": "Owner"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "runs",
+          "version": 4,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600018,
+            "action": {
+              "kind": "update",
+              "key": "r1",
+              "patch": {
+                "kind": "test"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "key": "r2",
+                "kind": "test"
+              },
+              "owned": {}
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 20,
+          "call": "schemas.live",
+          "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
+        }
+      ]
+    },
+    {
+      "name": "Constants (node) > the document the core binary builds keeps a step's kind",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes behaviors the core does not run: Variants"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes behaviors the core does not run: Variants"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes behaviors the core does not run: Variants"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "it composes behaviors the core does not run: Variants"
+        },
+        {
+          "step": 5,
+          "call": "instances.update",
+          "reason": "it composes behaviors the core does not run: Variants"
+        },
+        {
+          "step": 6,
+          "call": "tools.describe",
+          "reason": "it composes behaviors the core does not run: Variants"
+        },
+        {
+          "step": 7,
+          "call": "schemas.behaviors",
+          "reason": "it composes behaviors the core does not run: Variants"
+        }
+      ]
+    }
+  ]
+}

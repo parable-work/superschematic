@@ -1,0 +1,319 @@
+{
+  "types": {
+    "Task": {
+      "type": "Task",
+      "table": "task",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "owner",
+          "column": "owner",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "reviewer",
+          "column": "reviewer",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "plan",
+          "column": "plan",
+          "type": "string"
+        },
+        {
+          "field": "proof",
+          "column": "proof",
+          "type": "string"
+        },
+        {
+          "field": "urgent",
+          "column": "urgent",
+          "type": "boolean"
+        },
+        {
+          "field": "attempts",
+          "column": "attempts",
+          "type": "number"
+        }
+      ],
+      "audit": [
+        {
+          "field": "createdBy",
+          "column": "created_by",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Constants",
+          "behavior": "Constants",
+          "member": "constants",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "StateRules",
+          "behavior": "StateRules",
+          "member": "staterules",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "Approvals",
+          "behavior": "Approvals",
+          "member": "approvals",
+          "fields": [],
+          "operations": [
+            {
+              "name": "signOff",
+              "writes": true
+            },
+            {
+              "name": "withdrawSignOff",
+              "writes": true
+            },
+            {
+              "name": "listSignOffs",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "signOffs",
+              "table": "task_approvals_sign_offs",
+              "row": "task_id",
+              "key": {
+                "name": "number",
+                "field": "number",
+                "column": "number",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "note",
+                  "field": "note",
+                  "column": "note",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "consumedAt",
+                  "field": "consumedAt",
+                  "column": "consumed_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Task",
+        "uses": [
+          {
+            "behavior": "Constants",
+            "config": {
+              "fields": [
+                "owner"
+              ],
+              "oneWay": {
+                "attempts": "up",
+                "urgent": "up"
+              },
+              "permission": "tasks.admin"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "StateRules",
+            "config": {
+              "states": {
+                "planned": {
+                  "by": [
+                    "createdBy"
+                  ],
+                  "frozen": [
+                    "plan"
+                  ]
+                },
+                "proving": {
+                  "required": [
+                    "proof"
+                  ]
+                },
+                "working": {
+                  "by": [
+                    "reviewer"
+                  ],
+                  "frozen": [
+                    "plan"
+                  ]
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Approvals",
+            "config": {
+              "gates": {
+                "done": {
+                  "count": 1,
+                  "permission": "tasks.review",
+                  "pinned": true,
+                  "resetOn": [
+                    "proof"
+                  ]
+                },
+                "proving": {
+                  "count": 1,
+                  "permission": "tasks.review",
+                  "resetOn": []
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "planned",
+                "working",
+                "proving",
+                "done",
+                "cancelled"
+              ],
+              "transitions": [
+                {
+                  "by": [
+                    "owner"
+                  ],
+                  "from": "planned",
+                  "to": "working"
+                },
+                {
+                  "by": [
+                    "owner"
+                  ],
+                  "from": "working",
+                  "to": "proving"
+                },
+                {
+                  "from": "proving",
+                  "to": "working"
+                },
+                {
+                  "from": "proving",
+                  "to": "done"
+                },
+                {
+                  "from": "planned",
+                  "to": "cancelled"
+                },
+                {
+                  "from": "working",
+                  "to": "cancelled"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "owner",
+            "type": "Identity.UUID"
+          },
+          {
+            "name": "reviewer",
+            "type": "Identity.UUID"
+          },
+          {
+            "name": "plan",
+            "type": "string"
+          },
+          {
+            "name": "proof",
+            "type": "string"
+          },
+          {
+            "name": "urgent",
+            "type": "boolean"
+          },
+          {
+            "name": "attempts",
+            "type": "number"
+          },
+          {
+            "name": "createdBy",
+            "type": "Identity.UUID"
+          }
+        ]
+      }
+    }
+  }
+}

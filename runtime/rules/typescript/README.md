@@ -60,7 +60,8 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   each field's column type and the value field among them, its sub-tables
   (`tables`: each its name, key and typed fields), whether it arms
   deadlines (`armsDeadlines`) and whether it hears its row's writes
-  (`hearsChanges`), in the order Workflow, Reactions, Timers.
+  (`hearsChanges`), in the order Workflow, Reactions, Constants, StateRules,
+  Approvals, Timers.
 - `check(specs, { caller, now }?)` returns each spec's define check: null,
   or its refusal.
 - An input the module cannot read throws `RulesError` (`invalid_json`,

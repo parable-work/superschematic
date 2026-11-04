@@ -74,6 +74,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		// layout's audit createdBy beside the own fields, and transition's
 		// optional from and unchanged.
 		{service: "fixture-workflow-principals-db", behaviors: true},
+		// A table that implements Constants, StateRules and Approvals
+		// beside its Workflow (D104): Approvals' operations under
+		// approvals, its sub-table of sign-offs with no repository, no
+		// upserts, and the layout's audit createdBy, which its gates and a
+		// StateRules by read.
+		{service: "fixture-approvals-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

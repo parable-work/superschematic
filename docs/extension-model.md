@@ -1064,7 +1064,8 @@ own fields, and leaves out the fields the loader added and the
 `@optimistic` they imply.
 
 A behavior the behaviors' core runs and whose declaration names no `value`
-(Timers, Reactions) is implemented by a DB table as a whole (D103): `export abstract
+(Timers, Reactions, Constants, StateRules, Approvals) is implemented by a DB
+table as a whole (D103, D104): `export abstract
 class Ticket implements Timers<Ticket, { ... }>`, where `@superschematic/db`
 exports the carrier, which resolves to the empty object type as `User`
 does. Its first type argument is the table itself, and the walker reads

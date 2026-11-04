@@ -251,6 +251,53 @@ impl Db {
         )
     }
 
+    /// Runs an operation of a use on a row as a caller.
+    #[allow(clippy::too_many_arguments)]
+    async fn operate(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        operation: &str,
+        params: Value,
+        caller: Caller,
+    ) -> Result<Value, Error> {
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_operation(
+                host, &tx, type_name, key, use_id, operation, params, caller
+            ),
+            superschematic_rules_adapter::postgres::run_operation(
+                host, &tx, type_name, key, use_id, operation, params, caller
+            )
+            .await
+        )
+    }
+
+    /// An update of a row's own fields as a caller.
+    async fn update_as(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        patch: Value,
+        caller: Caller,
+    ) -> Result<(), Error> {
+        let patch = object(patch);
+        let options = ExecuteOptions::default();
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_update(
+                host, &tx, type_name, key, patch, caller, &options
+            ),
+            superschematic_rules_adapter::postgres::run_update(
+                host, &tx, type_name, key, patch, caller, &options
+            )
+            .await
+        )
+    }
+
     async fn transition(
         &mut self,
         host: &Host<'_>,
@@ -851,6 +898,7 @@ on_each_dialect!(a_create_with_no_id_gets_a_uuid_key_and_a_type_the_layout_lacks
 on_each_dialect!(soft_deletable_rows);
 on_each_dialect!(rules_across_rows_and_writes_taken_later);
 on_each_dialect!(a_row_read_holds_the_audit_fields);
+on_each_dialect!(a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them);
 
 /// Creates Order o1, titled Desk, at `at`.
 async fn desk(
@@ -1205,6 +1253,270 @@ async fn a_repeat_writes_nothing(db: &mut Db, host: &Host<'_>) {
         json!({"status": {"status": "answered", "enteredAt": 1_002_000}})
     );
     assert_eq!(db.heard("question_change_queue", "q2").await, heard);
+}
+
+/// Task (D104), whose Approvals keeps a sub-table and which arms no
+/// deadline and hears no change, so it has neither queue. Its own columns
+/// read back as the core holds them, whatever the dialect stores, and
+/// Constants' one-way veto names the values so read; its `createdBy`,
+/// which StateRules' `by` and a gate that excludes the creator read, is
+/// among its own fields; and its sign-offs live in the sub-table, a hard
+/// delete deleting them.
+async fn a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them(mut db: Db) {
+    let postgres = db.postgres();
+    for ddl in common::task_ddl(postgres) {
+        db.exec(&ddl, &[]).await;
+    }
+    let core = common::core();
+    let layout = Layout::new([common::task_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 1_001_000);
+    let given = json!({
+        "title": "Launch", "owner": "bob", "reviewer": "carol", "plan": "First plan",
+        "urgent": false, "attempts": 0, "data": {"tags": ["a"]}
+    });
+    let mut columns = object(given.clone());
+    columns.insert("created_by".into(), json!("alice"));
+    let stamped = CreateOptions {
+        id: Some("t1".into()),
+        execute: ExecuteOptions {
+            own_columns: Some(columns),
+            soft_delete: None,
+        },
+        ..CreateOptions::default()
+    };
+    db.create_with(&host, "Task", given, &stamped)
+        .await
+        .expect("created");
+    let task = read_task(&mut db, &host).await;
+    assert_eq!(
+        serde_json::to_value(&task.own).expect("json").to_string(),
+        json!({
+            "title": "Launch", "owner": "bob", "reviewer": "carol", "plan": "First plan",
+            "urgent": false, "attempts": 0, "data": {"tags": ["a"]}, "createdBy": "alice"
+        })
+        .to_string()
+    );
+    own_columns_read_back_as_the_update_gave_them(&mut db, &host).await;
+    a_move_back_names_the_values_as_the_core_read_them(&mut db, &host).await;
+    let later = Host::new(&core, &layout).with_clock(|| 1_002_000);
+    sign_offs_live_in_the_sub_table(&mut db, &host, &later).await;
+
+    // A hard delete deletes the row's sub-table rows with it.
+    db.delete(&host, "Task", "t1", None).await.expect("deleted");
+    assert!(db.read(&host, "Task", "t1").await.expect("read").is_none());
+    assert!(sign_offs_of(&mut db, &host).await.is_empty());
+}
+
+/// Task t1, which the table holds.
+async fn read_task(db: &mut Db, host: &Host<'_>) -> Row {
+    db.read(host, "Task", "t1")
+        .await
+        .expect("read")
+        .expect("a row")
+}
+
+/// An own field of a row as its JSON text; `None` for one with no value.
+fn own_text(row: &Row, field: &str) -> Option<String> {
+    row.own.get(field).map(Value::to_string)
+}
+
+/// Each own column of t1 reads back as the update gave it: a boolean as a
+/// boolean (SQLite's 1), a number as its digits (SQLite's `REAL` 2.0 as
+/// 2), and a JSON column's list and string each as it was; and its
+/// creator, whom StateRules' `by` names by `createdBy`, clears the plan it
+/// freezes.
+async fn own_columns_read_back_as_the_update_gave_them(db: &mut Db, host: &Host<'_>) {
+    let patch = json!({"urgent": true, "attempts": 2, "data": ["x", 1]});
+    db.update_as(host, "Task", "t1", patch, subject("bob"))
+        .await
+        .expect("saved");
+    db.update_as(host, "Task", "t1", json!({"plan": null}), alice())
+        .await
+        .expect("saved");
+    let task = read_task(db, host).await;
+    assert_eq!(own_text(&task, "urgent").as_deref(), Some("true"));
+    assert_eq!(own_text(&task, "attempts").as_deref(), Some("2"));
+    assert_eq!(own_text(&task, "data").as_deref(), Some(r#"["x",1]"#));
+    assert_eq!(own_text(&task, "plan"), None);
+    db.update_as(host, "Task", "t1", json!({"data": "5"}), subject("bob"))
+        .await
+        .expect("saved");
+    let task = read_task(db, host).await;
+    assert_eq!(own_text(&task, "data").as_deref(), Some(r#""5""#));
+}
+
+/// A move of a one-way field back is Constants' veto, naming the values as
+/// the core read them from t1's columns: a number and a boolean as they
+/// are, and a date-time, which the layout converts to epoch milliseconds,
+/// as the ISO 8601 text the table's API gives it in (D104).
+async fn a_move_back_names_the_values_as_the_core_read_them(db: &mut Db, host: &Host<'_>) {
+    db.update_as(
+        host,
+        "Task",
+        "t1",
+        json!({"due": 1_769_990_400_000_i64}),
+        subject("bob"),
+    )
+    .await
+    .expect("saved");
+    for (patch, field, current, attempted, moved) in [
+        (
+            json!({"attempts": 1.5}),
+            "attempts",
+            json!(2),
+            json!(1.5),
+            "grows: an update may not move it from 2 to 1.5",
+        ),
+        (
+            json!({"urgent": false}),
+            "urgent",
+            json!(true),
+            json!(false),
+            "turns true: an update may not move it from true to false",
+        ),
+        (
+            json!({"due": 1_769_904_000_000_i64}),
+            "due",
+            json!("2026-02-02T00:00:00.000Z"),
+            json!("2026-02-01T00:00:00.000Z"),
+            "grows: an update may not move it from \"2026-02-02T00:00:00.000Z\" to \"2026-02-01T00:00:00.000Z\"",
+        ),
+    ] {
+        let refused = refusal(
+            db.update_as(host, "Task", "t1", patch, subject("bob"))
+                .await,
+        );
+        assert_eq!(
+            refused.message,
+            format!("behavior Constants vetoes update of Task t1: Task t1's {field} only {moved}; only a caller with tasks.admin may move it back")
+        );
+        let details = refused.details.as_ref().expect("details");
+        assert_eq!(details.get("vetoCode"), Some(&json!("one_way")));
+        assert_eq!(
+            details.get("vetoDetails").map(Value::to_string),
+            Some(
+                json!({"field": field, "direction": "up", "current": current, "attempted": attempted})
+                    .to_string()
+            )
+        );
+    }
+}
+
+/// carol, who reviews tasks.
+fn reviewer() -> Caller {
+    Caller::new("carol", ["tasks.review"])
+}
+
+/// An operation of t1's Approvals as a caller.
+async fn approvals(
+    db: &mut Db,
+    host: &Host<'_>,
+    operation: &str,
+    params: Value,
+    caller: Caller,
+) -> Result<Value, Error> {
+    db.operate(host, "Task", "t1", "Approvals", operation, params, caller)
+        .await
+}
+
+/// t1's sign-offs as its sub-table holds them, in key order.
+async fn sign_offs_of(db: &mut Db, host: &Host<'_>) -> Vec<SubRow> {
+    db.sub_rows(host, "Task", "t1", "Approvals", "signOffs")
+        .await
+}
+
+/// A sign-off of carol's as the sub-table holds it: its number, its state,
+/// when it was given and when it was consumed.
+fn carols(number: &str, state: &str, consumed: Option<i64>) -> Value {
+    let mut values = object(json!({"state": state, "subject": "carol", "at": 1_001_000}));
+    if let Some(at) = consumed {
+        values.insert("consumedAt".into(), json!(at));
+    }
+    json!({"key": number, "values": values})
+}
+
+/// The creator, read from `createdBy`, signs off on no gate. A sign-off
+/// inserts its row of the sub-table and moves the row's version, which the
+/// pinned gate's names; then the rest of [`sign_offs_are_read_withdrawn_and_consumed`].
+async fn sign_offs_live_in_the_sub_table(db: &mut Db, host: &Host<'_>, later: &Host<'_>) {
+    let creator = Caller::new("alice", ["tasks.review"]);
+    let refused = approvals(db, host, "signOff", json!({"state": "proving"}), creator).await;
+    assert_eq!(veto_code(refused), Some(json!("creator_cannot_sign")));
+
+    let before = read_task(db, host).await.version;
+    let signed = approvals(db, host, "signOff", json!({"state": "proving"}), reviewer())
+        .await
+        .expect("signed");
+    assert_eq!(
+        signed,
+        json!({"state": "proving", "subject": "carol", "at": 1_001_000, "signedBy": ["carol"], "count": 1})
+    );
+    let version = read_task(db, host).await.version;
+    assert_eq!(version, before + 1);
+    let params = json!({"state": "done", "version": before});
+    let stale = refusal(approvals(db, host, "signOff", params, reviewer()).await);
+    let details = stale.details.as_ref().expect("details");
+    assert_eq!(details.get("vetoCode"), Some(&json!("stale")));
+    assert_eq!(
+        details.get("vetoDetails"),
+        Some(&json!({"version": before, "current": version}))
+    );
+    let params = json!({"state": "done", "version": version});
+    approvals(db, host, "signOff", params, reviewer())
+        .await
+        .expect("signed");
+    assert_eq!(
+        json!(sign_offs_of(db, host).await),
+        json!([
+            carols("0000000001", "proving", None),
+            carols("0000000002", "done", None)
+        ])
+    );
+    sign_offs_are_read_withdrawn_and_consumed(db, host, later).await;
+}
+
+/// `listSignOffs` writes nothing and leaves the version; a withdrawal
+/// deletes its row, and the next sign-off takes the number after the
+/// greatest; and an update of the proof, at `later`, consumes the done
+/// gate's sign-off, whose resetOn names it, by an update of its row, and
+/// keeps the proving gate's, whose resetOn is [].
+async fn sign_offs_are_read_withdrawn_and_consumed(db: &mut Db, host: &Host<'_>, later: &Host<'_>) {
+    let version = read_task(db, host).await.version;
+    let listed = approvals(db, host, "listSignOffs", json!({}), reviewer())
+        .await
+        .expect("listed");
+    assert_eq!(
+        listed,
+        json!({"items": [
+            {"state": "proving", "subject": "carol", "at": 1_001_000},
+            {"state": "done", "subject": "carol", "at": 1_001_000}
+        ], "next": null})
+    );
+    assert_eq!(read_task(db, host).await.version, version);
+
+    let params = json!({"state": "proving"});
+    approvals(db, host, "withdrawSignOff", params.clone(), reviewer())
+        .await
+        .expect("withdrawn");
+    assert_eq!(
+        json!(sign_offs_of(db, host).await),
+        json!([carols("0000000002", "done", None)])
+    );
+    approvals(db, host, "signOff", params, reviewer())
+        .await
+        .expect("signed");
+
+    let patch = json!({"proof": "Screenshots"});
+    db.update_as(later, "Task", "t1", patch, subject("bob"))
+        .await
+        .expect("saved");
+    assert_eq!(
+        json!(sign_offs_of(db, host).await),
+        json!([
+            carols("0000000002", "done", Some(1_002_000)),
+            carols("0000000003", "proving", None)
+        ])
+    );
 }
 
 /// A create with no id of a UUID-keyed table gets a UUID's wire form, which

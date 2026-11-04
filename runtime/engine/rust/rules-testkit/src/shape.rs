@@ -51,6 +51,11 @@ pub struct FieldDef {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Defined {
     pub spec: TypeSpec,
+    /// The name the document gives its instance type, which the engine's
+    /// define refusals name where its other messages name the schema: the
+    /// spec's name unless the document names them apart (schema `invoices`,
+    /// type `Invoice`).
+    pub type_name: String,
     pub fields: Vec<FieldDef>,
     /// Whether the document composes the engine's Links, whose links the
     /// spec holds as relations.
@@ -79,10 +84,10 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
         .get("types")
         .and_then(Value::as_object)
         .ok_or("a schema document holds its types")?;
-    let shape = types
-        .get(name)
-        .or_else(|| types.values().next())
-        .and_then(Value::as_object)
+    let (instance_type, shape) = types
+        .get_key_value(name)
+        .or_else(|| types.iter().next())
+        .and_then(|(named, shape)| Some((named.clone(), shape.as_object()?)))
         .ok_or("a schema document holds a type")?;
     let mut spec = TypeSpec::new(name);
     let mut links = false;
@@ -159,6 +164,7 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
     }
     Ok(Defined {
         spec,
+        type_name: instance_type,
         fields,
         links,
         unmapped,
@@ -869,6 +875,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(defined.spec.name, "Order");
+        assert_eq!(defined.type_name, "Order");
         assert_eq!(defined.spec.uses.len(), 2);
         assert_eq!(
             serde_json::to_value(&defined.spec.fields).unwrap(),
@@ -898,6 +905,17 @@ mod tests {
             false
         )
         .is_empty());
+    }
+
+    #[test]
+    fn a_document_that_names_its_type_apart_from_its_schema_says_so() {
+        let defined = read_document(&json!({
+            "name": "invoices",
+            "types": {"Invoice": {"name": "Invoice", "fields": [{"name": "title"}]}}
+        }))
+        .unwrap();
+        assert_eq!(defined.spec.name, "invoices");
+        assert_eq!(defined.type_name, "Invoice");
     }
 
     #[test]

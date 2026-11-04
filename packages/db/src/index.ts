@@ -48,7 +48,12 @@ export type {
   VersionGraphOptions,
 } from "./decorators";
 export type {
+  Approvals,
+  ApprovalsGateOn,
+  ApprovalsOn,
   AutoGenerate,
+  Constants,
+  ConstantsOn,
   Encrypted,
   HasMany,
   JsonField,
@@ -59,6 +64,9 @@ export type {
   ReactionsOn,
   Relation,
   RelationOptions,
+  StateRuleOn,
+  StateRules,
+  StateRulesOn,
   Timers,
   TimersDeadlineOn,
   TimersOn,

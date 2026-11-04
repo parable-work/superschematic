@@ -14,7 +14,16 @@
 //! - `schemas.define` reads the schema document as a type, each behavior a
 //!   use on it, and runs the core's define check and, when the type has a
 //!   live version, its config-change check; `schemas.publish` runs the
-//!   change check again and publishes.
+//!   change check again and publishes. The engine's define refusals name the
+//!   document's type where its other messages name the schema, so a refused
+//!   define of a document that names them apart (schema `invoices`, type
+//!   `Invoice`) is checked again under its type's name, which keeps
+//!   nothing. A recorded type that lists a behavior whose engine read an
+//!   instance's creator from its row ([`CREATOR_READERS`]: Approvals'
+//!   excludeCreator) and declares no own field createdBy gets one, which a
+//!   create sets to its caller's subject unless it gives one, as the engine
+//!   kept the creator beside the instance, and which no comparison with the
+//!   recording reads; a hand-written file declares it where it wants one.
 //! - `instances.create`, `update`, `delete` and `invoke` run the core's
 //!   commands; `get`, `list` and `events.read` read the host. A write's
 //!   own date-time fields are stored in their canonical form, as the
@@ -83,7 +92,7 @@
 //! same mapping: the replayer records each command, check and raw write it
 //! made on the host, with what the host answered, as it makes it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -91,7 +100,7 @@ use serde_json::{json, Map, Value};
 
 use superschematic_engine_testkit::{load, ScenarioFile};
 use superschematic_rules::{
-    Action, Caller, Code, Command, Core, Declaration, Refusal, Row, TypeSpec,
+    Action, Caller, Code, Command, Core, Declaration, FieldSpec, Refusal, Row, TypeSpec,
 };
 
 use crate::fixtures;
@@ -121,14 +130,38 @@ pub const SWEEP_OPERATIONS: [(&str, &str, SweepParams); 1] =
 pub type Rewrites = fn(Option<&Value>, Option<&Value>) -> bool;
 
 /// The behaviors whose engine's afterConfigChange rewrote every row's
-/// state at a publish, each with its [`Rewrites`].
-pub const PUBLISH_REWRITES: [(&str, Rewrites); 1] = [("Timers", timers_rewrites)];
+/// state at a publish, each with its [`Rewrites`] and why a scenario stops
+/// at a publish it names.
+pub const PUBLISH_REWRITES: [(&str, Rewrites, &str); 2] = [
+    ("Timers", timers_rewrites, TIMERS_REWRITE),
+    ("Approvals", approvals_rewrites, APPROVALS_REWRITE),
+];
 
-/// Why a scenario stops at a publish that [`PUBLISH_REWRITES`] names.
-const REWRITE_REASON: &str = "the engine's afterConfigChange rewrites every row's deadlines at the publish, and the core writes no row at a publish (a build-time project's config change is a build, and each row's deadlines reconcile at its next write through the core, D103), so the steps after it read state the core does not make";
+/// Why a scenario stops at a publish whose Timers change the engine
+/// rewrote rows for.
+const TIMERS_REWRITE: &str = "the engine's afterConfigChange rewrites every row's deadlines at the publish, and the core writes no row at a publish (a build-time project's config change is a build, and each row's deadlines reconcile at its next write through the core, D103), so the steps after it read state the core does not make";
+
+/// Why a scenario stops at a publish whose Approvals change the engine
+/// rewrote rows for.
+const APPROVALS_REWRITE: &str = "the engine's afterConfigChange consumed a removed gate's sign-offs at the publish, and the core writes no row at a publish: a row's sign-offs of a gate the config no longer names are consumed at its next write through the core (D104), so the steps after it read state the core does not make";
+
+/// The behaviors whose engine read an instance's creator from its row
+/// (`created_by`), which a table holds in the own field `createdBy`
+/// (D87): a recorded type that lists one and declares no such field gets
+/// one in the type the host runs, which each create sets to its caller's
+/// subject unless it gives one, as the engine kept an instance's creator
+/// beside it, and which no comparison with the recording reads.
+pub const CREATOR_READERS: [&str; 1] = ["Approvals"];
+
+/// The own field a table holds its row's creator in (D87).
+const CREATED_BY: &str = "createdBy";
 
 /// The behavior whose moves the engine logged with their cause.
 const REACTIONS: &str = "Reactions";
+
+/// The class of a define's refusal of a type's uses and configs, which the
+/// engine wrote as its schema document's validation.
+const SCHEMA_DOCUMENT_ERROR: &str = "SchemaDocumentError";
 
 /// Why a step whose recorded refusal names Links, or a refused define of a
 /// type that lists it, is not compared.
@@ -307,6 +340,7 @@ pub(crate) fn replay_recording(
     record: Option<bool>,
 ) -> (Report, Vec<Recorded>) {
     let runs = make_core().names();
+    let recording = is_recording(file);
     let mut report = Report {
         file: file.name.clone(),
         scenarios: Vec::new(),
@@ -319,6 +353,7 @@ pub(crate) fn replay_recording(
             .cloned()
             .unwrap_or_default();
         let mut run = Run::new(&file.name, scenario, make_core, steps.len());
+        run.recording = recording;
         run.recorded = record.map(Recorded::new);
         match skip_reason(&file.name, scenario, &runs) {
             Some(reason) => {
@@ -336,6 +371,13 @@ pub(crate) fn replay_recording(
         report.scenarios.push(run.report);
     }
     (report, recorded)
+}
+
+// is_recording says whether a file is one of the engine's recordings
+// (`runtime/engine/testdata/scenarios`), by its name, rather than a
+// hand-written one (D104), which no engine answered.
+fn is_recording(file: &ScenarioFile) -> bool {
+    scenario_path(&file.name).is_file()
 }
 
 // names reads a scenario's list of names under a key.
@@ -448,6 +490,9 @@ struct Engine {
     drafts: BTreeMap<String, Vec<FieldDef>>,
     /// The own fields of each type's live version.
     fields: BTreeMap<String, Vec<FieldDef>>,
+    /// The types the replay gave an own field createdBy, which the
+    /// recording's documents do not declare ([`CREATOR_READERS`]).
+    creators: BTreeSet<String>,
     /// The principal its runner runs the due deadlines as.
     runner: Caller,
 }
@@ -533,6 +578,10 @@ struct Run<'r> {
     current: (usize, String),
     /// What a transcript holds of the scenario, when one is written.
     recorded: Option<Recorded>,
+    /// Whether the file is one of the engine's recordings, whose types the
+    /// replay gives the creator field the engine kept ([`CREATOR_READERS`]);
+    /// a hand-written file declares it where it wants one.
+    recording: bool,
 }
 
 impl<'r> Run<'r> {
@@ -552,6 +601,7 @@ impl<'r> Run<'r> {
             halted: None,
             current: (0, String::new()),
             recorded: None,
+            recording: false,
             report: ScenarioReport {
                 name: scenario
                     .get("name")
@@ -828,6 +878,7 @@ impl<'r> Run<'r> {
             off,
             drafts: BTreeMap::new(),
             fields: BTreeMap::new(),
+            creators: BTreeSet::new(),
             runner,
         });
         Done::Checked(Vec::new())
@@ -970,7 +1021,7 @@ impl<'r> Run<'r> {
         let Some(document) = cx.args.first() else {
             return Done::Skipped("a define without a document".to_owned());
         };
-        let defined = match shape::read_document(document) {
+        let mut defined = match shape::read_document(document) {
             Ok(defined) => defined,
             Err(reason) => {
                 return Done::Skipped(format!(
@@ -978,6 +1029,11 @@ impl<'r> Run<'r> {
                 ))
             }
         };
+        if self.recording && with_creator(&mut defined) {
+            self.engines[cx.at]
+                .creators
+                .insert(defined.spec.name.clone());
+        }
         if let Some(reason) = &defined.unmapped {
             return Done::Halted(reason.clone());
         }
@@ -1001,9 +1057,27 @@ impl<'r> Run<'r> {
         let type_name = defined.spec.name.clone();
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(&type_name);
-        let check = engine.host.define_command(&defined.spec, cx.caller, cx.now);
-        let spec = defined.spec.clone();
-        let outcome = engine.host.define(defined.spec, cx.caller, cx.now);
+        let mut check = engine.host.define_command(&defined.spec, cx.caller, cx.now);
+        let mut spec = defined.spec.clone();
+        let mut outcome = engine.host.define(defined.spec, cx.caller, cx.now);
+        // The engine's define refusal names the document's type, where its
+        // other messages name the schema: a document that names them apart
+        // is checked again under its type's name for the refusal, which
+        // keeps nothing, as the core names a type by one name.
+        let mut refused_as = type_name.clone();
+        let documented = matches!(&outcome, Err(refusal) if refusal.class == SCHEMA_DOCUMENT_ERROR);
+        if documented && defined.type_name != type_name {
+            let rename = |spec: &TypeSpec| TypeSpec {
+                name: defined.type_name.clone(),
+                ..spec.clone()
+            };
+            spec = rename(&spec);
+            if let Action::Publish { from: Some(from) } = &mut check.action {
+                *from = rename(from);
+            }
+            outcome = engine.host.check(&spec, &check);
+            refused_as = defined.type_name.clone();
+        }
         // A config the core takes at a later step of D103's order of the
         // work stops the scenario, whose steps after it read what the
         // engine made of it.
@@ -1029,7 +1103,7 @@ impl<'r> Run<'r> {
         }
         self.judge(
             cx,
-            &type_name,
+            &refused_as,
             live_version,
             outcome.map(|()| Value::Null),
             |_, _, _| {},
@@ -1040,8 +1114,8 @@ impl<'r> Run<'r> {
         let Some(type_name) = cx.args.first().and_then(Value::as_str) else {
             return Done::Skipped("a publish that names no schema".to_owned());
         };
-        if rewrites_rows(self.engines[cx.at].host.store(), type_name) {
-            return Done::Halted(REWRITE_REASON.to_owned());
+        if let Some(reason) = rewrites_rows(self.engines[cx.at].host.store(), type_name) {
+            return Done::Halted(reason.to_owned());
         }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
@@ -1182,6 +1256,21 @@ impl<'r> Run<'r> {
             return done;
         }
         let mut own = self.stored(cx.at, type_name, data);
+        // The creator the engine kept beside an instance, in the field the
+        // replay gave its type.
+        let engine = &self.engines[cx.at];
+        let creates_creator = engine.creators.contains(type_name)
+            && engine
+                .host
+                .store()
+                .live(type_name)
+                .is_some_and(|spec| spec.field(CREATED_BY).is_some());
+        if creates_creator && !own.contains_key(CREATED_BY) && !cx.caller.subject.is_empty() {
+            own.insert(
+                CREATED_BY.to_owned(),
+                Value::from(cx.caller.subject.as_str()),
+            );
+        }
         let mut params = options
             .get("behaviors")
             .and_then(Value::as_object)
@@ -1343,8 +1432,9 @@ impl<'r> Run<'r> {
         let live_version = self.engines[cx.at].host.store().live_version(type_name);
         let command = Command::new(cx.caller.clone(), cx.now, action);
         let outcome = self.execute(cx.at, type_name, command);
-        let host = &self.engines[cx.at].host;
-        let outcome = outcome.map(|applied| record_of(host, type_name, &applied.key));
+        let engine = &self.engines[cx.at];
+        let outcome = outcome
+            .map(|applied| record_of(&engine.host, &engine.creators, type_name, &applied.key));
         self.judge(cx, type_name, live_version, outcome, compare_record)
     }
 
@@ -1496,8 +1586,8 @@ impl<'r> Run<'r> {
         ) else {
             return Done::Skipped("a get without a schema and an id".to_owned());
         };
-        let host = &self.engines[cx.at].host;
-        let found = record_of(host, type_name, key);
+        let engine = &self.engines[cx.at];
+        let found = record_of(&engine.host, &engine.creators, type_name, key);
         self.judge(cx, type_name, 0, Ok(found), compare_record)
     }
 
@@ -1549,12 +1639,16 @@ impl<'r> Run<'r> {
             })
             .filter_map(|(key, _)| {
                 spec.zip(store.row(type_name, key)).map(|(spec, row)| {
-                    shape::record(
-                        host.core(),
-                        spec,
-                        key,
-                        row,
-                        &store.sub_tables(type_name, key),
+                    without_creator(
+                        shape::record(
+                            host.core(),
+                            spec,
+                            key,
+                            row,
+                            &store.sub_tables(type_name, key),
+                        ),
+                        &self.engines[cx.at].creators,
+                        type_name,
                     )
                 })
             })
@@ -1628,7 +1722,8 @@ impl<'r> Run<'r> {
             })
             .map(|logged| {
                 let spec = store.live(&logged.type_name);
-                sweep_event(spec, logged, shape::event(spec, logged))
+                let event = sweep_event(spec, logged, shape::event(spec, logged));
+                without_creator(event, &self.engines[cx.at].creators, &logged.type_name)
             })
             .collect();
         // The fields each use computes on a read, by type and use id, which
@@ -1805,7 +1900,7 @@ fn names_links(error: &Value) -> bool {
 // is_document_error says whether a define's refusal is the schema
 // document's own validation, which names no behavior.
 fn is_document_error(error: &Value) -> bool {
-    error.get("class").and_then(Value::as_str) == Some("SchemaDocumentError")
+    error.get("class").and_then(Value::as_str) == Some(SCHEMA_DOCUMENT_ERROR)
         && !issues_of(error).iter().any(|issue| {
             issue
                 .get("path")
@@ -1971,19 +2066,65 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
     }
 }
 
-// record_of is a row as the engine's record, or null.
-fn record_of(host: &MemoryHost, type_name: &str, key: &str) -> Value {
+// record_of is a row as the engine's record, the creator the replay gave
+// its type left out, or null.
+fn record_of(host: &MemoryHost, creators: &BTreeSet<String>, type_name: &str, key: &str) -> Value {
     let store = host.store();
     match (store.live(type_name), store.row(type_name, key)) {
-        (Some(spec), Some(row)) => shape::record(
-            host.core(),
-            spec,
-            key,
-            row,
-            &store.sub_tables(type_name, key),
+        (Some(spec), Some(row)) => without_creator(
+            shape::record(
+                host.core(),
+                spec,
+                key,
+                row,
+                &store.sub_tables(type_name, key),
+            ),
+            creators,
+            type_name,
         ),
         _ => Value::Null,
     }
+}
+
+// with_creator gives a document's type an own field createdBy, a string,
+// when it lists a behavior that reads its creator from it
+// (CREATOR_READERS) and declares none, as the engine kept an instance's
+// creator beside it: whether it did.
+fn with_creator(defined: &mut shape::Defined) -> bool {
+    let reads = defined
+        .spec
+        .uses
+        .iter()
+        .any(|entry| CREATOR_READERS.contains(&entry.behavior.as_str()));
+    if !reads || defined.spec.field(CREATED_BY).is_some() {
+        return false;
+    }
+    defined.spec = std::mem::replace(&mut defined.spec, TypeSpec::new(""))
+        .with_field(FieldSpec::new(CREATED_BY, "string"));
+    defined.fields.push(FieldDef {
+        name: CREATED_BY.to_owned(),
+        required: false,
+        json_type: "string".to_owned(),
+        type_name: "string".to_owned(),
+        date_time: false,
+    });
+    true
+}
+
+// without_creator is a record or an event of a type the replay gave an own
+// field createdBy with that field left out of its own fields (a record's
+// `data`, an event change's `data` and its patch's), which the recording's
+// document does not declare.
+fn without_creator(mut value: Value, creators: &BTreeSet<String>, type_name: &str) -> Value {
+    if !creators.contains(type_name) {
+        return value;
+    }
+    for path in ["/data", "/change/data", "/change/patch/data"] {
+        if let Some(data) = value.pointer_mut(path).and_then(Value::as_object_mut) {
+            data.remove(CREATED_BY);
+        }
+    }
+    value
 }
 
 // sweep_event writes a deadline command's change-log entry as the engine's
@@ -2084,40 +2225,64 @@ fn strip(holder: &mut Map<String, Value>, fields: &BTreeMap<String, Vec<String>>
     }
 }
 
-// rewrites_rows says whether publishing a type's draft changes a config in
-// a way the engine's afterConfigChange rewrote rows for, on a type with
-// rows (PUBLISH_REWRITES): each listed behavior's use, by id, before and
-// after.
-fn rewrites_rows(store: &Store, type_name: &str) -> bool {
-    let Some(draft) = store.draft(type_name) else {
-        return false;
-    };
+// rewrites_rows says why publishing a type's draft stops the scenario: it
+// changes a config in a way the engine's afterConfigChange rewrote rows
+// for, on a type with rows (PUBLISH_REWRITES), each listed behavior's use,
+// by id, before and after; None when it does not.
+fn rewrites_rows(store: &Store, type_name: &str) -> Option<&'static str> {
+    let draft = store.draft(type_name)?;
     if !store.has_rows(type_name) {
-        return false;
+        return None;
     }
     let live = store.live(type_name);
-    PUBLISH_REWRITES.iter().any(|(behavior, rewrites)| {
-        let config_of = |spec: Option<&TypeSpec>| -> Vec<(String, Value)> {
-            spec.into_iter()
-                .flat_map(|spec| &spec.uses)
-                .filter(|entry| entry.behavior == *behavior)
-                .map(|entry| (entry.id().to_owned(), entry.config_or_empty()))
-                .collect()
-        };
-        let (before, after) = (config_of(live), config_of(Some(draft)));
-        let mut ids: Vec<&String> = before.iter().chain(&after).map(|(id, _)| id).collect();
-        ids.sort();
-        ids.dedup();
-        ids.into_iter().any(|id| {
-            let find = |configs: &[(String, Value)]| {
-                configs
-                    .iter()
-                    .find(|(known, _)| known == id)
-                    .map(|(_, config)| config.clone())
+    PUBLISH_REWRITES
+        .iter()
+        .find_map(|(behavior, rewrites, reason)| {
+            let config_of = |spec: Option<&TypeSpec>| -> Vec<(String, Value)> {
+                spec.into_iter()
+                    .flat_map(|spec| &spec.uses)
+                    .filter(|entry| entry.behavior == *behavior)
+                    .map(|entry| (entry.id().to_owned(), entry.config_or_empty()))
+                    .collect()
             };
-            rewrites(find(&before).as_ref(), find(&after).as_ref())
+            let (before, after) = (config_of(live), config_of(Some(draft)));
+            let mut ids: Vec<&String> = before.iter().chain(&after).map(|(id, _)| id).collect();
+            ids.sort();
+            ids.dedup();
+            let rewritten = ids.into_iter().any(|id| {
+                let find = |configs: &[(String, Value)]| {
+                    configs
+                        .iter()
+                        .find(|(known, _)| known == id)
+                        .map(|(_, config)| config.clone())
+                };
+                rewrites(find(&before).as_ref(), find(&after).as_ref())
+            });
+            rewritten.then_some(*reason)
         })
-    })
+}
+
+/// Whether the engine's Approvals afterConfigChange rewrote rows for a
+/// change of an Approvals use's config: removed from the type, which
+/// deleted every row's sign-offs, and a gate removed, whose sign-offs it
+/// consumed. A gate added or changed, and resetOnChange, it rewrote nothing
+/// for.
+pub fn approvals_rewrites(before: Option<&Value>, after: Option<&Value>) -> bool {
+    let gates = |config: Option<&Value>| -> Map<String, Value> {
+        config
+            .and_then(|config| config.get("gates"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
+    };
+    match (before, after) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (before, after) => {
+            let new = gates(after);
+            gates(before).keys().any(|state| !new.contains_key(state))
+        }
+    }
 }
 
 /// Whether the engine's Timers afterConfigChange rewrote rows for a change

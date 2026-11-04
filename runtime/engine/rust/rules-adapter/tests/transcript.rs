@@ -1,10 +1,14 @@
 //! The recorded scenarios are the specification (D103): the transcripts
 //! `superschematic-rules-testkit` writes from `core-workflow.json`,
-//! `core-timers.json`, `core-reactions.json` and
-//! `core-reactions-changes.json`, and from the scenarios written by hand in
-//! their format where the engine recorded none, `core-workflow-principals.json`
-//! (D104: a transition's `by`, `overridePermission`, `repeat` and `from`),
-//! whose transcript holds each command's row version too
+//! `core-timers.json`, `core-reactions.json`,
+//! `core-reactions-changes.json`, `core-constants.json`,
+//! `core-staterules.json` and `core-approvals.json`, and from the scenarios
+//! written by hand in their format where the engine recorded none,
+//! `core-workflow-principals.json` (D104: a transition's `by`,
+//! `overridePermission`, `repeat` and `from`) and
+//! `core-freezes-and-sign-offs.json` (D104: Constants' `oneWay`,
+//! StateRules' `by`, and Approvals' `resetOn` and `pinned`), whose
+//! transcripts hold each command's row version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
 //! and on Postgres, as the HTTP runtime's `src/rules-transcript.test.ts`
@@ -21,6 +25,7 @@
 //! only while it is armed at its time and its message spent with it, and a
 //! write a type's change trigger queued, run as written), its refusal
 //! compared whole and the row it names read back after it and compared,
+//! numbers by value,
 //! with its version when the transcript holds one (so a repeat answered
 //! unchanged is held to writing nothing), that row's sub-table rows and its
 //! armed deadlines and the other rows its change set wrote; and each raw
@@ -55,18 +60,23 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 5] = [
+const TRANSCRIPTS: [(&str, usize); 9] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
     ("core-reactions-changes", REACTIONS_CHANGES_FLOOR),
     ("core-workflow-principals", WORKFLOW_PRINCIPALS_FLOOR),
+    ("core-constants", CONSTANTS_FLOOR),
+    ("core-staterules", STATERULES_FLOOR),
+    ("core-approvals", APPROVALS_FLOOR),
+    ("core-freezes-and-sign-offs", FREEZES_AND_SIGN_OFFS_FLOOR),
 ];
 
-/// core-timers' floor, as the core's milestone states it: 125 steps, 75
-/// commands (10 of them deadlines and 25 changes the runner ran) and 50
-/// checks (D103).
-const TIMERS_FLOOR: usize = 125;
+/// core-timers' floor, as the core's milestone states it: 139 steps, 85
+/// commands (12 of them deadlines and 29 changes the runner ran) and 54
+/// checks (D103), the scenario whose fire StateRules vetoes among them
+/// since StateRules runs on the core (D104).
+const TIMERS_FLOOR: usize = 139;
 
 /// core-reactions' floor, as the core's milestone states it: 586 steps,
 /// 476 commands (252 of them changes the runner ran) and 110 checks.
@@ -82,6 +92,26 @@ const REACTIONS_CHANGES_FLOOR: usize = 60;
 /// its reasons, is the scenario whose gate is a test behavior of the
 /// reference host's, and the opens and reads.
 const WORKFLOW_PRINCIPALS_FLOOR: usize = 92;
+
+/// core-constants' floor, as the core's milestone states it: 39 steps, 20
+/// commands (5 creates and 15 updates, its object, list and string fields
+/// among their values) and 19 checks (D104).
+const CONSTANTS_FLOOR: usize = 39;
+
+/// core-staterules' floor, as the core's milestone states it: 76 steps, 43
+/// commands (13 of them transitions) and 33 checks (D104).
+const STATERULES_FLOOR: usize = 76;
+
+/// core-approvals' floor, as the core's milestone states it: 122 steps, 93
+/// commands (71 of them operations, the sign-offs kept in a sub-table, and
+/// 5 changes) and 29 checks (D104).
+const APPROVALS_FLOOR: usize = 122;
+
+/// core-freezes-and-sign-offs' floor, as the core's milestone states it:
+/// 115 steps of the scenarios written by hand (D104), 75 commands, each
+/// holding its row's version, among them updates of booleans, numbers and
+/// date-times, and 40 checks.
+const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
@@ -646,7 +676,7 @@ impl<'s> Scenario<'s> {
     }
 
     fn compare(&mut self, step: usize, call: &str, what: &str, expected: Value, actual: Value) {
-        if expected != actual {
+        if !same(&expected, &actual) {
             self.mismatches.push(format!(
                 "step {step} ({call}) {what}:\n    expected {expected}\n    actual   {actual}"
             ));
@@ -924,6 +954,32 @@ impl<'s> Scenario<'s> {
             json!(expected.get("others")),
             json!(actual),
         );
+    }
+}
+
+/// Whether two JSON values are one value, as the core compares them (D104):
+/// numbers by value, so a `5` the transcript holds is the `5.0` a column
+/// may give back; objects by member, whatever their order; arrays in
+/// order; the rest as they are. A refusal's message is text, compared as
+/// it is.
+fn same(expected: &Value, actual: &Value) -> bool {
+    match (expected, actual) {
+        (Value::Number(a), Value::Number(b)) => {
+            a == b
+                || match (a.as_i64(), b.as_i64()) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => a.as_f64().is_some() && a.as_f64() == b.as_f64(),
+                }
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(name, a)| b.get(name).is_some_and(|b| same(a, b)))
+        }
+        _ => expected == actual,
     }
 }
 

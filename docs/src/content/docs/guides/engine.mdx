@@ -620,7 +620,15 @@ config's `overridePermission` and `repeat`, and `transition`'s `from`
 The engine refuses each rather than ignore it: a define that names `by`,
 `overridePermission` or `repeat` is refused with a reason that names the
 table form (`status: Workflow<{ ... }> on a DB table`), and a `from` is
-400 `invalid_argument` at `/from`.
+400 `invalid_argument` at `/from`. So do Constants', StateRules' and
+Approvals' declarations, with what only a table's takes
+([Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
+Constants' `oneWay`, a StateRules state's `by` and its `status`, and an
+Approvals gate's `resetOn` and `pinned`, its `status` and `signOff`'s
+`version`. A define that names one is refused with a reason that names
+the table form (`implements Approvals<T, { ... }> on a DB table`), a
+`version` is 400 `invalid_argument` at `/version`, and the engine never
+answers `one_way` or `stale`.
 
 ### Comments
 

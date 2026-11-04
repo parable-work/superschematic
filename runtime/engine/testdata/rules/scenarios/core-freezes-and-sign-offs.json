@@ -1,0 +1,5333 @@
+{
+  "name": "core-freezes-and-sign-offs",
+  "description": "Constants' fields that move one way (oneWay), StateRules' subjects who may change a frozen field (by), and Approvals' gates whose sign-offs a change of chosen fields consumes (resetOn) and that pin the version their signer read (pinned), D104: cases written by hand in the recorded format, since the engine, which refuses each of them, recorded none. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out. A type's uses list the ones a table implements (Constants, StateRules, Approvals) before its Workflow, as a table lists them; a type that reads its creator declares createdBy.",
+  "source": "written by hand (D104): runtime/engine/testdata/rules/scenarios/core-freezes-and-sign-offs.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Freezes and sign-offs > a boolean that moves up only turns true, a create gives any value, clearing is a move down, and a caller with the permission turns it back",
+      "behaviors": [
+        "Constants"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        },
+        "dave": {
+          "subject": "dave",
+          "permissions": [
+            "items.admin"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {
+                          "urgent": "up"
+                        },
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Item",
+            "version": null,
+            "instanceType": "Item"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Item"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Item",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Item",
+            {
+              "title": "One",
+              "owner": "alice"
+            },
+            {
+              "id": "i1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i1",
+            "data": {
+              "title": "One",
+              "owner": "alice"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "urgent": false
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i1",
+            "data": {
+              "title": "One",
+              "owner": "alice",
+              "urgent": false
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "urgent": true
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i1",
+            "data": {
+              "title": "One",
+              "owner": "alice",
+              "urgent": true
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "urgent": false
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Item i1: Item i1's urgent only turns true: an update may not move it from true to false; only a caller with items.admin may move it back",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Item i1's urgent only turns true: an update may not move it from true to false; only a caller with items.admin may move it back",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "urgent",
+                "direction": "up",
+                "current": true,
+                "attempted": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "urgent": null
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Item i1: Item i1's urgent only turns true: an update may not move it from true to none; only a caller with items.admin may move it back",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Item i1's urgent only turns true: an update may not move it from true to none; only a caller with items.admin may move it back",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "urgent",
+                "direction": "up",
+                "current": true,
+                "attempted": null
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "title": "Renamed"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i1",
+            "data": {
+              "title": "Renamed",
+              "owner": "alice",
+              "urgent": true
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "dave",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "urgent": false
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i1",
+            "data": {
+              "title": "Renamed",
+              "owner": "alice",
+              "urgent": false
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Item",
+            "i1",
+            {
+              "owner": "bob"
+            }
+          ],
+          "error": {
+            "class": "InstanceValidationError",
+            "code": "invalid_instance",
+            "message": "Item in namespace default (version 1): owner: owner is a constant of Item: its create sets it and nothing changes it after; only a caller with items.admin may change it",
+            "details": {
+              "issues": [
+                {
+                  "path": "owner",
+                  "rule": "constant",
+                  "message": "owner is a constant of Item: its create sets it and nothing changes it after; only a caller with items.admin may change it"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Item",
+            "i1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i1",
+            "data": {
+              "title": "Renamed",
+              "owner": "alice",
+              "urgent": false
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "bob",
+          "args": [
+            "Item",
+            {
+              "title": "Two",
+              "owner": "bob",
+              "urgent": true
+            },
+            {
+              "id": "i2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Item",
+            "id": "i2",
+            "data": {
+              "title": "Two",
+              "owner": "bob",
+              "urgent": true
+            },
+            "behaviors": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > a boolean that moves down only turns false, and no value is below every value",
+      "behaviors": [
+        "Constants"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Flag",
+              "types": {
+                "Flag": {
+                  "name": "Flag",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "open",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "name"
+                        ],
+                        "oneWay": {
+                          "open": "down"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Flag",
+            "version": null,
+            "instanceType": "Flag"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Flag"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Flag",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Flag",
+            {
+              "name": "f1",
+              "open": true
+            },
+            {
+              "id": "f1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Flag",
+            "id": "f1",
+            "data": {
+              "name": "f1",
+              "open": true
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Flag",
+            "f1",
+            {
+              "open": false
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Flag",
+            "id": "f1",
+            "data": {
+              "name": "f1",
+              "open": false
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Flag",
+            "f1",
+            {
+              "open": true
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Flag f1: Flag f1's open only turns false: an update may not move it from false to true",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Flag f1's open only turns false: an update may not move it from false to true",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "open",
+                "direction": "down",
+                "current": false,
+                "attempted": true
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Flag",
+            "f1",
+            {
+              "open": null
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Flag",
+            "id": "f1",
+            "data": {
+              "name": "f1"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Flag",
+            "f1",
+            {
+              "open": false
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Flag f1: Flag f1's open only turns false: an update may not move it from none to false",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Flag f1's open only turns false: an update may not move it from none to false",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "open",
+                "direction": "down",
+                "current": null,
+                "attempted": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Flag",
+            "f1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Flag",
+            "id": "f1",
+            "data": {
+              "name": "f1"
+            },
+            "behaviors": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > a number grows or shrinks one way, an equal value is no move, and the field the type lists first is the one refused",
+      "behaviors": [
+        "Constants"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Counter",
+              "types": {
+                "Counter": {
+                  "name": "Counter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "attempts",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    },
+                    {
+                      "name": "budget",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "name"
+                        ],
+                        "oneWay": {
+                          "budget": "down",
+                          "attempts": "up"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Counter",
+            "version": null,
+            "instanceType": "Counter"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Counter"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Counter",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            {
+              "name": "c1",
+              "attempts": 1,
+              "budget": 10
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Counter",
+            "id": "c1",
+            "data": {
+              "name": "c1",
+              "attempts": 1,
+              "budget": 10
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1",
+            {
+              "attempts": 2
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Counter",
+            "id": "c1",
+            "data": {
+              "name": "c1",
+              "attempts": 2,
+              "budget": 10
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1",
+            {
+              "attempts": 2
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Counter",
+            "id": "c1",
+            "data": {
+              "name": "c1",
+              "attempts": 2,
+              "budget": 10
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1",
+            {
+              "attempts": 1.5
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Counter c1: Counter c1's attempts only grows: an update may not move it from 2 to 1.5",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Counter c1's attempts only grows: an update may not move it from 2 to 1.5",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "attempts",
+                "direction": "up",
+                "current": 2,
+                "attempted": 1.5
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1",
+            {
+              "budget": 8
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Counter",
+            "id": "c1",
+            "data": {
+              "name": "c1",
+              "attempts": 2,
+              "budget": 8
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1",
+            {
+              "budget": 9
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Counter c1: Counter c1's budget only shrinks: an update may not move it from 8 to 9",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Counter c1's budget only shrinks: an update may not move it from 8 to 9",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "budget",
+                "direction": "down",
+                "current": 8,
+                "attempted": 9
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1",
+            {
+              "attempts": 0,
+              "budget": 20
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Counter c1: Counter c1's attempts only grows: an update may not move it from 2 to 0",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Counter c1's attempts only grows: an update may not move it from 2 to 0",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "attempts",
+                "direction": "up",
+                "current": 2,
+                "attempted": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Counter",
+            "c1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Counter",
+            "id": "c1",
+            "data": {
+              "name": "c1",
+              "attempts": 2,
+              "budget": 8
+            },
+            "behaviors": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > a date-time grows or shrinks one way",
+      "behaviors": [
+        "Constants"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Window",
+              "types": {
+                "Window": {
+                  "name": "Window",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "opensAt",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "closesAt",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "name"
+                        ],
+                        "oneWay": {
+                          "opensAt": "up",
+                          "closesAt": "down"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Window",
+            "version": null,
+            "instanceType": "Window"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Window"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Window",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Window",
+            {
+              "name": "w1",
+              "opensAt": "2026-01-01T00:00:00.000Z",
+              "closesAt": "2026-12-31T00:00:00.000Z"
+            },
+            {
+              "id": "w1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Window",
+            "id": "w1",
+            "data": {
+              "name": "w1",
+              "opensAt": "2026-01-01T00:00:00Z",
+              "closesAt": "2026-12-31T00:00:00Z"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Window",
+            "w1",
+            {
+              "opensAt": "2026-02-01T00:00:00.000Z"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Window",
+            "id": "w1",
+            "data": {
+              "name": "w1",
+              "opensAt": "2026-02-01T00:00:00Z",
+              "closesAt": "2026-12-31T00:00:00Z"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Window",
+            "w1",
+            {
+              "opensAt": "2026-01-15T00:00:00.000Z"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Window w1: Window w1's opensAt only grows: an update may not move it from \"2026-02-01T00:00:00Z\" to \"2026-01-15T00:00:00Z\"",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Window w1's opensAt only grows: an update may not move it from \"2026-02-01T00:00:00Z\" to \"2026-01-15T00:00:00Z\"",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "opensAt",
+                "direction": "up",
+                "current": "2026-02-01T00:00:00Z",
+                "attempted": "2026-01-15T00:00:00Z"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Window",
+            "w1",
+            {
+              "closesAt": "2026-11-30T00:00:00.000Z"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Window",
+            "id": "w1",
+            "data": {
+              "name": "w1",
+              "opensAt": "2026-02-01T00:00:00Z",
+              "closesAt": "2026-11-30T00:00:00Z"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Window",
+            "w1",
+            {
+              "closesAt": "2027-01-01T00:00:00.000Z"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Constants vetoes update of Window w1: Window w1's closesAt only shrinks: an update may not move it from \"2026-11-30T00:00:00Z\" to \"2027-01-01T00:00:00Z\"",
+            "details": {
+              "behavior": "Constants",
+              "action": "update",
+              "reason": "Window w1's closesAt only shrinks: an update may not move it from \"2026-11-30T00:00:00Z\" to \"2027-01-01T00:00:00Z\"",
+              "vetoCode": "one_way",
+              "vetoDetails": {
+                "field": "closesAt",
+                "direction": "down",
+                "current": "2026-11-30T00:00:00Z",
+                "attempted": "2027-01-01T00:00:00Z"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Window",
+            "w1",
+            {
+              "closesAt": null
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Window",
+            "id": "w1",
+            "data": {
+              "name": "w1",
+              "opensAt": "2026-02-01T00:00:00Z"
+            },
+            "behaviors": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > define refuses a oneWay field that fields lists, one of another type, one the type lacks, and members its schema refuses",
+      "behaviors": [
+        "Constants"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {
+                          "owner": "up"
+                        },
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Item/behaviors/0/config: type Item: behavior Constants config: oneWay: owner is in fields, which keep the value their create gives them: a field moves one way or stays, not both",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Item/behaviors/0/config",
+                  "message": "type Item: behavior Constants config: oneWay: owner is in fields, which keep the value their create gives them: a field moves one way or stays, not both"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {
+                          "title": "up"
+                        },
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Item/behaviors/0/config: type Item: behavior Constants config: oneWay: title is a string field of Item: a field that moves one way holds a boolean, a number or a date-time",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Item/behaviors/0/config",
+                  "message": "type Item: behavior Constants config: oneWay: title is a string field of Item: a field that moves one way holds a boolean, a number or a date-time"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {
+                          "missing": "up"
+                        },
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Item/behaviors/0/config: type Item: behavior Constants config: oneWay: missing is not a field of Item (its fields: title, owner, urgent)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Item/behaviors/0/config",
+                  "message": "type Item: behavior Constants config: oneWay: missing is not a field of Item (its fields: title, owner, urgent)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {
+                          "urgent": "sideways"
+                        },
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Item/behaviors/0: must match \"then\" schema; /types/Item/behaviors/0/config/oneWay/urgent: must be one of \"up\", \"down\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Item/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Item/behaviors/0/config/oneWay/urgent",
+                  "message": "must be one of \"up\", \"down\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {},
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Item/behaviors/0: must match \"then\" schema; /types/Item/behaviors/0/config/oneWay: must NOT have fewer than 1 properties",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Item/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Item/behaviors/0/config/oneWay",
+                  "message": "must NOT have fewer than 1 properties"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Item",
+              "types": {
+                "Item": {
+                  "name": "Item",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Constants",
+                      "config": {
+                        "fields": [
+                          "owner"
+                        ],
+                        "oneWay": {
+                          "urgent": "up"
+                        },
+                        "permission": "items.admin"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Item",
+            "version": null,
+            "instanceType": "Item"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Item"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Item",
+            "version": 1,
+            "published": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > StateRules by: the subject a by field holds changes a frozen field, another caller is frozen_fields, the permission still does, a patch that names the caller in by does not, required holds for the subject, and createdBy names the creator",
+      "behaviors": [
+        "StateRules",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "dave": {
+          "subject": "dave",
+          "permissions": [
+            "plans.admin"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "createdBy"
+                            ]
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "frozen": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Plan",
+            "version": null,
+            "instanceType": "Plan"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Plan"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Plan",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Plan",
+            {
+              "title": "Launch",
+              "plan": "Draft",
+              "reviewer": "carol",
+              "createdBy": "alice"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Launch",
+              "plan": "Draft",
+              "reviewer": "carol",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "planned",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "plan": "Second draft"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Launch",
+              "plan": "Second draft",
+              "reviewer": "carol",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "planned",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "plan": "Bob's"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Plan p1: Plan p1 is planned, which freezes plan: it does not change while it is planned; only the subject createdBy holds, or a caller with plans.admin, may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Plan p1 is planned, which freezes plan: it does not change while it is planned; only the subject createdBy holds, or a caller with plans.admin, may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "planned",
+                "fields": [
+                  "plan"
+                ],
+                "by": [
+                  "createdBy"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "dave",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "plan": "Moderated"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Launch",
+              "plan": "Moderated",
+              "reviewer": "carol",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "planned",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "title": "Renamed"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Renamed",
+              "plan": "Moderated",
+              "reviewer": "carol",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "planned",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "createdBy": "bob",
+              "plan": "Mine"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Plan p1: Plan p1 is planned, which freezes plan: it does not change while it is planned; only the subject createdBy holds, or a caller with plans.admin, may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Plan p1 is planned, which freezes plan: it does not change while it is planned; only the subject createdBy holds, or a caller with plans.admin, may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "planned",
+                "fields": [
+                  "plan"
+                ],
+                "by": [
+                  "createdBy"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Plan",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "from": "planned",
+            "to": "working"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "plan": "Alice again"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Plan p1: Plan p1 is working, which freezes plan: it does not change while it is working; only the subject reviewer holds, or a caller with plans.admin, may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Plan p1 is working, which freezes plan: it does not change while it is working; only the subject reviewer holds, or a caller with plans.admin, may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "working",
+                "fields": [
+                  "plan"
+                ],
+                "by": [
+                  "reviewer"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "plan": "Carol's"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Renamed",
+              "plan": "Carol's",
+              "reviewer": "carol",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "working",
+                "enteredAt": 1001000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            "transition",
+            {
+              "to": "proving"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes transition of Plan p1: Plan p1 cannot move to proving without proof, which proving requires",
+            "details": {
+              "behavior": "StateRules",
+              "action": "transition",
+              "reason": "Plan p1 cannot move to proving without proof, which proving requires",
+              "vetoCode": "missing_fields",
+              "vetoDetails": {
+                "state": "proving",
+                "fields": [
+                  "proof"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "proof": "Screenshots"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Renamed",
+              "plan": "Carol's",
+              "reviewer": "carol",
+              "createdBy": "alice",
+              "proof": "Screenshots"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "working",
+                "enteredAt": 1001000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            "transition",
+            {
+              "to": "proving"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "from": "working",
+            "to": "proving"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "proof": null
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Plan p1: Plan p1 is proving, which requires proof: it keeps its value while it is proving",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Plan p1 is proving, which requires proof: it keeps its value while it is proving",
+              "vetoCode": "required_fields",
+              "vetoDetails": {
+                "state": "proving",
+                "fields": [
+                  "proof"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "proof": "Better screenshots"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Renamed",
+              "plan": "Carol's",
+              "reviewer": "carol",
+              "createdBy": "alice",
+              "proof": "Better screenshots"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "proving",
+                "enteredAt": 1002000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "proof": "Mine"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Plan p1: Plan p1 is proving, which freezes proof: it does not change while it is proving; only the subject reviewer holds, or a caller with plans.admin, may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Plan p1 is proving, which freezes proof: it does not change while it is proving; only the subject reviewer holds, or a caller with plans.admin, may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "proving",
+                "fields": [
+                  "proof"
+                ],
+                "by": [
+                  "reviewer"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "from": "proving",
+            "to": "done"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "carol",
+          "args": [
+            "Plan",
+            "p1",
+            {
+              "title": "Done"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Plan p1: Plan p1 is done, which freezes title: it does not change while it is done; only a caller with plans.admin may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Plan p1 is done, which freezes title: it does not change while it is done; only a caller with plans.admin may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "done",
+                "fields": [
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Plan",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Plan",
+            "id": "p1",
+            "data": {
+              "title": "Renamed",
+              "plan": "Carol's",
+              "reviewer": "carol",
+              "createdBy": "alice",
+              "proof": "Better screenshots"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "done",
+                "enteredAt": 1003000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > StateRules by: define refuses by in a state that freezes nothing, a seat, a field the type lacks, a field that holds no subject, and an empty by",
+      "behaviors": [
+        "StateRules",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "createdBy"
+                            ]
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Plan/behaviors/0/config: type Plan: behavior StateRules config: states.proving.by lists who may change a field proving freezes, and proving freezes none",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Plan/behaviors/0/config",
+                  "message": "type Plan: behavior StateRules config: states.proving.by lists who may change a field proving freezes, and proving freezes none"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "seat:owner"
+                            ]
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "frozen": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Plan/behaviors/0/config: type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which the core does not run yet (D104, step 3)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Plan/behaviors/0/config",
+                  "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which the core does not run yet (D104, step 3)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "missing"
+                            ]
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "frozen": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Plan/behaviors/0/config: type Plan: behavior StateRules config: states.planned.by names \"missing\", which is not a field of Plan (its fields: title, plan, proof, reviewer, createdBy, urgent)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Plan/behaviors/0/config",
+                  "message": "type Plan: behavior StateRules config: states.planned.by names \"missing\", which is not a field of Plan (its fields: title, plan, proof, reviewer, createdBy, urgent)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "urgent"
+                            ]
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "frozen": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Plan/behaviors/0/config: type Plan: behavior StateRules config: states.planned.by names \"urgent\", a boolean field of Plan: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Plan/behaviors/0/config",
+                  "message": "type Plan: behavior StateRules config: states.planned.by names \"urgent\", a boolean field of Plan: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": []
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "frozen": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Plan/behaviors/0: must match \"then\" schema; /types/Plan/behaviors/0/config/states/planned/by: must NOT have fewer than 1 items",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Plan/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Plan/behaviors/0/config/states/planned/by",
+                  "message": "must NOT have fewer than 1 items"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Plan",
+              "types": {
+                "Plan": {
+                  "name": "Plan",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "reviewer",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "urgent",
+                      "typeRef": {
+                        "name": "boolean"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "planned": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "createdBy"
+                            ]
+                          },
+                          "working": {
+                            "frozen": [
+                              "plan"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "proving": {
+                            "required": [
+                              "proof"
+                            ],
+                            "frozen": [
+                              "proof"
+                            ],
+                            "by": [
+                              "reviewer"
+                            ]
+                          },
+                          "done": {
+                            "frozen": "all"
+                          }
+                        },
+                        "permission": "plans.admin"
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "planned",
+                          "working",
+                          "proving",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "planned",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "proving"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "working"
+                          },
+                          {
+                            "from": "proving",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Plan",
+            "version": null,
+            "instanceType": "Plan"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Plan"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Plan",
+            "version": 1,
+            "published": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > Approvals resetOn: a gate whose resetOn field changes loses its sign-offs while the others keep theirs, [] keeps them, a gate without resetOn follows resetOnChange, and entering a gate's state consumes its own",
+      "behaviors": [
+        "Approvals",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "docs.review"
+          ]
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": [
+            "docs.review"
+          ]
+        },
+        "ben": {
+          "subject": "ben",
+          "permissions": [
+            "docs.review"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "planned": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": []
+                          },
+                          "proved": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": [
+                              "proof"
+                            ]
+                          },
+                          "published": {
+                            "count": 1,
+                            "permission": "docs.review"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "planned",
+                          "proved",
+                          "published"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "planned"
+                          },
+                          {
+                            "from": "planned",
+                            "to": "proved"
+                          },
+                          {
+                            "from": "proved",
+                            "to": "published"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Doc",
+            "version": null,
+            "instanceType": "Doc"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Doc"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Doc",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "Proof A",
+              "createdBy": "alice"
+            },
+            {
+              "id": "d1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "Proof A",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Doc",
+            "d1",
+            "signOff",
+            {
+              "state": "planned"
+            }
+          ],
+          "now": 1000001,
+          "expect": {
+            "state": "planned",
+            "subject": "ann",
+            "at": 1000001,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Doc",
+            "d1",
+            "signOff",
+            {
+              "state": "proved"
+            }
+          ],
+          "now": 1000002,
+          "expect": {
+            "state": "proved",
+            "subject": "ann",
+            "at": 1000002,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Doc",
+            "d1",
+            "signOff",
+            {
+              "state": "published"
+            }
+          ],
+          "now": 1000003,
+          "expect": {
+            "state": "published",
+            "subject": "ann",
+            "at": 1000003,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            {
+              "body": "Edited"
+            }
+          ],
+          "now": 1000004,
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "Proof A",
+              "createdBy": "alice",
+              "body": "Edited"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "planned": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  },
+                  "proved": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "Proof A",
+              "createdBy": "alice",
+              "body": "Edited"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "planned": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  },
+                  "proved": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            {
+              "proof": "New proof"
+            }
+          ],
+          "now": 1000005,
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "New proof",
+              "createdBy": "alice",
+              "body": "Edited"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "planned": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "New proof",
+              "createdBy": "alice",
+              "body": "Edited"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "planned": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Doc",
+            "d1",
+            "listSignOffs",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "state": "planned",
+                "subject": "ann",
+                "at": 1000001
+              },
+              {
+                "state": "proved",
+                "subject": "ann",
+                "at": 1000002,
+                "consumedAt": 1000005
+              },
+              {
+                "state": "published",
+                "subject": "ann",
+                "at": 1000003,
+                "consumedAt": 1000004
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "transition",
+            {
+              "to": "planned"
+            }
+          ],
+          "now": 1000006,
+          "expect": {
+            "from": "draft",
+            "to": "planned"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Doc",
+              "plan": "Plan A",
+              "proof": "New proof",
+              "createdBy": "alice",
+              "body": "Edited"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "planned",
+                "enteredAt": 1000006
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "signOff",
+            {
+              "state": "proved"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes signOff of Doc d1: alice created Doc d1, and its gate on proved takes no sign-off from its creator",
+            "details": {
+              "behavior": "Approvals",
+              "action": "signOff",
+              "reason": "alice created Doc d1, and its gate on proved takes no sign-off from its creator",
+              "vetoCode": "creator_cannot_sign"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Doc",
+            "d1",
+            "signOff",
+            {
+              "state": "planned"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes signOff of Doc d1: Doc d1 is planned already; a sign-off for it waits until it has left",
+            "details": {
+              "behavior": "Approvals",
+              "action": "signOff",
+              "reason": "Doc d1 is planned already; a sign-off for it waits until it has left",
+              "vetoCode": "in_state"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > Approvals resetOnChange false: a gate without resetOn keeps its sign-offs through an update",
+      "behaviors": [
+        "Approvals",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": [
+            "notes.review"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Note",
+              "types": {
+                "Note": {
+                  "name": "Note",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "sent": {
+                            "count": 1,
+                            "permission": "notes.review"
+                          }
+                        },
+                        "resetOnChange": false
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "sent"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "sent"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Note",
+            "version": null,
+            "instanceType": "Note"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Note"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Note",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Note",
+            {
+              "title": "Note",
+              "createdBy": "alice"
+            },
+            {
+              "id": "n1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Note",
+            "id": "n1",
+            "data": {
+              "title": "Note",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Note",
+            "n1",
+            "signOff",
+            {
+              "state": "sent"
+            }
+          ],
+          "now": 1000001,
+          "expect": {
+            "state": "sent",
+            "subject": "ann",
+            "at": 1000001,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Note",
+            "n1",
+            {
+              "body": "More"
+            }
+          ],
+          "now": 1000002,
+          "expect": {
+            "namespace": "default",
+            "schema": "Note",
+            "id": "n1",
+            "data": {
+              "title": "Note",
+              "createdBy": "alice",
+              "body": "More"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "sent": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Note",
+            "n1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Note",
+            "id": "n1",
+            "data": {
+              "title": "Note",
+              "createdBy": "alice",
+              "body": "More"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "sent": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Note",
+            "n1",
+            "transition",
+            {
+              "to": "sent"
+            }
+          ],
+          "now": 1000003,
+          "expect": {
+            "from": "draft",
+            "to": "sent"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Note",
+            "n1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Note",
+            "id": "n1",
+            "data": {
+              "title": "Note",
+              "createdBy": "alice",
+              "body": "More"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "sent",
+                "enteredAt": 1000003
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > Approvals pinned: a sign-off names the row's version it read: a missing one is invalid, a stale one is stale with the version and the current one, a matching one signs, and a sign-off moves the version",
+      "behaviors": [
+        "Approvals",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": [
+            "proofs.review"
+          ]
+        },
+        "ben": {
+          "subject": "ben",
+          "permissions": [
+            "proofs.review"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Proof",
+              "types": {
+                "Proof": {
+                  "name": "Proof",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "approved": {
+                            "count": 2,
+                            "permission": "proofs.review",
+                            "pinned": true
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "approved"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "approved"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proof",
+            "version": null,
+            "instanceType": "Proof"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Proof"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Proof",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Proof",
+            {
+              "title": "Proof",
+              "proof": "v1",
+              "createdBy": "alice"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proof",
+            "id": "p1",
+            "data": {
+              "title": "Proof",
+              "proof": "v1",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation signOff of behavior Approvals: /version: is required: the gate on approved is pinned, so a sign-off names the row's version its signer read",
+            "details": {
+              "issues": [
+                {
+                  "path": "/version",
+                  "message": "is required: the gate on approved is pinned, so a sign-off names the row's version its signer read"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved",
+              "version": 2
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes signOff of Proof p1: Proof p1 is at version 1, not 2",
+            "details": {
+              "behavior": "Approvals",
+              "action": "signOff",
+              "reason": "Proof p1 is at version 1, not 2",
+              "vetoCode": "stale",
+              "vetoDetails": {
+                "version": 2,
+                "current": 1
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved",
+              "version": 1
+            }
+          ],
+          "now": 1000001,
+          "expect": {
+            "state": "approved",
+            "subject": "ann",
+            "at": 1000001,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 2
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ben",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved",
+              "version": 1
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes signOff of Proof p1: Proof p1 is at version 2, not 1",
+            "details": {
+              "behavior": "Approvals",
+              "action": "signOff",
+              "reason": "Proof p1 is at version 2, not 1",
+              "vetoCode": "stale",
+              "vetoDetails": {
+                "version": 1,
+                "current": 2
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ben",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved",
+              "version": 2
+            }
+          ],
+          "now": 1000002,
+          "expect": {
+            "state": "approved",
+            "subject": "ben",
+            "at": 1000002,
+            "signedBy": [
+              "ann",
+              "ben"
+            ],
+            "count": 2
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Proof",
+            "p1",
+            {
+              "proof": "Changed"
+            }
+          ],
+          "now": 1000003,
+          "expect": {
+            "namespace": "default",
+            "schema": "Proof",
+            "id": "p1",
+            "data": {
+              "title": "Proof",
+              "proof": "Changed",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proof",
+            "p1",
+            "transition",
+            {
+              "to": "approved"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes transition of Proof p1: Proof p1 cannot move to approved with 0 of the 2 sign-offs it needs",
+            "details": {
+              "behavior": "Approvals",
+              "action": "transition",
+              "reason": "Proof p1 cannot move to approved with 0 of the 2 sign-offs it needs",
+              "vetoCode": "approvals_missing",
+              "vetoDetails": {
+                "state": "approved",
+                "required": 2,
+                "count": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved",
+              "version": 4
+            }
+          ],
+          "now": 1000004,
+          "expect": {
+            "state": "approved",
+            "subject": "ann",
+            "at": 1000004,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 2
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ben",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "approved",
+              "version": 5
+            }
+          ],
+          "now": 1000005,
+          "expect": {
+            "state": "approved",
+            "subject": "ben",
+            "at": 1000005,
+            "signedBy": [
+              "ann",
+              "ben"
+            ],
+            "count": 2
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Proof",
+            "p1",
+            "transition",
+            {
+              "to": "approved"
+            }
+          ],
+          "now": 1000006,
+          "expect": {
+            "from": "open",
+            "to": "approved"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Proof",
+            "p1",
+            "signOff",
+            {
+              "state": "open",
+              "version": 1
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes signOff of Proof p1: open is not a state Proof's Approvals gates (it gates approved)",
+            "details": {
+              "behavior": "Approvals",
+              "action": "signOff",
+              "reason": "open is not a state Proof's Approvals gates (it gates approved)",
+              "vetoCode": "no_gate"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Proof",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Proof",
+            "id": "p1",
+            "data": {
+              "title": "Proof",
+              "proof": "Changed",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "approved",
+                "enteredAt": 1000006
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > Approvals: a version on a gate that is not pinned is held to the row's version too",
+      "behaviors": [
+        "Approvals",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": [
+            "memos.review"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Memo",
+              "types": {
+                "Memo": {
+                  "name": "Memo",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "sent": {
+                            "count": 1,
+                            "permission": "memos.review"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "sent"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "sent"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Memo",
+            "version": null,
+            "instanceType": "Memo"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Memo"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Memo",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Memo",
+            {
+              "title": "Memo",
+              "createdBy": "alice"
+            },
+            {
+              "id": "m1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Memo",
+            "id": "m1",
+            "data": {
+              "title": "Memo",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {}
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Memo",
+            "m1",
+            "signOff",
+            {
+              "state": "sent",
+              "version": 3
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Approvals vetoes signOff of Memo m1: Memo m1 is at version 1, not 3",
+            "details": {
+              "behavior": "Approvals",
+              "action": "signOff",
+              "reason": "Memo m1 is at version 1, not 3",
+              "vetoCode": "stale",
+              "vetoDetails": {
+                "version": 3,
+                "current": 1
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Memo",
+            "m1",
+            "signOff",
+            {
+              "state": "sent"
+            }
+          ],
+          "now": 1000001,
+          "expect": {
+            "state": "sent",
+            "subject": "ann",
+            "at": 1000001,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Memo",
+            "m1",
+            "withdrawSignOff",
+            {
+              "state": "sent"
+            }
+          ],
+          "now": 1000002,
+          "expect": {
+            "state": "sent",
+            "subject": "ann",
+            "at": 1000001
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Memo",
+            "m1",
+            "signOff",
+            {
+              "state": "sent",
+              "version": 3
+            }
+          ],
+          "now": 1000003,
+          "expect": {
+            "state": "sent",
+            "subject": "ann",
+            "at": 1000003,
+            "signedBy": [
+              "ann"
+            ],
+            "count": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Memo",
+            "m1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Memo",
+            "id": "m1",
+            "data": {
+              "title": "Memo",
+              "createdBy": "alice"
+            },
+            "behaviors": {
+              "Approvals": {
+                "gates": {
+                  "sent": {
+                    "signedBy": [
+                      "ann"
+                    ]
+                  }
+                }
+              },
+              "Workflow": {
+                "status": "draft",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Freezes and sign-offs > Approvals: define refuses a resetOn field the type lacks, a gate that excludes the creator on a type with no createdBy, and members its schema refuses",
+      "behaviors": [
+        "Approvals",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "planned": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": []
+                          },
+                          "proved": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": [
+                              "missing"
+                            ]
+                          },
+                          "published": {
+                            "count": 1,
+                            "permission": "docs.review"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "planned",
+                          "proved",
+                          "published"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "planned"
+                          },
+                          {
+                            "from": "planned",
+                            "to": "proved"
+                          },
+                          {
+                            "from": "proved",
+                            "to": "published"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Approvals config: gate \"proved\": resetOn names \"missing\", which is not a field of Doc (its fields: title, plan, proof, body, createdBy)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Doc/behaviors/0/config",
+                  "message": "type Doc: behavior Approvals config: gate \"proved\": resetOn names \"missing\", which is not a field of Doc (its fields: title, plan, proof, body, createdBy)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Bare",
+              "types": {
+                "Bare": {
+                  "name": "Bare",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "sent": {
+                            "count": 1,
+                            "permission": "bare.review"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "sent"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "sent"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Bare/behaviors/0/config: type Bare: behavior Approvals config: gate \"sent\" excludes the creator (excludeCreator is true when absent), and Bare has no field createdBy to read the creator from: give Bare a createdBy field, or set excludeCreator to false",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Bare/behaviors/0/config",
+                  "message": "type Bare: behavior Approvals config: gate \"sent\" excludes the creator (excludeCreator is true when absent), and Bare has no field createdBy to read the creator from: give Bare a createdBy field, or set excludeCreator to false"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Bare",
+              "types": {
+                "Bare": {
+                  "name": "Bare",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "sent": {
+                            "count": 1,
+                            "permission": "bare.review",
+                            "excludeCreator": false
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "sent"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "sent"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Bare",
+            "version": null,
+            "instanceType": "Bare"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Bare"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Bare",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Bare",
+              "types": {
+                "Bare": {
+                  "name": "Bare",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "sent": {
+                            "count": 1,
+                            "permission": "bare.review",
+                            "excludeCreator": false,
+                            "pinned": "yes"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "sent"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "sent"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Bare/behaviors/0: must match \"then\" schema; /types/Bare/behaviors/0/config/gates/sent/pinned: must be boolean",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Bare/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Bare/behaviors/0/config/gates/sent/pinned",
+                  "message": "must be boolean"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "planned": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": []
+                          },
+                          "proved": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": "proof"
+                          },
+                          "published": {
+                            "count": 1,
+                            "permission": "docs.review"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "planned",
+                          "proved",
+                          "published"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "planned"
+                          },
+                          {
+                            "from": "planned",
+                            "to": "proved"
+                          },
+                          {
+                            "from": "proved",
+                            "to": "published"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Doc/behaviors/0: must match \"then\" schema; /types/Doc/behaviors/0/config/gates/proved/resetOn: must be array",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Doc/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Doc/behaviors/0/config/gates/proved/resetOn",
+                  "message": "must be array"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "plan",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "proof",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Approvals",
+                      "config": {
+                        "gates": {
+                          "planned": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": []
+                          },
+                          "proved": {
+                            "count": 1,
+                            "permission": "docs.review",
+                            "resetOn": [
+                              "proof"
+                            ]
+                          },
+                          "published": {
+                            "count": 1,
+                            "permission": "docs.review"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "draft",
+                          "planned",
+                          "proved",
+                          "published"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "planned"
+                          },
+                          {
+                            "from": "planned",
+                            "to": "proved"
+                          },
+                          {
+                            "from": "proved",
+                            "to": "published"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Doc",
+            "version": null,
+            "instanceType": "Doc"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Doc"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Doc",
+            "version": 1,
+            "published": true
+          }
+        }
+      ]
+    }
+  ]
+}

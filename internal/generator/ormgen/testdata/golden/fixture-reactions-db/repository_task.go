@@ -150,7 +150,9 @@ func (r *TaskRepository) RunChange(ctx context.Context, change types.TaskChange,
 func (r *TaskRepository) coreOwn(row *types.Task) map[string]any {
 	own := map[string]any{}
 	own["title"] = row.Title
-	own["priority"] = row.Priority
+	if !reflect.ValueOf(row.Priority).IsZero() {
+		own["priority"] = row.Priority
+	}
 	{
 		var zero types.IdentityUUID
 		if id, ok := taskUUIDValue(row.Project.Id); ok && id != zero {

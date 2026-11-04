@@ -125,6 +125,45 @@ func TestATableWhoseFieldsAreBehaviorsLeavesTheOwnedFieldsOutOfItsInputs(t *test
 	}
 }
 
+// A create through the core gives it the own fields the insert writes
+// (D104): an optional member that is no pointer, Task's plan and proof, is
+// absent from the core's create when it is its zero value, as the insert
+// leaves its column NULL, so what StateRules requires of a create is what
+// the row then holds; a required one, urgent, is always given. Task's
+// Approvals hangs its operations under Approvals(), its gates' states a
+// type of their own.
+func TestACreateGivesTheCoreTheOwnFieldsTheInsertWrites(t *testing.T) {
+	output := generateFixture(t, approvalsFixture)
+	task := repositoryOf(t, output, "Task")
+	var uses []string
+	for _, use := range task.Uses {
+		uses = append(uses, use.GoName+" "+use.Interface)
+	}
+	if want := []string{"Approvals TaskApprovalsOperations", "Status TaskStatusOperations"}; !slices.Equal(uses, want) {
+		t.Fatalf("Task's uses with operations = %v, want %v", uses, want)
+	}
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, "repository_task.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"\tif !reflect.ValueOf(row.Plan).IsZero() {\n\t\town[\"plan\"] = row.Plan\n\t}\n",
+		"\tif !reflect.ValueOf(row.Proof).IsZero() {\n\t\town[\"proof\"] = row.Proof\n\t}\n",
+		"\tif !reflect.ValueOf(row.Plan).IsZero() {\n\t\tcolumns[\"plan\"] = row.Plan\n\t}\n",
+		"\town[\"urgent\"] = row.Urgent\n",
+		"TaskApprovalsGateDone    TaskApprovalsGate = \"done\"",
+		"func (r *TaskRepository) Approvals() TaskApprovalsOperations",
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("repository_task.go has no %q", want)
+		}
+	}
+}
+
 // Generate refuses a table whose fields are behaviors when no registry
 // declares them.
 func TestATableWhoseFieldsAreBehaviorsNeedsARegistry(t *testing.T) {

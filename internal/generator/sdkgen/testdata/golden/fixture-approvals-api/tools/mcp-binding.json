@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-approvals-api",
+  "sdkClassName": "FixtureApprovalsApiSDK",
+  "tools": [
+    {
+      "toolName": "task.approvals.listSignOffs",
+      "apiId": "fixture-approvals-api",
+      "namespace": "task",
+      "methodName": "listSignOffs",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "cursor",
+          "required": false,
+          "kind": "input",
+          "target": "input.cursor"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "input",
+          "target": "input.limit"
+        },
+        {
+          "toolParameter": "state",
+          "required": false,
+          "kind": "input",
+          "target": "input.state"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["cursor", "limit", "state"]
+        }
+      ]
+    },
+    {
+      "toolName": "task.approvals.signOff",
+      "apiId": "fixture-approvals-api",
+      "namespace": "task",
+      "methodName": "signOff",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "note",
+          "required": false,
+          "kind": "input",
+          "target": "input.note"
+        },
+        {
+          "toolParameter": "state",
+          "required": true,
+          "kind": "input",
+          "target": "input.state"
+        },
+        {
+          "toolParameter": "version",
+          "required": false,
+          "kind": "input",
+          "target": "input.version"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["note", "state", "version"]
+        }
+      ]
+    },
+    {
+      "toolName": "task.approvals.withdrawSignOff",
+      "apiId": "fixture-approvals-api",
+      "namespace": "task",
+      "methodName": "withdrawSignOff",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "state",
+          "required": true,
+          "kind": "input",
+          "target": "input.state"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["state"]
+        }
+      ]
+    },
+    {
+      "toolName": "task.status.transition",
+      "apiId": "fixture-approvals-api",
+      "namespace": "task",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["from", "to"]
+        }
+      ]
+    },
+    {
+      "toolName": "task-admin.reassignTask",
+      "apiId": "fixture-approvals-api",
+      "namespace": "task-admin",
+      "methodName": "reassignTask",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "reviewer",
+          "required": false,
+          "kind": "input",
+          "target": "input.reviewer"
+        },
+        {
+          "toolParameter": "owner",
+          "required": false,
+          "kind": "input",
+          "target": "input.owner"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["reviewer", "owner"]
+        }
+      ]
+    }
+  ]
+}

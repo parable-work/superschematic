@@ -149,7 +149,10 @@ Its entry points:
   audit fields (`createdBy`, D104) among the row's own fields, converted as
   an own column is (a UUID to base62, NULL absent); no change set writes
   one, and a change set with no writes (a Workflow repeat) applies
-  nothing. A generated repository whose table
+  nothing. An own or sub-table column of IR type `Generic.JSON` is bound
+  as its JSON text whatever the value, a string, a number and a boolean
+  among them, and read back parsed on SQLite (as pg parses JSONB on
+  Postgres), so it reaches the core as it was written (D104). A generated repository whose table
   arms deadlines runs them with its `runDeadline` (typed
   `BehaviorDeadlines`), and one whose writes are heard runs its changes
   with its `runChange` (typed `BehaviorChanges`), each in its transaction,
@@ -462,7 +465,15 @@ source the Go ORM's come from, filled in the Go ORM's order, so the two
 send the same SQL. A repository reads and writes rows through the codec;
 `withUser(id)` and `as(principal)` act as a user, whom `createdBy`,
 `updatedBy` and `deletedBy` record, and a write that needs one throws
-`NoUserError` without it; `transaction(fn)` gives `fn` repositories on one
+`NoUserError` without it; `withBehaviorCaller({ subject, permissions })`
+runs the behaviors' commands of the repositories and their transactions
+(a create, an update and a delete through the core, and an operation, a
+deadline or a change given no `options.caller`) as that caller, the
+subject and the permissions the behaviors' configs name, such as
+Constants' and StateRules' permission on an update (D104), while the acting
+user still stamps the audit fields; `null` unsets it, and unset a command
+runs as the acting user holding no permissions (Go's ORM is
+`WithBehaviorCaller`); `transaction(fn)` gives `fn` repositories on one
 connection, with `query` and `exec`, and rolls back when it throws. A key
 no live row holds is `NotFoundError`, and a page key that names no row
 `PageKeyError`.

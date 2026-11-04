@@ -45,6 +45,13 @@
 //! would lose a field the rule requires or enter the state. Revisions'
 //! propose checks its patch with `validate_update()`, which asks no guard,
 //! so a proposal that changes a frozen field is refused at approve.
+//!
+//! What only a table's StateRules takes (D104), whose declaration the
+//! engine shares, the engine refuses rather than ignores: a state's `by`,
+//! who may change a field it freezes, and `status`, the Workflow field the
+//! rules are of, each at define, naming the table form. Ignoring a rule of
+//! who may change a frozen field would be a hole, and an engine type can be
+//! defined at run time, past any build's check.
 
 use serde_json::{Map, Value};
 
@@ -56,6 +63,10 @@ use superschematic_engine::{
 };
 
 use crate::guidance::list;
+
+// How a refusal of what only a table's StateRules takes names the table
+// form (D104).
+const TABLE_FORM: &str = "implements StateRules<T, { ... }> on a DB table, D104";
 
 /// One state's rules, parsed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -160,6 +171,9 @@ impl Behavior for StateRules {
     // Workflow, whose config it is given, and the fields to the type's own,
     // and reads the state a create starts in.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<StateRulesConfig> {
+        if let Some(reason) = table_member(raw) {
+            return Err(Error::config(reason));
+        }
         let empty = Map::new();
         let rules = raw
             .get("states")
@@ -290,6 +304,31 @@ impl Behavior for StateRules {
             ..Hooks::default()
         }
     }
+}
+
+// table_member says why a config names a member only a table's StateRules
+// takes (D104): the first state, in the config's order, whose rules name
+// by, then status; None for a config that names neither.
+fn table_member(raw: &Value) -> Option<String> {
+    let by = raw
+        .get("states")
+        .and_then(Value::as_object)
+        .and_then(|rules| {
+            js_keys(rules)
+                .into_iter()
+                .find(|state| rules[*state].get("by").is_some())
+        });
+    if let Some(state) = by {
+        return Some(format!(
+            "the rules of \"{state}\" name by, which a table's StateRules takes ({TABLE_FORM}): on an engine type a frozen field changes for a caller with the config's permission alone"
+        ));
+    }
+    if raw.get("status").is_some() {
+        return Some(format!(
+            "status is a table's StateRules' ({TABLE_FORM}): an engine type's StateRules reads its one Workflow"
+        ));
+    }
+    None
 }
 
 fn guard(

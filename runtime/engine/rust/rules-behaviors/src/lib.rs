@@ -18,7 +18,11 @@
 //! writes of the rows that point at its row too. Workflow's transitions name
 //! who makes them, and a move to the state a row is in may answer as no
 //! change, in step 1 of D104's ([`subjects`] is how a field names a
-//! subject). The engine's behaviors
+//! subject). [`Constants`], [`StateRules`] and [`Approvals`], in step 2 of
+//! D104's order of the work, each with its upgrade: fields that move one
+//! way, who may change a frozen field, and gates whose sign-offs a change
+//! of chosen fields consumes and that pin the version their signer read.
+//! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
 //!
@@ -42,17 +46,29 @@
 //! assert!(matches!(step, Step::Done(Outcome::Changed(_))));
 //! ```
 
+pub mod approvals;
+pub mod constants;
 mod declared;
+mod flow;
+mod paging;
 pub mod reactions;
 mod schema;
+pub mod staterules;
 pub mod subjects;
 pub mod timers;
+mod values;
 pub mod workflow;
 
+pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
+pub use constants::{
+    Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
+    ONE_WAY_NUMBERS,
+};
 pub use reactions::{
     Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule, ReactionsTerminal,
     ReactionsThen, ReactionsWhen,
 };
+pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use timers::{
     deadlines_field, parse_date_time, Timers, TimersConfig, TimersDeadline, TimersStart,
     TimersThen, TimersUntil,
@@ -66,16 +82,26 @@ use superschematic_rules::Core;
 
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far.
-pub const NAMES: [&str; 3] = [workflow::NAME, reactions::NAME, timers::NAME];
+pub const NAMES: [&str; 6] = [
+    workflow::NAME,
+    reactions::NAME,
+    constants::NAME,
+    staterules::NAME,
+    approvals::NAME,
+    timers::NAME,
+];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
 /// the text the compiler registers and each behavior reads in place, which
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 3] = [
+pub const DECLARATIONS: [&str; 6] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
+    constants::DECLARATION,
+    staterules::DECLARATION,
+    approvals::DECLARATION,
     timers::DECLARATION,
 ];
 
@@ -83,7 +109,13 @@ pub const DECLARATIONS: [&str; 3] = [
 /// the default permission matcher: what a host runs, extended with its own
 /// behaviors (`.with(..)`) and a deployment's matcher (`.with_matcher(..)`).
 pub fn core() -> Core {
-    Core::new().with(Workflow).with(Reactions).with(Timers)
+    Core::new()
+        .with(Workflow)
+        .with(Reactions)
+        .with(Constants)
+        .with(StateRules)
+        .with(Approvals)
+        .with(Timers)
 }
 
 #[cfg(test)]

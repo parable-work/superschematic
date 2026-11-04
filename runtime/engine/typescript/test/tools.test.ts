@@ -211,7 +211,10 @@ describe('the describe document', () => {
     assert.deepEqual(
       described.behaviors.map((behavior) => [behavior.name, behavior.vetoes.map((veto) => veto.code)]),
       [
-        ['Constants', []],
+        // A table's Constants' one_way (D104): the declaration is shared,
+        // so an engine type's describe lists it, and the engine never
+        // answers it, refusing oneWay.
+        ['Constants', ['one_way']],
         ['Variants', []],
         ['Links', ['no_revision', 'no_release', 'required_link', 'required_target', 'too_many', 'not_linked']],
         ['test.Hold', ['stale', 'required', 'refused']],

@@ -13681,9 +13681,16 @@ Timers, and the `implements` form pulled forward from step 5 for the
 core's behaviors alone. Step 3's second half built: the outbox trigger
 and the change queue it writes, the core's change command and its
 listeners, deadlines that follow a raw write, the worker running both
-queues, a vetoed fire released, and Reactions on the core. Steps 4 to 7
-are not built. The names and rules are reversible until the first
-release.
+queues, a vetoed fire released, and Reactions on the core. Step 4's waves
+begun: Constants, StateRules and Approvals ported, each with D104's
+upgrade (D104's step 2, first batch, whose status records them), each
+module doc holding it to the test. Approvals passes it, its sign-offs a
+sub-table of its own; Constants and StateRules fail it, keeping no state
+of their own and holding rules over the table's own fields, and are ported
+because D104 orders it, which leaves step 5 the question of whether a
+field's constancy and direction and a state's required and frozen fields
+become declarative rules. The rest of step 4, and steps 5 to 7, are not
+built. The names and rules are reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -14376,8 +14383,10 @@ release.
   acting only where they can; and it recurs, a project done when its tasks
   are, an escalation when a field moves. A table says `implements
   Reactions<Project, { rules: [...] }>` (`@superschematic/db`'s carrier,
-  typed by the table; `registry.RulesBehaviors` is Workflow, Reactions,
-  Timers, the core's order and every transcript's). Its whens: `enters`;
+  typed by the table; `registry.RulesBehaviors` is the core's order and
+  every transcript's, Workflow, Reactions and Timers then, and Workflow,
+  Reactions, Constants, StateRules, Approvals and Timers since D104's step
+  2). Its whens: `enters`;
   `changes`, a field of the table by its name (an own field, a relation by
   its name, a field anchor whose value field it hears), the engine's
   qualified form taken by the core for the recorded scenarios; and
@@ -14875,7 +14884,7 @@ none with `resetOnChange: false`, and a sign-off names no revision.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | A gate may list `resetOn`: the own fields whose change consumes its sign-offs, `[]` for none. A gate without it follows `resetOnChange`, as now. | One switch for every gate, which cannot keep a plan's approval while it clears a proof's |
-| A gate may set `pinned: true`. `signOff` then takes `version`, the row's version the signer read (the `@optimistic` column D103's writes are held by), and one that is not the row's version is `vetoed` (`stale`, details `{ version, current }`). | A sign-off checked against nothing, which approves what the signer did not see; a precondition only HTTP carries, which MCP and the SDKs' calls would lose |
+| A gate may set `pinned: true`. `signOff` then takes `version`, the row's version the signer read (the `@optimistic` column D103's writes are held by), and one that is not the row's version is `vetoed` (`stale`, details `{ version, current }`). (Amended when step 2 was built: a pinned gate's `signOff` without `version` is `invalid_argument`, and a `version` given on a gate that is not pinned is checked as on a pinned one, since ignoring a version a caller named would accept the stale read it asked to be held to.) | A sign-off checked against nothing, which approves what the signer did not see; a precondition only HTTP carries, which MCP and the SDKs' calls would lose |
 
 ### Retries that wait
 
@@ -15044,8 +15053,13 @@ Status: step 1 built: `by`, `overridePermission`, `repeat` and `from` on
 the Workflow the core runs, its cases written by hand in the recorded
 format and replayed by every adapter, a table's Workflow fields taking
 them in each language's repositories, API and SDK, and the engine
-refusing each. Steps 2 to 4 are not built. The names and configs are
-reversible until the first release.
+refusing each. Step 2's first batch built: Constants with `oneWay`,
+StateRules with `by` and Approvals with `resetOn` and `pinned`, ported
+onto the core with their recordings replayed, their upgrades' cases
+written by hand, and a table implementing them in each language. Step
+2's second batch (Lease, Retries, Presence and Budget) and steps 3 and 4
+are not built. The names and configs are reversible until the first
+release.
 - **The core addition.** `Behavior::settle(view, operation, params)` is a
   hook a use answers about an operation of its own before any use's guard
   is asked. The core asks it after the parameter check, for a caller's
@@ -15135,7 +15149,8 @@ reversible until the first release.
   takes the table's key) and takes a `@source` view of it that carries a
   field a `by` names, naming the API, the set and the operation, the field,
   the moves and the fix (keep the field out of the input, or freeze it
-  once StateRules or Constants run on the core). The table is the
+  once StateRules or Constants run on the core; since step 2, list it in
+  the fields of the table's Constants). The table is the
   `@source` target as the TypeScript compiler resolves it, with its
   behaviors' configs, or the API's database when the loader read it, so an
   API that serves none of the table's operations warns too
@@ -15202,10 +15217,254 @@ reversible until the first release.
   `createdBy`; Rust's, with no repository, by SQL. The existing fixtures'
   goldens change by `from` and `unchanged` alone (and the TypeScript
   routers by the `behaviorParams` call); the engine clients do not change.
+- **Step 2, first batch: the ports.** `rules-behaviors` ports Constants,
+  StateRules and Approvals from the engine (`constants.rs`,
+  `staterules.rs`, `approvals.rs`, beside three private helpers:
+  `flow.rs`, the Workflow a config reads; `values.rs`, JSON equality, two
+  whole numbers by their digits so a `Generic.Int64` past 2^53 is not its
+  neighbour, the one-way order and a date-time's ISO text; and
+  `paging.rs`, the engine's cursor, word for word),
+  with the engine's wording, their config checks hand-written and held to
+  the declarations' configSchemas by a test, as Workflow's and Timers' are.
+  The core registers the six in the engine's order, Workflow, Reactions,
+  Constants, StateRules, Approvals and Timers (`NAMES`, `core()`, Go's
+  `registry.RulesBehaviors`, every transcript's `behaviors`). Each module
+  doc holds it to D103's test of a behavior. Approvals passes it: its
+  state is its `signOffs` sub-table, its rules say how a sign-off is
+  given, withdrawn and consumed and which moves wait for them, and it
+  recurs (an expense two approvers sign, a document's review, a release's
+  go-ahead). Constants and StateRules fail it: they keep no state of their
+  own and hold rules over the table's own fields, and they are ported
+  because this entry orders it, so whether a field's constancy, its
+  direction and a state's required and frozen fields become step 5's
+  declarative rules is step 5's question. A table says `implements
+  Constants<Task, { ... }>`, `StateRules<Task, { ... }>` and
+  `Approvals<Task, { ... }>` (D103's implements form, `@superschematic/db`'s
+  carriers), beside a Workflow field. Constants validates an update (the
+  rule `constant`, `invalid_instance`) and guards it (`one_way`);
+  StateRules validates a create (`required` in the initial state) and
+  guards an update (`required_fields`, then `frozen_fields`) and its
+  Workflow's `transition` (`missing_fields`); Approvals checks `signOff`'s
+  parameters, settles a stale `version`, guards its Workflow's
+  `transition` (`approvals_missing`), runs `signOff`, `withdrawSignOff`
+  and `listSignOffs`, consumes sign-offs after a change and reads
+  `gates`. StateRules and Approvals read the Workflow their config's new
+  `status` names (a table's alone) or the type's one, as Timers' does, and
+  let a move that Workflow's config refuses through, so Workflow's own veto
+  answers it whatever the list order. Each holds every write through the
+  core: creates, the repositories' updates of one row by its key, the
+  operations and the deadlines, a Timers `then` and a Reactions move made
+  through `call()` among them. An upsert's update of the row its unique key
+  already holds is not one: D103's repositories set that row's own fields
+  as `updateMany` does, so it goes around the core (below). The core
+  needed no change.
+  `tests/constants.rs` has 11 cases, `tests/staterules.rs` 11 and
+  `tests/approvals.rs` 14.
+- **Constants' `oneWay`.** `oneWay: { <field>: "up" | "down" }`: a
+  boolean that only turns true or false, a number or a date-time that only
+  grows or shrinks. An update that moves one the other way, by a caller
+  without the config's `permission`, is the veto `one_way`, declared in
+  Constants' `vetoes`, details `{ field, direction, current, attempted }`
+  (null for no value; a date-time held as epoch milliseconds, a table's
+  column, as the ISO 8601 text `toISOString` writes, the form the table's
+  API types it in, and one held as text as it is, so the reason and the
+  details name it alike in every adapter): `Task <key>'s urgent only
+  turns true: an update may not move it from true to false; only a caller
+  with tasks.admin may move it back`. The first such field in the type's
+  order is the one refused,
+  and an equal value is no move. A create sets any value. No value is
+  below every value: clearing a field is a move down and giving one with
+  none a value a move up, the one order in which up means never lost once
+  given (a requirement turned on stays on) and down only ever less. A
+  boolean is a JSON boolean or 0 and 1, a number (`number`,
+  `Generic.Int64`, `Generic.Float64`) a JSON number or a decimal string, a
+  date-time epoch milliseconds or ISO text; a value the core cannot read
+  as its type passes. The constant rule is a validation and the direction
+  a guard, so an update that does both is `invalid_instance`. A field in
+  both `fields` and `oneWay`, of another type, or that the type lacks is
+  refused at define; the build also refuses an owned field, a relation by
+  its name, an audit field, a list, a `Generic.Decimal`, which reaches the
+  core as text, and a field encrypted at rest
+  (`verify/behaviors_constants.go`, its types held to the core's by
+  `TestOneWayTypesAreTheCores`). In `fields`, as in StateRules' `required`
+  and `frozen` and Approvals' `resetOn`, it refuses a field the core reads
+  no value of: one encrypted at rest, whose envelope neither ORM gives the
+  core, and a list or a map of date-times, which no adapter converts, so a
+  rule over either would never see it change (`unread`).
+- **StateRules' `by`.** A state's rules may list `by`, the entries a
+  Workflow transition's `by` takes, checked with step 1's `subjects`
+  against the row before the update, so a patch that names the caller in a
+  `by` field does not count. A frozen field changes for that subject as
+  for a caller with `permission`; what the state requires holds for every
+  caller. The refusal stays `frozen_fields`, its details gaining `by` and
+  its reason who may change the fields (`...; only the subject createdBy
+  holds may change it`). `by` in a state that freezes nothing, a `seat:`
+  entry, a field the type lacks and one that holds no subject are refused
+  at define, the build warns of a state that freezes `"all"` on a table
+  with a field the core reads no value of, which the state leaves
+  unfrozen, and the build reuses step 1's checks of a `by` entry
+  (`verify/behaviors_staterules.go`).
+- **Approvals' sign-offs, `resetOn` and `pinned`.** A table's sign-offs
+  are the rows of the sub-table its declaration's `tables` gives,
+  `signOffs` (`TaskApprovalsSignOffs`, `task_approvals_sign_offs`, deleted
+  with its row), keyed by `number`, the sign-off's number on the row in
+  ten digits zero-padded, so the key's order is the order they were given
+  in and the engine's `after:<n>` cursor carries over, with `state`,
+  `subject`, `note`, `at` and `consumedAt`. Approvals arms no deadline and
+  hears no change, so the table gets no queue. The after-change hook
+  consumes a gate's sign-offs that count: an update that changes a field
+  its `resetOn` lists (`[]` none), or any update for a gate without
+  `resetOn` while `resetOnChange` holds; a change that leaves the row in a
+  gated state, that gate's; and, at the row's next write through the
+  core, those of a state the config no longer gates, which the engine
+  consumed at the publish, since the core writes no row at a publish. A
+  consumed sign-off stays for `listSignOffs`, a read-only operation that
+  pages them. `pinned: true` makes `signOff`'s `version` required
+  (`invalid_argument` at `/version` without it); a `version` on any gate
+  is checked in `settle`, before any guard and the gate's permission, as
+  Workflow's `from` is, and one that is not the row's `_version` is
+  `stale`, details `{ version, current }`. `creator_cannot_sign` reads
+  `createdBy` with `names_subject`: the layout's `audit` lists it when a
+  StateRules state's `by` names it or a gate excludes the creator, beside
+  step 1's Workflow `by`, and a gate that excludes the creator on a type
+  with no `createdBy` is refused at define and by the build
+  (`verify/behaviors_approvals.go`). `behaviortypes` types the gated states
+  as `TaskApprovalsGate` on a table, which `signOff` and `withdrawSignOff`
+  take, and drops `version`, `stale` and Constants' `one_way` for an engine
+  type, whose clients do not change.
+- **The engine.** The three declarations
+  (`internal/registry/behaviors/*.behavior.json`) gain the new members
+  alone: `oneWay` and the veto `one_way`; a state's `by` and `status`;
+  `resetOn`, `pinned`, `status`, `signOff`'s `version`, the veto `stale`
+  and the table `signOffs`. The engine shares them and refuses each rather
+  than ignore it: a define naming `oneWay`, a state's `by`, `status`,
+  `resetOn` or `pinned` is refused with a reason naming the table form
+  (`implements Approvals<T, { ... }> on a DB table, D104`), and a
+  `version` is `invalid_argument` at `/version`. It never answers
+  `one_way` or `stale`. `testkit/tests/core_constants_table_members.rs`,
+  `core_staterules_table_members.rs` and `core_approvals_table_members.rs`
+  hold it on SQLite and Postgres. The scenario corpus (`registry.json`'s
+  metaSchema and the recordings that embed Constants' declaration:
+  `core-behaviors.json`, `core-constants.json`, `core-variants.json`) and
+  the HTTP corpus's `mcp.json` were recorded again and change by the new
+  members alone. `@superschematic/schema`'s engine configs do not change,
+  so each member is a type error on an engine type's `@behavior`, and the
+  build refuses each there, one error per member.
+- **The writable-by warning learns the freezes.** `checkWritableBy` leaves
+  out a field the table's Constants lists in `fields`, since a constant
+  changes for no update, so naming oneself in it is no way past `by`; and
+  warns of a StateRules state's `by` field as it warns of a Workflow's:
+  `fixture-approvals-api: TaskAdmin.reassignTask takes Task.reviewer
+  (TaskAssignment is @source(Task)), and Task's StateRules names reviewer
+  in by for working: a caller who may call reassignTask can set reviewer
+  to itself and then change the fields working freezes. Keep reviewer out
+  of the operation's input, or freeze it: list it in the fields of Task's
+  Constants (D104)`. Step 1's Workflow warning ends the same way now. It
+  stays a warning. `createdBy` is never warned of.
+- **The permission catalog.** Constants' and StateRules' `permission`,
+  which the core checks on an update, are listed under each operation
+  that updates a row of the table through a `@source` view of it
+  (`behaviorops.WritePermissions`, and `UpdatesARow`, moved there from
+  verify); the generator gives it to apigen as `Options.WritePermissions`,
+  since apigen cannot import behaviorops, which imports the registry,
+  which imports apigen. Approvals' gates' permissions are listed under its
+  operations, as any behavior operation's are.
+- **The adapters.** None names a behavior. TypeScript's and Rust's bind a
+  `Generic.JSON` own or sub-table column's value as its JSON text whatever
+  it is (a string, a number, a boolean) and read it back parsed on SQLite;
+  Rust's reads a whole double as its digits (SQLite's REAL 2.0 as 2), as
+  JavaScript writes it and `to_jsonb` writes a DOUBLE PRECISION. Go's ORM
+  gives the core an optional own field that is no pointer only when the
+  insert writes it, so an optional string the insert leaves NULL is no
+  `""` that a create's `required` would take for a value; it changes
+  `fixture-reactions-db`'s `repository_task.go` golden beyond the new
+  members. Each adapter's store test holds a sub-table on a table with no
+  queue, a read-only operation that reads sub-rows, the widened audit and
+  own booleans, numbers and JSON, on both dialects. The TypeScript ORM
+  gains `withBehaviorCaller({ subject, permissions })`, as Go's has
+  `WithBehaviorCaller`, so an update names the caller whose permissions
+  the core checks.
+- **The specification.** `core-constants.json` replays 45 of its steps,
+  20 skipped (an operation's `update()`, through Revisions, and Variants'
+  document); `core-staterules.json` 88, 38 skipped (`test.Recorder`'s
+  `update()`, Revisions, and a define the engine's `requires` check
+  refused, which the core refuses in its own words); `core-approvals.json`
+  151, 47 skipped (a change of the own fields through Revisions, a
+  publish that removes a gate on a type with rows, a read of the event log
+  holding a Reactions move, and the same `requires` define);
+  `core-timers.json` 346, from 324, since its scenario of a fire
+  StateRules vetoes now replays; and `core-behaviors.json`, which no test
+  replayed before, 86 of its 223 (`tests/core_behaviors_scenarios.rs`):
+  the expenses document's 20 (Approvals, a claimant who never signs), the
+  invoices document's 12 (StateRules), the requests document's 17
+  (Timers), 36 of the project tree's 37 (Reactions) and the `open` of the
+  scenario that registers the core's behaviors, whose reads of the
+  engine's registry and `behaviors.register` are outside the reference
+  host's surface, its 8 other scenarios composing behaviors the core does
+  not run yet; each with 0 mismatches, each refusal compared whole,
+  floors from the first green run. `core-behaviors.json` is replayed on
+  the reference host alone, with no transcript: its scenarios' rules are
+  the ones the per-behavior transcripts hold. The replayer checks a
+  refused define again under the document's type name when it names it
+  apart from its schema, stops a scenario at a
+  publish that removes a gate or Approvals on a type with rows, and gives a
+  recorded type that lists Approvals and has no `createdBy` one, which a
+  create sets to its caller's subject and no comparison reads, since the
+  engine kept an instance's creator beside it. D104's upgrades have no
+  recordings: `rules/scenarios/core-freezes-and-sign-offs.json` is written
+  by hand in the recorded format, 12 scenarios and 138 steps of `oneWay`
+  up and down on a boolean, a number and a date-time, the permission past
+  it, a cleared value and a create, StateRules' `by` on a field and on
+  `createdBy`, `resetOn` changed, unchanged and `[]` beside
+  `resetOnChange`, `pinned` with a matching, a stale and a missing
+  `version`, a `version` on a gate that is not pinned, and each one's
+  define refusals; it replays 138 steps, floor 138. A config's `status`,
+  which a type with one Workflow cannot show, is held by `rules-behaviors`'
+  tests. The transcripts: `core-constants.transcript.json` 39 steps (20
+  commands, 19 checks), `core-staterules.transcript.json` 76 (43, 33),
+  `core-approvals.transcript.json` 122 (93, 71 of them operations and 5
+  changes, and 29), `core-freezes-and-sign-offs.transcript.json` 115 (75
+  commands, each with its row's `expect.version`, and 40 checks), and
+  `core-timers.transcript.json` 139, from 125; `core-workflow`,
+  `core-workflow-principals`, `core-reactions` and `core-reactions-changes`
+  keep their steps and floors (96, 92, 586, 60) and change by their
+  `behaviors` header alone. TypeScript replays the nine on bun:sqlite and
+  Postgres, Go on SQLite and Postgres and Rust on rusqlite and Postgres,
+  each at its step count with 0 mismatches.
+- **Fixtures and end-to-end tests.** `fixture-approvals-db`'s `Task` is a
+  task a person plans and proves: Constants keeps its `owner` and moves
+  `urgent` and `attempts` up; StateRules freezes the plan while it is
+  planned except for its creator (`by: ["createdBy"]`) and while it is
+  working except for its reviewer, and requires a proof to enter proving;
+  Approvals gates proving (`resetOn: []`, so the plan's approval survives
+  edits) and done (`resetOn: ["proof"]`, `pinned`). `fixture-approvals-api`
+  serves its operations (`@behaviorOperations(Task) @auth`) beside
+  `TaskAdmin.reassignTask`, a `PATCH` taking a `@source(Task)` view with
+  `reviewer` and `owner`, so the build warns of `reviewer` alone
+  (`TestApprovalsFixturesLoad`). Each language's test runs, on Postgres,
+  the generated server through its SDK for the operations and the
+  repository (Rust's adapter) for creates and updates, through eight
+  cases: a oneWay field moved back is 409 `one_way` and moved forward is
+  saved; a caller holding `tasks.admin` moves it back; the creator edits
+  the plan while the task is planned and another caller is 409
+  `frozen_fields`; a move into proving without its sign-off is 409
+  `approvals_missing`; a pinned sign-off with no version is 400, with a
+  stale one 409 `stale` and with the row's version saved; editing the
+  proof consumes the done gate's sign-offs and keeps the proving gate's;
+  and an update of the owner is 422 `invalid_instance`
+  (`TestApprovalsGoServerOnPostgres`, `TestGeneratedApprovalsEndToEnd`,
+  which also signs through the MCP tool `task_approvals_sign_off`, and
+  `TestRustApprovalsOnPostgres`). Each case creates a task of its own, the
+  three assert the same refusals, a number's `one_way` among them, and each
+  refusal is checked to leave the row's `_version` where it was. A build's permission catalog lists
+  `tasks.admin` under `reassignTask` from Constants alone
+  (`TestABuildsCatalogListsTheCoresWritePermissions`). The existing
+  fixtures' goldens change by the declarations' new members alone, but the
+  Go ORM's fix above.
 - **Left for later steps.**
-  - `seat:<name>` entries in `by`, refused at define and by the build until
-    Seats (step 3).
-  - StateRules' `by` (step 2) and the `caller` operand (step 4).
+  - `seat:<name>` entries in `by`, a Workflow transition's and a StateRules
+    state's, refused at define and by the build until Seats (step 3).
+  - The `caller` operand (step 4).
   - A `by` naming a to-one relation by its name (the build points at
     `<relation>Id`), `updatedBy`, `deletedBy` or an audit time, and a
     `createdBy` that is a relation or a list: the layout's `audit` holds a
@@ -15215,7 +15474,13 @@ reversible until the first release.
     calls the repository's update, raw SQL, and an API in a data format
     (JSON, YAML) that reads no database, whose `@source` targets nothing
     resolves, go unseen, and the docs and the agent skill say so.
-    Freezing a `by` field waits for StateRules or Constants on the core.
+    Since step 2 a `by` field is frozen by listing it in the table's
+    Constants `fields`, which silences the warning; a StateRules state
+    that freezes it in some states does not. It stays silent when Constants
+    names a `permission`: the caller who holds it may change the field,
+    which is what the permission says, and an authored route's update
+    reaches the core holding no permissions unless its handler names its
+    caller with them (`withBehaviorCaller`).
   - Every server reads a behavior operation's null optional member as
     absent (TypeScript's `behaviorParams`, Go's nil pointer, Rust's
     `Option`), which suits `from`, whose paramsSchema takes no null. A
@@ -15249,3 +15514,103 @@ reversible until the first release.
     before a gate too).
   - `transition`'s parameter issues sort by pointer, as the engine sorts
     its validator's, so `/from` comes before `/to`.
+  - Lease, Retries, Presence and Budget, each with its upgrade: step 2's
+    second batch.
+  - Constants and StateRules fail D103's test, holding rules over the
+    table's own fields and keeping no state of their own: whether a
+    field's constancy, its direction and a state's required and frozen
+    fields become step 5's declarative rules.
+  - The core has no write of own fields from an operation (the engine's
+    `update()`), so the update command is every own-field write Constants
+    and StateRules hold; the behavior that adds one (Revisions, step 4)
+    runs it through an update's validation and guards. The recordings'
+    `update()` scenarios (`test.Recorder`'s, Revisions') are skipped.
+  - A write around the core (a repository's bulk update, a hard write, raw
+    SQL) is held to neither Constants nor StateRules and consumes no
+    sign-off, since Approvals hears no change: hearing them would give
+    each Approvals table a change queue and a worker. The docs and the
+    agent skill say so, and no trigger or check refuses such a write.
+  - An upsert's update of the row its unique key already holds
+    (`upsertOne`, `upsertMany`, `UpsertOne`, `UpsertMany`) is such a write:
+    D103's repositories insert a new row through the core's create and set
+    a held row's own fields in the statement's `ON CONFLICT ... DO UPDATE`,
+    as `updateMany` does, so a table that implements Constants or
+    StateRules beside its Workflow, and keeps no sub-table, has upserts
+    whose update can change a constant, move a oneWay field back or edit a
+    frozen one. A table with Approvals keeps a sub-table and has none. The
+    guide and the agent skill name upserts among the writes around the
+    core; the generated repositories' doc comments say the update sets the
+    row's own fields alone. Running a held row's update through the core's
+    update (a statement that inserts or leaves the row, then
+    `runUpdate`/`RunUpdate` of the row it holds, in the upsert's
+    transaction) changes both ORMs' upserts and every behavior table's
+    goldens, and is left.
+  - The core reads no value of an own field encrypted at rest (neither ORM
+    gives it a command's envelope) or of a list or a map of date-times (no
+    adapter converts one), so the build refuses either in Constants'
+    `fields` and `oneWay`, StateRules' `required` and `frozen` and
+    Approvals' `resetOn`, and warns of a state that freezes `"all"` beside
+    one, which the state leaves unfrozen; giving the core an encrypted
+    field's plaintext, or a converted list, is left. Under `resetOnChange`
+    an update that sets only such a field still consumes a gate's
+    sign-offs, as every update through the core does.
+  - A sign-off's `subject` is the caller's subject as its text, compared
+    exactly, as the engine kept it: a principal whose deployment's
+    authenticators give its UUID hyphenated for one route and base62 for
+    another signs twice and counts twice, where `creator_cannot_sign`
+    compares by value (`names_subject` on the `createdBy` field's type).
+    A caller's subject has no type, and comparing subjects by UUID value
+    whenever both read as one would make the subjects `7` and `07` one, and
+    `7` one with the UUID `00000000-0000-0000-0000-000000000007`, so which
+    subjects a deployment's authenticators give alike is left.
+  - A pinned gate's version is the row's `_version`, which every write
+    through the core moves, a sign-off's and an unrelated field's among
+    them: on a gate whose count is above one each later signer signs
+    against the version the earlier sign-off left (the `stale` veto's
+    `current` says which). Pinning a gate to the version its `resetOn`
+    fields last moved at is left.
+  - The API's types of a table carry no `_version`: a client reads it from
+    a repository's row, the `stale` veto's details, or an operation of the
+    project's.
+  - An authored route's write carries its caller's subject alone to the
+    core (D87): Constants' and StateRules' `permission` passes only for a
+    write that names a behavior caller (`withBehaviorCaller`,
+    `WithBehaviorCaller`), and the routers binding the principal's
+    permissions is left. A Rust server has no repository; its updates call
+    the adapter.
+  - The permission catalog lists Constants' and StateRules' `permission`
+    only under an operation the build sees update a row of the table
+    through a `@source` view, as the writable-by warning sees it.
+  - On a table the uses it implements come before its field uses, so
+    StateRules' and Approvals' guards are asked before Workflow's: a move
+    the config allows whose `by` or permission the caller fails, into a
+    state whose rule or gate is unmet, is vetoed `missing_fields` or
+    `approvals_missing` rather than `not_principal` or `forbidden`.
+  - A removed gate's sign-offs are consumed at the row's next write
+    through the core, and the replay stops at a publish that removes one
+    on a type with rows. A withdrawal of the greatest sign-off number frees
+    it for the next sign-off, as SQLite's row id did.
+  - Constants still requires `fields`, at least one, so a use that moves
+    fields one way and keeps none constant lists one: relaxing it changes
+    the recorded declarations by more than a new member.
+  - `oneWay` takes booleans, `number`, `Generic.Int64`, `Generic.Float64`
+    and date-times; a `Generic.Decimal`, which reaches the core as text, is
+    refused by the build.
+  - A Constants field stays in the repositories' update inputs and is
+    refused at run time.
+  - The layout's `audit` holds `createdBy` only for a table whose
+    Workflow or StateRules `by`, or whose Approvals gate that excludes the
+    creator, reads it: a StateRules `required` or `frozen` entry naming
+    `createdBy` on a table where nothing else reads it is refused as no
+    field of the table, by the core and the build alike.
+  - A list or a map own field reaches the layout as its element's IR type
+    with no marker, so an adapter on SQLite reads its JSON text back as a
+    string; no field of the three behaviors' fixtures is one, and Postgres
+    reads it through `to_jsonb`. A layout member marking such a column
+    would close it for every adapter.
+  - Rust's handlers stamp no `createdBy` (D103): `creator_cannot_sign` and
+    a StateRules `by` on it read whatever the application's own create
+    set, and a row whose `createdBy` holds nothing excludes no creator.
+  - The engine advertises the new members of Constants, StateRules and
+    Approvals through their shared declarations and refuses each, until
+    engine types go (D103, step 7).

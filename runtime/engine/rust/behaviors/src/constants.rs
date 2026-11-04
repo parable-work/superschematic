@@ -19,6 +19,13 @@
 //! and removed from a schema with instances: it keeps no state, and a
 //! stored instance satisfies any list, since validate only compares an
 //! update with what the instance holds.
+//!
+//! What only a table's Constants takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores: `oneWay`, the fields
+//! that move one way, at define, naming the table form. Ignoring a field
+//! that only moves one way would let an update move it back, and an engine
+//! type can be defined at run time, past any build's check. The engine
+//! never answers `one_way`.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -28,6 +35,10 @@ use superschematic_engine::json::js_equal;
 use superschematic_engine::{
     json_config, Behavior, ConfigTarget, Error, Hooks, Result, ValidationRequest,
 };
+
+// How a refusal of what only a table's Constants takes names the table form
+// (D104).
+const TABLE_FORM: &str = "implements Constants<T, { ... }> on a DB table, D104";
 
 /// Constants' config, parsed.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -57,8 +68,15 @@ impl Behavior for Constants {
     }
 
     // The configSchema holds the shape; this holds the fields to the
-    // type's own.
+    // type's own, after refusing what only a table's Constants takes.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<ConstantsConfig> {
+        // oneWay is a table's (D104); the config's struct would drop it
+        // silently.
+        if raw.get("oneWay").is_some() {
+            return Err(Error::config(format!(
+                "oneWay is a table's Constants' ({TABLE_FORM}): an engine type's Constants keeps a field as its create gave it, and moves none one way"
+            )));
+        }
         let config: ConstantsConfig = json_config(raw)?;
         for field in &config.fields {
             if !target.fields().contains(field) {

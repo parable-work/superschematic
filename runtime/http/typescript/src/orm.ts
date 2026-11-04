@@ -104,15 +104,22 @@ in a transaction, the core's create of each input to its change set,
 without applying it (prepareCreate), and insert the row with the owned
 fields it gives, so an inserted row holds what createOne would have
 written; the update of a row the key already holds sets the update's own
-fields alone, as updateMany does, and refuses an owned one. updateMany and
+fields alone, as updateMany does, and refuses an owned one, so like
+updateMany it goes around the core: the rules a use holds an update to,
+Constants' and StateRules' (D104), do not run on it. updateMany and
 deleteMany do not go through the core. Each use's operations are members
 under the use's member, its field or, for a use the table implements, the
 behavior (orm.order.status.transition(key, { to: 'paid' }),
 orm.ticket.timers.fireTimer(key, { deadline: 'respond' })), run as the
 acting user with no permissions unless the call names its caller, each
-stamping updatedAt and updatedBy on the row it writes. A table whose
-behaviors keep sub-tables or arm deadlines has no upserts: an upsert's
-insert applies no change set, and the core's create of such a row writes
+stamping updatedAt and updatedBy on the row it writes.
+orm.withBehaviorCaller({ subject, permissions }) runs every command of the
+ORM's repositories and transactions as that caller instead, a create's, an
+update's and a delete's through the core among them, so an update that
+needs a permission a behavior's config names (Constants' and StateRules'
+permission, D104) can hold it; the acting user still stamps the audit
+fields. A table whose behaviors keep sub-tables or arm deadlines has no
+upserts: an upsert's insert applies no change set, and the core's create of such a row writes
 its sub-table rows and arms its deadlines. Its repository's runDeadline
 runs a due deadline, as a behavior worker claimed it, through the core in
 a transaction (./rules, runDeadline). A table whose writes its behaviors
@@ -899,6 +906,16 @@ export interface OrmMembers<R> {
   as(principal: Actor | null | undefined): this;
   /** The ORM acting as the database's system actor (systemActorOf), for a job's or a worker's writes (D87). */
   asSystem(): this;
+  /**
+   * The ORM whose behaviors' commands (a create, an update and a delete
+   * through the core, and an operation, a deadline or a change given no
+   * options.caller) run as caller (D103, D104): the subject and the
+   * permissions the behaviors' configs name, such as Constants' and
+   * StateRules' permission on an update. Unset, a command runs as the acting
+   * user holding no permissions; null unsets it. Go's ORM is
+   * WithBehaviorCaller.
+   */
+  withBehaviorCaller(caller: CoreCaller | null): this;
   /** Runs fn in a transaction, with repositories bound to it, and commits; rolls back when fn throws. options sets its isolation level and makes it read only (D89). */
   transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T>;
   /** Runs a statement: a text and its values, or a pg query config, as enqueue passes one; options.decode reads its rows as a table's repository does (D89). */
@@ -922,7 +939,7 @@ export type OrmTx<R> = R &
   };
 
 /** The members a repository's table may not take, which an ORM holds itself. */
-export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'transaction', 'query', 'exec', 'queries'];
+export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'withBehaviorCaller', 'transaction', 'query', 'exec', 'queries'];
 
 /**
  * Fills a format string's %s and %d, in order, with args, and %% with %, as
@@ -1085,7 +1102,8 @@ class TableRepository {
     private readonly runner: Runner,
     private readonly acting: Acting,
     private readonly keys: FieldKeyring | undefined,
-    private readonly rules: RulesCore | undefined = undefined
+    private readonly rules: RulesCore | undefined = undefined,
+    private readonly behaviorCaller: CoreCaller | undefined = undefined
   ) {
     this.encrypted = def.columns.filter(c => c.encrypted);
     this.behaviors = orm.rules?.types[def.name];
@@ -1259,7 +1277,7 @@ class TableRepository {
     const pool = this.runner.pool;
     if (!pool) throw new Error(`orm: ${this.def.name} has no pool to open a transaction on`);
     return inTransaction(pool, 'BEGIN', client =>
-      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true }, this.acting, this.keys, this.rules))
+      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true }, this.acting, this.keys, this.rules, this.behaviorCaller))
     );
   }
 
@@ -2237,9 +2255,9 @@ class TableRepository {
     };
   }
 
-  /** The caller a behavior's command runs as: the acting user, holding no permissions. */
+  /** The caller a behavior's command runs as: the ORM's behavior caller (withBehaviorCaller), else the acting user, holding no permissions. */
   private caller(): CoreCaller {
-    return { subject: this.user ?? '', permissions: [] };
+    return this.behaviorCaller ?? { subject: this.user ?? '', permissions: [] };
   }
 
   /** The column of the table a layout column names, by its unquoted name. */
@@ -2501,11 +2519,11 @@ function distinct(values: readonly unknown[]): unknown[] {
   return out;
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined): Record<string, TableRepository> {
+function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined): Record<string, TableRepository> {
   const out: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, acting, keys, rules);
+    out[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller);
     out[member].bindUses();
   }
   // An include and a filter through a relation read the target through
@@ -2551,22 +2569,24 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
 
 /**
  * A transaction over client, acting as whom acting resolves to, with the
- * field keys, nested in depth savepoints, 0 for a transaction of its own
- * (D89). A savepoint acts as the transaction it is nested in, the caller
- * (D87) among them.
+ * field keys, its behaviors' commands run as behaviorCaller when set, nested
+ * in depth savepoints, 0 for a transaction of its own (D89). A savepoint
+ * acts as the transaction it is nested in, the caller (D87) and the
+ * behavior caller among them.
  */
-function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, depth = 0): OrmTx<R> {
+function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0): OrmTx<R> {
   const runner: Runner = { queryable: client, inTransaction: true };
   const query = queryOf(orm, runner, acting, keys);
   return {
-    ...repositories(orm, runner, acting, keys, rules),
+    ...repositories(orm, runner, acting, keys, rules, behaviorCaller),
     ...declaredQueries(orm, runner),
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, rules, depth),
-    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, rules, depth),
-    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, rules, depth),
+    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, rules, behaviorCaller, depth),
+    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth),
+    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth),
+    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, client, acting, keys, rules, caller ?? undefined, depth),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
     // A nested transaction is a savepoint, named for its depth, as
@@ -2577,7 +2597,7 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys:
       await client.query({ text: `SAVEPOINT ${savepoint}`, values: [] });
       let out: T;
       try {
-        out = await fn(txOf<R>(orm, client, acting, keys, rules, depth + 1));
+        out = await fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller, depth + 1));
       } catch (error) {
         await client.query({ text: `ROLLBACK TO SAVEPOINT ${savepoint}`, values: [] });
         await client.query({ text: `RELEASE SAVEPOINT ${savepoint}`, values: [] });
@@ -2602,23 +2622,24 @@ export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | n
   const keys = opts.fieldKeys === undefined ? undefined : parseFieldKeys(opts.fieldKeys);
   // A system actor that is no UUID throws here, not at a job's first write.
   systemActorOf(orm);
-  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules);
+  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules, undefined);
 }
 
-function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined): Orm<R> {
+function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined): Orm<R> {
   const runner: Runner = { queryable: pool, inTransaction: false, pool };
   const query = queryOf(orm, runner, acting, keys);
   return {
-    ...repositories(orm, runner, acting, keys, rules),
+    ...repositories(orm, runner, acting, keys, rules, behaviorCaller),
     ...declaredQueries(orm, runner),
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys, rules),
-    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys, rules),
-    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys, rules),
+    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys, rules, behaviorCaller),
+    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys, rules, behaviorCaller),
+    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys, rules, behaviorCaller),
+    withBehaviorCaller: (caller: CoreCaller | null) => ormWith<R>(pool, orm, acting, keys, rules, caller ?? undefined),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T> {
-      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys, rules)));
+      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys, rules, behaviorCaller)));
     },
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,

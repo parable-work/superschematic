@@ -4,6 +4,9 @@
   "behaviors": [
     "Workflow",
     "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
     "Timers"
   ],
   "scenarios": [
