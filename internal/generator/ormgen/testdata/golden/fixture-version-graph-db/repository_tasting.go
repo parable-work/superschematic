@@ -2159,8 +2159,8 @@ var tastingUniqueKeys = map[TastingUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TastingUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM tasting WHERE (id) IN (%s)`, []string{`id`}},
-	TastingUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM tasting WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+	TastingUniqueById:           {`(id)`, `id = tasting.id`, `SELECT "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM tasting WHERE (id) IN (%s)`, []string{`id`}},
+	TastingUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = tasting.entity_key`, `SELECT "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM tasting WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
 }
 
 // tastingKeyOf is the text of row's values of the unique key on, as

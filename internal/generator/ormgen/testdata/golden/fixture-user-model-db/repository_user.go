@@ -782,8 +782,8 @@ var userUniqueKeys = map[UserUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	UserUniqueById:    {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "email", "display_name", "created_at" FROM "user" WHERE (id) IN (%s)`, []string{`id`}},
-	UserUniqueByEmail: {`(email)`, `email = EXCLUDED.email`, `SELECT "id", "email", "display_name", "created_at" FROM "user" WHERE (email) IN (%s)`, []string{`email`}},
+	UserUniqueById:    {`(id)`, `id = "user".id`, `SELECT "id", "email", "display_name", "created_at" FROM "user" WHERE (id) IN (%s)`, []string{`id`}},
+	UserUniqueByEmail: {`(email)`, `email = "user".email`, `SELECT "id", "email", "display_name", "created_at" FROM "user" WHERE (email) IN (%s)`, []string{`email`}},
 }
 
 // userKeyOf is the text of row's values of the unique key on, as

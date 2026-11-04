@@ -146,7 +146,7 @@ export const boardTable: TableDefinition = {
     deleteMany: "DELETE FROM board%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = board.id", rows: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE (id) IN (%s)" },
   },
 };
 

@@ -1192,8 +1192,8 @@ var userRoleGrantUniqueKeys = map[UserRoleGrantUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	UserRoleGrantUniqueById:       {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "user_id", "role_id", "granted_at" FROM user_role_grant WHERE (id) IN (%s)`, []string{`id`}},
-	UserRoleGrantUniqueByUserRole: {`(user_id, role_id)`, `user_id = EXCLUDED.user_id`, `SELECT "id", "user_id", "role_id", "granted_at" FROM user_role_grant WHERE (user_id, role_id) IN (%s)`, []string{`user_id`, `role_id`}},
+	UserRoleGrantUniqueById:       {`(id)`, `id = user_role_grant.id`, `SELECT "id", "user_id", "role_id", "granted_at" FROM user_role_grant WHERE (id) IN (%s)`, []string{`id`}},
+	UserRoleGrantUniqueByUserRole: {`(user_id, role_id)`, `user_id = user_role_grant.user_id`, `SELECT "id", "user_id", "role_id", "granted_at" FROM user_role_grant WHERE (user_id, role_id) IN (%s)`, []string{`user_id`, `role_id`}},
 }
 
 // userRoleGrantKeyOf is the text of row's values of the unique key on, as

@@ -882,8 +882,8 @@ var apiCredentialUniqueKeys = map[ApiCredentialUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	ApiCredentialUniqueById:      {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "service", "secret", "rotated_at" FROM api_credential WHERE (id) IN (%s)`, []string{`id`}},
-	ApiCredentialUniqueByService: {`(service)`, `service = EXCLUDED.service`, `SELECT "id", "service", "secret", "rotated_at" FROM api_credential WHERE (service) IN (%s)`, []string{`service`}},
+	ApiCredentialUniqueById:      {`(id)`, `id = api_credential.id`, `SELECT "id", "service", "secret", "rotated_at" FROM api_credential WHERE (id) IN (%s)`, []string{`id`}},
+	ApiCredentialUniqueByService: {`(service)`, `service = api_credential.service`, `SELECT "id", "service", "secret", "rotated_at" FROM api_credential WHERE (service) IN (%s)`, []string{`service`}},
 }
 
 // apiCredentialKeyOf is the text of row's values of the unique key on, as

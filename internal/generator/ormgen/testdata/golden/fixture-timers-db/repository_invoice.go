@@ -1316,7 +1316,7 @@ var invoiceUniqueKeys = map[InvoiceUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	InvoiceUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "number", "status", "status_entered_at", "payment", "payment_entered_at", "_version" FROM invoice WHERE (id) IN (%s)`, []string{`id`}},
+	InvoiceUniqueById: {`(id)`, `id = invoice.id`, `SELECT "id", "number", "status", "status_entered_at", "payment", "payment_entered_at", "_version" FROM invoice WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // invoiceKeyOf is the text of row's values of the unique key on, as

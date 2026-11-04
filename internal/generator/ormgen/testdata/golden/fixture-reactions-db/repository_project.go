@@ -1004,7 +1004,7 @@ var projectUniqueKeys = map[ProjectUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	ProjectUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "name", "status", "status_entered_at", "_version" FROM project WHERE (id) IN (%s)`, []string{`id`}},
+	ProjectUniqueById: {`(id)`, `id = project.id`, `SELECT "id", "name", "status", "status_entered_at", "_version" FROM project WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // projectKeyOf is the text of row's values of the unique key on, as

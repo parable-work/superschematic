@@ -756,8 +756,8 @@ var bankAccountUniqueKeys = map[BankAccountUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	BankAccountUniqueById:   {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "code", "name" FROM bank_account WHERE (id) IN (%s)`, []string{`id`}},
-	BankAccountUniqueByCode: {`(code)`, `code = EXCLUDED.code`, `SELECT "id", "code", "name" FROM bank_account WHERE (code) IN (%s)`, []string{`code`}},
+	BankAccountUniqueById:   {`(id)`, `id = bank_account.id`, `SELECT "id", "code", "name" FROM bank_account WHERE (id) IN (%s)`, []string{`id`}},
+	BankAccountUniqueByCode: {`(code)`, `code = bank_account.code`, `SELECT "id", "code", "name" FROM bank_account WHERE (code) IN (%s)`, []string{`code`}},
 }
 
 // bankAccountKeyOf is the text of row's values of the unique key on, as

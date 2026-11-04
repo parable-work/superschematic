@@ -1015,7 +1015,7 @@ var stockUniqueKeys = map[StockUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	StockUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "shelf_id", "ingredient", "quantity", "_version" FROM stock WHERE (id) IN (%s)`, []string{`id`}},
+	StockUniqueById: {`(id)`, `id = stock.id`, `SELECT "id", "shelf_id", "ingredient", "quantity", "_version" FROM stock WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // stockKeyOf is the text of row's values of the unique key on, as

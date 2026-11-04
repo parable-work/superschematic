@@ -142,8 +142,8 @@ export const roleTable: TableDefinition = {
     deleteMany: "DELETE FROM role%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"permissions\" FROM role WHERE (id) IN (%s)" },
-    "name": { conflict: "(\"name\")", keep: "\"name\" = EXCLUDED.\"name\"", rows: "SELECT \"id\", \"name\", \"permissions\" FROM role WHERE (\"name\") IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = role.id", rows: "SELECT \"id\", \"name\", \"permissions\" FROM role WHERE (id) IN (%s)" },
+    "name": { conflict: "(\"name\")", keep: "\"name\" = role.\"name\"", rows: "SELECT \"id\", \"name\", \"permissions\" FROM role WHERE (\"name\") IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByUserRoleGrantRole", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id" },
@@ -282,8 +282,8 @@ export const sessionTable: TableDefinition = {
     deleteMany: "DELETE FROM \"session\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
-    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"session\".id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
+    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = \"session\".token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
   },
   relations: [
     { field: "user", column: "userId", target: "user", probe: "\"session\".user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
@@ -410,8 +410,8 @@ export const userTable: TableDefinition = {
     deleteMany: "DELETE FROM \"user\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"email\", \"display_name\", \"created_at\" FROM \"user\" WHERE (id) IN (%s)" },
-    "email": { conflict: "(email)", keep: "email = EXCLUDED.email", rows: "SELECT \"id\", \"email\", \"display_name\", \"created_at\" FROM \"user\" WHERE (email) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"user\".id", rows: "SELECT \"id\", \"email\", \"display_name\", \"created_at\" FROM \"user\" WHERE (id) IN (%s)" },
+    "email": { conflict: "(email)", keep: "email = \"user\".email", rows: "SELECT \"id\", \"email\", \"display_name\", \"created_at\" FROM \"user\" WHERE (email) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
@@ -551,8 +551,8 @@ export const userCredentialTable: TableDefinition = {
     deleteMany: "DELETE FROM user_credential%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
-    "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = user_credential.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
+    "user": { conflict: "(user_id)", keep: "user_id = user_credential.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
   },
   relations: [
     { field: "user", column: "userId", target: "user", probe: "user_credential.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
@@ -678,8 +678,8 @@ export const userRoleGrantTable: TableDefinition = {
     deleteMany: "DELETE FROM user_role_grant%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
-    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = user_role_grant.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
+    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = user_role_grant.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
   },
   relations: [
     { field: "user", column: "userId", target: "user", probe: "user_role_grant.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },

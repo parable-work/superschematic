@@ -138,7 +138,7 @@ export const orderTable: TableDefinition = {
     deleteMany: "DELETE FROM \"order\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"order\".id", rows: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
@@ -274,7 +274,7 @@ export const orderLineTable: TableDefinition = {
     deleteMany: "DELETE FROM order_line%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = order_line.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "order", column: "orderId", target: "order", probe: "order_line.order_id IN (SELECT \"order\".id FROM \"order\"%s)" },
@@ -388,7 +388,7 @@ export const productTable: TableDefinition = {
     deleteMany: "DELETE FROM product%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\" FROM product WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = product.id", rows: "SELECT \"id\", \"name\" FROM product WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },

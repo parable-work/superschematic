@@ -1535,8 +1535,8 @@ var tenantUniqueKeys = map[TenantUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TenantUniqueById:   {`(id)`, `id = EXCLUDED.id`, `SELECT "created_at", "updated_at", "id", "name", "slug", "email", "status", "is_active", "seat_count", "metadata", "_version" FROM tenant WHERE (id) IN (%s)`, []string{`id`}},
-	TenantUniqueBySlug: {`(slug)`, `slug = EXCLUDED.slug`, `SELECT "created_at", "updated_at", "id", "name", "slug", "email", "status", "is_active", "seat_count", "metadata", "_version" FROM tenant WHERE (slug) IN (%s)`, []string{`slug`}},
+	TenantUniqueById:   {`(id)`, `id = tenant.id`, `SELECT "created_at", "updated_at", "id", "name", "slug", "email", "status", "is_active", "seat_count", "metadata", "_version" FROM tenant WHERE (id) IN (%s)`, []string{`id`}},
+	TenantUniqueBySlug: {`(slug)`, `slug = tenant.slug`, `SELECT "created_at", "updated_at", "id", "name", "slug", "email", "status", "is_active", "seat_count", "metadata", "_version" FROM tenant WHERE (slug) IN (%s)`, []string{`slug`}},
 }
 
 // tenantKeyOf is the text of row's values of the unique key on, as

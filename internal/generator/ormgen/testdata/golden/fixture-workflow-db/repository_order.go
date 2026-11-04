@@ -1054,7 +1054,7 @@ var orderUniqueKeys = map[OrderUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	OrderUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "title", "placed_at", "status", "status_entered_at", "_version" FROM "order" WHERE (id) IN (%s)`, []string{`id`}},
+	OrderUniqueById: {`(id)`, `id = "order".id`, `SELECT "id", "title", "placed_at", "status", "status_entered_at", "_version" FROM "order" WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // orderKeyOf is the text of row's values of the unique key on, as

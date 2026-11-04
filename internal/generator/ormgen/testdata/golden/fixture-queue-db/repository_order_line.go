@@ -1284,7 +1284,7 @@ var orderLineUniqueKeys = map[OrderLineUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	OrderLineUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "order_id", "product_id", "quantity", "note" FROM order_line WHERE (id) IN (%s)`, []string{`id`}},
+	OrderLineUniqueById: {`(id)`, `id = order_line.id`, `SELECT "id", "order_id", "product_id", "quantity", "note" FROM order_line WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // orderLineKeyOf is the text of row's values of the unique key on, as

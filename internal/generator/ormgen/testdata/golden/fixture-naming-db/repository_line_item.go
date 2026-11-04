@@ -1301,8 +1301,8 @@ var lineItemUniqueKeys = map[LineItemUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	LineItemUniqueById:                 {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt" FROM "lineItem" WHERE (id) IN (%s)`, []string{`id`}},
-	LineItemUniqueByCategoryExternalId: {`("categoryId", "externalId") WHERE "deletedAt" IS NULL`, `"categoryId" = EXCLUDED."categoryId"`, `SELECT "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt" FROM "lineItem" WHERE ("categoryId", "externalId") IN (%s) AND ("deletedAt" IS NULL)`, []string{`"categoryId"`, `"externalId"`}},
+	LineItemUniqueById:                 {`(id)`, `id = "lineItem".id`, `SELECT "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt" FROM "lineItem" WHERE (id) IN (%s)`, []string{`id`}},
+	LineItemUniqueByCategoryExternalId: {`("categoryId", "externalId") WHERE "deletedAt" IS NULL`, `"categoryId" = "lineItem"."categoryId"`, `SELECT "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt" FROM "lineItem" WHERE ("categoryId", "externalId") IN (%s) AND ("deletedAt" IS NULL)`, []string{`"categoryId"`, `"externalId"`}},
 }
 
 // lineItemKeyOf is the text of row's values of the unique key on, as

@@ -767,7 +767,7 @@ var textEmbeddingUniqueKeys = map[TextEmbeddingUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TextEmbeddingUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "text", "embedding" FROM text_embedding WHERE (id) IN (%s)`, []string{`id`}},
+	TextEmbeddingUniqueById: {`(id)`, `id = text_embedding.id`, `SELECT "id", "text", "embedding" FROM text_embedding WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // textEmbeddingKeyOf is the text of row's values of the unique key on, as

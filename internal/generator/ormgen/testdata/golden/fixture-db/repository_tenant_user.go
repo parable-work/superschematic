@@ -1387,8 +1387,8 @@ var tenantUserUniqueKeys = map[TenantUserUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TenantUserUniqueById:                {`(id)`, `id = EXCLUDED.id`, `SELECT "created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version" FROM tenant_user WHERE (id) IN (%s)`, []string{`id`}},
-	TenantUserUniqueByTenantDisplayName: {`(tenant_id, display_name) WHERE deleted_at IS NULL`, `tenant_id = EXCLUDED.tenant_id`, `SELECT "created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version" FROM tenant_user WHERE (tenant_id, display_name) IN (%s) AND (deleted_at IS NULL)`, []string{`tenant_id`, `display_name`}},
+	TenantUserUniqueById:                {`(id)`, `id = tenant_user.id`, `SELECT "created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version" FROM tenant_user WHERE (id) IN (%s)`, []string{`id`}},
+	TenantUserUniqueByTenantDisplayName: {`(tenant_id, display_name) WHERE deleted_at IS NULL`, `tenant_id = tenant_user.tenant_id`, `SELECT "created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version" FROM tenant_user WHERE (tenant_id, display_name) IN (%s) AND (deleted_at IS NULL)`, []string{`tenant_id`, `display_name`}},
 }
 
 // tenantUserKeyOf is the text of row's values of the unique key on, as

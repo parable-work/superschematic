@@ -98,7 +98,7 @@ const orderTable: TableDefinition = {
     deleteMany: '',
   },
   uniqueKeys: {
-    id: { conflict: '(id)', keep: 'id = EXCLUDED.id', rows: `SELECT ${columnList} FROM "order" WHERE (id) IN (%s)` },
+    id: { conflict: '(id)', keep: 'id = "order".id', rows: `SELECT ${columnList} FROM "order" WHERE (id) IN (%s)` },
   },
 };
 
@@ -449,9 +449,9 @@ const itemTable: TableDefinition = {
     delete: 'DELETE FROM item WHERE id = $1',
   },
   uniqueKeys: {
-    id: { conflict: '(id)', keep: 'id = EXCLUDED.id', rows: `SELECT ${itemColumns} FROM item WHERE (id) IN (%s)` },
-    code: { conflict: '(code)', keep: 'code = EXCLUDED.code', rows: `SELECT ${itemColumns} FROM item WHERE (code) IN (%s)` },
-    lowerCode: { conflict: '((lower(code)))', keep: 'code = EXCLUDED.code', expression: true },
+    id: { conflict: '(id)', keep: 'id = item.id', rows: `SELECT ${itemColumns} FROM item WHERE (id) IN (%s)` },
+    code: { conflict: '(code)', keep: 'code = item.code', rows: `SELECT ${itemColumns} FROM item WHERE (code) IN (%s)` },
+    lowerCode: { conflict: '((lower(code)))', keep: 'code = item.code', expression: true },
   },
 };
 
@@ -692,11 +692,15 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('an upsert of a tabl
     await expect(orm.item.upsertMany([{ code: 'K1', title: 'Urn' }], ['lowerCode'], ['title'])).rejects.toThrow('a unique index over an expression');
     expect(await stored('k1')).toEqual(before);
     expect(await stored('K1')).toBeUndefined();
-    // The key's keep, as the generator writes it, sets its first column to
-    // the input's value, so the read of k1 is the last of these tests.
+    // The key's keep sets its first column to the held row's own value, not
+    // the input's K1, so k1 keeps its text; the bump trigger still moves
+    // its version, as it does on every update.
     const [{ id }] = (await pool.query("SELECT id FROM item WHERE code = 'k1'")).rows;
     const kept = await orm.item.upsertOneResult({ code: 'K1', title: 'Kettle' }, ['lowerCode'], {});
     expect(kept.status).toBe('unchanged');
     expect(uuidToDb(kept.row.id)).toBe(id);
+    expect(kept.row.code).toBe('k1');
+    expect(await stored('k1')).toEqual({ ...before, _version: expect.anything() });
+    expect(await stored('K1')).toBeUndefined();
   });
 });

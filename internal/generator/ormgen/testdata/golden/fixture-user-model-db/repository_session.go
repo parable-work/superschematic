@@ -1169,8 +1169,8 @@ var sessionUniqueKeys = map[SessionUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	SessionUniqueById:        {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at" FROM "session" WHERE (id) IN (%s)`, []string{`id`}},
-	SessionUniqueByTokenHash: {`(token_hash)`, `token_hash = EXCLUDED.token_hash`, `SELECT "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at" FROM "session" WHERE (token_hash) IN (%s)`, []string{`token_hash`}},
+	SessionUniqueById:        {`(id)`, `id = "session".id`, `SELECT "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at" FROM "session" WHERE (id) IN (%s)`, []string{`id`}},
+	SessionUniqueByTokenHash: {`(token_hash)`, `token_hash = "session".token_hash`, `SELECT "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at" FROM "session" WHERE (token_hash) IN (%s)`, []string{`token_hash`}},
 }
 
 // sessionKeyOf is the text of row's values of the unique key on, as

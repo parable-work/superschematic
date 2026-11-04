@@ -1002,7 +1002,7 @@ var boardUniqueKeys = map[BoardUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	BoardUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "labels", "states", "walls", "scores" FROM board WHERE (id) IN (%s)`, []string{`id`}},
+	BoardUniqueById: {`(id)`, `id = board.id`, `SELECT "id", "labels", "states", "walls", "scores" FROM board WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // boardKeyOf is the text of row's values of the unique key on, as

@@ -2427,8 +2427,8 @@ var recipeRefUniqueKeys = map[RecipeRefUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RecipeRefUniqueById:       {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM recipe_ref WHERE (id) IN (%s)`, []string{`id`}},
-	RecipeRefUniqueByRootName: {`(root_id, "name") WHERE deleted_at IS NULL`, `root_id = EXCLUDED.root_id`, `SELECT "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM recipe_ref WHERE (root_id, "name") IN (%s) AND (deleted_at IS NULL)`, []string{`root_id`, `"name"`}},
+	RecipeRefUniqueById:       {`(id)`, `id = recipe_ref.id`, `SELECT "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM recipe_ref WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeRefUniqueByRootName: {`(root_id, "name") WHERE deleted_at IS NULL`, `root_id = recipe_ref.root_id`, `SELECT "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM recipe_ref WHERE (root_id, "name") IN (%s) AND (deleted_at IS NULL)`, []string{`root_id`, `"name"`}},
 }
 
 // recipeRefKeyOf is the text of row's values of the unique key on, as

@@ -785,7 +785,7 @@ var recipeUniqueKeys = map[RecipeUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RecipeUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "title", "created_at", "created_by" FROM recipe WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeUniqueById: {`(id)`, `id = recipe.id`, `SELECT "id", "title", "created_at", "created_by" FROM recipe WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // recipeKeyOf is the text of row's values of the unique key on, as

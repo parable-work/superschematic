@@ -1141,8 +1141,8 @@ var shipmentUniqueKeys = map[ShipmentUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	ShipmentUniqueById:        {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (id) IN (%s)`, []string{`id`}},
-	ShipmentUniqueByReference: {`(reference)`, `reference = EXCLUDED.reference`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (reference) IN (%s)`, []string{`reference`}},
+	ShipmentUniqueById:        {`(id)`, `id = shipment.id`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (id) IN (%s)`, []string{`id`}},
+	ShipmentUniqueByReference: {`(reference)`, `reference = shipment.reference`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (reference) IN (%s)`, []string{`reference`}},
 }
 
 // shipmentKeyOf is the text of row's values of the unique key on, as

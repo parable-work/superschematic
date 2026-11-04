@@ -1625,8 +1625,8 @@ var noteUniqueKeys = map[NoteUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	NoteUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "reply_to", "body", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM note WHERE (id) IN (%s)`, []string{`id`}},
-	NoteUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "reply_to", "body", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM note WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+	NoteUniqueById:           {`(id)`, `id = note.id`, `SELECT "id", "recipe_id", "reply_to", "body", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM note WHERE (id) IN (%s)`, []string{`id`}},
+	NoteUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = note.entity_key`, `SELECT "id", "recipe_id", "reply_to", "body", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM note WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
 }
 
 // noteKeyOf is the text of row's values of the unique key on, as

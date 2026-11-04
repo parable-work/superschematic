@@ -1520,7 +1520,7 @@ var lineItemUniqueKeys = map[LineItemUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	LineItemUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "date", "name", "amount", "account_id", "category_id", "transfer_group_id" FROM line_item WHERE (id) IN (%s)`, []string{`id`}},
+	LineItemUniqueById: {`(id)`, `id = line_item.id`, `SELECT "id", "date", "name", "amount", "account_id", "category_id", "transfer_group_id" FROM line_item WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // lineItemKeyOf is the text of row's values of the unique key on, as

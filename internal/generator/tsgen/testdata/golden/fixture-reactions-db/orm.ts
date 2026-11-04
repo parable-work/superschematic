@@ -194,7 +194,7 @@ export const projectTable: TableDefinition = {
     deleteMany: "DELETE FROM project%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"status\", \"status_entered_at\", \"_version\" FROM project WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = project.id", rows: "SELECT \"id\", \"name\", \"status\", \"status_entered_at\", \"_version\" FROM project WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByTaskProject", probe: "SELECT 1 FROM task WHERE task.project_id = project.id" },
@@ -349,7 +349,7 @@ export const taskTable: TableDefinition = {
     deleteMany: "DELETE FROM task%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"priority\", \"project_id\", \"status\", \"status_entered_at\", \"_version\" FROM task WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = task.id", rows: "SELECT \"id\", \"title\", \"priority\", \"project_id\", \"status\", \"status_entered_at\", \"_version\" FROM task WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "project", column: "projectId", target: "project", probe: "task.project_id IN (SELECT project.id FROM project%s)" },

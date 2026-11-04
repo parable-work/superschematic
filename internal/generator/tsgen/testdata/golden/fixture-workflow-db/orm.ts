@@ -190,7 +190,7 @@ export const orderTable: TableDefinition = {
     deleteMany: "DELETE FROM \"order\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"placed_at\", \"status\", \"status_entered_at\", \"_version\" FROM \"order\" WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"order\".id", rows: "SELECT \"id\", \"title\", \"placed_at\", \"status\", \"status_entered_at\", \"_version\" FROM \"order\" WHERE (id) IN (%s)" },
   },
 };
 
@@ -347,8 +347,8 @@ export const shipmentTable: TableDefinition = {
     deleteMany: "DELETE FROM shipment%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"reference\", \"status\", \"status_entered_at\", \"payment_status\", \"payment_status_entered_at\", \"_version\" FROM shipment WHERE (id) IN (%s)" },
-    "reference": { conflict: "(reference)", keep: "reference = EXCLUDED.reference", rows: "SELECT \"id\", \"reference\", \"status\", \"status_entered_at\", \"payment_status\", \"payment_status_entered_at\", \"_version\" FROM shipment WHERE (reference) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = shipment.id", rows: "SELECT \"id\", \"reference\", \"status\", \"status_entered_at\", \"payment_status\", \"payment_status_entered_at\", \"_version\" FROM shipment WHERE (id) IN (%s)" },
+    "reference": { conflict: "(reference)", keep: "reference = shipment.reference", rows: "SELECT \"id\", \"reference\", \"status\", \"status_entered_at\", \"payment_status\", \"payment_status_entered_at\", \"_version\" FROM shipment WHERE (reference) IN (%s)" },
   },
 };
 

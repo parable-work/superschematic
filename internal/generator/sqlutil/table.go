@@ -558,7 +558,9 @@ type RelationModel struct {
 // partial index, "(product_id, author_id) WHERE deleted_at IS NULL", or
 // over an expression index's expression, "((lower(email)))". Keep
 // is the assignment an upsert that sets nothing writes, so the conflicting
-// row is returned: its first column set to itself.
+// row is returned: its first column set to itself, "email = account.email",
+// never to the input's value, which a key over an expression may hold in
+// another form.
 type UniqueKey struct {
 	Name     string
 	Fields   []string
@@ -953,7 +955,10 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 				}
 			}
 		}
-		key.Keep = quoted[0] + " = EXCLUDED." + quoted[0]
+		// keep sets the held row's first column to its own value, not the
+		// input's: over an expression the two may differ, as 'K1' conflicts
+		// with 'k1' under lower(code).
+		key.Keep = quoted[0] + " = " + table.columnOfKey(fields[0]).Qualified
 		keys = append(keys, key)
 		return nil
 	}

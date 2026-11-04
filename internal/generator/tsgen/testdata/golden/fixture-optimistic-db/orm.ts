@@ -158,7 +158,7 @@ export const shelfTable: TableDefinition = {
   },
   softDelete: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM shelf WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = shelf.id", rows: "SELECT \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM shelf WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByStockShelf", probe: "SELECT 1 FROM stock WHERE stock.shelf_id = shelf.id" },
@@ -287,7 +287,7 @@ export const stockTable: TableDefinition = {
     deleteMany: "DELETE FROM stock%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\" FROM stock WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = stock.id", rows: "SELECT \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\" FROM stock WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "shelf", column: "shelfId", target: "shelf", probe: "stock.shelf_id IN (SELECT shelf.id FROM shelf%s)" },
