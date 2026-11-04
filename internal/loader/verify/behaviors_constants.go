@@ -99,7 +99,7 @@ func (f *tableFields) classify(name string, createdByIsOwn bool) (fieldClass, st
 	if fd.Owned() {
 		return fieldOwned, fd.Behavior.Behavior, nil, fd
 	}
-	if fd != nil && sqlutil.AuditField(name) && !(createdByIsOwn && name == sqlutil.AuditCreatedBy) {
+	if fd != nil && sqlutil.AuditField(name) && (!createdByIsOwn || name != sqlutil.AuditCreatedBy) {
 		return fieldAudit, "", nil, fd
 	}
 	if fd != nil && sqlutil.IsTableRelation(f.schema, fd) && !fd.TypeRef.IsArray {
