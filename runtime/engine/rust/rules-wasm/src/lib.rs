@@ -216,13 +216,22 @@ mod tests {
         assert_eq!(files[0]["fields"][1]["type"], "Temporal.DateTime");
         assert_eq!(files[1]["name"], "Reactions");
         assert_eq!(files[1]["hearsChanges"], true);
-        assert_eq!(files[2]["name"], "Timers");
-        assert_eq!(files[2]["armsDeadlines"], true);
-        assert_eq!(files[2]["hearsChanges"], true);
-        assert_eq!(files[2]["tables"][0]["name"], "deadlines");
-        assert_eq!(files[2]["tables"][0]["key"], "name");
+        assert_eq!(files[2]["name"], "Constants");
+        assert_eq!(files[3]["name"], "StateRules");
+        assert_eq!(files[4]["name"], "Approvals");
+        assert_eq!(files[4]["tables"][0]["name"], "signOffs");
+        assert_eq!(files[4]["tables"][0]["key"], "number");
         assert_eq!(
-            files[2]["tables"][0]["fields"][3]["type"],
+            files[4]["tables"][0]["fields"][4]["type"],
+            "Temporal.DateTime"
+        );
+        assert_eq!(files[5]["name"], "Timers");
+        assert_eq!(files[5]["armsDeadlines"], true);
+        assert_eq!(files[5]["hearsChanges"], true);
+        assert_eq!(files[5]["tables"][0]["name"], "deadlines");
+        assert_eq!(files[5]["tables"][0]["key"], "name");
+        assert_eq!(
+            files[5]["tables"][0]["fields"][3]["type"],
             "Temporal.DateTime"
         );
     }

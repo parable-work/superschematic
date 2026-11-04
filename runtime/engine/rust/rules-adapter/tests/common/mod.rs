@@ -424,6 +424,167 @@ pub fn question_ddl(postgres: bool) -> Vec<String> {
     ddl
 }
 
+/// Task (D104), the end-to-end fixture's table as behaviorlayout writes it,
+/// its subjects strings: the own `title`, `owner`, `reviewer`, `plan`,
+/// `proof`, a boolean `urgent`, a number `attempts` and a JSON `data`;
+/// `createdBy` among its audit fields, which an Approvals gate that excludes
+/// the creator reads; Constants, StateRules and Approvals, which it
+/// implements, before its status, a Workflow. Approvals keeps its sign-offs
+/// in the sub-table `task_approvals_sign_offs`, and nothing arms a deadline
+/// or hears a change, so the table has neither queue.
+pub fn task_table() -> Table {
+    let flow = json!({
+        "states": ["planned", "working", "proving", "done", "cancelled"],
+        "transitions": [
+            {"from": "planned", "to": "working", "by": ["owner"]},
+            {"from": "working", "to": "proving", "by": ["owner"]},
+            {"from": "proving", "to": "working"},
+            {"from": "proving", "to": "done"},
+            {"from": "planned", "to": "cancelled"},
+            {"from": "working", "to": "cancelled"}
+        ]
+    });
+    let at = |name: &str| OwnedField {
+        name: name.into(),
+        column: Column::new(name, snake(name), "Temporal.DateTime").converted(Convert::EpochMillis),
+        value: false,
+    };
+    let text = |name: &str| owned(name, name, name, "string", false);
+    let implemented = |behavior: &str| Use {
+        id: behavior.into(),
+        behavior: behavior.into(),
+        member: behavior.to_ascii_lowercase(),
+        anchor: None,
+        fields: Vec::new(),
+        operations: Vec::new(),
+        tables: Vec::new(),
+    };
+    let approvals = Use {
+        operations: [
+            ("signOff", true),
+            ("withdrawSignOff", true),
+            ("listSignOffs", false),
+        ]
+        .into_iter()
+        .map(|(name, writes)| Operation {
+            name: name.into(),
+            writes,
+        })
+        .collect(),
+        tables: vec![SubTable {
+            name: "signOffs".into(),
+            table: "task_approvals_sign_offs".into(),
+            row: "task_id".into(),
+            key: text("number"),
+            fields: vec![
+                text("state"),
+                text("subject"),
+                text("note"),
+                at("at"),
+                at("consumedAt"),
+            ],
+        }],
+        ..implemented("Approvals")
+    };
+    let own = [
+        ("title", "string"),
+        ("owner", "string"),
+        ("reviewer", "string"),
+        ("plan", "string"),
+        ("proof", "string"),
+        ("urgent", "boolean"),
+        ("attempts", "number"),
+        ("data", "Generic.JSON"),
+    ];
+    let mut spec = TypeSpec::new("Task")
+        .with(UseSpec::on_type(
+            "Constants",
+            json!({
+                "fields": ["owner"],
+                "oneWay": {"urgent": "up", "attempts": "up", "due": "up"},
+                "permission": "tasks.admin"
+            }),
+        ))
+        .with(UseSpec::on_type(
+            "StateRules",
+            json!({"states": {
+                "planned": {"frozen": ["plan"], "by": ["createdBy"]},
+                "working": {"frozen": ["plan"], "by": ["reviewer"]},
+                "proving": {"required": ["proof"]}
+            }}),
+        ))
+        .with(UseSpec::on_type(
+            "Approvals",
+            json!({"gates": {
+                "proving": {"count": 1, "permission": "tasks.review", "resetOn": []},
+                "done": {"count": 1, "permission": "tasks.review", "resetOn": ["proof"], "pinned": true}
+            }}),
+        ))
+        .with(UseSpec::on_field("status", "Workflow", flow));
+    for (name, type_name) in own.iter().chain(&[("createdBy", "string")]) {
+        spec = spec.with_field(FieldSpec::new(*name, *type_name));
+    }
+    spec = spec.with_field(FieldSpec::date_time("due", "Temporal.DateTime"));
+    let mut status = order_table("Task", "task");
+    let workflow = status.uses.remove(0);
+    Table {
+        type_name: "Task".into(),
+        table: "task".into(),
+        key: Column::new("id", "id", "string"),
+        version: "_version".into(),
+        live: None,
+        own: own
+            .iter()
+            .map(|(name, type_name)| Column::new(*name, *name, *type_name))
+            .chain([Column::new("due", "due", "Temporal.DateTime").converted(Convert::EpochMillis)])
+            .collect(),
+        audit: vec![Column::new("createdBy", "created_by", "string")],
+        uses: vec![
+            implemented("Constants"),
+            implemented("StateRules"),
+            approvals,
+            workflow,
+        ],
+        deadlines: None,
+        changes: None,
+        spec,
+    }
+}
+
+/// [`task_table`]'s tables in a dialect as sqlgen writes them: the row's,
+/// with its version trigger, and its sub-table's, a surrogate `id` beside
+/// the row's key and the sign-off's number, unique together, its rows
+/// deleted with the row's.
+pub fn task_ddl(postgres: bool) -> Vec<String> {
+    let t = column_types(postgres);
+    let mut ddl = vec![format!(
+        "CREATE TABLE \"task\" (id {}, title {text} NOT NULL, owner {text}, reviewer {text}, plan {text}, proof {text}, urgent {}, attempts {}, data {}, due {}, created_by {text}, status {text}, status_entered_at {}, _version {})",
+        t.key,
+        t.boolean,
+        t.number,
+        t.json,
+        t.timestamp,
+        t.timestamp,
+        t.version,
+        text = t.text,
+    )];
+    if postgres {
+        ddl.extend(postgres_bump("task"));
+    } else {
+        ddl.push(sqlite_bump("task"));
+    }
+    let id = if postgres {
+        "UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY"
+    } else {
+        "TEXT DEFAULT (lower(hex(randomblob(16)))) NOT NULL PRIMARY KEY"
+    };
+    ddl.push(format!(
+        "CREATE TABLE \"task_approvals_sign_offs\" (id {id}, task_id TEXT NOT NULL REFERENCES \"task\" (id) ON DELETE CASCADE, number TEXT NOT NULL, state TEXT, subject TEXT, note TEXT, at {ts}, consumed_at {ts}, UNIQUE (task_id, number))",
+        ts = t.timestamp,
+    ));
+    ddl
+}
+
 /// A deadline queue's layout on a table (D103): `<table>_deadline_queue`,
 /// its columns as behaviorlayout names them.
 pub fn deadlines_of(type_name: &str, table: &str) -> Deadlines {

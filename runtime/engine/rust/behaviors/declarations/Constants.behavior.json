@@ -15,6 +15,18 @@
         "type": "array",
         "uniqueItems": true
       },
+      "oneWay": {
+        "additionalProperties": {
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "description": "Own fields, by JSON key, that move one way after the create: up, a boolean that only turns true or a number or a date-time that only grows; down, one that only turns false or shrinks. No value is below every value, so clearing a field is a move down and giving a field with none a value a move up. A move the other way is vetoed (one_way) unless the caller holds the config's permission; a create gives any value. A field is in fields or here, not both. A table's alone: an engine type refuses it.",
+        "maxProperties": 64,
+        "minProperties": 1,
+        "type": "object"
+      },
       "permission": {
         "description": "The permission a caller needs to change them after the create; nobody may when absent.",
         "minLength": 1,
@@ -25,5 +37,11 @@
       "fields"
     ],
     "type": "object"
-  }
+  },
+  "vetoes": [
+    {
+      "code": "one_way",
+      "description": "An update that moves a oneWay field the other way, by a caller without the config's permission; details give the field, its direction, its current value and the one the update gives it, null for none. A table's alone: an engine type refuses oneWay."
+    }
+  ]
 }

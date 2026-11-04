@@ -32,12 +32,18 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // sub-tables, arm deadlines and hear their rows' writes; and
 // core-reactions' and core-reactions-changes', whose rules hear writes of
 // their own rows and of the rows that link to them through a relation (an
-// engine Links link with one target, mapped to an own field <link>Id); and
-// core-workflow-principals', written by hand in the recorded format
-// (runtime/engine/testdata/rules/scenarios, D104) since the engine recorded
-// no case of a transition's by, overridePermission, repeat or from, whose
-// commands each hold the version of their row after them (expect.version),
-// so a repeat answered unchanged is held to writing nothing. Each
+// engine Links link with one target, mapped to an own field <link>Id);
+// core-constants', core-staterules' and core-approvals', whose rules hold a
+// row's own fields, booleans, numbers and JSON among them, and whose
+// sign-offs are a sub-table of the row with no queue (D104); and
+// core-workflow-principals' and core-freezes-and-sign-offs', written by
+// hand in the recorded format (runtime/engine/testdata/rules/scenarios,
+// D104) since the engine recorded no case of a transition's by,
+// overridePermission, repeat or from, of a field that moves one way, of a
+// frozen field a by names, or of a gate's resetOn or pinned, whose commands
+// each hold the version of their row after them (expect.version), so a
+// repeat answered unchanged is held to writing nothing and a sign-off to
+// moving the version. Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
 // and _version, and, for a use whose behavior declares tables, each
@@ -59,7 +65,10 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
 // workflow_status and workflow_entered_at, Timers' sub-table
-// <table>_timers_deadlines). The layout the generator writes
+// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs), and
+// an own field of a JSON type other than a string, a number or a boolean
+// (an object, a list) is a Generic.JSON column, JSONB on Postgres and its
+// text on SQLite. The layout the generator writes
 // (internal/generator/behaviorlayout) is held by the generated packages'
 // own end-to-end tests, not by this one.
 
@@ -70,10 +79,14 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
  */
 const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] = [
   { file: 'core-workflow', floor: 96 },
-  { file: 'core-timers', floor: 125 },
+  { file: 'core-timers', floor: 139 },
   { file: 'core-reactions', floor: 586 },
   { file: 'core-reactions-changes', floor: 60 },
   { file: 'core-workflow-principals', floor: 92 },
+  { file: 'core-constants', floor: 39 },
+  { file: 'core-staterules', floor: 76 },
+  { file: 'core-approvals', floor: 122 },
+  { file: 'core-freezes-and-sign-offs', floor: 115 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

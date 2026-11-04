@@ -1,0 +1,726 @@
+{
+  "name": "fixture-approvals-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-approvals-db",
+      "types": [
+        "Task"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-approvals-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "TaskApprovalsListSignOffsInput": {
+      "name": "TaskApprovalsListSignOffsInput",
+      "owner": "fixture-approvals-api",
+      "comment": "The parameters of Task's approvals listSignOffs.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "cursor",
+          "comment": "The next of the previous page.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "comment": "At most this many sign-offs; 50 when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "validateMax": 500,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "Only sign-offs for this state.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskApprovalsListSignOffsResult": {
+      "name": "TaskApprovalsListSignOffsResult",
+      "owner": "fixture-approvals-api",
+      "comment": "What Task's approvals listSignOffs returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "TaskApprovalsListSignOffsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "next",
+          "comment": "The cursor of the next page; null after the last.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskApprovalsListSignOffsResultItems": {
+      "name": "TaskApprovalsListSignOffsResultItems",
+      "owner": "fixture-approvals-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "When, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "consumedAt",
+          "comment": "When a change of the own fields, entering the state or a new version without its gate consumed it; absent while it counts.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "note",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "The gated state.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject of the caller who signed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskApprovalsSignOffInput": {
+      "name": "TaskApprovalsSignOffInput",
+      "owner": "fixture-approvals-api",
+      "comment": "The parameters of Task's approvals signOff.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "note",
+          "comment": "Why, for the others.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMaxLength": 10000,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "The gated state to sign off for.",
+          "typeRef": {
+            "name": "TaskApprovalsGate"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "version",
+          "comment": "The row's version the signer read, the version a write through the core is held to. Needed on a pinned gate; on any gate, one that is not the row's version is vetoed stale before anything else is checked. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskApprovalsSignOffResult": {
+      "name": "TaskApprovalsSignOffResult",
+      "owner": "fixture-approvals-api",
+      "comment": "What Task's approvals signOff returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "When, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "count",
+          "comment": "How many the gate needs.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "note",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "signedBy",
+          "comment": "Every subject whose sign-off for the state is not yet consumed, in the order they signed.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "The gated state.",
+          "typeRef": {
+            "name": "TaskApprovalsGate"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject of the caller who signed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskApprovalsWithdrawSignOffInput": {
+      "name": "TaskApprovalsWithdrawSignOffInput",
+      "owner": "fixture-approvals-api",
+      "comment": "The parameters of Task's approvals withdrawSignOff.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "state",
+          "comment": "The gated state whose sign-off to withdraw.",
+          "typeRef": {
+            "name": "TaskApprovalsGate"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskApprovalsWithdrawSignOffResult": {
+      "name": "TaskApprovalsWithdrawSignOffResult",
+      "owner": "fixture-approvals-api",
+      "comment": "What Task's approvals withdrawSignOff returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "When it was signed, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "note",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "The gated state.",
+          "typeRef": {
+            "name": "TaskApprovalsGate"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject of the caller who signed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskAssignment": {
+      "name": "TaskAssignment",
+      "owner": "src/tasks.schema.ts",
+      "comment": "Who reviews a task and who owns it, as reassignTask takes them: a view of\nthe table that carries reviewer, which StateRules names in by, so the build\nwarns that a caller who may reassign a task may then edit its plan while\nit is working; and owner, which the Workflow names in by and Constants\nkeeps as its create gave it, so the build does not warn of it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-approvals-db.Task",
+        "omittedFromSource": [
+          "id",
+          "title",
+          "plan",
+          "proof",
+          "urgent",
+          "attempts",
+          "createdBy",
+          "status",
+          "statusEnteredAt"
+        ]
+      },
+      "fields": [
+        {
+          "name": "reviewer",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "owner",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        }
+      ]
+    },
+    "TaskStatusTransitionInput": {
+      "name": "TaskStatusTransitionInput",
+      "owner": "fixture-approvals-api",
+      "comment": "The parameters of Task's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskStatusTransitionResult": {
+      "name": "TaskStatusTransitionResult",
+      "owner": "fixture-approvals-api",
+      "comment": "What Task's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "TaskApprovalsGate": {
+      "name": "TaskApprovalsGate",
+      "owner": "fixture-approvals-api",
+      "comment": "A state Task's Approvals gates.",
+      "values": [
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Proving",
+          "serializedAs": "proving"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskStatusState": {
+      "name": "TaskStatusState",
+      "owner": "fixture-approvals-api",
+      "comment": "A state of Task's status Workflow.",
+      "values": [
+        {
+          "name": "Planned",
+          "serializedAs": "planned"
+        },
+        {
+          "name": "Working",
+          "serializedAs": "working"
+        },
+        {
+          "name": "Proving",
+          "serializedAs": "proving"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Cancelled",
+          "serializedAs": "cancelled"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "TaskActions",
+      "comment": "A task's status and approvals operations (D104), for any signed-in\ncaller: the core decides who may move a task, sign it off and change what\nits state freezes.",
+      "operations": [
+        {
+          "name": "approvalsSignOff",
+          "comment": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
+          "docs": {
+            "title": "Task approvals: sign off",
+            "description": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
+            "capability": "task.approvals.sign-off",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "task_approvals_sign_off",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TaskApprovalsSignOffResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Task row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskApprovalsSignOffInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-approvals-db",
+            "type": "Task",
+            "key": "id",
+            "use": "Approvals",
+            "behavior": "Approvals",
+            "operation": "signOff",
+            "writes": true,
+            "permissions": [
+              "tasks.review"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "task/{id}/approvals/sign-off",
+          "origin": "behavior"
+        },
+        {
+          "name": "approvalsWithdrawSignOff",
+          "comment": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
+          "docs": {
+            "title": "Task approvals: withdraw sign off",
+            "description": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
+            "capability": "task.approvals.withdraw-sign-off",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "task_approvals_withdraw_sign_off",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TaskApprovalsWithdrawSignOffResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Task row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskApprovalsWithdrawSignOffInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-approvals-db",
+            "type": "Task",
+            "key": "id",
+            "use": "Approvals",
+            "behavior": "Approvals",
+            "operation": "withdrawSignOff",
+            "writes": true,
+            "permissions": [
+              "tasks.review"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "task/{id}/approvals/withdraw-sign-off",
+          "origin": "behavior"
+        },
+        {
+          "name": "approvalsListSignOffs",
+          "comment": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
+          "docs": {
+            "title": "Task approvals: list sign offs",
+            "description": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
+            "capability": "task.approvals.list-sign-offs",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "task_approvals_list_sign_offs",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TaskApprovalsListSignOffsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Task row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskApprovalsListSignOffsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-approvals-db",
+            "type": "Task",
+            "key": "id",
+            "use": "Approvals",
+            "behavior": "Approvals",
+            "operation": "listSignOffs",
+            "permissions": [
+              "tasks.review"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "task/{id}/approvals/list-sign-offs",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Task status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "task.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "task_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TaskStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Task row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-approvals-db",
+            "type": "Task",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "task/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Task"
+      },
+      "auth": true
+    },
+    {
+      "name": "TaskAdmin",
+      "comment": "Administration of tasks, for callers who hold tasks.admin.",
+      "operations": [
+        {
+          "name": "reassignTask",
+          "typeRef": {
+            "name": "Task"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskAssignment"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tasks.admin"
+          ],
+          "httpMethod": "PATCH",
+          "restPath": "tasks/{id}/assignment"
+        }
+      ]
+    }
+  ]
+}

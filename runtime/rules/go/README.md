@@ -291,17 +291,30 @@ base62, a NULL absent, the core's row and linked reads holding `createdBy`,
 and a write that names it refused) and an operation the core answers with
 no write writing nothing (`TestAnOperationTheCoreAnswersWithNoWriteWritesNothing`:
 no statement, no stamp, `_version` and `enteredAt` unmoved), on SQLite and
-on Postgres. `transcript_test.go` replays the five transcripts
-in `runtime/engine/testdata/rules` on SQLite and on Postgres, as the
-TypeScript adapter does: `core-workflow.transcript.json`, 96 steps (34
-commands, 61 checks, one raw write); `core-timers.transcript.json`, 125
-steps (75 commands, 10 of them deadlines and 25 changes, and 50 checks);
+on Postgres; `sign_offs_test.go` holds a table whose only sub-table keeps
+no deadline or change queue, Approvals' beside Constants and StateRules
+(`TestASubTableWithNoQueueIsWrittenAndReadAsTheCoreSays`: its rows
+inserted, read, updated and deleted, a hard delete removing them, a
+read-only operation writing nothing, the audit `createdBy` read for a
+StateRules `by`, and boolean and number columns read as JSON, SQLite's 0
+and 1 as a boolean), on SQLite and on Postgres. `transcript_test.go`
+replays the nine transcripts in `runtime/engine/testdata/rules` on SQLite
+and on Postgres, as the TypeScript adapter does:
+`core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, one raw
+write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
+deadlines and 29 changes, and 54 checks);
 `core-reactions.transcript.json`, 586 steps (476 commands, 252 of them
 changes, and 110 checks); `core-reactions-changes.transcript.json`, 60
-steps (48 commands, 24 of them changes, and 12 checks); and the
-hand-written `core-workflow-principals.transcript.json` (D104), 92 steps
-(58 commands, each compared with its row's `expect.version`, and 34
-checks); each held to a floor of its step count, its `expect.others`
+steps (48 commands, 24 of them changes, and 12 checks);
+`core-constants.transcript.json`, 39 steps (20 commands and 19 checks);
+`core-staterules.transcript.json`, 76 steps (43 commands and 33 checks);
+`core-approvals.transcript.json`, 122 steps (93 commands, 71 of them
+operations and 5 changes, and 29 checks); and the hand-written
+`core-workflow-principals.transcript.json` (D104), 92 steps (58 commands,
+each compared with its row's `expect.version`, and 34 checks), and
+`core-freezes-and-sign-offs.transcript.json` (D104), 115 steps (75
+commands, each compared with its row's `expect.version`, and 40 checks);
+each held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every
 type live in its database, each at the version the scenario last made
 live, since a step names its own type's version alone. The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`,

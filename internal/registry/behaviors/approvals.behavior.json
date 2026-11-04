@@ -25,13 +25,29 @@
               "uniqueItems": true,
               "items": { "type": "string", "minLength": 1 }
             },
-            "excludeCreator": { "description": "Whether the principal who created the instance is refused a sign-off; true when absent.", "type": "boolean" }
+            "excludeCreator": { "description": "Whether the principal who created the instance is refused a sign-off; true when absent.", "type": "boolean" },
+            "resetOn": {
+              "description": "The own fields whose change, by an update, consumes the gate's sign-offs; [] for none. Absent, the gate follows resetOnChange. A table's alone: an engine type refuses it.",
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "pinned": {
+              "description": "Whether a sign-off names the row's version its signer read: signOff then needs version, and one that is not the row's version is vetoed stale. A table's alone: an engine type refuses it.",
+              "type": "boolean"
+            }
           }
         }
       },
       "resetOnChange": {
         "description": "Whether a change of the instance's own fields, an update or an operation's, consumes every gate's sign-offs; true when absent.",
         "type": "boolean"
+      },
+      "status": {
+        "description": "The field of the type whose Workflow the gates are of. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+        "type": "string",
+        "minLength": 1
       }
     }
   },
@@ -49,7 +65,12 @@
         "required": ["state"],
         "properties": {
           "state": { "description": "The gated state to sign off for.", "type": "string", "minLength": 1 },
-          "note": { "description": "Why, for the others.", "type": "string", "maxLength": 10000 }
+          "note": { "description": "Why, for the others.", "type": "string", "maxLength": 10000 },
+          "version": {
+            "description": "The row's version the signer read, the version a write through the core is held to. Needed on a pinned gate; on any gate, one that is not the row's version is vetoed stale before anything else is checked. A table's alone: an engine type refuses it.",
+            "type": "integer",
+            "minimum": 1
+          }
         }
       },
       "resultSchema": {
@@ -136,6 +157,22 @@
     { "code": "creator_cannot_sign", "description": "signOff by the principal who created the instance, on a gate that excludes the creator." },
     { "code": "in_state", "description": "signOff while the instance is in the gated state." },
     { "code": "no_gate", "description": "signOff or withdrawSignOff for a state the config does not gate." },
-    { "code": "not_signed", "description": "withdrawSignOff by a caller with no sign-off for the state that is not yet consumed." }
+    { "code": "not_signed", "description": "withdrawSignOff by a caller with no sign-off for the state that is not yet consumed." },
+    { "code": "stale", "description": "signOff naming a version that is not the row's version: what the signer read has moved since; details give the version it named and the row's. A table's alone: an engine type refuses version." }
+  ],
+  "tables": [
+    {
+      "name": "signOffs",
+      "description": "One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.",
+      "key": "number",
+      "fields": [
+        { "name": "number", "description": "The sign-off's number on the row, from 1 in the order they were given, in ten digits zero-padded so the key's order is theirs.", "type": "string" },
+        { "name": "state", "description": "The gated state it signs off for.", "type": "string" },
+        { "name": "subject", "description": "The subject of the caller who signed.", "type": "string" },
+        { "name": "note", "description": "Why, for the others.", "type": "string" },
+        { "name": "at", "description": "When it was given, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "consumedAt", "description": "When a change of the fields its gate names, an entry into the gated state or a build without its gate consumed it; absent while it counts.", "type": "Temporal.DateTime" }
+      ]
+    }
   ]
 }

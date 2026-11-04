@@ -1041,8 +1041,10 @@ repository and no migration, and writes the schema's engine document
 instead
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)). A
 table that types a field as a behavior, `status: Workflow<{ ... }>`, or
-implements one, `implements Timers<Ticket, { ... }>` or `implements
-Reactions<Project, { ... }>`, stays a table: the behavior's fields are its
+implements one, `implements Timers<Ticket, { ... }>`, `implements
+Reactions<Project, { ... }>`, or Constants, StateRules and Approvals
+([Fields a table keeps, freezes and signs off](#fields-a-table-keeps-freezes-and-signs-off)),
+stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue and its change queue are
 tables beside it, and its operations change them through the behaviors'
 core
@@ -1132,9 +1134,198 @@ refuse each.
 (through an update operation of an API, code that calls the repository's
 update, or a raw SQL write) may set it to itself and then make the move.
 Keep a field that `by` names out of every input a caller who should not
-make the move can write, or freeze it once StateRules or Constants run on
-the core. No input carries `createdBy`, which the repositories stamp. The
+make the move can write, or freeze it: list it in the fields of the
+table's Constants
+([below](#fields-a-table-keeps-freezes-and-signs-off)), and no update
+changes it. No input carries `createdBy`, which the repositories stamp. The
 build warns of an API operation that updates a row and takes such a field
 in a `@source` view of the table
 ([Who may move a row](/superschematic/guides/api-routes/#who-may-move-a-row-and-a-move-that-changes-nothing)),
 and sees no other write.
+
+### Fields a table keeps, freezes and signs off
+
+A table implements `Constants`, `StateRules` and `Approvals` as it
+implements Timers, each with the table itself as its first type argument,
+beside its Workflow field (D103, D104):
+
+```ts
+// tasks-db
+export abstract class Task
+  implements
+    Constants<Task, {
+      fields: ["owner"];
+      oneWay: { urgent: "up"; attempts: "up" };
+      permission: "tasks.admin";
+    }>,
+    StateRules<Task, {
+      states: {
+        planned: { frozen: ["plan"]; by: ["createdBy"] };
+        working: { frozen: ["plan"]; by: ["reviewer"] };
+        proving: { required: ["proof"] };
+      };
+    }>,
+    Approvals<Task, {
+      gates: {
+        proving: { count: 1; permission: "tasks.review"; resetOn: [] };
+        done: { count: 1; permission: "tasks.review"; resetOn: ["proof"]; pinned: true };
+      };
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  owner: Identity.UUID;
+  reviewer?: Identity.UUID;
+  plan?: string;
+  proof?: string;
+  urgent: boolean;
+  attempts: number;
+  createdBy: Identity.UUID;
+  status: Workflow<{
+    states: ["planned", "working", "proving", "done", "cancelled"];
+    transitions: [
+      { from: "planned"; to: "working"; by: ["owner"] },
+      { from: "working"; to: "proving"; by: ["owner"] },
+      { from: "proving"; to: "working" },
+      { from: "proving"; to: "done" },
+      { from: "planned"; to: "cancelled" },
+      { from: "working"; to: "cancelled" }
+    ];
+  }>;
+}
+```
+
+**Constants.** `fields` are own fields the create sets and no update
+changes: an update that changes one is 422 `invalid_instance`, the rule
+`constant` at the field (`owner is a constant of Task: its create sets it
+and nothing changes it after; only a caller with tasks.admin may change
+it`), unless the caller holds `permission`. `oneWay` names own fields that
+only move one way after the create: `"up"`, a boolean that only turns true
+or a number or a date-time that only grows; `"down"`, one that only turns
+false or shrinks. An update that moves one the other way is 409 `vetoed`,
+`details.vetoCode` `one_way`, `details.vetoDetails` `{ field, direction,
+current, attempted }`, unless the caller holds `permission`:
+
+```
+Task <id>'s urgent only turns true: an update may not move it from true to false; only a caller with tasks.admin may move it back
+```
+
+- A create gives any value, and an equal value is no move.
+- No value is below every value: clearing an `"up"` field is a move down,
+  and refused; giving a `"down"` field a value where it had none is a move
+  up, and refused. `null` and absent are one value, none.
+- A refusal names a date-time as ISO 8601 text, as JavaScript's
+  `toISOString` writes it (`2026-02-01T00:00:00.000Z`), whatever its
+  column holds.
+- A oneWay field is a `boolean`, a `number`, a `Generic.Int64`, a
+  `Generic.Float64` or a `Temporal.DateTime`. The build refuses a field
+  in both `fields` and `oneWay`, one of another type (a
+  `Generic.Decimal`, which reaches the core as text, a list), one encrypted
+  at rest, a relation by its name (name its `<relation>Id`), an audit field
+  and a field another behavior owns.
+- `fields` takes at least one field, and the build refuses in it what it
+  refuses in `oneWay` but the type: a field encrypted at rest, or a list or
+  a map of date-times, whose values the core never reads (the
+  repositories keep an encrypted field's envelope from it, and no adapter
+  converts a list of date-times), a relation by its name, an audit field
+  and a field another behavior owns.
+
+**StateRules.** `states` gives, by a state of the table's Workflow, its
+rules: `required`, the own fields a row must hold to enter the state and
+keep while it is in it; `frozen`, the ones no update changes while the
+row is in it, or `"all"`; and `by`, own fields that hold a subject,
+`createdBy` among them, as a Workflow transition's `by` takes them
+([above](#who-may-move-a-workflow-fields-row)): the subject one of them
+holds changes a field the state freezes, as a caller with `permission`
+does.
+
+| Write | Refusal |
+| --- | --- |
+| a transition into a state without a field it requires, whoever asks | 409 `vetoed`, `missing_fields`, `{ state, fields }` |
+| a create without a field the Workflow's initial state requires | 422 `invalid_instance`, the rule `required` at the field |
+| an update that clears a field the row's state requires, whoever asks | 409 `vetoed`, `required_fields`, `{ state, fields }` |
+| an update that changes a frozen field, by a caller neither `by` names nor holding `permission` | 409 `vetoed`, `frozen_fields`, `{ state, fields, by }` (`by` when the state has one): `Task <id> is planned, which freezes plan: it does not change while it is planned; only the subject createdBy holds may change it` |
+
+`by` is read from the row before the update, so a patch that sets a `by`
+field to its caller does not let that caller change what the state
+freezes in the same write. What a state requires holds for every caller,
+`by` or permission. The build refuses `by` in a state that freezes
+nothing, an entry that holds no subject and a `seat:` entry, and a
+required or frozen field the core reads no value of (encrypted at rest, a
+list or a map of date-times); it warns of `frozen: "all"` on a table with
+such a field, which the state leaves unfrozen. `status` names the Workflow
+field the states are of when the table has several.
+
+**Approvals.** `gates` gives, by a state of the Workflow, `{ count,
+permission, from?, excludeCreator?, resetOn?, pinned? }`: a transition
+into the state, from a state `from` lists (every state when absent),
+waits for `count` sign-offs by distinct subjects holding `permission`
+(409 `approvals_missing`, `{ state, required, count }`). Its operations,
+`approvals.signOff`, `withdrawSignOff` and the read-only `listSignOffs`,
+are served by a `@behaviorOperations` set
+([A table's sign-offs](/superschematic/guides/api-routes/#a-tables-sign-offs-approvals)).
+The sign-offs are rows of a sub-table beside the table,
+`task_approvals_sign_offs` (`TaskApprovalsSignOffs`), one per sign-off,
+numbered in the order they were given, deleted with the row; a consumed
+one keeps its row, with `consumed_at`, for `listSignOffs`.
+
+- **The creator.** The subject the table's `createdBy` holds signs none
+  unless the gate sets `excludeCreator: false`, so a gate that excludes
+  the creator needs a `createdBy` field ([Who wrote a row](#who-wrote-a-row)).
+- **What consumes a sign-off.** Entering the gate's state uses its
+  sign-offs, so a return to it signs again. An update consumes a gate's
+  sign-offs when it changes a field the gate's `resetOn` lists; `resetOn:
+  []` keeps them through every update, and a gate without `resetOn` follows
+  `resetOnChange`, true when absent: any update consumes them. Above, the
+  plan's approval for proving survives later edits, and a new proof clears
+  the approval for done. A `resetOn` field is an own field whose value the
+  core reads: the build refuses one encrypted at rest, a list or a map of
+  date-times, a relation by its name and an audit field.
+- **Pinned.** With `pinned: true`, `signOff` takes `version`, the row's
+  `_version` the signer read, and is 400 `invalid_argument` without it; a
+  `version` that is not the row's is 409 `stale`, `{ version, current }`,
+  after the parameters and before the guards and the gate's permission, so
+  the signer reads the row again. A `version` given on a gate that is not
+  pinned is checked too. Every write through the core moves `_version`, a
+  sign-off's own among them, so with `count` above one each later signer
+  signs against the version the last sign-off left.
+- A gate whose config a later build removes has its sign-offs consumed
+  at the row's next write through the core.
+
+The three hold every write through the core: the repositories' creates,
+their updates and deletes of one row by its key, the table's behavior
+operations and its deadlines, a Timers `then` and a Reactions move among
+them. A repository's update runs as the acting user holding no
+permissions, so Constants' and StateRules' `permission` passes only for a
+write that names its caller: `orm.withBehaviorCaller({ subject,
+permissions })` in TypeScript, `WithBehaviorCaller(ctx, rules.Caller{...})`
+in Go. The uses a table implements are asked before its Workflow field, so
+a move into a state whose rule or gate is unmet is `missing_fields` or
+`approvals_missing` before Workflow's `by` or permission is asked; a move
+the Workflow's transitions do not allow is Workflow's veto.
+
+An upsert (`upsertOne` and `upsertMany`, `UpsertOne` and `UpsertMany`)
+inserts a new row through the core's create and updates the row its key
+already holds through the core's update, as `updateOne` does, so the same
+rules hold it: an upsert that would change a constant, move a oneWay field
+back or edit a frozen field is refused, and an `upsertMany` that one of
+its rows is refused for writes none of them. A table with Approvals keeps
+a sub-table, so it has no upserts. A write around the core is held to none
+of them: a repository's bulk and hard writes (`updateMany`,
+`UpdateMany`), a script, psql. No trigger or
+check refuses a raw SQL write of a constant or a frozen column, so an
+operator can repair a row, and such a write consumes no sign-off, since
+Approvals hears no change. A frozen field, or a `by` field, is only as
+strong as the update operations that take it: a caller who may write
+`reviewer` through an API's update can set it to itself and then edit the
+plan while the task is working. Keep a `by` field out of every input such
+a caller can write, or list it in Constants' `fields`. The build warns of
+an API operation that updates a row and takes a StateRules or Workflow
+`by` field in a `@source` view of the table, unless Constants lists it
+([Who may move a row](/superschematic/guides/api-routes/#who-may-move-a-row-and-a-move-that-changes-nothing)).
+
+A type that composes these with `@behavior("Constants", ...)` and the like
+is an engine type: its configs have no `oneWay`, `by`, `status`, `resetOn`
+or `pinned`, its `signOff` takes no `version`, and the build and the
+engine refuse each.

@@ -6,12 +6,13 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-timers.json` the replayer maps and compares: 324 of
-/// its 420. The 96 it skips: the 22 steps of the scenario that composes
-/// StateRules, which the core does not run; 13 of the one that composes
-/// Reactions, from its define, whose changes rule names the field Timers
-/// computes at a read (`Timers.deadlines.nudge.fired`), which no column
-/// holds and a table's rule waits for a later step to hear; 7 of the
+/// The steps of `core-timers.json` the replayer maps and compares: 346 of
+/// its 420, the 22 steps of the scenario that composes StateRules among
+/// them, since the core runs StateRules (D104, step 2): a fire whose move a
+/// guard vetoes is recorded vetoed. The 74 it skips: 13 of the one that
+/// composes Reactions, from its define, whose changes rule names the field
+/// Timers computes at a read (`Timers.deadlines.nudge.fired`), which no
+/// column holds and a table's rule waits for a later step to hear; 7 of the
 /// scenario whose access policy is the test's own (its open is checked),
 /// since the API authorizes (D103); 23 of the scenario that names
 /// namespaces, from its first define in one, since the reference host keeps
@@ -21,12 +22,12 @@ use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 /// next write; a read of the event log of a row whose heard write the core
 /// reconciled under the version published after it, where the engine's
 /// fire cancelled it; and the runner's status twice and the tools' describe
-/// twice, the engine's own reads. The 21 `open` steps that run count but
+/// twice, the engine's own reads. The `open` steps that run count but
 /// compare nothing, and each `runner.runDue` counts as checked once the
 /// changes and deadlines it ran answered, the engine's counters being its
 /// store's. The two scenarios that compose a test behavior run on the
 /// fixtures this kit ports (test.Bounce, test.Hold).
-const FLOOR: usize = 324;
+const FLOOR: usize = 346;
 
 #[test]
 fn timers_scenarios_replay_on_the_core() {

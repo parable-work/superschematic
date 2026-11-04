@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureApprovalsApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-approvals-api API",
+  "tools": [
+    {
+      "name": "task.approvals.listSignOffs",
+      "operationId": "TaskApprovalsListSignOffsHandler",
+      "title": "Task approvals: list sign offs",
+      "mcp": {
+        "hidden": false,
+        "name": "Task approvals: list sign offs",
+        "handle": "task_approvals_list_sign_offs",
+        "description": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "task.approvals.list-sign-offs",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.",
+      "namespace": "task",
+      "methodName": "approvals.list_sign_offs",
+      "httpMethod": "POST",
+      "httpPath": "/api/task/{id}/approvals/list-sign-offs",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:98b8d45510b964469bc6600acbcf77f677f0f6c56a801302b6244f77f2a28bc6",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {"description":"A string value","type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "state": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TaskApprovalsListSignOffsResult object"
+      }
+    },
+    {
+      "name": "task.approvals.signOff",
+      "operationId": "TaskApprovalsSignOffHandler",
+      "title": "Task approvals: sign off",
+      "mcp": {
+        "hidden": false,
+        "name": "Task approvals: sign off",
+        "handle": "task_approvals_sign_off",
+        "description": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "task.approvals.sign-off",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.",
+      "namespace": "task",
+      "methodName": "approvals.sign_off",
+      "httpMethod": "POST",
+      "httpPath": "/api/task/{id}/approvals/sign-off",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:056da1f3d069c7f2238a6468441bad86d0fcc00993b7088ed3c5aa5dd5432729",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "note": {"description":"A string value","maxLength":10000,"type":["string","null"]},
+          "state": {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
+          "version": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "state"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TaskApprovalsSignOffResult object"
+      }
+    },
+    {
+      "name": "task.approvals.withdrawSignOff",
+      "operationId": "TaskApprovalsWithdrawSignOffHandler",
+      "title": "Task approvals: withdraw sign off",
+      "mcp": {
+        "hidden": false,
+        "name": "Task approvals: withdraw sign off",
+        "handle": "task_approvals_withdraw_sign_off",
+        "description": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "task.approvals.withdraw-sign-off",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Withdraws the caller's sign-off for a gated state, one not yet consumed.",
+      "namespace": "task",
+      "methodName": "approvals.withdraw_sign_off",
+      "httpMethod": "POST",
+      "httpPath": "/api/task/{id}/approvals/withdraw-sign-off",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:01cc93a2bb0bd31cdfafcf17fe9c3cdf6b78ef98f68e43efd193e53c7c201fcc",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "state": {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"}
+        },
+        "required": ["id", "state"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TaskApprovalsWithdrawSignOffResult object"
+      }
+    },
+    {
+      "name": "task.status.transition",
+      "operationId": "TaskStatusTransitionHandler",
+      "title": "Task status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Task status: transition",
+        "handle": "task_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "task.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "task",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/task/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:3c71d81fb875e5522353fe6683ce0716d19705fcabeacc0cd28e65f196702a0e",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TaskStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "task-admin.reassignTask",
+      "operationId": "TaskAdminReassignTaskHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "reassignTask endpoint (Requires authentication)",
+      "namespace": "task-admin",
+      "methodName": "reassign_task",
+      "httpMethod": "PATCH",
+      "httpPath": "/api/tasks/{id}/assignment",
+      "requiresAuth": true,
+      "requiredPermissions": ["tasks.admin"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:08d2f1dd545ada3bb3e5046bb03fc6abadc3519337d2d43f7d5b78355ca146aa",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "owner": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":["string","null"],"x-superschematic-scalar":"Identity.UUID"},
+          "reviewer": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":["string","null"],"x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Task object"
+      }
+    }
+  ]
+}

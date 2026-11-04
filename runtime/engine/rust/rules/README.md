@@ -18,7 +18,8 @@ crosses a binding (`TypeSpec`, `Command`, `Answers`, `Step`) reads and writes
 as JSON.
 
 `superschematic-rules-behaviors` (`../rules-behaviors`) holds the behaviors
-ported onto it; `superschematic-rules-testkit` (`../rules-testkit`) is its
+ported onto it, in the engine's order: Workflow, Reactions, Constants,
+StateRules, Approvals and Timers; `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
 (`../engine`, D58) stays beside them until the order of the work in D103
@@ -563,8 +564,9 @@ the declarations, so a behavior adds no code to any of them (D103):
   live message (ready or claimed) per row, use and name;
 - the audit field `createdBy` (D87), when the table has one that is a
   plain scalar column, to that column, which a row read holds among the
-  row's own fields and no command writes (the layout's `audit`, D104): a
-  Workflow transition's `by` may name it;
+  row's own fields and no command writes (the layout's `audit`, D104),
+  when a Workflow transition's `by` or a StateRules state's `by` names it,
+  or an Approvals gate excludes the creator, which reads it;
 - a row's writes to messages of the table's change queue, `<row's
   type>Change` (`TicketChange`, table `ticket_change_queue`), which a
   trigger on the table writes for every insert, update and delete, whoever
@@ -699,9 +701,10 @@ refused as `internal`, as a `subRows` read is.
 An upsert's insert applies no change set of the core's, so it binds what
 the core's create of the row gives it: the adapter runs the create to its
 change set and applies nothing (`prepareCreate`), and the repository
-inserts the row with the owned fields that change set holds and updates a
-row the unique key already holds by its own fields alone, as the
-repository's `updateMany` does.
+inserts the row with the owned fields that change set holds. A row the
+unique key already holds the statement leaves as it is, and the
+repository then updates it through the core's update, as its `updateOne`
+does, so every use's guards hold an upsert's update (D104).
 
 A row's version is the column `@optimistic` keeps, `_version`, which a
 trigger bumps on every update (`BEFORE UPDATE` on Postgres, `AFTER
@@ -767,8 +770,10 @@ applied, and the worker's claim loop fails the message (D68).
 
 Every adapter replays the recorded scenarios as transcripts:
 `superschematic-rules-testkit` writes `core-workflow.json`,
-`core-timers.json`, `core-reactions.json` and `core-reactions-changes.json`,
-and the hand-written `core-workflow-principals.json`
+`core-timers.json`, `core-reactions.json`, `core-reactions-changes.json`,
+`core-constants.json`, `core-staterules.json` and `core-approvals.json`,
+and the hand-written `core-workflow-principals.json` and
+`core-freezes-and-sign-offs.json`
 (`runtime/engine/testdata/rules/scenarios`, D104: cases the engine
 recorded none of, written in the recorded format and never re-recorded),
 out as `runtime/engine/testdata/rules/<name>.transcript.json` (its
@@ -779,14 +784,21 @@ them against tables of their own on SQLite and on Postgres. The testkit's
 writes (`UPDATE_TRANSCRIPTS=1` rewrites them), and holds each to a floor:
 `core-workflow` to 96 steps, 61 define and publish checks, 34 commands and
 one raw write, in the 14 scenarios a core with no test fixtures runs;
-`core-timers` to 125 steps, 50 checks and 75 commands, 10 of them deadlines
-and 25 changes a runner ran, in 12 scenarios; `core-reactions` to 586
+`core-timers` to 139 steps, 54 checks and 85 commands, 12 of them deadlines
+and 29 changes a runner ran, in 13 scenarios, the one whose fire a
+StateRules guard vetoes among them; `core-reactions` to 586
 steps, 110 checks and 476 commands, 252 of them changes, in 26 scenarios;
-and `core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
-them changes, in 4 scenarios; and `core-workflow-principals` to 92 steps,
+`core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
+them changes, in 4 scenarios; `core-constants` to 39 steps, 19 checks and
+20 commands, in 4 scenarios; `core-staterules` to 76 steps, 33 checks and
+43 commands, in 7 scenarios; `core-approvals` to 122 steps, 29 checks and
+93 commands, 71 of them operations and 5 changes, in 9 scenarios;
+`core-workflow-principals` to 92 steps,
 34 define and publish checks, twelve of them refused, and 58 commands, five
 of them repeats answered unchanged, in 9 scenarios (its tenth, test.Gate's,
-runs on the reference host alone). A hand-written file's transcript holds
+runs on the reference host alone); and `core-freezes-and-sign-offs` to 115
+steps, 40 checks and 75 commands, in 12 scenarios. Every transcript's
+`behaviors` lists the six behaviors the core runs, in its order. A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to
 writing nothing; a recording's holds none. A change a runner's sweep ran is a command
@@ -908,8 +920,10 @@ and a to-one relation's own field names its relation in `spec.fields`:
 ```
 
 A table with a `createdBy` that is a plain scalar column (D87) has it in
-`audit`, after `own`, and listed in `spec.fields` after the own fields, so
-a Workflow transition's `by` may name it (D104):
+`audit`, after `own`, and listed in `spec.fields` after the own fields,
+when a Workflow transition's `by` or a StateRules state's `by` names it,
+or an Approvals gate excludes the creator (`excludeCreator` absent or
+true), whose `creator_cannot_sign` reads it (D104):
 
 ```json
 "audit": [{ "field": "createdBy", "column": "created_by", "type": "Identity.UUID" }]
@@ -982,9 +996,10 @@ with its after-change hooks, a change that writes nothing, `Core::listeners`
 and the JSON of the action, the read and `Gone`; and `settle` answering an
 operation before any guard with nothing written, refusing before any
 guard, and a settled `call_on` writing nothing on the other row.
-`rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18) and
-`tests/reactions.rs` (16) hold each behavior to its declaration's schemas
-and its rules: Workflow's `by` on a string, a UUID in either form and a
+`rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18),
+`tests/reactions.rs` (16), `tests/constants.rs` (11), `tests/staterules.rs`
+(11) and `tests/approvals.rs` (14) hold each behavior to its declaration's
+schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
 field with no value, `by` with a permission, `overridePermission`, a call
 held to `by`, `repeat` and `from`, and its config checks; Timers'
 starts, its `then`'s four outcomes, `until` in both forms, reset, snooze,
@@ -994,19 +1009,37 @@ write of a field start arming it again, a raw insert arming a create
 deadline from its `at`, and a deadline reconciling its row before it fires;
 Reactions' when kinds firing and not, each `then` that leaves its target as
 it is, a `forbidden` move refusing the command, each config message, the
-cycle check and `listens`.
+cycle check and `listens`; Constants' `oneWay` up and down for a boolean, a
+number and a date-time, no value below every value, the permission past it,
+a create and a value of another shape passing; StateRules' `by` on a string
+field and on `createdBy`, a patch naming the caller not counting, required
+held for the subject, a move its Workflow refuses left to Workflow, and the
+`status` of a type with two Workflows; and Approvals' `resetOn` changed,
+unchanged and `[]`, `resetOnChange`, `pinned` with a matching, stale and
+missing `version`, a version on a gate that is not pinned, the creator read
+from `createdBy`, entering a gate's state, a move by `Cx::call`, a removed
+gate's sign-offs consumed at the next write, `listSignOffs`' cursor, and a
+Timers `then` vetoed by `missing_fields` and by `approvals_missing`.
 
 `superschematic-rules-testkit`'s `tests/workflow_scenarios.rs`,
-`tests/timers_scenarios.rs` and `tests/reactions_scenarios.rs` replay
-`core-workflow.json` on Workflow, `core-timers.json` on Workflow and Timers,
-and `core-reactions.json` and `core-reactions-changes.json` on Workflow,
-Reactions and Timers through the reference host, and fail on any step that
-answers otherwise than the engine, or when fewer steps are checked than
-their floors (154, 324, 443 and 65). `tests/workflow_principals_scenarios.rs`
-replays the hand-written `core-workflow-principals.json`
-(`runtime/engine/testdata/rules/scenarios`, D104) on Workflow and the test
-behavior `test.Gate`, whose guard vetoes every Workflow transition, with a
-floor of 122 steps, its opens and reads among them. The reference host keeps the outbox:
+`tests/timers_scenarios.rs`, `tests/reactions_scenarios.rs`,
+`tests/constants_scenarios.rs`, `tests/staterules_scenarios.rs` and
+`tests/approvals_scenarios.rs` replay `core-workflow.json` on Workflow,
+`core-timers.json` on Workflow, StateRules and Timers,
+`core-reactions.json` and `core-reactions-changes.json` on Workflow,
+Reactions and Timers, and `core-constants.json`, `core-staterules.json`
+and `core-approvals.json` on the six through the reference host, and fail
+on any step that answers otherwise than the engine, or when fewer steps
+are checked than their floors (154, 346, 443, 65, 45, 88 and 151).
+`tests/workflow_principals_scenarios.rs` replays the hand-written
+`core-workflow-principals.json` (`runtime/engine/testdata/rules/scenarios`,
+D104) on Workflow and the test behavior `test.Gate`, whose guard vetoes
+every Workflow transition, with a floor of 122 steps, its opens and reads
+among them, and `tests/freezes_and_sign_offs_scenarios.rs` the
+hand-written `core-freezes-and-sign-offs.json` (D104, step 2) with a floor
+of 138. A recorded type that lists Approvals and has no `createdBy` field
+is given one, which each create sets to its caller's subject and which no
+comparison reads, since the engine kept an instance's creator beside it. The reference host keeps the outbox:
 every write of a type whose writes are heard, the core's and a raw one,
 queues a change, and the replay's `runner.runDue` drains the changes through
 the core, runs the due deadlines and drains again. An engine Links link with

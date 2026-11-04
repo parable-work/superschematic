@@ -276,7 +276,8 @@ Most are load errors; knowing them saves a build round-trip:
   and a set whose routes require one passes every caller past `by` (the
   build warns). Keep every field a `by` names out of any update input a
   caller who should not make the move can write (an update operation's
-  `@source` view, a `PATCH`), or the caller sets it to itself and moves the
+  `@source` view, a `PATCH`), or freeze it by listing it in the table's
+  Constants `fields`, or the caller sets it to itself and moves the
   row: the build only warns of a `@source` input of an operation that
   updates a row (a `PUT`, a `PATCH`, or one that takes the key), and sees
   no other write.
@@ -353,6 +354,47 @@ Most are load errors; knowing them saves a build round-trip:
   rule that cannot move its target (already there, no transition, vetoed,
   gone) leaves it as it is. Reactions has no operations, so no route or
   SDK method comes from it.
+- For fields a row keeps, freezes or only moves one way, and moves that
+  wait for sign-offs, implement Constants, StateRules and Approvals on the
+  table beside its Workflow field (D104), never a guard in a handler:
+  `implements Constants<Task, { fields: ["owner"]; oneWay: { urgent:
+  "up"; attempts: "up" }; permission: "tasks.admin" }>`,
+  `StateRules<Task, { states: { planned: { frozen: ["plan"]; by:
+  ["createdBy"] }; proving: { required: ["proof"] } } }>` and
+  `Approvals<Task, { gates: { done: { count: 1; permission:
+  "tasks.review"; resetOn: ["proof"]; pinned: true } } }>`. Constants'
+  `fields` are set by the create for good; `oneWay` fields (a boolean, a
+  number or a date-time, never a decimal or a list) only go `"up"` or
+  `"down"` after it, a create giving any value and clearing one counting
+  as a move down. StateRules' `required` fields are needed to enter a
+  state and kept while in it, for every caller; its `frozen` fields change
+  only for a caller with `permission` or the subject a state's `by` field
+  held before the update (the entries a transition's `by` takes). An
+  Approvals gate's `resetOn` lists the fields whose change clears its
+  sign-offs (`[]` keeps them; without it any update clears them unless
+  `resetOnChange: false`), entering the gated state uses them, and the
+  creator signs none unless `excludeCreator: false` (which needs a
+  `createdBy` field). With `pinned: true`, `signOff` must send `version`,
+  the row's `_version` the signer read; on `stale` read the row again and
+  sign again. Serve `approvals.signOff`, `withdrawSignOff` and
+  `listSignOffs` with `@behaviorOperations(Task)`. An update through the
+  repository names the caller whose permissions the core checks with
+  `orm.withBehaviorCaller({ subject, permissions })` (Go's
+  `WithBehaviorCaller(ctx, rules.Caller{...})`); without one Constants'
+  and StateRules' `permission` never passes. A frozen or `by` field is
+  only as strong as the update operations that take it: keep a StateRules
+  `by` field out of every update input a caller who should not edit what
+  the state freezes can write, or list it in Constants' `fields` (the
+  build warns of a `@source` input that carries one). An upsert's update of
+  the row its key holds (`upsertOne`, `upsertMany`, Go's `UpsertOne`,
+  `UpsertMany`) runs through the core as `updateOne` does, so all three
+  hold it. A raw SQL write and the bulk and hard writes (`updateMany`,
+  `UpdateMany`) skip all three and consume no sign-off: use them only to
+  repair a row. The core reads no value of a field encrypted at rest or
+  a list or map of date-times, so the build refuses one in Constants,
+  StateRules' `required` and `frozen` and `resetOn`. These members are a
+  table's alone: an engine type's `@behavior` refuses `oneWay`, `by`,
+  `status`, `resetOn`, `pinned` and `version`.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

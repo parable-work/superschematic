@@ -18,10 +18,12 @@ import (
 
 // The recorded scenarios are the specification (D103): the transcripts
 // superschematic-rules-testkit writes from core-workflow.json,
-// core-timers.json, core-reactions.json and core-reactions-changes.json,
-// and from the scenarios written by hand in their format where the engine
-// recorded none, core-workflow-principals.json (D104), whose transcript
-// holds each command's row version too
+// core-timers.json, core-reactions.json, core-reactions-changes.json,
+// core-constants.json, core-staterules.json and core-approvals.json, and
+// from the scenarios written by hand in their format where the engine
+// recorded none, core-workflow-principals.json and
+// core-freezes-and-sign-offs.json (D104), whose transcripts hold each
+// command's row version too
 // (runtime/engine/testdata/rules/*.transcript.json, whose format its
 // transcript module states) replayed through this adapter on SQLite and on
 // Postgres, as the TypeScript adapter replays them
@@ -47,7 +49,8 @@ import (
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
 // workflow_status and workflow_entered_at, Timers' sub-table
-// <table>_timers_deadlines). The layout the generator writes
+// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs). The
+// layout the generator writes
 // (internal/generator/behaviorlayout) is held by the generated packages'
 // own end-to-end tests, not by this one.
 
@@ -61,10 +64,14 @@ type transcriptFile struct {
 
 var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-workflow.transcript.json", 96},
-	{"../../engine/testdata/rules/core-timers.transcript.json", 125},
+	{"../../engine/testdata/rules/core-timers.transcript.json", 139},
 	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
 	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
 	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 92},
+	{"../../engine/testdata/rules/core-constants.transcript.json", 39},
+	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
+	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
+	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
 }
 
 type transcript struct {

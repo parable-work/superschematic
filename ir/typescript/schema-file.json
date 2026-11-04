@@ -154,6 +154,20 @@
                           "description": "The permission a caller needs to sign off.",
                           "minLength": 1,
                           "type": "string"
+                        },
+                        "pinned": {
+                          "description": "Whether a sign-off names the row's version its signer read: signOff then needs version, and one that is not the row's version is vetoed stale. A table's alone: an engine type refuses it.",
+                          "type": "boolean"
+                        },
+                        "resetOn": {
+                          "description": "The own fields whose change, by an update, consumes the gate's sign-offs; [] for none. Absent, the gate follows resetOnChange. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 64,
+                          "type": "array",
+                          "uniqueItems": true
                         }
                       },
                       "required": [
@@ -173,6 +187,11 @@
                   "resetOnChange": {
                     "description": "Whether a change of the instance's own fields, an update or an operation's, consumes every gate's sign-offs; true when absent.",
                     "type": "boolean"
+                  },
+                  "status": {
+                    "description": "The field of the type whose Workflow the gates are of. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1046,6 +1065,18 @@
                     "minItems": 1,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "oneWay": {
+                    "additionalProperties": {
+                      "enum": [
+                        "up",
+                        "down"
+                      ]
+                    },
+                    "description": "Own fields, by JSON key, that move one way after the create: up, a boolean that only turns true or a number or a date-time that only grows; down, one that only turns false or shrinks. No value is below every value, so clearing a field is a move down and giving a field with none a value a move up. A move the other way is vetoed (one_way) unless the caller holds the config's permission; a create gives any value. A field is in fields or here, not both. A table's alone: an engine type refuses it.",
+                    "maxProperties": 64,
+                    "minProperties": 1,
+                    "type": "object"
                   },
                   "permission": {
                     "description": "The permission a caller needs to change them after the create; nobody may when absent.",
@@ -2873,6 +2904,16 @@
                       "additionalProperties": false,
                       "minProperties": 1,
                       "properties": {
+                        "by": {
+                          "description": "Who may change a field the state freezes: own fields that hold a subject, createdBy among them. A caller who is the subject one of them holds, before the update, changes a frozen field as a caller with the config's permission does; a field with no value names no one, and what the state requires holds for every caller. Refused in a state that freezes nothing. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
                         "frozen": {
                           "description": "The type's own top-level fields, by JSON key, that do not change while the instance is in the state, or all, every one of them.",
                           "oneOf": [
@@ -2912,6 +2953,11 @@
                       "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
                     },
                     "type": "object"
+                  },
+                  "status": {
+                    "description": "The field of the type whose Workflow the states are of. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
                   }
                 },
                 "required": [

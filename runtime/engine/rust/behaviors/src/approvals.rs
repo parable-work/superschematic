@@ -49,6 +49,14 @@
 //! a schema that has instances, which start with none, and cannot be
 //! removed from one: its sign-offs would stay behind with nothing to delete
 //! them.
+//!
+//! What only a table's Approvals takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores: a gate's `resetOn`, the
+//! fields whose change consumes its sign-offs, and `pinned`, and the
+//! config's `status`, each at define, naming the table form, and
+//! `signOff`'s `version`, as a bad parameter. Ignoring a rule of what a
+//! sign-off holds to would be a hole, and an engine type can be defined at
+//! run time, past any build's check. The engine never answers `stale`.
 
 use serde_json::{json, Map, Value};
 
@@ -56,7 +64,7 @@ use superschematic_engine::behaviors::{
     page, page_request, BehaviorMigration, ColumnSpec, IndexSpec, InstanceCx, InstanceView, Page,
     TableSpec,
 };
-use superschematic_engine::errors::Veto;
+use superschematic_engine::errors::{SchemaIssue, Veto};
 use superschematic_engine::json::{js_keys, number_value};
 use superschematic_engine::storage::{Row, SqlValue};
 use superschematic_engine::{
@@ -65,6 +73,10 @@ use superschematic_engine::{
 };
 
 use crate::staterules::status_of;
+
+// How a refusal of what only a table's Approvals takes names the table form
+// (D104).
+const TABLE_FORM: &str = "implements Approvals<T, { ... }> on a DB table, D104";
 
 /// One gate of an Approvals config, parsed: `excludeCreator` filled in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -235,6 +247,9 @@ impl Behavior for Approvals {
     // every from state to the states of the type's Workflow, whose config it
     // is given, and fills in the defaults.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<ApprovalsConfig> {
+        if let Some(reason) = table_member(raw) {
+            return Err(Error::config(reason));
+        }
         let empty = Map::new();
         let gates = raw
             .get("gates")
@@ -616,6 +631,33 @@ fn sign_off(
     Ok(Value::Object(out))
 }
 
+// table_member says why a config names a member only a table's Approvals
+// takes (D104): each gate's resetOn, then its pinned, gate by gate in the
+// config's order, then status; None for a config that names none.
+fn table_member(raw: &Value) -> Option<String> {
+    if let Some(gates) = raw.get("gates").and_then(Value::as_object) {
+        for state in js_keys(gates) {
+            let gate = &gates[state];
+            if gate.get("resetOn").is_some() {
+                return Some(format!(
+                    "the gate on \"{state}\" names resetOn, which a table's Approvals takes ({TABLE_FORM}): an engine type's gates follow resetOnChange"
+                ));
+            }
+            if gate.get("pinned").is_some() {
+                return Some(format!(
+                    "the gate on \"{state}\" sets pinned, which a table's Approvals takes ({TABLE_FORM}): an engine type's sign-off names no version"
+                ));
+            }
+        }
+    }
+    if raw.get("status").is_some() {
+        return Some(format!(
+            "status is a table's Approvals' ({TABLE_FORM}): an engine type's Approvals reads its one Workflow"
+        ));
+    }
+    None
+}
+
 // guard is the gate: a transition of the type's Workflow into a gated
 // state, from a state the gate allows, waits for its count of sign-offs.
 fn guard(
@@ -623,6 +665,27 @@ fn guard(
     view: &InstanceView<'_, ApprovalsConfig>,
     request: &GuardRequest<'_>,
 ) -> Result<Option<Veto>> {
+    // signOff's version, the row's version its signer read, is a table's
+    // Approvals' (D104).
+    if let GuardRequest::Operation {
+        behavior: NAME,
+        operation: "signOff",
+        params,
+        ..
+    } = request
+    {
+        if params.get("version").is_some() {
+            return Err(EngineError::operation_params(
+                NAME,
+                "signOff",
+                vec![SchemaIssue::new(
+                    "/version",
+                    format!("version is a table's Approvals' ({TABLE_FORM}): an engine type's signOff takes state and note alone"),
+                )],
+            )
+            .into());
+        }
+    }
     let GuardRequest::Operation {
         behavior: "Workflow",
         operation: "transition",

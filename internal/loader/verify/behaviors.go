@@ -105,6 +105,18 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			// repeat for a table, whose core runs them; the engine's
 			// Workflow refuses each (D104).
 			checkEngineWorkflowConfig(td, ref, r)
+		} else if !ref.FieldAnchored() && !ref.Implements {
+			// Constants' oneWay, StateRules' by and status, and Approvals'
+			// resetOn, pinned and status are a table's, whose core runs
+			// them; the engine refuses each (D104).
+			switch ref.Name {
+			case constantsBehavior:
+				checkEngineConstantsConfig(td, ref, r)
+			case stateRulesBehavior:
+				checkEngineStateRulesConfig(td, ref, r)
+			case approvalsBehavior:
+				checkEngineApprovalsConfig(td, ref, r)
+			}
 		}
 		if ref.FieldAnchored() || ref.Implements {
 			uses[id] = behavior
@@ -203,8 +215,11 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // behaviors keeps its version in _version (@optimistic), which no own
 // column may take. A Timers use's config is held to the table
 // (checkTimersConfig), a Reactions use's to the table and the tables of
-// its database (checkReactionsConfig), and a Workflow use's by to the
-// table's fields (checkWorkflowConfig).
+// its database (checkReactionsConfig), a Workflow use's by to the table's
+// fields (checkWorkflowConfig), and a Constants, StateRules or Approvals
+// use's fields, states, by, gates and resetOn to the table and its
+// Workflow (checkConstantsConfig, checkStateRulesConfig,
+// checkApprovalsConfig, D104).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -290,6 +305,18 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			case reactionsBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
+				}
+			case constantsBehavior, stateRulesBehavior, approvalsBehavior:
+				if behavior.ValidateConfig(ref.Config) != nil {
+					break
+				}
+				switch ref.Name {
+				case constantsBehavior:
+					checkConstantsConfig(schema, td, ref, uses, r)
+				case stateRulesBehavior:
+					checkStateRulesConfig(schema, td, ref, uses, r)
+				default:
+					checkApprovalsConfig(schema, td, ref, uses, r)
 				}
 			}
 		}

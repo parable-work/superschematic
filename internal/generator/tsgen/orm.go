@@ -315,7 +315,7 @@ var encryptedStatements = []string{"stale", "reseal"}
 
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
-var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "transaction", "query", "exec", "queries"}
+var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "withBehaviorCaller", "transaction", "query", "exec", "queries"}
 
 // typeScriptORM is what orm.ts writes for schema, or nil for a schema with
 // no table. output holds the types the rows' members take theirs from, and

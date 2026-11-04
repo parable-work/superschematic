@@ -38,11 +38,14 @@ creates, updates and deletes its rows through the behaviors' core, which
 the runtime's adapter runs in the ORM's transaction over the layout
 fixtureWorkflowPrincipalsDbRules records. An upsert inserts a new row with the owned
 fields the core's create gives it, and updates a row the key holds by its
-own fields alone; a table whose behaviors keep sub-tables or arm deadlines
-has no upserts, and its repository runs a due deadline, as a behavior
-worker claimed it (runDeadline). A behavior's sub-table has no repository:
-only its operations write it. A raw SQL write of an owned column or a
-sub-table row is never refused, and arms or clears no deadline.
+own fields alone, through the core's update as updateOne's does, so each
+use's guards hold it, Constants' and StateRules' among them (D104): its
+statement locks the row and writes nothing of it, and the row is read back
+by the key's columns. A table whose behaviors keep sub-tables or arm
+deadlines has no upserts, and its repository runs a due deadline, as a
+behavior worker claimed it (runDeadline). A behavior's sub-table has no
+repository: only its operations write it. A raw SQL write of an owned
+column or a sub-table row is never refused, and arms or clears no deadline.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';

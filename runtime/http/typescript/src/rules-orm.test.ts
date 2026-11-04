@@ -9,8 +9,12 @@ import { uuidToDb } from './uuid';
 // on status (D103), as tsgen writes its definition and layout
 // (internal/generator/tsgen's fixture-workflow-db golden): createOne,
 // updateOne and deleteOne go through the core in a transaction, an upsert
-// inserts what the core's create gives a row, and orm.order.status holds
-// Workflow's operations. Skipped without
+// inserts what the core's create gives a row and updates a row its key
+// holds through the core's update, and orm.order.status holds Workflow's
+// operations; and over a table that implements Constants and StateRules
+// beside its Workflow, with no sub-table and a unique key, whose upserts
+// are held to the rules those uses hold an update to (D104). Postgres
+// alone, the ORM's one dialect. Skipped without
 // SUPERSCHEMATIC_RULES_TEST_DATABASE_URL; the generated package's own
 // end-to-end test runs the generated definition itself.
 
@@ -268,6 +272,25 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     expect(await orm.order.status.transition(id, { to: 'shipped' }, { caller: { subject: 'sam', permissions: ['orders.ship'] } })).toEqual({ from: 'paid', to: 'shipped' });
   });
 
+  test("withBehaviorCaller runs the commands as its caller, kept by withUser's copy and a transaction, a call's caller still first, and null unsets it", async () => {
+    const shipper = orm.withBehaviorCaller({ subject: 'sam', permissions: ['orders.ship'] });
+    const paid = async () => {
+      const row = await shipper.order.createOne({ title: 'Crate' });
+      expect(await shipper.order.status.transition(row.id, { to: 'paid' })).toEqual({ from: 'draft', to: 'paid' });
+      return row.id;
+    };
+    const first = await paid();
+    await expect(orm.order.status.transition(first, { to: 'shipped' })).rejects.toMatchObject({ code: 'forbidden', status: 403 });
+    expect(await shipper.withUser('6fe1XoZ0UJpMNNdUOSMC2X').order.status.transition(first, { to: 'shipped' })).toEqual({ from: 'paid', to: 'shipped' });
+    const second = await paid();
+    expect(await shipper.transaction(tx => tx.order.status.transition(second, { to: 'shipped' }))).toEqual({ from: 'paid', to: 'shipped' });
+    const third = await paid();
+    await expect(shipper.order.status.transition(third, { to: 'shipped' }, { caller: { subject: 'ann', permissions: [] } })).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(shipper.withBehaviorCaller(null).order.status.transition(third, { to: 'shipped' })).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(shipper.transaction(async tx => tx.withBehaviorCaller(null).order.status.transition(third, { to: 'shipped' }))).rejects.toMatchObject({ code: 'forbidden' });
+    expect(await orm.order.getOne(third)).toMatchObject({ status: 'paid' });
+  });
+
   test('updateOne writes own fields through the core, and refuses an owned one', async () => {
     const row = await orm.order.updateOne(id, { title: 'Chair' });
     expect(row).toMatchObject({ title: 'Chair', status: 'shipped', _version: 4 });
@@ -276,7 +299,7 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     await expect(orm.order.createOne({ title: 'Lamp', status: 'paid' } as never)).rejects.toMatchObject({ code: 'invalid_instance' });
   });
 
-  test("an upsert inserts a new row with what the core's create gives it, and updates a held row's own fields alone, its state kept", async () => {
+  test("an upsert inserts a new row with what the core's create gives it, and updates a held row's own fields through the core, its state kept", async () => {
     const before = Date.now();
     const inserted = await orm.order.upsertOneResult({ title: 'Crate' }, ['id'], { title: 'Crate' });
     expect(inserted.status).toBe('inserted');
@@ -285,6 +308,8 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     expect(await orm.order.status.transition(inserted.row.id, { to: 'paid' })).toEqual({ from: 'draft', to: 'paid' });
     const entered = (await orm.order.getOne(inserted.row.id)).statusEnteredAt!.getTime();
 
+    // The conflict branch writes nothing, so the core's update moves the
+    // version once.
     const updated = await orm.order.upsertOneResult({ id: inserted.row.id, title: 'Crate' }, ['id'], { title: 'Box' });
     expect(updated.status).toBe('updated');
     expect(updated.row).toMatchObject({ id: inserted.row.id, title: 'Box', status: 'paid', _version: 3 });
@@ -379,5 +404,299 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     const repositories = ormOf<Repositories>(pool, { ...definition, rules: quiet });
     expect(Object.keys(repositories.order)).not.toContain('reactions');
     expect(typeof repositories.order.getOne).toBe('function');
+  });
+});
+
+const itemColumns = '"id", "code", "title", "owner", "urgent", "plan", "reviewer", "status", "status_entered_at", "updated_at", "deleted_at", "_version"';
+
+/**
+ * A soft-deletable table that implements Constants and StateRules beside
+ * its Workflow on status (D104), as the fixture-approvals-db golden lays
+ * one out, with no sub-table, so it has upserts: by its unique key, code,
+ * and by a unique index over lower(code), an expression.
+ */
+const itemTable: TableDefinition = {
+  ...orderTable,
+  name: 'Item',
+  table: 'item',
+  softDelete: true,
+  columns: [
+    { name: 'id', column: 'id', field: 'id', qualified: 'item.id', uuid: true, key: true, auto: true, required: true },
+    { name: 'code', column: 'code', field: 'code', qualified: 'item.code', required: true },
+    { name: 'title', column: 'title', field: 'title', qualified: 'item.title', required: true },
+    { name: 'owner', column: 'owner', field: 'owner', qualified: 'item.owner' },
+    { name: 'urgent', column: 'urgent', field: 'urgent', qualified: 'item.urgent', boolean: true },
+    { name: 'plan', column: 'plan', field: 'plan', qualified: 'item.plan' },
+    { name: 'reviewer', column: 'reviewer', field: 'reviewer', qualified: 'item.reviewer' },
+    { name: 'status', column: 'status', field: 'status', qualified: 'item.status', required: true },
+    { name: 'statusEnteredAt', column: 'status_entered_at', field: 'statusEnteredAt', qualified: 'item.status_entered_at', timestamp: true },
+    { name: 'updatedAt', column: 'updated_at', field: 'updatedAt', qualified: 'item.updated_at', timestamp: true, audit: 'updatedAt' },
+    { name: 'deletedAt', column: 'deleted_at', field: 'deletedAt', qualified: 'item.deleted_at', timestamp: true, audit: 'deletedAt' },
+    { name: '_version', column: '_version', field: '_version', qualified: 'item._version', int64: true, auto: true, required: true, internal: true },
+  ],
+  statements: {
+    ...orderTable.statements,
+    columns: itemColumns,
+    getOne: `SELECT ${itemColumns} FROM item WHERE id = $1`,
+    live: ' AND deleted_at IS NULL',
+    liveCondition: 'item.deleted_at IS NULL',
+    findOne: 'SELECT %s FROM item%s%s LIMIT 1',
+    insert: 'INSERT INTO item (%s) VALUES (%s) RETURNING %s',
+    update: 'UPDATE item SET %s WHERE id = $%d',
+    returning: ` RETURNING ${itemColumns}`,
+    upsert: `INSERT INTO item (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING ${itemColumns}, (xmax = 0) AS _inserted`,
+    softDelete: 'UPDATE item SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL',
+    delete: 'DELETE FROM item WHERE id = $1',
+  },
+  uniqueKeys: {
+    id: { conflict: '(id)', keep: 'id = EXCLUDED.id', rows: `SELECT ${itemColumns} FROM item WHERE (id) IN (%s)` },
+    code: { conflict: '(code)', keep: 'code = EXCLUDED.code', rows: `SELECT ${itemColumns} FROM item WHERE (code) IN (%s)` },
+    lowerCode: { conflict: '((lower(code)))', keep: 'code = EXCLUDED.code', expression: true },
+  },
+};
+
+/** Item's owner stays who its create named and urgent only turns true, unless the caller holds items.admin; while it is a draft only its reviewer edits its plan. */
+const itemRules: RulesLayout = {
+  types: {
+    Item: {
+      type: 'Item',
+      table: 'item',
+      key: { field: 'id', column: 'id', type: 'Identity.UUID' },
+      version: '_version',
+      live: { column: 'deleted_at' },
+      own: [
+        { field: 'code', column: 'code', type: 'string' },
+        { field: 'title', column: 'title', type: 'string' },
+        { field: 'owner', column: 'owner', type: 'string' },
+        { field: 'urgent', column: 'urgent', type: 'boolean' },
+        { field: 'plan', column: 'plan', type: 'string' },
+        { field: 'reviewer', column: 'reviewer', type: 'string' },
+      ],
+      uses: [
+        { id: 'Constants', behavior: 'Constants', member: 'constants', fields: [], operations: [] },
+        { id: 'StateRules', behavior: 'StateRules', member: 'staterules', fields: [], operations: [] },
+        { ...rules.types.Order!.uses[0]!, member: 'status' },
+      ],
+      spec: {
+        name: 'Item',
+        uses: [
+          { behavior: 'Constants', config: { fields: ['owner'], oneWay: { urgent: 'up' }, permission: 'items.admin' }, anchor: 'type' },
+          { behavior: 'StateRules', config: { states: { draft: { frozen: ['plan'], by: ['reviewer'] } } }, anchor: 'type' },
+          { behavior: 'Workflow', config: { initial: 'draft', states: ['draft', 'done'], transitions: [{ from: 'draft', to: 'done' }] }, anchor: { field: 'status' } },
+        ],
+        fields: [
+          { name: 'code', type: 'string' },
+          { name: 'title', type: 'string' },
+          { name: 'owner', type: 'string' },
+          { name: 'urgent', type: 'boolean' },
+          { name: 'plan', type: 'string' },
+          { name: 'reviewer', type: 'string' },
+        ],
+      },
+    },
+  },
+};
+
+const itemDefinition: OrmDefinition = { clauses, defaultLimit: 100, historyActorCTE: '', clearHistoryActor: '', tables: { item: itemTable }, rules: itemRules };
+
+interface ItemRow {
+  id: string;
+  code: string;
+  title: string;
+  owner: string | null;
+  urgent: boolean | null;
+  plan: string | null;
+  reviewer: string | null;
+  status: string;
+  updatedAt: Date;
+  _version: number;
+}
+
+interface ItemInput {
+  code: string;
+  title: string;
+  owner?: string;
+  urgent?: boolean;
+  plan?: string;
+  reviewer?: string;
+}
+
+type ItemUpdate = Partial<Omit<ItemInput, 'code'>>;
+
+type ItemKey = readonly ['code'] | readonly ['lowerCode'];
+
+interface ItemRepositories {
+  readonly item: {
+    deleteOne(id: string): Promise<void>;
+    upsertOne(input: ItemInput, on: ItemKey, update: ItemUpdate, options?: { onlyIfChanged?: boolean }): Promise<ItemRow>;
+    upsertOneResult(input: ItemInput, on: ItemKey, update: ItemUpdate, options?: { onlyIfChanged?: boolean }): Promise<Upserted<ItemRow>>;
+    upsertMany(inputs: readonly ItemInput[], on: ItemKey, update: readonly (keyof ItemUpdate)[], options?: { onlyIfChanged?: boolean }): Promise<Upserted<ItemRow>[]>;
+  };
+}
+
+describe.skipIf(rulesCore === undefined || rulesDsn === '')('an upsert of a table that implements Constants and StateRules, on Postgres', () => {
+  const schema = `rules_orm_upsert_${process.pid}_${Date.now()}`;
+  let admin: pg.Pool;
+  let pool: pg.Pool;
+  let orm: Orm<ItemRepositories>;
+
+  beforeAll(async () => {
+    admin = new pg.Pool({ connectionString: rulesDsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    pool = new pg.Pool({ connectionString: rulesDsn, max: 4, options: `-c search_path=${schema}` });
+    await pool.query(`CREATE TABLE item (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  owner TEXT,
+  urgent BOOLEAN,
+  plan TEXT,
+  reviewer TEXT,
+  status TEXT,
+  status_entered_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  deleted_at TIMESTAMPTZ,
+  _version BIGINT DEFAULT 1 NOT NULL
+)`);
+    await pool.query('CREATE UNIQUE INDEX item_lower_code ON item ((lower(code)))');
+    for (const ddl of bumpVersion('item')) await pool.query(ddl);
+    orm = ormOf<ItemRepositories>(pool, itemDefinition, withRulesCore(null, () => rulesCore!));
+  });
+  afterAll(async () => {
+    await pool?.end();
+    await admin?.query(`DROP SCHEMA ${schema} CASCADE`);
+    await admin?.end();
+  });
+
+  /** The row that holds code as the table holds it, read past the ORM; undefined when none does. */
+  const stored = async (code: string) => (await pool.query('SELECT title, owner, urgent, plan, reviewer, status, updated_at, deleted_at, _version FROM item WHERE code = $1', [code])).rows[0];
+
+  /** An input whose key, k1, the table holds after the first test. */
+  const held: ItemInput = { code: 'k1', title: 'Kettle' };
+
+  test("an upsert of a new key inserts what the core's create gives the row, and one that sets no field leaves the held row as it is", async () => {
+    const inserted = await orm.item.upsertOneResult({ code: 'k1', title: 'Kettle', owner: 'ann', urgent: false, plan: 'boil', reviewer: 'rita' }, ['code'], { title: 'Kettle' });
+    expect(inserted.status).toBe('inserted');
+    expect(inserted.row).toMatchObject({ code: 'k1', title: 'Kettle', owner: 'ann', urgent: false, plan: 'boil', reviewer: 'rita', status: 'draft', _version: 1 });
+    const same = await orm.item.upsertOneResult(held, ['code'], {});
+    expect(same.status).toBe('unchanged');
+    expect(same.row).toMatchObject({ id: inserted.row.id, title: 'Kettle', owner: 'ann', plan: 'boil' });
+  });
+
+  test('an upsert of a held key that changes a constant is refused and leaves the row as it was; a caller with the permission changes it, moving its version once', async () => {
+    const before = await stored('k1');
+    await expect(orm.item.upsertOne(held, ['code'], { owner: 'bob' })).rejects.toMatchObject({
+      code: 'invalid_instance',
+      status: 422,
+      refusal: { details: { issues: [{ path: 'owner', rule: 'constant' }] } },
+    });
+    await expect(orm.item.upsertOne(held, ['code'], { title: 'Pot', owner: 'bob' })).rejects.toBeInstanceOf(RulesRefusal);
+    expect(await stored('k1')).toEqual(before);
+    const keeper = orm.withBehaviorCaller({ subject: 'root', permissions: ['items.admin'] });
+    const changed = await keeper.item.upsertOneResult(held, ['code'], { owner: 'bob' });
+    expect(changed).toMatchObject({ status: 'updated', row: { owner: 'bob', title: 'Kettle', _version: Number(before._version) + 1 } });
+    expect(await stored('k1')).toMatchObject({ owner: 'bob', _version: String(Number(before._version) + 1) });
+  });
+
+  test('an upsert that moves a one-way field forward is updated and saved, and one that moves it back is refused and leaves the row as it was', async () => {
+    const earlier = await stored('k1');
+    const forward = await orm.item.upsertOneResult(held, ['code'], { urgent: true });
+    expect(forward).toMatchObject({ status: 'updated', row: { urgent: true, _version: Number(earlier._version) + 1 } });
+    const before = await stored('k1');
+    expect(before.urgent).toBe(true);
+    await expect(orm.item.upsertOne(held, ['code'], { urgent: false })).rejects.toMatchObject({
+      code: 'vetoed',
+      refusal: { details: { behavior: 'Constants', vetoCode: 'one_way', vetoDetails: { field: 'urgent', direction: 'up' } } },
+    });
+    expect(await stored('k1')).toEqual(before);
+  });
+
+  test('an upsert that changes a frozen field is refused for a caller its by does not name, and saved, stamped, for the subject it names', async () => {
+    const before = await stored('k1');
+    const frozen = { code: 'vetoed', refusal: { details: { behavior: 'StateRules', vetoCode: 'frozen_fields', vetoDetails: { state: 'draft', fields: ['plan'], by: ['reviewer'] } } } };
+    await expect(orm.item.upsertOne(held, ['code'], { plan: 'steep' })).rejects.toMatchObject(frozen);
+    await expect(orm.withBehaviorCaller({ subject: 'sam', permissions: [] }).item.upsertOne(held, ['code'], { plan: 'steep' })).rejects.toMatchObject(frozen);
+    expect(await stored('k1')).toEqual(before);
+    const saved = await orm.withBehaviorCaller({ subject: 'rita', permissions: [] }).item.upsertOneResult(held, ['code'], { plan: 'steep' });
+    expect(saved).toMatchObject({ status: 'updated', row: { plan: 'steep', status: 'draft', _version: Number(before._version) + 1 } });
+    expect(saved.row.updatedAt.getTime()).toBeGreaterThan(before.updated_at.getTime());
+  });
+
+  test('an upsert only if changed whose fields hold its values already is unchanged at its version; one that differs runs through the core', async () => {
+    const before = await stored('k1');
+    const same = await orm.item.upsertOneResult(held, ['code'], { title: 'Kettle', urgent: true }, { onlyIfChanged: true });
+    expect(same.status).toBe('unchanged');
+    expect(same.row).toMatchObject({ title: 'Kettle', urgent: true, _version: Number(before._version) });
+    expect(await stored('k1')).toEqual(before);
+    await expect(orm.item.upsertOne(held, ['code'], { title: 'Pot', urgent: false }, { onlyIfChanged: true })).rejects.toMatchObject({ code: 'vetoed', refusal: { details: { vetoCode: 'one_way' } } });
+    expect(await stored('k1')).toEqual(before);
+    const differs = await orm.item.upsertOneResult(held, ['code'], { title: 'Teapot', urgent: true }, { onlyIfChanged: true });
+    expect(differs).toMatchObject({ status: 'updated', row: { title: 'Teapot', urgent: true, _version: Number(before._version) + 1 } });
+  });
+
+  test("upsertMany updates each held row through the core with its input's fields, in the inputs' order, as the repository's caller", async () => {
+    const before = await stored('k1');
+    const results = await orm.withBehaviorCaller({ subject: 'rita', permissions: [] }).item.upsertMany(
+      [
+        { code: 'k2', title: 'Cup', owner: 'cy', plan: 'fill', reviewer: 'rita' },
+        { code: 'k1', title: 'Kettle', plan: 'pour' },
+      ],
+      ['code'],
+      ['title', 'plan']
+    );
+    expect(results.map(result => [result.status, result.row.code, result.row.title, result.row.owner, result.row.plan, result.row.status, result.row._version])).toEqual([
+      ['inserted', 'k2', 'Cup', 'cy', 'fill', 'draft', 1],
+      ['updated', 'k1', 'Kettle', 'bob', 'pour', 'draft', Number(before._version) + 1],
+    ]);
+    const after = await stored('k1');
+    const unchanged = await orm.item.upsertMany([{ code: 'k1', title: 'Kettle', plan: 'pour' }], ['code'], ['title', 'plan'], { onlyIfChanged: true });
+    expect(unchanged.map(result => [result.status, result.row._version])).toEqual([['unchanged', Number(after._version)]]);
+    expect(await stored('k1')).toEqual(after);
+  });
+
+  test("an upsertMany whose second input's held row would change a constant is refused and writes none of the batch", async () => {
+    const before = await stored('k1');
+    await expect(
+      orm.item.upsertMany(
+        [
+          { code: 'k3', title: 'Jug', owner: 'jo' },
+          { code: 'k1', title: 'Kettle', owner: 'zed' },
+        ],
+        ['code'],
+        ['owner']
+      )
+    ).rejects.toMatchObject({ code: 'invalid_instance', refusal: { details: { issues: [{ path: 'owner', rule: 'constant' }] } } });
+    expect(await stored('k3')).toBeUndefined();
+    expect(await stored('k1')).toEqual(before);
+  });
+
+  test('an upsert of a key a soft-deleted row holds throws NotFoundError and writes nothing', async () => {
+    const acting = orm.withUser('6fe1XoZ0UJpMNNdUOSMC2X');
+    const row = await acting.item.upsertOne({ code: 'k4', title: 'Lid' }, ['code'], {});
+    await acting.item.deleteOne(row.id);
+    const gone = await stored('k4');
+    expect(gone.deleted_at).toBeInstanceOf(Date);
+    await expect(acting.item.upsertOne({ code: 'k4', title: 'Lid' }, ['code'], { title: 'Cap' })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(acting.item.upsertOne({ code: 'k4', title: 'Lid' }, ['code'], { title: 'Cap' }, { onlyIfChanged: true })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(acting.item.upsertMany([{ code: 'k5', title: 'Tin' }, { code: 'k4', title: 'Cap' }], ['code'], ['title'])).rejects.toBeInstanceOf(NotFoundError);
+    await expect(acting.item.upsertOne({ code: 'k4', title: 'Lid' }, ['code'], {})).rejects.toBeInstanceOf(NotFoundError);
+    expect(await stored('k4')).toEqual(gone);
+    expect(await stored('k5')).toBeUndefined();
+  });
+
+  test('an upsert on a key over an expression whose update sets a field is refused before anything is written; one that sets none keeps the row as it is', async () => {
+    const before = await stored('k1');
+    await expect(orm.item.upsertOne({ code: 'K1', title: 'Kettle' }, ['lowerCode'], { title: 'Urn' })).rejects.toThrow(
+      'orm: upsertOne of Item on lowerCode, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key'
+    );
+    await expect(orm.item.upsertMany([{ code: 'K1', title: 'Urn' }], ['lowerCode'], ['title'])).rejects.toThrow('a unique index over an expression');
+    expect(await stored('k1')).toEqual(before);
+    expect(await stored('K1')).toBeUndefined();
+    // The key's keep, as the generator writes it, sets its first column to
+    // the input's value, so the read of k1 is the last of these tests.
+    const [{ id }] = (await pool.query("SELECT id FROM item WHERE code = 'k1'")).rows;
+    const kept = await orm.item.upsertOneResult({ code: 'K1', title: 'Kettle' }, ['lowerCode'], {});
+    expect(kept.status).toBe('unchanged');
+    expect(uuidToDb(kept.row.id)).toBe(id);
   });
 });

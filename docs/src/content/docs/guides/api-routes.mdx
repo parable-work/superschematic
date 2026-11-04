@@ -680,9 +680,11 @@ The three runtimes run the same vectors
 
 A DB table may type a field as a behavior, `status: Workflow<{ ... }>`, or
 implement a behavior of the whole table, `implements Timers<Ticket, { ...
-}>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker)) or
+}>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker)),
 `implements Reactions<Project, { ... }>` ([A table's
-reactions](#a-tables-reactions-and-its-change-queue)) (D103). The table
+reactions](#a-tables-reactions-and-its-change-queue)) or `implements
+Approvals<Task, { ... }>` ([A table's sign-offs](#a-tables-sign-offs-approvals))
+(D103). The table
 stays a table: the behavior's fields are its columns (`status`,
 `status_entered_at`), the generated repositories read them and leave them
 out of their create, update and upsert inputs, and only the behavior's
@@ -853,7 +855,17 @@ takes a `@source` view of the table carrying a field a `by` names, naming
 the API, the operation, the field, the moves and the fix:
 
 ```
-questions-api: QuestionAdmin.reassignQuestion takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call reassignQuestion can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it once StateRules or Constants run on the core (D104)
+questions-api: QuestionAdmin.reassignQuestion takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call reassignQuestion can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it: list it in the fields of Question's Constants (D104)
+```
+
+A field the table's Constants lists in `fields` is not warned of, since
+no update changes it
+([Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)).
+A field a StateRules state's `by` names is warned of the same way, since
+a caller who sets it to itself may then change what the state freezes:
+
+```
+tasks-api: TaskAdmin.reassignTask takes Task.reviewer (TaskAssignment is @source(Task)), and Task's StateRules names reviewer in by for working: a caller who may call reassignTask can set reviewer to itself and then change the fields working freezes. Keep reviewer out of the operation's input, or freeze it: list it in the fields of Task's Constants (D104)
 ```
 
 It is a warning, not a refusal, and it sees only that: an input of a
@@ -873,6 +885,64 @@ the override, since every caller its routes admit then passes `by`:
 ```
 QuestionActions: every caller its routes admit holds questions, which covers questions.moderate, the overridePermission of the Workflow on Question.status, so each moves its rows past every transition's by, which names no one for them; require a permission that does not cover questions.moderate, or name another overridePermission (D104)
 ```
+
+### A table's sign-offs: Approvals
+
+A table that implements Approvals
+([Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off))
+has three operations, which a `@behaviorOperations` set serves beside its
+Workflow field's `transition`; Constants and StateRules add none, and hold
+the table's updates and moves instead:
+
+```ts
+// tasks-api
+@behaviorOperations(Task)
+@auth
+export abstract class TaskActions {}
+```
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /api/task/{id}/approvals/sign-off` | `{ "state": "done", "note"?: "...", "version"?: 7 }` | `{ state, subject, note?, at, signedBy, count }`, the gate's subjects that count after it |
+| `POST /api/task/{id}/approvals/withdraw-sign-off` | `{ "state": "done" }` | the sign-off taken back, `{ state, subject, note?, at }` |
+| `POST /api/task/{id}/approvals/list-sign-offs` | `{ "state"?: "done", "limit"?: 50, "cursor"?: "..." }` | `{ items: [{ state, subject, note?, at, consumedAt? }], next }`, oldest first, the consumed ones included; it writes nothing |
+
+The types are `TaskApprovalsSignOffInput`, whose `state` is
+`TaskApprovalsGate`, the enum of the config's gated states, and the rest
+of `TaskApprovals*`; the SDK method is `sdk.task.approvals.signOff(id, {
+state: "done", version })` and the MCP tool `task_approvals_sign_off`. The
+core checks a `signOff`'s caller against the gate's `permission` (403
+`forbidden` without it), so an `@auth` set admits any signed-in caller and
+the config decides who signs. A sign-off is a
+write: it moves the row's `_version`. The permission catalog lists each
+gate's permission under the three operations, and Constants' and
+StateRules' `permission` under each operation that updates a row of the
+table through a `@source` view of it, which the core checks on that
+update.
+
+| Call | Answer |
+| --- | --- |
+| a transition into a gated state with fewer sign-offs than its `count` | 409 `vetoed`, `approvals_missing`, `details.vetoDetails` `{ "state": "proving", "required": 1, "count": 0 }` |
+| `signOff` on a `pinned` gate without `version` | 400 `invalid_argument`: `operation signOff of behavior Approvals: /version: is required: the gate on done is pinned, so a sign-off names the row's version its signer read` |
+| `signOff` whose `version` is not the row's, on any gate | 409 `vetoed`, `stale`, `details.vetoDetails` `{ "version": 6, "current": 7 }`: `behavior Approvals vetoes signOff of Task <id>: Task <id> is at version 7, not 6` |
+| `signOff` with the row's `version` | 200 |
+| `signOff` of a state the config does not gate, of the state the row is in, by its creator on a gate that excludes the creator, a second time, or `withdrawSignOff` with no sign-off to take back | 409 `vetoed`: `no_gate`, `in_state`, `creator_cannot_sign`, `already_signed`, `not_signed` |
+
+`version` is checked after the parameters (a malformed `version`, or none
+on a pinned gate, is 400 first) and only for a state the config gates (a
+`version` on another state is `no_gate`), then before every guard and the
+gate's permission, as Workflow's `from` is, so a stale read is answered to
+any caller the route admits. The API's types of `Task` carry no
+`_version`: read it from a repository's row, or from the `stale` veto's
+`current`. The
+updates Constants and StateRules refuse answer through the route that
+makes them, as any refusal of the core: 409 `vetoed` with `one_way`,
+`required_fields` or `frozen_fields`, and 422 `invalid_instance` for a
+constant. An authored route's update reaches the core as its caller's
+subject alone, holding no permissions, so Constants' and StateRules'
+`permission` passes only for an update that names its caller
+(`orm.withBehaviorCaller({ subject, permissions })`, Go's
+`WithBehaviorCaller`).
 
 ## A table's deadlines: Timers and its worker
 

@@ -98,6 +98,7 @@ var coreNarrowers = map[string]narrower{
 	"Rollups":      narrowRollups,
 	"Variants":     narrowVariants,
 	"Approvals":    narrowApprovals,
+	"Constants":    narrowConstants,
 	"Numbering":    narrowNumbering,
 	"Timers":       narrowTimers,
 	"Derived":      narrowDerived,
@@ -925,8 +926,12 @@ func EnumValues(enum *ir.EnumDef) []string {
 // Approvals: the gates field holds, by gated state, the subjects whose
 // sign-offs count, and no gate with none, so none is required; signOff and
 // withdrawSignOff name a gated state. listSignOffs takes any state, a gate
-// a later version removed included.
-func narrowApprovals(n *Narrowing, config map[string]any, _ Target) error {
+// a later version removed included. On a table the gated states are the
+// alias <Base>Gate, and signOff takes the row's version its signer read,
+// optional, which a pinned gate needs (D104); an engine type's Approvals
+// refuses version and never answers stale, so its types name the states
+// inline and have neither.
+func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 	gates, _ := config["gates"].(map[string]any)
 	states := SortedKeys(gates)
 	properties := map[string]any{}
@@ -936,15 +941,38 @@ func narrowApprovals(n *Narrowing, config map[string]any, _ Target) error {
 			"properties": map[string]any{"signedBy": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
 		}
 	}
+	table := target.Instance != nil && !target.Instance.IsEngineType()
+	state := func() map[string]any { return EnumOf(states) }
+	if table {
+		gate := target.Base + "Gate"
+		n.Aliases = append(n.Aliases, Alias{Name: gate, Doc: fmt.Sprintf("A state %s's Approvals gates.", An(target.Base)), Schema: EnumOf(states)})
+		state = func() map[string]any { return ref(gate, "") }
+	}
 	for _, op := range []string{"signOff", "withdrawSignOff"} {
-		if err := setOperationProperty(n.Params, op, nil, "state", EnumOf(states)); err != nil {
+		if err := setOperationProperty(n.Params, op, nil, "state", state()); err != nil {
 			return err
 		}
-		if err := setOperationProperty(n.Results, op, nil, "state", EnumOf(states)); err != nil {
+		if err := setOperationProperty(n.Results, op, nil, "state", state()); err != nil {
 			return err
 		}
 	}
+	if !table {
+		if err := deleteProperty(n.Params["signOff"], "version"); err != nil {
+			return fmt.Errorf("operation signOff: %w", err)
+		}
+		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "stale" })
+	}
 	return setField(n, "gates", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
+}
+
+// Constants: an engine type's Constants refuses oneWay and never answers
+// one_way (D104), so its vetoes have none; a table's keeps the
+// declaration's.
+func narrowConstants(n *Narrowing, _ map[string]any, target Target) error {
+	if target.Instance == nil || target.Instance.IsEngineType() {
+		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "one_way" })
+	}
+	return nil
 }
 
 // Assignment: the assignee's subject, absent when unassigned.

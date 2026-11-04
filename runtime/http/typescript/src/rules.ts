@@ -1053,7 +1053,7 @@ export async function readRow(host: RulesHost, type: string, key: string): Promi
   const text = `SELECT ${rowList(table)} FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${placeholder(host.store.dialect, 1)}${live(table)}`;
   const rows = await host.store.query(text, [keyValue(table, key)]);
   const row = rows[0];
-  return row === undefined ? null : rowFrom(table, row);
+  return row === undefined ? null : rowFrom(table, row, host.store.dialect);
 }
 
 /**
@@ -1072,12 +1072,12 @@ function ownRead(table: RulesTable): readonly RulesColumn[] {
   return table.audit === undefined || table.audit.length === 0 ? table.own : [...table.own, ...table.audit];
 }
 
-/** A row read by rowList's select list as the core reads it: each column converted, one with no value absent, and a use with none absent. */
-function rowFrom(table: RulesTable, row: Readonly<Record<string, unknown>>): CoreRow {
+/** A row read by rowList's select list as the core reads it: each column converted in the store's dialect, one with no value absent, and a use with none absent. */
+function rowFrom(table: RulesTable, row: Readonly<Record<string, unknown>>, dialect: RulesDialect): CoreRow {
   const own: Record<string, unknown> = {};
   const read = ownRead(table);
   read.forEach((column, i) => {
-    const value = fromColumn(row[`c${i}`], column, table);
+    const value = fromColumn(row[`c${i}`], column, table, dialect);
     if (value !== undefined) own[column.field] = value;
   });
   const fields: Record<string, Record<string, unknown>> = {};
@@ -1085,7 +1085,7 @@ function rowFrom(table: RulesTable, row: Readonly<Record<string, unknown>>): Cor
   for (const use of table.uses) {
     const values: Record<string, unknown> = {};
     for (const field of use.fields) {
-      const value = fromColumn(row[`c${at++}`], field, table);
+      const value = fromColumn(row[`c${at++}`], field, table, dialect);
       if (value !== undefined) values[field.name] = value;
     }
     if (Object.keys(values).length > 0) fields[use.id] = values;
@@ -1117,7 +1117,7 @@ export async function readLinked(host: RulesHost, type: string, field: string, k
   }
   const text = `SELECT ${quote(table.key.column)} AS k, ${rowList(table)} FROM ${quote(table.table)} WHERE ${where} ORDER BY ${quote(table.key.column)} LIMIT ${limit + 1}`;
   const found = await host.store.query(text, values);
-  return { rows: found.slice(0, limit).map(row => ({ key: wireKeyOf(table, row.k), row: rowFrom(table, row) })), more: found.length > limit };
+  return { rows: found.slice(0, limit).map(row => ({ key: wireKeyOf(table, row.k), row: rowFrom(table, row, dialect) })), more: found.length > limit };
 }
 
 /** The table of a type, or an internal refusal for a type the layout lacks. */
@@ -1330,7 +1330,7 @@ function imageOf(table: RulesTable, dialect: RulesDialect, image: unknown, what:
   const columns = members as Readonly<Record<string, unknown>>;
   const value = (column: RulesColumn): unknown => {
     const cell = columns[column.column];
-    return fromColumn(dialect === 'sqlite' && typeof cell === 'boolean' ? (cell ? 1 : 0) : cell, column, table);
+    return fromColumn(dialect === 'sqlite' && typeof cell === 'boolean' ? (cell ? 1 : 0) : cell, column, table, dialect);
   };
   const own: Record<string, unknown> = {};
   for (const column of table.own) {
@@ -1396,7 +1396,7 @@ export async function readSubRows(host: RulesHost, type: string, key: string, us
   return rows.map(row => {
     const values: Record<string, unknown> = {};
     sub.fields.forEach((field, i) => {
-      const value = fromColumn(row[`c${i}`], field, table);
+      const value = fromColumn(row[`c${i}`], field, table, dialect);
       if (value !== undefined) values[field.name] = value;
     });
     return { key: String(row.k), values };
@@ -1726,10 +1726,14 @@ function keyValue(table: RulesTable, key: string): unknown {
   return UUID_TYPES.has(table.key.type) ? uuidToDb(key) : key;
 }
 
+/** The IR type of a column that holds JSON (D103): JSONB on Postgres, its JSON text on SQLite. */
+const JSON_TYPE = 'Generic.JSON';
+
 /**
  * A value of the core's as its column binds it: null for none; a
  * timestamp's epoch milliseconds as a Date on Postgres and its ISO text on
- * SQLite; a UUID's hyphenated text; an object or array as its JSON text
+ * SQLite; a UUID's hyphenated text; a JSON column's value, whatever it is,
+ * as its JSON text, and an object or array in any other column so too
  * (which Postgres casts to a JSON column, and which pg would otherwise bind
  * as an array); a boolean as 1 or 0 on SQLite.
  */
@@ -1740,6 +1744,7 @@ function toColumn(value: unknown, column: RulesColumn, table: RulesTable, dialec
     if (Number.isNaN(date.getTime())) throw internal(`${table.type}.${column.field}: ${JSON.stringify(value)} is no epoch milliseconds`);
     return dialect === 'postgres' ? date : date.toISOString();
   }
+  if (column.type === JSON_TYPE) return JSON.stringify(value);
   if (UUID_TYPES.has(column.type) && typeof value === 'string') return uuidToDb(value);
   if (typeof value === 'object') return JSON.stringify(value);
   if (typeof value === 'boolean' && dialect === 'sqlite') return value ? 1 : 0;
@@ -1750,11 +1755,20 @@ function toColumn(value: unknown, column: RulesColumn, table: RulesTable, dialec
  * A column's value as the core holds it: undefined for NULL, which the
  * row leaves absent; a timestamp as epoch milliseconds, from a Date on
  * Postgres and from ISO text on SQLite; a UUID as its base62 wire form; a
- * boolean column's 1 or 0 as a boolean on SQLite; a BIGINT pg reads as
- * text as a number.
+ * boolean column's 1 or 0 as a boolean on SQLite; a JSON column's SQLite
+ * text as the JSON it holds (pg reads a JSONB column already parsed, so on
+ * Postgres its value is taken as it is, a string among them); a BIGINT pg
+ * reads as text as a number.
  */
-function fromColumn(value: unknown, column: RulesColumn, table: RulesTable): unknown {
+function fromColumn(value: unknown, column: RulesColumn, table: RulesTable, dialect: RulesDialect): unknown {
   if (value === null || value === undefined) return undefined;
+  if (column.type === JSON_TYPE && dialect === 'sqlite' && typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
   if (column.convert === 'epochMillis') {
     const millis = value instanceof Date ? value.getTime() : typeof value === 'number' ? value : typeof value === 'bigint' ? Number(value) : Date.parse(String(value));
     if (Number.isNaN(millis)) throw internal(`${table.type}.${column.field}: ${JSON.stringify(String(value))} is no timestamp`);

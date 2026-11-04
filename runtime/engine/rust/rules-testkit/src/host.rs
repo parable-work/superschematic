@@ -1128,8 +1128,10 @@ impl MemoryHost {
         ))
     }
 
-    // check runs a define or publish check, which writes nothing.
-    fn check(&self, spec: &TypeSpec, command: &Command) -> Result<(), Refusal> {
+    /// Runs a define or publish check of a spec, which writes nothing and
+    /// keeps no version: what [`MemoryHost::define`] and
+    /// [`MemoryHost::publish`] run before they keep one.
+    pub fn check(&self, spec: &TypeSpec, command: &Command) -> Result<(), Refusal> {
         match self.settle(spec, command)?.0 {
             Outcome::Refused(refusal) => Err(refusal),
             Outcome::Changed(_) => Ok(()),

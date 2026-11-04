@@ -107,8 +107,9 @@ var goldenSDKs = map[string]func(t *testing.T) goldenSDK{
 		schema, apiOutput, parseable := loadQueryListsAPI(t)
 		return goldenSDK{apiOutput: apiOutput, parseable: parseable, clock: nestedArraysClock, types: apiTypes(sdktest.QueryListsService, schema)}
 	},
-	workflowAPI: workflowAPIGolden,
-	timersAPI:   timersAPIGolden,
+	workflowAPI:  workflowAPIGolden,
+	timersAPI:    timersAPIGolden,
+	approvalsAPI: approvalsAPIGolden,
 	sdktest.UnionListsService: func(t *testing.T) goldenSDK {
 		schema, apiOutput, parseable := loadUnionListsAPI(t)
 		return goldenSDK{apiOutput: apiOutput, parseable: parseable, clock: nestedArraysClock, types: apiTypes(sdktest.UnionListsService, schema)}

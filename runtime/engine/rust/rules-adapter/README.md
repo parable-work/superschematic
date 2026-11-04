@@ -206,7 +206,11 @@ digits), which a Postgres `TIMESTAMPTZ` parses and a SQLite `TEXT` holds,
 and reads back from RFC 3339 text with any offset, any fraction (past the
 third digit dropped) and `T` or a space. A UUID is base62 in the core and
 lowercase hyphenated text in its column (D79). An object or an array binds
-as its JSON text; a boolean as 1 or 0 on SQLite.
+as its JSON text; a boolean as 1 or 0 on SQLite. A JSON column's value,
+whatever it is (a string, a number and a boolean among them), binds as its
+JSON text, so it reads back as it was; and a double that is a whole number
+reads back as its digits (SQLite's REAL 2.0 as 2), as JavaScript writes it
+and Postgres's `to_jsonb` writes a DOUBLE PRECISION (D104).
 
 Postgres binds every value as text, as node-pg does, so each is read into
 the type of the column it meets, and reads each column of a row as
@@ -263,19 +267,31 @@ Workflow whose `by` names `askedOf` and `createdBy`, which holds the audit
 read (`a_row_read_holds_the_audit_fields`): a stamped and an unstamped
 `createdBy`, `by` on each field, a field with no value naming no one, a
 repeat leaving `_version` and `enteredAt` where they were, and an update of
-`createdBy` refused with the stamp kept. `tests/transcript.rs`
+`createdBy` refused with the stamp kept; and `Task`, Constants, StateRules
+and Approvals implemented beside a Workflow, which holds a sub-table on a
+table with neither queue, a read-only operation that reads sub-rows, the
+audit `createdBy` that a gate excluding the creator reads, and own
+booleans, numbers and JSON read back as the core holds them
+(`a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them`).
+`tests/transcript.rs`
 replays the transcripts in `runtime/engine/testdata/rules` on rusqlite and
 on Postgres, each command over a layout of every type of its database:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, 1 raw
-write); `core-timers.transcript.json`, 125 steps (75 commands, 10 of them
-deadlines and 25 changes, and 50 checks); `core-reactions.transcript.json`,
-586 steps (476 commands, 252 of them changes, and 110 checks); and
+write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
+deadlines and 29 changes, and 54 checks), the scenario whose fire StateRules
+vetoes among them; `core-reactions.transcript.json`, 586 steps (476
+commands, 252 of them changes, and 110 checks);
 `core-reactions-changes.transcript.json`, 60 steps (48 commands, 24 of them
-changes, and 12 checks); and the hand-written
-`core-workflow-principals.transcript.json` (D104), 92 steps (58 commands,
-each compared with its row's `expect.version`, and 34 checks); each held to
-a floor of its step count, its `expect.others` compared on every command
-step, 0 mismatches each.
+changes, and 12 checks); `core-constants.transcript.json`, 39 steps (20
+commands and 19 checks); `core-staterules.transcript.json`, 76 steps (43
+commands and 33 checks); `core-approvals.transcript.json`, 122 steps (93
+commands, 71 of them operations and 5 changes, and 29 checks); and the
+hand-written `core-workflow-principals.transcript.json` (D104), 92 steps
+(58 commands, each compared with its row's `expect.version`, and 34
+checks), and `core-freezes-and-sign-offs.transcript.json` (D104), 115 steps
+(75 commands, each compared with its row's `expect.version`, and 40
+checks); each held to a floor of its step count, its `expect.others`
+compared on every command step and its numbers by value, 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
 schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are

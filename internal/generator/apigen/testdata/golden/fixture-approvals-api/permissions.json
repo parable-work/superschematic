@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "api": "fixture-approvals-api",
+  "permissions": [
+    {
+      "name": "tasks.admin",
+      "identity": false,
+      "operations": [
+        "TaskAdminReassignTaskHandler"
+      ]
+    },
+    {
+      "name": "tasks.review",
+      "identity": false,
+      "operations": [
+        "TaskApprovalsListSignOffsHandler",
+        "TaskApprovalsSignOffHandler",
+        "TaskApprovalsWithdrawSignOffHandler"
+      ]
+    }
+  ]
+}

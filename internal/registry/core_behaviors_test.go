@@ -137,15 +137,21 @@ func TestCoreBehaviors(t *testing.T) {
 			budget.ConfigRequired(), budget.Requires, retries.ConfigRequired(), retries.Requires)
 	}
 	// Constants and Variants judge the fields a write stores: no field, no
-	// operation, no requirement, and no veto code or precondition, since
-	// what they refuse is an issue at a field (invalid_instance).
+	// operation, no requirement, and no precondition, since what they
+	// refuse is an issue at a field (invalid_instance). Variants declares no
+	// veto code; Constants declares one_way alone, a table's oneWay field
+	// moved back (D104), which an engine type, refusing oneWay, never
+	// answers.
 	constants, _ := reg.Behavior("Constants")
 	variants, _ := reg.Behavior("Variants")
 	for _, b := range []Behavior{constants, variants} {
 		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.Requires) != 0 || len(b.Fields) != 0 || len(b.Operations) != 0 ||
-			len(b.Vetoes) != 0 || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
-			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation, veto or parameter", b.Name, b)
+			len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
+			t.Errorf("%s = %+v, want the engine's, a config, and no requirement, field, operation or parameter", b.Name, b)
 		}
+	}
+	if len(variants.Vetoes) != 0 || len(constants.Vetoes) != 1 || constants.Vetoes[0].Code != "one_way" {
+		t.Errorf("vetoes: Variants %+v, Constants %+v; want none and one_way", variants.Vetoes, constants.Vetoes)
 	}
 	// StateRules holds the own fields to the state of the type's Workflow:
 	// no field, no operation, and Workflow required, since its guard reads

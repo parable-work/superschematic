@@ -28,7 +28,7 @@ const (
 // writableAskedOf is the warning the API's reassignQuestion draws: it takes
 // askedOf, which status's by names, through a @source(Question) view
 // (D104).
-const writableAskedOf = "fixture-workflow-principals-api: QuestionAdmin.reassignQuestion takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call reassignQuestion can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it once StateRules or Constants run on the core (D104)"
+const writableAskedOf = "fixture-workflow-principals-api: QuestionAdmin.reassignQuestion takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call reassignQuestion can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it: list it in the fields of Question's Constants (D104)"
 
 // TestWorkflowPrincipalsFixturesLoad: both fixtures load; the API's one
 // warning is that reassignQuestion can write a field status's by names;
@@ -394,7 +394,7 @@ func TestWritableByWarnsOfAnUpdateOfAByField(t *testing.T) {
 		return dir
 	}
 	writable := func(op string) string {
-		return "questions-api: QuestionEdits." + op + " takes Question.askedOf (QuestionEdit is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call " + op + " can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it once StateRules or Constants run on the core (D104)"
+		return "questions-api: QuestionEdits." + op + " takes Question.askedOf (QuestionEdit is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call " + op + " can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it: list it in the fields of Question's Constants (D104)"
 	}
 	covered := func(held string) string {
 		return "QuestionActions: every caller its routes admit holds " + held + " questions.moderate, the overridePermission of the Workflow on Question.status, so each moves its rows past every transition's by, which names no one for them; require a permission that does not cover questions.moderate, or name another overridePermission (D104)"
@@ -495,7 +495,7 @@ export class QuestionSupport {
 		t.Fatalf("LoadService: %v", err)
 	}
 	writable := func(op string) string {
-		return "questions-admin-api: QuestionSupport." + op + " takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call " + op + " can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it once StateRules or Constants run on the core (D104)"
+		return "questions-admin-api: QuestionSupport." + op + " takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call " + op + " can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it: list it in the fields of Question's Constants (D104)"
 	}
 	if want := []string{writable("reassign"), writable("handOver")}; !slices.Equal(warnings, want) {
 		t.Errorf("warnings =\n%q\nwant\n%q", warnings, want)

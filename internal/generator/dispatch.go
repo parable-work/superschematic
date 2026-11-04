@@ -28,6 +28,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
+	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -1080,6 +1081,12 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
 		Engine:             engine,
+		// The catalog lists Constants' and StateRules' permission under an
+		// operation that updates a row of their table, which the core
+		// checks on the write (D104).
+		WritePermissions: func(op *ir.FieldDef) []string {
+			return behaviorops.WritePermissions(r.Schema, op, deps)
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)

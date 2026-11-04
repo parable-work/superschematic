@@ -298,3 +298,95 @@ func TestNarrowWorkflowOfAnEngineTypeHasNoFromOrUnchanged(t *testing.T) {
 		t.Errorf("a table's transition after an engine type's has no from: %v", err)
 	}
 }
+
+// A table's Approvals types the gated states as the alias <Base>Gate,
+// which signOff's and withdrawSignOff's state and their results' refer to,
+// and keeps signOff's version, optional, and the veto stale (D104).
+func TestNarrowApprovalsOfATableTypesItsGatesAndVersion(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Approvals")
+	table := &ir.TypeDef{Name: "Task", Behaviors: []ir.BehaviorRef{{Name: "Approvals", Implements: true}, {Name: "Workflow", Field: "status"}}}
+	target := Target{Schema: "tasks", Base: "TaskApprovals", Document: ir.NewSchema("tasks", ir.SchemaKindDB), Instance: table}
+	n, err := Narrow(declaration, json.RawMessage(`{"gates": {"proving": {"count": 1, "permission": "tasks.review", "resetOn": []}, "done": {"count": 1, "permission": "tasks.review", "pinned": true}}}`), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "TaskApprovalsGate" || n.Aliases[0].Doc != "A state a TaskApprovals's Approvals gates." {
+		t.Fatalf("aliases = %+v, want TaskApprovalsGate", n.Aliases)
+	}
+	if values, _ := n.Aliases[0].Schema.(map[string]any)["enum"].([]any); len(values) != 2 || values[0] != "done" || values[1] != "proving" {
+		t.Errorf("TaskApprovalsGate = %v, want done and proving", n.Aliases[0].Schema)
+	}
+	for _, op := range []string{"signOff", "withdrawSignOff"} {
+		for kind, schema := range map[string]any{"parameters": n.Params[op], "result": n.Results[op]} {
+			if state, err := at(schema, "properties", "state"); err != nil || state[RefKey] != "TaskApprovalsGate" {
+				t.Errorf("%s's %s state = %v (%v), want TaskApprovalsGate", op, kind, state, err)
+			}
+		}
+	}
+	version, err := at(n.Params["signOff"], "properties", "version")
+	if err != nil || version["type"] != "integer" || version["minimum"] != float64(1) {
+		t.Errorf("signOff's version = %v (%v), want the declared integer", version, err)
+	}
+	if required, _ := n.Params["signOff"].(map[string]any)["required"].([]any); len(required) != 1 || required[0] != "state" {
+		t.Errorf("signOff's required = %v, want state alone", required)
+	}
+	if !slices.Contains(n.Vetoes, "stale") {
+		t.Errorf("a table's Approvals vetoes = %v, want stale among them", n.Vetoes)
+	}
+}
+
+// An engine type's Approvals refuses signOff's version and never answers
+// stale (D104): its narrowing names the gated states inline, as before,
+// and has neither, so its generated clients do not change.
+func TestNarrowApprovalsOfAnEngineTypeHasNoVersion(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Approvals")
+	engine := &ir.TypeDef{Name: "Expense", Behaviors: []ir.BehaviorRef{{Name: "Approvals"}}}
+	for _, instance := range []*ir.TypeDef{engine, nil} {
+		target := Target{Schema: "expenses", Base: "Expense", Document: ir.NewSchema("expenses", ir.SchemaKindGeneral), Instance: instance}
+		n, err := Narrow(declaration, json.RawMessage(`{"gates": {"approved": {"count": 2, "permission": "expenses.approve"}}}`), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(n.Aliases) != 0 {
+			t.Errorf("instance %v: aliases = %+v, want none", instance, n.Aliases)
+		}
+		params, _ := at(n.Params["signOff"], "properties")
+		if got := slices.Sorted(maps.Keys(params)); !slices.Equal(got, []string{"note", "state"}) {
+			t.Errorf("instance %v: signOff's parameters = %v, want note and state", instance, got)
+		}
+		if state, _ := at(n.Params["signOff"], "properties", "state"); state["enum"] == nil {
+			t.Errorf("instance %v: signOff's state = %v, want the inline enum", instance, state)
+		}
+		if want := []string{"approvals_missing", "already_signed", "creator_cannot_sign", "in_state", "no_gate", "not_signed"}; !slices.Equal(n.Vetoes, want) {
+			t.Errorf("instance %v: vetoes = %v, want %v", instance, n.Vetoes, want)
+		}
+	}
+}
+
+// An engine type's Constants refuses oneWay and never answers one_way
+// (D104), so its vetoes have none; a table's keeps it. Constants has no
+// operation and no field to narrow.
+func TestNarrowConstantsDropsOneWayForAnEngineType(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Constants")
+	config := json.RawMessage(`{"fields": ["owner"]}`)
+	for _, tc := range []struct {
+		name     string
+		instance *ir.TypeDef
+		want     []string
+	}{
+		{"a table", &ir.TypeDef{Name: "Task", Behaviors: []ir.BehaviorRef{{Name: "Constants", Implements: true}}}, []string{"one_way"}},
+		{"an engine type", &ir.TypeDef{Name: "Step", Behaviors: []ir.BehaviorRef{{Name: "Constants"}}}, nil},
+		{"no instance", nil, nil},
+	} {
+		n, err := Narrow(declaration, config, Target{Schema: "tasks", Base: "Task", Document: ir.NewSchema("tasks", ir.SchemaKindDB), Instance: tc.instance})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(n.Vetoes, tc.want) {
+			t.Errorf("%s: vetoes = %v, want %v", tc.name, n.Vetoes, tc.want)
+		}
+	}
+}

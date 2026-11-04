@@ -33,6 +33,13 @@ const timersFixture = "fixture-timers-db"
 // each table keeps a change queue its trigger writes.
 const reactionsFixture = "fixture-reactions-db"
 
+// approvalsFixture is the DB fixture whose Task implements Constants,
+// StateRules and Approvals beside its Workflow on status (D104): its
+// sign-offs in a sub-table, no deadline queue and no change queue. Its
+// Note implements Constants and StateRules and keeps no sub-table, so it
+// has upserts, whose update of the row a key holds runs through the core.
+const approvalsFixture = "fixture-approvals-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -47,10 +54,11 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 
 	// fixture-workflow-db's tables' fields are behaviors (D103), which the
 	// loader adds the owned fields of and the generator renders from the
-	// core's registry; so are the Timers and Reactions fixtures' tables.
+	// core's registry; so are the Timers, Reactions and Approvals fixtures'
+	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -132,6 +140,13 @@ func TestWriteORMGolden(t *testing.T) {
 		// Tables whose writes Reactions hear (D103): RunChange, the change
 		// queues, and a relation's column in the core's spec.
 		{reactionsFixture, []string{"repository_project.go", "repository_task.go", "rules.go", "queues.go"}},
+		// A table that implements Constants, StateRules and Approvals
+		// (D104): Approvals' operations under Approvals(), its gates'
+		// states TaskApprovalsGate, no upsert, no repository of its
+		// sub-table, and no queue; and one that implements Constants and
+		// StateRules and keeps no sub-table, whose upserts update the row
+		// a key holds through the core.
+		{approvalsFixture, []string{"repository_note.go", "repository_task.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

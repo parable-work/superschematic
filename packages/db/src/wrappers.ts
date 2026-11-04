@@ -1,4 +1,4 @@
-import type { BehaviorConfigs, TimersDeadline, WorkflowOutcome, WorkflowTransition } from "@superschematic/schema";
+import type { ApprovalsGate, BehaviorConfigs, TimersDeadline, WorkflowOutcome, WorkflowTransition } from "@superschematic/schema";
 
 // FK ON DELETE actions expressible on a relation. SET NULL clears the
 // reference instead of deleting the row, so it needs a nullable foreign key
@@ -129,3 +129,89 @@ export interface ReactionRuleOn<T> {
  * type; the first type argument is the table itself.
  */
 export type Reactions<T, C extends ReactionsOn<T>> = NonNullable<unknown>;
+
+/**
+ * Constants' config on a table (D103, D104): @superschematic/schema's
+ * ConstantsConfig, its fields named by the table's own, and fields that move
+ * one way: up, a boolean that only turns true or a number or a date-time that
+ * only grows; down, the other way. An engine type's @behavior("Constants", ...)
+ * takes the schema package's config, which has no oneWay, and the build
+ * refuses it there.
+ */
+export interface ConstantsOn<T> {
+  /** The table's own fields that keep the value their create gives them. */
+  readonly fields: readonly Extract<keyof T, string>[];
+  /** The permission a caller needs to change them after the create, or move a oneWay field back; nobody may when absent. */
+  readonly permission?: string;
+  /** Fields that move one way after the create, unless the caller holds permission; clearing one is a move down. */
+  readonly oneWay?: { readonly [F in Extract<keyof T, string>]?: "up" | "down" };
+}
+
+/**
+ * Fields a table's create sets for good, and fields that move one way (D103,
+ * D104): `export abstract class Task implements Constants<Task, { fields: ["owner"] }>`.
+ * The type stays a table. An update through the core that changes one is
+ * refused; a raw SQL write is not. Constants has no operations and stores
+ * nothing. Like Timers, it resolves to the empty object type; the first type
+ * argument is the table itself.
+ */
+export type Constants<T, C extends ConstantsOn<T>> = NonNullable<unknown>;
+
+/** StateRules' config on a table (D103, D104): its fields named by the table's own, who may change a frozen field (by), and the Workflow it reads (status). */
+export interface StateRulesOn<T> {
+  readonly states: Readonly<Record<string, StateRuleOn<T>>>;
+  /** The permission a caller needs to change a field a state freezes; nobody may when absent. What a state requires holds for every caller. */
+  readonly permission?: string;
+  /** The field whose Workflow the states are of; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+}
+
+/** One state's rules under StateRulesOn<T>. */
+export interface StateRuleOn<T> {
+  readonly required?: readonly Extract<keyof T, string>[];
+  readonly frozen?: readonly Extract<keyof T, string>[] | "all";
+  /**
+   * The row's own fields that hold a subject (string, Identity.UUID or
+   * Identity.UserID), createdBy among them: the subject one holds changes a
+   * field the state freezes. A field is only as strong as its writes: keep
+   * it out of any input a caller who should not change what it frees may
+   * write, or list it in Constants' fields.
+   */
+  readonly by?: readonly Extract<keyof T, string>[];
+}
+
+/**
+ * Rules per state of a table's Workflow (D103, D104):
+ * `export abstract class Task implements StateRules<Task, { states: { ... } }>`.
+ * The type stays a table. StateRules has no operations and stores nothing;
+ * it resolves to the empty object type.
+ */
+export type StateRules<T, C extends StateRulesOn<T>> = NonNullable<unknown>;
+
+/** Approvals' config on a table (D103, D104): its gates' resetOn and pinned, and the Workflow it reads (status). */
+export interface ApprovalsOn<T> {
+  readonly gates: Readonly<Record<string, ApprovalsGateOn<T>>>;
+  /** Whether an update consumes every gate's sign-offs that names no resetOn; true when absent. */
+  readonly resetOnChange?: boolean;
+  /** The field whose Workflow the gates are of; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+}
+
+/** One gate of ApprovalsOn<T>: @superschematic/schema's ApprovalsGate, the fields whose change consumes its sign-offs, and whether a sign-off names the version its signer read. */
+export interface ApprovalsGateOn<T> extends ApprovalsGate {
+  /** The own fields whose change, by an update, consumes the gate's sign-offs; [] for none; absent, resetOnChange decides. */
+  readonly resetOn?: readonly Extract<keyof T, string>[];
+  /** signOff names the row's version its signer read, and a stale one is vetoed. */
+  readonly pinned?: boolean;
+}
+
+/**
+ * Sign-offs that gate the states of a table's Workflow (D103, D104):
+ * `export abstract class Task implements Approvals<Task, { gates: { ... } }>`.
+ * The type stays a table. Approvals keeps its sign-offs in a sub-table of the
+ * row (task_approvals_sign_offs); its operations (approvals.signOff,
+ * withdrawSignOff, listSignOffs) change and read them. A gate that excludes
+ * the creator reads the table's createdBy. Like Timers, it resolves to the
+ * empty object type; the first type argument is the table itself.
+ */
+export type Approvals<T, C extends ApprovalsOn<T>> = NonNullable<unknown>;
