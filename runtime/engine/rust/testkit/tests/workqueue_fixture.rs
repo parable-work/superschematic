@@ -566,7 +566,8 @@ fn it_runs_the_document_the_core_binary_builds_claimed_in_order_held_and_put_bac
                         "setLimit",
                         "reserveFor",
                         "settleFor",
-                        "recordUsageFor"
+                        "recordUsageFor",
+                        "observe"
                     ]
                 ]),
                 json!(["Retries", ["recordAttempt"]])

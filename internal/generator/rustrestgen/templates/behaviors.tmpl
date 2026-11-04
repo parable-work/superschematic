@@ -7,6 +7,11 @@
 //! superschematic-rules-adapter on a transaction of {{ .BehaviorDatabase }}'s
 //! pool, as the request's caller. No implementation method serves them: the
 //! router's handler of each calls `run_operation`.
+{{- if .HasBehaviorPreconditions }} An operation whose input
+//! carries the caller's preconditions (D16, D104), a body member by use id,
+//! calls `run_operation_with_preconditions`, which hands them to the core
+//! with the command.
+{{- end }}
 {{- end }}
 {{- range $i, $w := .BehaviorWorkers }}
 {{- if or $i $.HasBehaviorOperations }}
@@ -21,7 +26,11 @@ use axum::http::StatusCode;
 use serde::de::DeserializeOwned;
 {{- end }}
 use serde::Serialize;
+{{- if .HasBehaviorPreconditions }}
+use serde_json::{Map, Value};
+{{- else }}
 use serde_json::Value;
+{{- end }}
 {{- range .BehaviorUses }}
 {{ . }}
 {{- end }}
@@ -143,6 +152,80 @@ where
         Err(err) => Err(internal(err)),
     }
 }
+{{- if .HasBehaviorPreconditions }}
+
+/// Runs `operation` as `run_operation` does, with the caller's preconditions
+/// its input presents (D16, D104): the input's `preconditions` member, each
+/// use's entry by its use id (`{"Lease": {"token": 3}}`), taken out of the
+/// parameters and handed to the core with the command, which checks each
+/// against its use's behavior before it reads the row and hands it to that
+/// use's guard, a malformed one refused as `invalid_argument`.
+pub(crate) async fn run_operation_with_preconditions<K, P, R>(
+    behaviors: &Behaviors,
+    ctx: &RequestContext,
+    type_name: &str,
+    key: &K,
+    use_id: &str,
+    operation: &str,
+    input: &P,
+) -> Result<R, ApiError>
+where
+    K: Serialize + ?Sized,
+    P: Serialize + ?Sized,
+    R: DeserializeOwned,
+{
+    let key = match serde_json::to_value(key).map_err(internal)? {
+        Value::String(key) => key,
+        other => other.to_string(),
+    };
+    let mut params = serde_json::to_value(input).map_err(internal)?;
+    let options = ExecuteOptions {
+        preconditions: presented(&mut params),
+        ..ExecuteOptions::default()
+    };
+    let mut client = behaviors.pool.get().await.map_err(internal)?;
+    let tx = client.transaction().await.map_err(internal)?;
+    let host = Host::new(core(), layout());
+    let ran = postgres::run_operation_with(
+        &host,
+        &*tx,
+        type_name,
+        &key,
+        use_id,
+        operation,
+        params,
+        caller(ctx),
+        &options,
+    )
+    .await;
+    match ran {
+        Ok(result) => {
+            tx.commit().await.map_err(internal)?;
+            serde_json::from_value(result).map_err(internal)
+        }
+        // Dropping the transaction rolls it back.
+        Err(Error::Refused(refusal)) if is_problem(refusal.status) => Err(problem(*refusal)),
+        Err(err) => Err(internal(err)),
+    }
+}
+
+/// The caller's preconditions an input presents, taken out of it (D16,
+/// D104): its `preconditions` member's entries by use id, a null one left
+/// out, as the Go and TypeScript servers read them; none for an input
+/// without the member.
+fn presented(input: &mut Value) -> Map<String, Value> {
+    match input
+        .as_object_mut()
+        .and_then(|input| input.remove("preconditions"))
+    {
+        Some(Value::Object(entries)) => entries
+            .into_iter()
+            .filter(|(_, entry)| !entry.is_null())
+            .collect(),
+        _ => Map::new(),
+    }
+}
+{{- end }}
 
 /// Whether a refusal of `status` is answered as its problem: an error
 /// status, 400 to 599, other than 500, which is the server's own.

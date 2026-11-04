@@ -41,6 +41,7 @@ pub struct View<'r, C> {
     pub(crate) index: usize,
     pub(crate) config: &'r C,
     pub(crate) action: &'r str,
+    pub(crate) precondition: Option<&'r Value>,
 }
 
 impl<'r, C> View<'r, C> {
@@ -93,6 +94,16 @@ impl<'r, C> View<'r, C> {
 
     pub fn caller(&self) -> &'r Caller {
         &self.run.command.caller
+    }
+
+    /// The use's own entry of the command's preconditions, in a guard asked
+    /// about the command's own update, delete or operation (D16, D104),
+    /// held to its behavior's precondition check before the row was read;
+    /// `None` in every other hook, and in a guard asked about a `call()`, a
+    /// `call_on()` or a create, so a request a behavior's code makes
+    /// presents nothing.
+    pub fn precondition(&self) -> Option<&'r Value> {
+        self.precondition
     }
 
     /// Whether the caller holds a permission, as the core's matcher
@@ -179,6 +190,28 @@ impl<'r, C> View<'r, C> {
             .read_linked(&ReadRequest::linked(type_name, field, key, after))
     }
 
+    /// One page of the rows of a type whose use's owned field holds a value,
+    /// as the host read them, in key order: [`crate::LINKED_PAGE`] at most,
+    /// after the key `after` when given. A rule over the rows a principal
+    /// holds pages it to the end (Presence's releaseLeases over Lease's
+    /// holder, D104); the run's own writes are not in it.
+    pub fn read_holding(
+        &self,
+        type_name: &str,
+        use_id: &str,
+        field: &str,
+        value: &Value,
+        after: Option<&str>,
+    ) -> Hook<&'r LinkedRows> {
+        self.run.read_linked(&ReadRequest::holding(
+            type_name,
+            use_id,
+            field,
+            value.clone(),
+            after,
+        ))
+    }
+
     /// A row of any type as the run has it: with its writes so far applied
     /// when the run reached it, else the host's; `None` when the type has
     /// none of the key or the run deleted it.
@@ -208,6 +241,25 @@ impl<'r, C> View<'r, C> {
     /// defect.
     pub fn sub_rows(&self, table: &str) -> Hook<Vec<SubRow>> {
         self.run.sub_rows(self.frame, self.index, table)
+    }
+
+    /// The rows of one sub-table of a use of any row, as the run has them:
+    /// the host's ([`ReadRequest::SubRows`]), with the run's own writes of
+    /// that row's sub-table applied in order, in key order (by code point);
+    /// a row the run creates reads no host, and one the run deleted, or
+    /// found gone, has none. What a behavior that checks another row's
+    /// state against its own reads (Budget's scope operations read the
+    /// inner row's reservation, D104). A use the row's type lacks, and a
+    /// table its behavior does not declare, is a defect.
+    pub fn sub_rows_of(
+        &self,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        table: &str,
+    ) -> Hook<Vec<SubRow>> {
+        self.run
+            .sub_rows_of(self.frame, self.index, type_name, key, use_id, table)
     }
 
     /// A type's live version, its uses and their configs; `None` when no
@@ -263,6 +315,10 @@ pub struct Cx<'r, C> {
     /// Whether this is the handler of the command's own operation, the one
     /// whose [`Cx::unchanged`] the core honors.
     pub(crate) own: bool,
+    /// Whether this is a deadline's handler, whose calls on its row a guard
+    /// is told are the worker's requests ([`crate::GuardRequest`]'s
+    /// `fired`).
+    pub(crate) fired: bool,
 }
 
 impl<'r, C> Deref for Cx<'r, C> {
@@ -479,12 +535,15 @@ impl<'r, C> Cx<'r, C> {
     /// effects join the run's change set; when it is refused they are
     /// undone and the refusal returns, which the caller may pass on or go
     /// on past. A read-only operation calls only operations that do not
-    /// write.
+    /// write. A deadline's handler's call is the request of the worker that
+    /// runs the deadline, which each guard is told (`fired`), as the
+    /// engine's runner made it as its principal (D103).
     pub fn call(&self, use_id: &str, operation: &str, params: &Value) -> Hook<Value> {
         self.view.run.call(
             self.view.frame,
             self.view.index,
             self.writable,
+            self.fired,
             use_id,
             operation,
             params,
@@ -513,6 +572,7 @@ impl<'r, C> Cx<'r, C> {
             self.view.frame,
             self.view.index,
             self.writable,
+            self.fired,
             type_name,
             key,
             use_id,

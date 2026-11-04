@@ -43,6 +43,12 @@
 // null is its absence: the handler leaves it out of the repository's
 // parameters, which take no null for it (D104).
 {{- end }}
+{{- if .BehaviorsTakePreconditions }}
+// An input's preconditions member is what the caller asserts of the row,
+// each use's entry by its use id (D16, D104): the handler presents it in
+// the operation's options, never among its parameters, and the core checks
+// it before it reads the row.
+{{- end }}
 {{- end }}
 {{- if .Identity }}
 //
@@ -349,7 +355,12 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       behaviorOperation(() =>
         options.orm.{{ .Behavior.Method }}(
           request.path[{{ tsString .Behavior.Key.Name }}] as {{ .Behavior.Key.TSType }},
-{{- if and .HasInput .Behavior.Optional }}
+{{- if and .HasInput .Behavior.Preconditions }}
+          // The repository's parameters: the wire values of {{ .InputType }},
+          // each optional member that is null left out and its preconditions
+          // apart (D104).
+          behaviorParams(request.input, {{ .Behavior.OptionalList }}, ['preconditions']) as never,
+{{- else if and .HasInput .Behavior.Optional }}
           // The repository's parameters: the wire values of {{ .InputType }},
           // each optional member that is null left out (D104).
           behaviorParams(request.input, {{ .Behavior.OptionalList }}) as never,
@@ -359,7 +370,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- else }}
           {},
 {{- end }}
+{{- if .Behavior.Preconditions }}
+          // The caller's preconditions, by use id, which the core checks
+          // before it reads the row (D16, D104).
+          { caller: behaviorCaller(ctx), preconditions: behaviorPreconditions(request.input) as never }
+{{- else }}
           { caller: behaviorCaller(ctx) }
+{{- end }}
         )
       ) as Promise<{{ .OutputType }}>,
     {{ $runtime }},

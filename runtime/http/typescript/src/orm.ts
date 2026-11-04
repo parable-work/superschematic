@@ -141,7 +141,12 @@ runChange runs one, as a behavior worker claimed it, through the core in a
 transaction (./rules, runChange): so a bulk or hard write, and a raw SQL
 write, arms and clears its deadlines after its commit, when the worker
 runs its change. A raw SQL write of an owned column or a sub-table row is
-never refused (D103).
+never refused (D103). updateOne, deleteOne and each operation take the
+caller's preconditions (D16, D104) in their options, each use's entry by
+its use id (orm.job.updateOne(key, { title }, { preconditions: { Lease: {
+token } } })), which the core checks before it reads the row and the use's
+guard holds the write to; a table that composes no behaviors throws for
+any, since nothing would check them.
 
 The @versioned history readers are the Go ORM's alone for now.
 */
@@ -712,6 +717,18 @@ export interface ReadRepository<Row, Filter, OrderField extends string, SortFiel
   ): Promise<RowPage<Loaded<Row, Relations, O>, PageKey>>;
 }
 
+/**
+ * What a write of one row through updateOne or deleteOne takes beside its
+ * key and fields: the caller's preconditions (D16, D104), each use's entry
+ * by its use id ({ Lease: { token } }), which the behaviors' core checks
+ * before it reads the row and each use's guard holds the write to. The
+ * generated orm.ts types them per table (<Type>Preconditions); a table that
+ * composes no behaviors refuses them.
+ */
+export interface WriteOptions<Preconditions = Readonly<Record<string, unknown>>> {
+  readonly preconditions?: Preconditions;
+}
+
 /** The repository of a table. */
 export interface Repository<
   Row,
@@ -724,13 +741,14 @@ export interface Repository<
   Key,
   PageKey,
   Relations = unknown,
+  Preconditions = Readonly<Record<string, unknown>>,
 > extends ReadRepository<Row, Filter, OrderField, SortField, Key, PageKey, Relations> {
   /** Inserts a row; an optional member left unset takes its column's default. */
   createOne(input: Create): Promise<Row>;
   /** Inserts the rows in one statement, DEFAULT for each column a row leaves unset that another sets. */
   createMany(inputs: readonly Create[]): Promise<Row[]>;
-  /** Sets the members update sets, null setting a column NULL, on the live row whose key is id; NotFoundError when there is none. */
-  updateOne(id: Key, update: Update): Promise<Row>;
+  /** Sets the members update sets, null setting a column NULL, on the live row whose key is id; NotFoundError when there is none. options.preconditions are a behavior table's (D104). */
+  updateOne(id: Key, update: Update, options?: WriteOptions<Preconditions>): Promise<Row>;
   /** Sets the members update sets on the live rows filter finds, and resolves to how many. */
   updateMany(filter: Filter | null, update: Update): Promise<number>;
   /**
@@ -758,8 +776,8 @@ export interface Repository<
    * returns are matched to the inputs by the key's columns.
    */
   upsertMany(inputs: readonly Create[], on: UniqueKey, update: readonly UpsertField<Update>[], options?: UpsertManyOptions): Promise<UpsertResult<Row>[]>;
-  /** Deletes the live row whose key is id, stamping it on a soft-deletable table; NotFoundError when there is none. */
-  deleteOne(id: Key): Promise<void>;
+  /** Deletes the live row whose key is id, stamping it on a soft-deletable table; NotFoundError when there is none. options.preconditions are a behavior table's (D104). */
+  deleteOne(id: Key, options?: WriteOptions<Preconditions>): Promise<void>;
   /** Deletes the rows filter finds, stamping them on a soft-deletable table, and resolves to how many. */
   deleteMany(filter: Filter | null): Promise<number>;
 }
@@ -855,7 +873,8 @@ export interface SoftDeleteRepository<
   Key,
   PageKey,
   Relations = unknown,
-> extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey, Relations> {
+  Preconditions = Readonly<Record<string, unknown>>,
+> extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey, Relations, Preconditions> {
   /** Removes the row whose key is id, deleted or not; NotFoundError when there is none. */
   hardDeleteOne(id: Key): Promise<void>;
 }
@@ -1896,8 +1915,9 @@ class TableRepository {
     }
   }
 
-  async updateOne(id: unknown, update: Values): Promise<Values> {
-    if (this.behaviors) return this.atomically(repo => repo.updateThroughCore(id, update));
+  async updateOne(id: unknown, update: Values, options: WriteOptions = {}): Promise<Values> {
+    if (this.behaviors) return this.atomically(repo => repo.updateThroughCore(id, update, options.preconditions));
+    this.refusePreconditions(options.preconditions);
     const args: unknown[] = [];
     const sets = this.setClauses(this.sealedUpdate(update, id, 'update'), args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
@@ -2298,8 +2318,9 @@ class TableRepository {
     return { row: await this.updateOne(result.row[this.def.key], change), status: 'updated' };
   }
 
-  async deleteOne(id: unknown): Promise<void> {
-    if (this.behaviors) return this.atomically(repo => repo.deleteThroughCore(id));
+  async deleteOne(id: unknown, options: WriteOptions = {}): Promise<void> {
+    if (this.behaviors) return this.atomically(repo => repo.deleteThroughCore(id, options.preconditions));
+    this.refusePreconditions(options.preconditions);
     if (!this.def.softDelete) return this.hardDeleteOne(id);
     const user = this.requireUser();
     const key = this.encode(id, this.keyColumn(), 'key');
@@ -2355,6 +2376,17 @@ class TableRepository {
   /** The caller a behavior's command runs as: the ORM's behavior caller (withBehaviorCaller), else the acting user, holding no permissions. */
   private caller(): CoreCaller {
     return this.behaviorCaller ?? { subject: this.user ?? '', permissions: [] };
+  }
+
+  /**
+   * Throws for preconditions given to a write of a table that composes no
+   * behaviors (D104): nothing would check them, and a write never drops
+   * what its caller asserts. None, or an empty set, passes.
+   */
+  private refusePreconditions(preconditions: Readonly<Record<string, unknown>> | undefined): void {
+    if (preconditions !== undefined && preconditions !== null && Object.keys(preconditions).length > 0) {
+      throw new Error(`orm: preconditions are a behavior table's (D104): ${this.def.name} composes none`);
+    }
   }
 
   /** The column of the table a layout column names, by its unquoted name. */
@@ -2450,14 +2482,14 @@ class TableRepository {
     return this.getOne(key);
   }
 
-  /** updateOne through the core, in a transaction (this repository's). */
-  private async updateThroughCore(id: unknown, update: Values): Promise<Values> {
+  /** updateOne through the core, in a transaction (this repository's), presenting the caller's preconditions. */
+  private async updateThroughCore(id: unknown, update: Values, preconditions?: Readonly<Record<string, unknown>>): Promise<Values> {
     const sealed = this.sealedUpdate(update, id, 'update');
     const patch = this.coreOwn(sealed);
     const ownColumns = this.updateColumns(sealed);
     if (Object.keys(patch).length === 0 && Object.keys(ownColumns).length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
     try {
-      await runUpdate(this.rulesHost(), this.def.name, this.wireKey(id), patch, this.caller(), { ownColumns });
+      await runUpdate(this.rulesHost(), this.def.name, this.wireKey(id), patch, this.caller(), { ownColumns, preconditions });
     } catch (error) {
       throw this.notFound(error, id);
     }
@@ -2471,9 +2503,10 @@ class TableRepository {
    * for the transaction, as the repository's own deletes do. The core reads
    * a soft-deletable table's live rows alone (the layout's live), so a row
    * already deleted is not_found, and one another deletes under the command
-   * moves it, which then runs again to not_found.
+   * moves it, which then runs again to not_found. The caller's
+   * preconditions are presented to the core.
    */
-  private async deleteThroughCore(id: unknown): Promise<void> {
+  private async deleteThroughCore(id: unknown, preconditions?: Readonly<Record<string, unknown>>): Promise<void> {
     let softDelete: Values | undefined;
     if (this.def.softDelete) {
       const user = this.requireUser();
@@ -2486,7 +2519,7 @@ class TableRepository {
       await run(this.runner, `${this.orm.historyActorCTE}SELECT _history_actor FROM history_actor`, [this.actor()]);
     }
     try {
-      await runDelete(this.rulesHost(), this.def.name, this.wireKey(id), this.caller(), { softDelete });
+      await runDelete(this.rulesHost(), this.def.name, this.wireKey(id), this.caller(), { softDelete, preconditions });
     } catch (error) {
       throw this.notFound(error, id);
     }
@@ -2501,14 +2534,14 @@ class TableRepository {
     return error;
   }
 
-  /** Runs an operation of one of the table's uses on a row, in a transaction, and resolves to its result; NotFoundError for a key no live row holds. */
+  /** Runs an operation of one of the table's uses on a row, in a transaction, as options.caller presenting options.preconditions, and resolves to its result; NotFoundError for a key no live row holds. */
   private async operate(useId: string, operation: string, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
     return this.atomically(async repo => {
       const host = repo.rulesHost();
       const action = { kind: 'operation' as const, key: repo.wireKey(key), useId, operation, params: params ?? {} };
       const command = { caller: options.caller ?? repo.caller(), now: Date.now(), action };
       try {
-        return (await execute(host, repo.def.name, command, { ownColumns: repo.operationColumns() })).result;
+        return (await execute(host, repo.def.name, command, { ownColumns: repo.operationColumns(), preconditions: options.preconditions })).result;
       } catch (error) {
         throw repo.notFound(error, key);
       }

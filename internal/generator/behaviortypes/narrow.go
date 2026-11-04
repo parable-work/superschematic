@@ -46,7 +46,10 @@ type FieldShape struct {
 // <Base>Patch), which only an operation's schemas refer to.
 type Narrowing struct {
 	Aliases []Alias
-	// Fields are the behavior's fields by name.
+	// Fields are the behavior's fields by name: every declared field but
+	// one the type's form keeps none of (an engine type's Retries'
+	// retryAt, failingSince and keyedBy, D104), which a consumer leaves
+	// out.
 	Fields map[string]FieldShape
 	// Params and Results are each operation's, by name.
 	Params  map[string]any
@@ -66,6 +69,16 @@ type Narrowing struct {
 	// type's form never answers (an engine type's Workflow answers no
 	// not_principal or stale, D104).
 	Vetoes []string
+	// Refused are the operations of the declaration a type's form refuses
+	// every call of, in declaration order: an engine type's Budget refuses
+	// observe (D104). A client of the type offers none of them.
+	Refused []string
+}
+
+// Offers reports whether a client of the type offers the operation: one
+// its form does not refuse every call of (Refused).
+func (n Narrowing) Offers(operation string) bool {
+	return !slices.Contains(n.Refused, operation)
 }
 
 // Variants is Variants' config: Field holds the type Types names for the
@@ -1040,23 +1053,60 @@ func narrowPresence(n *Narrowing, _ map[string]any, _ Target) error {
 	)
 }
 
+// retriesTableFields are the fields of Retries a table keeps and an engine
+// type does not (D104): when the row may run again, since when it has
+// failed, and the keyField value its counts were made under.
+var retriesTableFields = []string{"retryAt", "failingSince", "keyedBy"}
+
 // Retries: the attempts by class hold every class of the config; the best
-// score is absent when no scored result is kept.
-func narrowRetries(n *Narrowing, config map[string]any, _ Target) error {
+// score is absent when no scored result is kept. On a table the config's
+// failure classes are the alias <Base>Class, which recordAttempt's failure
+// names, and the row keeps when it may run again, since when it has failed
+// and the keyField value its counts were made under, each absent until set
+// (D104); an engine type's Retries keeps none of the three, never answers
+// retryAt, backing_off or throttled, and refuses the members that would, so
+// its types have none of them.
+func narrowRetries(n *Narrowing, config map[string]any, target Target) error {
 	classes, _ := config["classes"].(map[string]any)
+	names := SortedKeys(classes)
 	properties := map[string]any{}
 	required := make([]any, 0, len(classes))
-	for _, name := range SortedKeys(classes) {
+	for _, name := range names {
 		properties[name] = integer()
 		required = append(required, name)
 	}
 	classAttempts := map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}
-	return setFields(n,
+	if err := setFields(n,
 		typedField{"total", integer(), true},
 		typedField{"classAttempts", classAttempts, true},
 		typedField{"bestScore", map[string]any{"type": "number"}, false},
 		typedField{"exhausted", boolean(), true},
 		typedField{"stuck", boolean(), true},
+	); err != nil {
+		return err
+	}
+	if target.Instance == nil || target.Instance.IsEngineType() {
+		for _, name := range retriesTableFields {
+			if _, ok := n.Fields[name]; !ok {
+				return fmt.Errorf("the declaration has no field %s", name)
+			}
+			delete(n.Fields, name)
+		}
+		if err := deleteProperty(n.Results["recordAttempt"], "retryAt"); err != nil {
+			return fmt.Errorf("operation recordAttempt: %w", err)
+		}
+		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "backing_off" || code == "throttled" })
+		return nil
+	}
+	class := target.Base + "Class"
+	n.Aliases = append(n.Aliases, Alias{Name: class, Doc: fmt.Sprintf("A failure class of %s's Retries.", An(target.Base)), Schema: EnumOf(names)})
+	if err := setOperationProperty(n.Params, "recordAttempt", nil, "failure", ref(class, "")); err != nil {
+		return err
+	}
+	return setFields(n,
+		typedField{"retryAt", integer(), false},
+		typedField{"failingSince", integer(), false},
+		typedField{"keyedBy", map[string]any{"type": "string"}, false},
 	)
 }
 
@@ -1070,10 +1120,37 @@ func narrowBlueprint(n *Narrowing, _ map[string]any, _ Target) error {
 	return setField(n, "children", map[string]any{"type": "array", "items": child}, false)
 }
 
+// budgetMeterOperations are Budget's operations whose parameters name a
+// meter, and budgetMeterResults those whose results do.
+var (
+	budgetMeterOperations = []string{"reserve", "checkReserve", "recordUsage", "settle", "setLimit", "observe", "reserveFor", "settleFor", "recordUsageFor"}
+	budgetMeterResults    = []string{"recordUsage", "setLimit", "observe"}
+)
+
 // Budget: the meters field holds every meter of the config, by name; a
-// meter with no limit holds null for its limit and what remains of it.
-func narrowBudget(n *Narrowing, config map[string]any, _ Target) error {
+// meter with no limit holds null for its limit and what remains of it. On
+// a table the config's meters are the alias <Base>Meter, which every
+// operation's meter names, and recordUsage's, setLimit's and observe's
+// results; an engine type's Budget refuses every observe (D104), which its
+// clients therefore leave out (Refused).
+func narrowBudget(n *Narrowing, config map[string]any, target Target) error {
 	meters, _ := config["meters"].(map[string]any)
+	if target.Instance == nil || target.Instance.IsEngineType() {
+		n.Refused = append(n.Refused, "observe")
+	} else {
+		meter := target.Base + "Meter"
+		n.Aliases = append(n.Aliases, Alias{Name: meter, Doc: fmt.Sprintf("A meter of %s's Budget.", An(target.Base)), Schema: EnumOf(SortedKeys(meters))})
+		for _, op := range budgetMeterOperations {
+			if err := setOperationProperty(n.Params, op, nil, "meter", ref(meter, "")); err != nil {
+				return err
+			}
+		}
+		for _, op := range budgetMeterResults {
+			if err := setOperationProperty(n.Results, op, nil, "meter", ref(meter, "")); err != nil {
+				return err
+			}
+		}
+	}
 	nullable := func() map[string]any { return map[string]any{"type": []any{"integer", "null"}} }
 	properties := map[string]any{}
 	required := make([]any, 0, len(meters))

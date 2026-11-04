@@ -27,6 +27,16 @@ and stuck detection. That is every work-queue behavior D16 lists. A
 worker that runs a handler over the instances a process claims, through
 the engine's HTTP API, is the `./worker` subpath ("The worker").
 
+A DB table implements `Lease`, `Retries`, `Presence` and `Budget` too
+(D103, D104): the behaviors' core (`runtime/engine/rust/rules-behaviors`)
+ports them from this crate, reading the same declarations, and each rule
+over time is a deadline the API's behavior worker runs rather than this
+runner's sweep. The members a table's config takes beyond the engine's
+(each config's `status`, Retries' waits, Presence's `ttlByState`, Budget's
+periods, rolling window and `observe`) are in the declarations this
+crate shares, so its describe and MCP documents list them; it refuses
+each at define, naming the table form, rather than ignore it.
+
 ```ts
 import { openEngine } from '@superschematic/engine';
 import { workQueueBehaviors } from '@superschematic/engine-workqueue';
@@ -131,7 +141,7 @@ and numbered by a fencing token.
 
 | | |
 | --- | --- |
-| Config | `ttlMs` (at least 1000; 60000 when absent), `heartbeatMs` (at most half of `ttlMs`; a third of it when absent), `sweepMs` (at least 1000; 5000 when absent), `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`, one per link of the type's `Links`, and a permission that sends directives); all optional |
+| Config | `ttlMs` (at least 1000; 60000 when absent), `heartbeatMs` (at most half of `ttlMs`; a third of it when absent), `sweepMs` (at least 1000; 5000 when absent), `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`, one per link of the type's `Links`, and a permission that sends directives); all optional. A table's Lease's `status`, which the declaration the engine shares lists (D104), is refused at define, naming the table form (`implements Lease<T, { ... }> on a DB table`) |
 | Precondition | `{ token }`, the lease's current token: `preconditions: { Lease: { token } }` on any write |
 | Fields | under `Lease`: `holder`, `token`, `acquiredAt`, `renewedAt` (its acquire or last heartbeat), `expiresAt`, `active`, `expiries` and `ended`; `holder`, `acquiredAt`, `renewedAt` and `expiresAt` absent when it is free; `active` volatile, since the clock moves it past `expiresAt`; `ended`, `{ reason, at }`, how the last lease ended, absent while one is held. A list filters on `Lease.holder`, the holder's column, through an index on it (migration 4): `where: { "Lease.holder": "wren" }`, and `null` for a free instance |
 | Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat({ acknowledge? })` -> `{ expiresAt, directives }`; `release({ abandon? })` -> `{}`; `expire({ holder?, notRenewedAfter? })` -> `{ expired, reason? }`; `direct({ name, data?, dedupeKey? })` -> `{ id, created }`; `acknowledge({ ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder, notRenewedAfter? })` -> `{ expired, reasons, ids }`. All write; `heartbeat`, `acknowledge` and the holder's `release` present the token |
@@ -555,7 +565,7 @@ one for a worker process ("The worker").
 
 | | |
 | --- | --- |
-| Config | `ttlMs` (at least 1000) and `principalField` (a string field of the type), required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (at least 1000; 5000 when absent) |
+| Config | `ttlMs` (at least 1000) and `principalField` (a string field of the type), required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (at least 1000; 5000 when absent). A table's Presence's members, which the declaration the engine shares lists (D104), are refused at define, each naming the table form (`implements Presence<T, { ... }> on a DB table`): `ttlByState` and `status` |
 | Fields | under `Presence`: `deadline`, `lastBeatAt`, `missed` and `released`; the times in epoch milliseconds, `lastBeatAt` absent before the first beat; `released`, the instances whose lease the last miss expired, by schema, absent before a miss |
 | Operations | `beat()` -> `{ deadline }`; `miss()` -> `{ missed, released? }`. Both write |
 | Schedule | `miss`, every `sweepMs`: `miss` on every instance past its deadline and not missed, at most 1000 a run, as the runner's principal |
@@ -776,7 +786,7 @@ points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) and `limitField` (an integer field of the type, whose value of at least 0 replaces `limit`), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config that holds one target) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`) |
+| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) and `limitField` (an integer field of the type, whose value of at least 0 replaces `limit`), `reserve` (at least 1) and `reserveField` (an integer field of the type, whose positive value replaces `reserve`), `scope` (a link of the type's `Links` config that holds one target) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`); `escalate` (`{ transition, from }`, needs `Workflow`). A table's Budget's members, which the declaration the engine shares lists (D104), are refused at define, each naming the table form (`implements Budget<T, { ... }> on a DB table`): a `reset` other than `daily` (`hourly`, `weekly`, `monthly`, `{ everyMs }`), a meter's `window`, `observePermission` and `status`; every `observe` is `invalid_argument` |
 | Fields | `meters`, under `Budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it; volatile, since a daily meter starts again at a read |
 | Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `checkReserve({ meter?, amount? })` -> `{ fits, until, scopes }`, each scope `{ schema, id, hears }`, read-only; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`, each overrun `{ schema, id, used, limit, escalated }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All but `checkReserve` write |
 | Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed` (`scope_reserved`); a change of a meter's `limitField` without `limitPermission` is `forbidden` (`not_configured` when the config names none), and below what is used and reserved `vetoed` (`below_committed`), the config's `limit` counting for a change that empties the field |
@@ -933,7 +943,7 @@ in time: an instance that may run again may be taken again at once.
 
 | | |
 | --- | --- |
-| Config | `classes` (required, by name: `{ attempts, hint? }`, `attempts` at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `limitsPermission`, `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission` |
+| Config | `classes` (required, by name: `{ attempts, hint? }`, `attempts` at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `limitsPermission`, `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission`. A table's Retries' members, which the declaration the engine shares lists (D104), are refused at define, each naming the table form (`implements Retries<T, { ... }> on a DB table`): a class's `backoff`, and `retryInto`, `then`, `giveUpAfterMs`, `window`, `keyField` and `status`; its fields `retryAt`, `failingSince` and `keyedBy` read nothing here, and it never answers `backing_off` or `throttled` |
 | Fields | under `Retries`: `total`, `classAttempts`, `bestScore` (absent while no scored result is kept), `exhausted` and `stuck`. A list filters on `Retries.exhausted`, its column, through an index on it (migration 2): `where: { "Retries.exhausted": true }` |
 | Operations | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })` -> `{ failure, score, kept, total, classAttempts, exhausted, stuck, hint }`, writes |
 | Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` (`exhausted`); an update that changes `limitsField` without `limitsPermission` (`forbidden`; `not_configured` when the config names none), and by the holder of the instance's active lease (`limits_fixed`) |

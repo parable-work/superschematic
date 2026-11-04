@@ -50,6 +50,16 @@
 //! each instance's next beat. Presence can be added to a schema that has
 //! instances, which have no deadline until their first beat, and cannot be
 //! removed from one: the deadlines and misses they hold would stay behind.
+//!
+//! What only a table's Presence takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores: `ttlByState`, how long
+//! an instance stays present in each state of its Workflow, and `status`,
+//! the Workflow a table's config names, each at define, naming the table
+//! form. An engine type's instance stays present `ttlMs` after its create
+//! and each beat, whatever its state; ignoring a rule of when an instance
+//! is missed would be a hole, and an engine type can be defined at run
+//! time, past any build's check. The new fields' types and `armsDeadlines`,
+//! which the declaration gives a table, read nothing here.
 
 use serde_json::{json, Map, Value};
 
@@ -75,6 +85,10 @@ pub const MAX_SWEEP: i64 = 1000;
 const SWEEP_BATCH: i64 = 100;
 
 const NAME: &str = "Presence";
+
+// How a refusal of what only a table's Presence takes names the table form
+// (D104).
+const TABLE_FORM: &str = "implements Presence<T, { ... }> on a DB table, D104";
 
 /// A move of the status a miss or a beat makes.
 pub type PresenceTransition = StatusMove;
@@ -246,6 +260,9 @@ impl Behavior for Presence {
     // its fields, its Workflow's states, and the schemas it releases leases
     // on.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<PresenceConfig> {
+        if let Some(reason) = table_member(raw) {
+            return Err(Error::config(reason));
+        }
         let principal_field = raw
             .get("principalField")
             .and_then(Value::as_str)
@@ -363,6 +380,23 @@ impl Behavior for Presence {
             ..Hooks::default()
         }
     }
+}
+
+// table_member says why a config names a member only a table's Presence
+// takes (D104): ttlByState, then status; None for a config that names
+// neither.
+fn table_member(raw: &Value) -> Option<String> {
+    if raw.get("ttlByState").is_some() {
+        return Some(format!(
+            "ttlByState is a table's Presence's ({TABLE_FORM}): an engine type's instance stays present ttlMs after its create and each beat, whatever its state"
+        ));
+    }
+    if raw.get("status").is_some() {
+        return Some(format!(
+            "status is a table's Presence's ({TABLE_FORM}): an engine type's Presence reads its one Workflow"
+        ));
+    }
+    None
 }
 
 // guard keeps the instance to its principal: a create sets

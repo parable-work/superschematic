@@ -118,19 +118,42 @@
             }
           }
         }
+      },
+      "status": {
+        "description": "The field of the type whose Workflow onExpiry and escalate move, and in whose terminal states an expiry does not count. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+        "type": "string",
+        "minLength": 1
       }
     }
   },
   "fields": [
-    { "name": "holder", "description": "The subject of the principal that holds the lease; absent when the instance is free." },
-    { "name": "token", "description": "The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it." },
-    { "name": "acquiredAt", "description": "When the lease was acquired, in epoch milliseconds; absent when the instance is free." },
-    { "name": "renewedAt", "description": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free." },
-    { "name": "expiresAt", "description": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free." },
+    { "name": "holder", "description": "The subject of the principal that holds the lease; absent when the instance is free.", "type": "string" },
+    { "name": "token", "description": "The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it.", "type": "Generic.Int64" },
+    { "name": "acquiredAt", "description": "When the lease was acquired, in epoch milliseconds; absent when the instance is free.", "type": "Temporal.DateTime" },
+    { "name": "renewedAt", "description": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free.", "type": "Temporal.DateTime" },
+    { "name": "expiresAt", "description": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free.", "type": "Temporal.DateTime" },
     { "name": "active", "description": "Whether a lease is held and has not expired.", "volatile": true },
-    { "name": "expiries", "description": "How many leases have expired or been abandoned since the last resetExpiries." },
-    { "name": "ended", "description": "How and when the last lease ended (reason and at); absent while one is held." }
+    { "name": "expiries", "description": "How many leases have expired or been abandoned since the last resetExpiries.", "type": "Generic.Int64" },
+    { "name": "ended", "description": "How and when the last lease ended (reason and at); absent while one is held.", "type": "Generic.JSON" }
   ],
+  "tables": [
+    {
+      "name": "directives",
+      "description": "One row per directive sent to the holder of the row's lease, keyed by its number in the lease: the token it was sent under, what it asks, its data, the dedupeKey it was sent with, who sent it and when, and when the holder acknowledged it. Every end of a lease deletes its directives, so none reaches the next holder.",
+      "key": "number",
+      "fields": [
+        { "name": "number", "description": "The directive's number in its lease, from 1 in the order they were sent, in ten digits zero-padded so the key's order is theirs.", "type": "string" },
+        { "name": "token", "description": "The lease's token it was sent under.", "type": "Generic.Int64" },
+        { "name": "name", "description": "What the directive asks.", "type": "string" },
+        { "name": "data", "description": "Its data.", "type": "Generic.JSON" },
+        { "name": "dedupeKey", "description": "The key it was sent with, when it was.", "type": "string" },
+        { "name": "sentBy", "description": "The subject of the caller who sent it, or of the principal a behavior's call ran for.", "type": "string" },
+        { "name": "sentAt", "description": "When it was sent, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "acknowledgedAt", "description": "When the holder acknowledged it; absent while heartbeats deliver it.", "type": "Temporal.DateTime" }
+      ]
+    }
+  ],
+  "armsDeadlines": true,
   "operations": [
     {
       "name": "acquire",

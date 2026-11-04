@@ -147,6 +147,11 @@ Timers' `fireTimer` on `Ticket` is the tool `ticket_timers_fire_timer`,
 titled `Ticket timers: fire timer`, capability `ticket.timers.fire-timer`,
 its tool name `ticket.timers.fireTimer`, and its parameters `id` and
 `deadline`, an enum of the config's deadlines.
+On a table one of whose uses takes a precondition, a Lease's fencing
+token, every one of the table's tools takes `preconditions` too, by use,
+`{ "Lease": { "token": 3 } }`, as the route's body does: `job_lease_heartbeat`
+with `{ id, preconditions: { Lease: { token: 3 } } }` (D104,
+[A precondition](/superschematic/guides/api-routes/#a-precondition-the-leases-token)).
 
 A TypeScript API's endpoint lists the tool and runs it through its route,
 so the set's `@requirePermission` and the core's own permission checks

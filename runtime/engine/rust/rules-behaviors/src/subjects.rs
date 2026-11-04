@@ -48,6 +48,64 @@ pub fn names_subject(type_name: &str, value: Option<&Value>, subject: &str) -> b
     held == subject
 }
 
+/// The texts a field's value names one subject in (D104): for a UUID type
+/// (Identity.UUID, Identity.UserID), a value that reads as a UUID gives its
+/// base62 form (the adapters' wire form, its fewest digits), its lowercase
+/// hyphenated form and its uppercase one, in that order, the value's own
+/// first when it is one of them; any other value, and a value of any other
+/// type, itself alone. What a behavior that finds rows by a subject another
+/// behavior kept as its text reads (Presence's releaseLeases over Lease's
+/// holder), so a subject an authenticator gives in either case is found; a
+/// hyphenated subject of mixed case is not.
+pub fn subject_forms(type_name: &str, value: &str) -> Vec<String> {
+    let uuid = UUID_TYPES
+        .contains(&type_name)
+        .then(|| uuid_value(value))
+        .flatten();
+    let Some(uuid) = uuid else {
+        return vec![value.to_owned()];
+    };
+    let lower = hyphenated(uuid);
+    let upper = lower.to_uppercase();
+    let mut forms: Vec<String> = Vec::with_capacity(3);
+    let own = [base62(uuid), lower.clone(), upper.clone()]
+        .into_iter()
+        .find(|form| form == value);
+    for form in own.into_iter().chain([base62(uuid), lower, upper]) {
+        if !forms.contains(&form) {
+            forms.push(form);
+        }
+    }
+    forms
+}
+
+// base62 is a UUID's value in base62, its fewest digits.
+fn base62(mut n: u128) -> String {
+    let mut digits = Vec::new();
+    loop {
+        digits.push(BASE62[(n % 62) as usize]);
+        n /= 62;
+        if n == 0 {
+            break;
+        }
+    }
+    digits.reverse();
+    String::from_utf8(digits).unwrap_or_default()
+}
+
+// hyphenated is a UUID's value as lowercase 8-4-4-4-12 hexadecimal digits.
+fn hyphenated(n: u128) -> String {
+    let hex = format!("{n:032x}");
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
 /// A UUID's value from its hyphenated form (36 characters, `8-4-4-4-12`
 /// hexadecimal digits of either case) or its base62 form (1 to 22
 /// characters, case-sensitive, at most 2^128 - 1), as the adapters read a
@@ -149,6 +207,58 @@ mod tests {
             assert!(!names_subject(type_name, Some(&json!(5)), "5"));
             assert!(!names_subject(type_name, Some(&json!(["bob"])), "bob"));
         }
+    }
+
+    #[test]
+    fn a_uuid_subject_has_its_three_forms_the_values_own_first() {
+        let upper = HYPHENATED.to_uppercase();
+        for type_name in ["Identity.UUID", "Identity.UserID"] {
+            assert_eq!(
+                subject_forms(type_name, BASE62_FORM),
+                [BASE62_FORM, HYPHENATED, upper.as_str()]
+            );
+            assert_eq!(
+                subject_forms(type_name, HYPHENATED),
+                [HYPHENATED, BASE62_FORM, upper.as_str()]
+            );
+            assert_eq!(
+                subject_forms(type_name, &upper),
+                [upper.as_str(), BASE62_FORM, HYPHENATED]
+            );
+            // Mixed case, or base62 with a leading zero, is none of them:
+            // base62 comes first.
+            let mixed = format!("{}{}", &upper[..8], &HYPHENATED[8..]);
+            assert_eq!(
+                subject_forms(type_name, &mixed),
+                [BASE62_FORM, HYPHENATED, upper.as_str()]
+            );
+            assert_eq!(
+                subject_forms(type_name, &format!("0{BASE62_FORM}")),
+                [BASE62_FORM, HYPHENATED, upper.as_str()]
+            );
+            // A text that is no UUID is itself alone; a short base62 text
+            // is one, as names_subject reads it.
+            assert_eq!(
+                subject_forms(type_name, "bob@example.com"),
+                ["bob@example.com"]
+            );
+            assert_eq!(
+                subject_forms(type_name, "bob"),
+                [
+                    "bob",
+                    "00000000-0000-0000-0000-0000000237d5",
+                    "00000000-0000-0000-0000-0000000237D5"
+                ]
+            );
+        }
+        // A UUID with no letter has one hyphenated form.
+        assert_eq!(
+            subject_forms("Identity.UUID", "00000000-0000-0000-0000-000000000000"),
+            ["00000000-0000-0000-0000-000000000000", "0"]
+        );
+        // A string field's text is itself alone.
+        assert_eq!(subject_forms("string", BASE62_FORM), [BASE62_FORM]);
+        assert_eq!(subject_forms("string", "bob"), ["bob"]);
     }
 
     #[test]

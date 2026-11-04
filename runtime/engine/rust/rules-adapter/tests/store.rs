@@ -275,6 +275,77 @@ impl Db {
         )
     }
 
+    /// Runs an operation of a use on a row as a caller with what the
+    /// options give it beside, its preconditions among them (D104).
+    #[allow(clippy::too_many_arguments)]
+    async fn operate_with(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        operation: &str,
+        params: Value,
+        caller: Caller,
+        options: &ExecuteOptions,
+    ) -> Result<Value, Error> {
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_operation_with(
+                host, &tx, type_name, key, use_id, operation, params, caller, options
+            ),
+            superschematic_rules_adapter::postgres::run_operation_with(
+                host, &tx, type_name, key, use_id, operation, params, caller, options
+            )
+            .await
+        )
+    }
+
+    /// An update of a row's own fields as a caller with what the options
+    /// give it beside.
+    async fn update_with(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        patch: Value,
+        caller: Caller,
+        options: &ExecuteOptions,
+    ) -> Result<(), Error> {
+        let patch = object(patch);
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_update(
+                host, &tx, type_name, key, patch, caller, options
+            ),
+            superschematic_rules_adapter::postgres::run_update(
+                host, &tx, type_name, key, patch, caller, options
+            )
+            .await
+        )
+    }
+
+    /// A delete of a row as a caller with what the options give it beside.
+    async fn delete_with(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        caller: Caller,
+        options: &ExecuteOptions,
+    ) -> Result<(), Error> {
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_delete(
+                host, &tx, type_name, key, caller, options
+            ),
+            superschematic_rules_adapter::postgres::run_delete(
+                host, &tx, type_name, key, caller, options
+            )
+            .await
+        )
+    }
+
     /// An update of a row's own fields as a caller.
     async fn update_as(
         &mut self,
@@ -376,6 +447,7 @@ impl Db {
         let options = ExecuteOptions {
             own_columns: None,
             soft_delete: soft.map(object),
+            ..ExecuteOptions::default()
         };
         in_transaction!(
             self,
@@ -899,6 +971,9 @@ on_each_dialect!(soft_deletable_rows);
 on_each_dialect!(rules_across_rows_and_writes_taken_later);
 on_each_dialect!(a_row_read_holds_the_audit_fields);
 on_each_dialect!(a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them);
+on_each_dialect!(
+    a_leased_row_keeps_its_token_its_sub_tables_and_its_deadline_and_a_write_presents_the_token
+);
 
 /// Creates Order o1, titled Desk, at `at`.
 async fn desk(
@@ -1162,7 +1237,7 @@ async fn ask_stamped_and_unstamped(db: &mut Db, host: &Host<'_>) {
                 "asked_of": ERIN.1,
                 "created_by": DANA.1
             }))),
-            soft_delete: None,
+            ..ExecuteOptions::default()
         },
         ..CreateOptions::default()
     };
@@ -1280,7 +1355,7 @@ async fn a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them(m
         id: Some("t1".into()),
         execute: ExecuteOptions {
             own_columns: Some(columns),
-            soft_delete: None,
+            ..ExecuteOptions::default()
         },
         ..CreateOptions::default()
     };
@@ -2277,4 +2352,284 @@ async fn a_rules_lock_on_postgres_is_held_until_the_transaction_ends() {
         assert!(taken, "the lock outlived its transaction");
     })
     .await;
+}
+
+/// The caller's preconditions (D104), each use's entry by its use id.
+fn presenting(preconditions: Value) -> ExecuteOptions {
+    ExecuteOptions {
+        preconditions: object(preconditions),
+        ..ExecuteOptions::default()
+    }
+}
+
+/// Lease's token presented as its precondition.
+fn token(token: i64) -> ExecuteOptions {
+    presenting(json!({"Lease": {"token": token}}))
+}
+
+/// wren, a worker.
+fn wren() -> Caller {
+    Caller::new("wren", Vec::<String>::new())
+}
+
+/// otto, another.
+fn otto() -> Caller {
+    Caller::new("otto", Vec::<String>::new())
+}
+
+/// A refusal's veto code, `None` for none.
+fn vetoed_as<T: std::fmt::Debug>(result: Result<T, Error>) -> Option<Value> {
+    refusal(result)
+        .details
+        .and_then(|details| details.get("vetoCode").cloned())
+}
+
+/// The commands of j1, a row of [`common::job_table`], on a core and its
+/// layout.
+struct Jobs<'a> {
+    core: &'a superschematic_rules::Core,
+    layout: &'a Layout,
+}
+
+impl Jobs<'_> {
+    /// The host at a time.
+    fn at(&self, at: i64) -> Host<'_> {
+        Host::new(self.core, self.layout).with_clock(move || at)
+    }
+
+    /// An operation of a use of j1, `(use, operation)`, as a caller,
+    /// presenting the options' preconditions, at a time.
+    async fn run(
+        &self,
+        db: &mut Db,
+        at: i64,
+        (use_id, operation): (&str, &str),
+        params: Value,
+        caller: Caller,
+        options: &ExecuteOptions,
+    ) -> Result<Value, Error> {
+        let host = self.at(at);
+        db.operate_with(
+            &host, "Job", "j1", use_id, operation, params, caller, options,
+        )
+        .await
+    }
+
+    /// j1 as the core reads it.
+    async fn row(&self, db: &mut Db) -> Row {
+        db.read(&self.at(0), "Job", "j1")
+            .await
+            .expect("read")
+            .expect("a row")
+    }
+
+    /// j1's rows of a use's sub-table.
+    async fn sub_rows(&self, db: &mut Db, use_id: &str, table: &str) -> Vec<SubRow> {
+        db.sub_rows(&self.at(0), "Job", "j1", use_id, table).await
+    }
+}
+
+/// Job (D104), Lease and Retries implemented beside a Workflow: the
+/// adapter needs nothing of either behavior's own. A create reads back its
+/// owned whole numbers as JSON numbers and its JSON as it was; then
+/// [`a_lease_is_acquired_directed_and_renewed`],
+/// [`an_attempt_and_a_holder_are_read_by_their_columns`],
+/// [`a_write_presents_the_token_and_a_release_clears_the_expiry`] and
+/// [`a_lapsed_lease_is_taken_again_and_a_delete_presents_the_token`].
+async fn a_leased_row_keeps_its_token_its_sub_tables_and_its_deadline_and_a_write_presents_the_token(
+    mut db: Db,
+) {
+    let postgres = db.postgres();
+    for ddl in common::job_ddl(postgres) {
+        db.exec(&ddl, &[]).await;
+    }
+    let core = common::core();
+    let layout = Layout::new([common::job_table()]);
+    let jobs = Jobs {
+        core: &core,
+        layout: &layout,
+    };
+    let created = json!({"title": "Build", "revision": 1});
+    db.create(&jobs.at(1_000_000), "Job", created, Some("j1"))
+        .await
+        .expect("created");
+    let row = jobs.row(&mut db).await;
+    assert_eq!(
+        json!(row.owned),
+        json!({
+            "Lease": {"token": 0, "expiries": 0},
+            "Retries": {"total": 0, "classAttempts": {"timeout": 0, "rejected": 0}, "exhausted": false, "stuck": false, "keyedBy": "1"},
+            "status": {"status": "queued", "enteredAt": 1_000_000}
+        })
+    );
+    assert_eq!(row.own.get("revision"), Some(&json!(1)));
+    a_lease_is_acquired_directed_and_renewed(&mut db, &jobs).await;
+    an_attempt_and_a_holder_are_read_by_their_columns(&mut db, &jobs).await;
+    a_write_presents_the_token_and_a_release_clears_the_expiry(&mut db, &jobs).await;
+    a_lapsed_lease_is_taken_again_and_a_delete_presents_the_token(&mut db, &jobs).await;
+}
+
+/// An acquire writes Lease's owned timestamps and arms its expiry in the
+/// table's deadline queue; a directive is a row of its sub-table, its
+/// whole number, its JSON and its timestamp read back as the core wrote
+/// them; and a heartbeat presenting the token through the options moves
+/// the expiry, its message cleared and armed again in one change set, one
+/// live message, while one presenting none is refused.
+async fn a_lease_is_acquired_directed_and_renewed(db: &mut Db, jobs: &Jobs<'_>) {
+    let (none, one) = (ExecuteOptions::default(), token(1));
+    let acquire = ("Lease", "acquire");
+    let acquired = jobs
+        .run(db, 1_000_000, acquire, json!({}), wren(), &none)
+        .await;
+    assert_eq!(
+        acquired.expect("acquired"),
+        json!({"token": 1, "expiresAt": 1_060_000, "heartbeatMs": 20_000})
+    );
+    assert_eq!(
+        db.messages("job_deadline_queue", "j1").await,
+        [("expire".to_owned(), 1_060_000, "ready".to_owned())]
+    );
+    let overrides = Caller::new("otto", ["jobs.override"]);
+    let params = json!({"name": "rebase", "data": {"to": "main"}});
+    let sent = jobs.run(db, 1_001_000, ("Lease", "direct"), params, overrides, &none);
+    assert_eq!(sent.await.expect("sent"), json!({"id": 1, "created": true}));
+    assert_eq!(
+        json!(jobs.sub_rows(db, "Lease", "directives").await),
+        json!([{"key": "0000000001", "values": {"token": 1, "name": "rebase", "data": {"to": "main"}, "sentBy": "otto", "sentAt": 1_001_000}}])
+    );
+    let heartbeat = ("Lease", "heartbeat");
+    let beat = jobs.run(db, 1_010_000, heartbeat, json!({}), wren(), &one);
+    assert_eq!(beat.await.expect("renewed")["expiresAt"], json!(1_070_000));
+    assert_eq!(
+        db.messages("job_deadline_queue", "j1").await,
+        [("expire".to_owned(), 1_070_000, "ready".to_owned())]
+    );
+    let bare = jobs.run(db, 1_010_000, heartbeat, json!({}), wren(), &none);
+    assert_eq!(vetoed_as(bare.await), Some(json!("token_required")));
+}
+
+/// An attempt is a row of Retries' attempts sub-table, a timestamp, text,
+/// a number, a boolean and JSON each read back as the core wrote it, and
+/// its owned columns hold the counts as JSON and the wait as a timestamp;
+/// and a read of the rows whose Lease's holder is a subject finds the row
+/// by its owned column, and none for another.
+async fn an_attempt_and_a_holder_are_read_by_their_columns(db: &mut Db, jobs: &Jobs<'_>) {
+    let one = token(1);
+    let params = json!({"failure": "timeout", "score": 0.5, "detail": {"log": ["x"]}});
+    let attempt = ("Retries", "recordAttempt");
+    let recorded = jobs.run(db, 1_020_000, attempt, params, wren(), &one);
+    assert_eq!(
+        recorded.await.expect("recorded")["retryAt"],
+        json!(1_080_000)
+    );
+    assert_eq!(
+        json!(jobs.sub_rows(db, "Retries", "attempts").await),
+        json!([{"key": "0000000001", "values": {
+            "at": 1_020_000, "failure": "timeout", "score": 0.5, "kept": false,
+            "detail": {"log": ["x"]}, "subject": "wren", "keyedBy": "1"
+        }}])
+    );
+    assert_eq!(
+        json!(jobs.row(db).await.owned["Retries"]),
+        json!({"total": 1, "classAttempts": {"timeout": 1, "rejected": 0}, "exhausted": false, "stuck": false, "retryAt": 1_080_000, "keyedBy": "1"})
+    );
+    let none = ExecuteOptions::default();
+    let find =
+        |value: &str| json!({"type": "Job", "use": "Lease", "field": "holder", "value": value});
+    let found = jobs.run(
+        db,
+        1_020_000,
+        ("Finder", "find"),
+        find("wren"),
+        wren(),
+        &none,
+    );
+    let found = found.await.expect("found");
+    assert_eq!(found["rows"][0]["key"], json!("j1"), "{found}");
+    assert_eq!(
+        (found["rows"].as_array().map(Vec::len), &found["more"]),
+        (Some(1), &json!(false))
+    );
+    let found = jobs.run(
+        db,
+        1_020_000,
+        ("Finder", "find"),
+        find("otto"),
+        wren(),
+        &none,
+    );
+    assert_eq!(
+        found.await.expect("found"),
+        json!({"rows": [], "more": false})
+    );
+}
+
+/// An update presents the token, refused without it under requireToken;
+/// a malformed precondition is refused as PreconditionsError before the
+/// row is read, so one of a row the table lacks is refused alike; and a
+/// release clears the expiry and deletes the directives.
+async fn a_write_presents_the_token_and_a_release_clears_the_expiry(db: &mut Db, jobs: &Jobs<'_>) {
+    let (none, one) = (ExecuteOptions::default(), token(1));
+    let later = jobs.at(1_030_000);
+    let patch = json!({"title": "Rebuild"});
+    let bare = db.update_with(&later, "Job", "j1", patch.clone(), wren(), &none);
+    assert_eq!(vetoed_as(bare.await), Some(json!("token_required")));
+    let fenced = db.update_with(&later, "Job", "j1", patch.clone(), wren(), &one);
+    fenced.await.expect("saved");
+    let malformed = presenting(json!({"Lease": {}}));
+    for key in ["j1", "j9"] {
+        let refused = db.update_with(&later, "Job", key, patch.clone(), wren(), &malformed);
+        let refused = refusal(refused.await);
+        assert_eq!(
+            (
+                refused.code,
+                refused.class.as_str(),
+                refused.message.as_str()
+            ),
+            (
+                Code::InvalidArgument,
+                "PreconditionsError",
+                "preconditions of Job: /Lease: must have required property 'token'"
+            )
+        );
+    }
+    let release = jobs.run(db, 1_040_000, ("Lease", "release"), json!({}), wren(), &one);
+    release.await.expect("released");
+    assert!(db.messages("job_deadline_queue", "j1").await.is_empty());
+    assert!(jobs.sub_rows(db, "Lease", "directives").await.is_empty());
+    assert_eq!(
+        json!(jobs.row(db).await.owned["Lease"]),
+        json!({"token": 2, "expiries": 0, "ended": {"reason": "release", "at": 1_040_000}})
+    );
+}
+
+/// An acquire over a lapsed lease expires it and takes a new one in one
+/// change set, the expiry cleared and armed again, in order, one live
+/// message; and a delete presents the token too, a stale one refused and
+/// the holder's current one deleting the row, its sub-table rows and its
+/// deadline's message.
+async fn a_lapsed_lease_is_taken_again_and_a_delete_presents_the_token(
+    db: &mut Db,
+    jobs: &Jobs<'_>,
+) {
+    let (none, three, five) = (ExecuteOptions::default(), token(3), token(5));
+    let acquire = ("Lease", "acquire");
+    let acquired = jobs.run(db, 1_100_000, acquire, json!({}), wren(), &none);
+    acquired.await.expect("acquired");
+    let taken = jobs.run(db, 1_200_000, acquire, json!({}), otto(), &none);
+    assert_eq!(taken.await.expect("acquired")["token"], json!(5));
+    assert_eq!(
+        db.messages("job_deadline_queue", "j1").await,
+        [("expire".to_owned(), 1_260_000, "ready".to_owned())]
+    );
+    let expiries = jobs.row(db).await.owned["Lease"].get("expiries").cloned();
+    assert_eq!(expiries, Some(json!(1)));
+    let at = jobs.at(1_210_000);
+    let stale = db.delete_with(&at, "Job", "j1", wren(), &three);
+    assert_eq!(vetoed_as(stale.await), Some(json!("token_stale")));
+    let deleted = db.delete_with(&at, "Job", "j1", otto(), &five);
+    deleted.await.expect("deleted");
+    assert!(db.read(&at, "Job", "j1").await.expect("read").is_none());
+    assert!(jobs.sub_rows(db, "Retries", "attempts").await.is_empty());
+    assert!(db.messages("job_deadline_queue", "j1").await.is_empty());
 }

@@ -1064,8 +1064,9 @@ own fields, and leaves out the fields the loader added and the
 `@optimistic` they imply.
 
 A behavior the behaviors' core runs and whose declaration names no `value`
-(Timers, Reactions, Constants, StateRules, Approvals) is implemented by a DB
-table as a whole (D103, D104): `export abstract
+(Timers, Reactions, Constants, StateRules, Approvals, Lease, Presence,
+Budget, Retries) is implemented by a DB table as a whole (D103, D104):
+`export abstract
 class Ticket implements Timers<Ticket, { ... }>`, where `@superschematic/db`
 exports the carrier, which resolves to the empty object type as `User`
 does. Its first type argument is the table itself, and the walker reads
@@ -1320,6 +1321,19 @@ fields, and this type's fields its steps read). `make cli-smoke` loads
 `fixture-workqueue-json`, whose jobs compose the first five and whose
 workers, batches and steps, one type a file, compose the other two, and
 its TypeScript twin loads to the same IR.
+
+A DB table that implements `Lease`, `Retries`, `Presence` or `Budget`
+(D104) is checked by the loader instead, in the core's words
+(`verify/behaviors_lease.go` and its siblings): the fields a config names
+are own fields of the type its rule needs, the states the Workflow's, a
+meter's `scope` a to-one relation whose target implements `Budget` with
+the meter, and each `releaseLeases` table one that implements `Lease`.
+The members only a table takes (each config's `status`, Retries'
+`backoff`, `retryInto`, `then`, `giveUpAfterMs`, `window` and `keyField`,
+Presence's `ttlByState`, Budget's resets but `daily`, its `window` and
+`observePermission`) are refused on an engine type, and the members only
+the engine's runner reads (`sweepMs`), Lease's `directOn` and Retries'
+`resultField` are refused on a table.
 
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);

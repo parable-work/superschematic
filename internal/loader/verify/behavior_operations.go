@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -332,8 +333,11 @@ func tableImportedFrom(schema *ir.Schema, set *ir.OperationSet, db string, r *Re
 
 // behaviorOperationsTable returns the table set names, a table of db that
 // composes a behavior, by implements or on a field, keyed by one field,
-// each of whose uses' operations runs on a row, refusing the set when it
-// is not.
+// refusing the set when it is not. An operation of a use that runs on the
+// schema or a namespace as a whole, not on a row (Lease's expireHolder),
+// is one a command without a row would run, which the core does not take
+// yet: the set leaves it out and the build warns of it, once per set, use
+// and operation (D103, D104).
 func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry, r *Result) (*ir.TypeDef, bool) {
 	typeName := set.BehaviorOperations.Type
 	td := db.Types[typeName]
@@ -366,6 +370,14 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 		return nil, false
 	}
 	ok := true
+	// The uses whose behaviors take a precondition, whose entries every
+	// operation's input presents in its preconditions member (D104).
+	var preconditioned []string
+	for _, ref := range td.TableBehaviors() {
+		if declaration, registered := reg.Behavior(ref.Name); registered && behaviorops.TakesPreconditions(declaration) {
+			preconditioned = append(preconditioned, ref.UseID())
+		}
+	}
 	for _, ref := range td.TableBehaviors() {
 		declaration, registered := reg.Behavior(ref.Name)
 		if !registered {
@@ -373,14 +385,34 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 			ok = false
 			continue
 		}
+		if len(preconditioned) > 0 {
+			for _, op := range declaration.Operations {
+				if takesParameter(op.ParamsSchema, behaviorops.PreconditionsMember) {
+					r.errorf("", "%s: %s's %s is %s, whose operation %s takes a parameter %s, the member every behavior operation's input on %s presents the caller's preconditions in, since its uses %s take one (D16, D104): rename the parameter, or serve the table's operations from code of the project's own", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, behaviorops.PreconditionsMember, typeName, strings.Join(preconditioned, ", "))
+					ok = false
+				}
+			}
+		}
 		for _, op := range declaration.Operations {
 			if op.Scope == registry.OperationScopeSchema || op.Scope == registry.OperationScopeNamespace {
-				r.errorf("", "%s: %s's %s is %s, whose operation %s runs on the %s as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row (D103)", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, op.Scope)
-				ok = false
+				r.warnf("", "%s: %s's %s is %s, whose operation %s runs on the %s as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves %s out (D103, D104)", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, op.Scope, op.Name)
 			}
 		}
 	}
 	return td, ok
+}
+
+// takesParameter reports whether an operation's paramsSchema declares the
+// property name.
+func takesParameter(paramsSchema json.RawMessage, name string) bool {
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(paramsSchema, &schema) != nil {
+		return false
+	}
+	_, ok := schema.Properties[name]
+	return ok
 }
 
 // checkBehaviorOperationNames refuses a type or an enum the expansion adds

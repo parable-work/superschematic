@@ -591,15 +591,43 @@
                           "type": "string"
                         },
                         "reset": {
-                          "description": "daily: the used amount starts again at 0 at each UTC day; reservations are kept.",
-                          "enum": [
-                            "daily"
+                          "description": "When the used amount starts again at 0, in UTC; reservations are kept. daily: at each UTC day. hourly, weekly (each Monday), monthly (each first of the month) and { everyMs } (at each multiple of everyMs from the epoch, a whole number of minutes) are a table's alone: an engine type refuses them.",
+                          "oneOf": [
+                            {
+                              "enum": [
+                                "hourly",
+                                "daily",
+                                "weekly",
+                                "monthly"
+                              ]
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "everyMs": {
+                                  "description": "The period's length, in milliseconds.",
+                                  "minimum": 60000,
+                                  "multipleOf": 60000,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "everyMs"
+                              ],
+                              "type": "object"
+                            }
                           ]
                         },
                         "scope": {
                           "description": "A link of the type's Links config whose target is the enclosing scope: its schema composes Budget with the same meter, and every reservation and usage of the meter here is taken there too, and on up its own scope.",
                           "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
                           "type": "string"
+                        },
+                        "window": {
+                          "description": "rolling: the meter counts the usage of its last period rather than of the current one, from buckets of a sixtieth of the period each (a month is thirty days), so no boundary lets twice the limit through. Needs reset. A table's alone: an engine type refuses it.",
+                          "enum": [
+                            "rolling"
+                          ]
                         }
                       },
                       "type": "object"
@@ -610,6 +638,11 @@
                       "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
                     },
                     "type": "object"
+                  },
+                  "observePermission": {
+                    "description": "The permission a caller needs to record the usage a provider reports with observe; absent, observe is refused (not_configured). A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "onExceeded": {
                     "additionalProperties": false,
@@ -625,6 +658,11 @@
                       "direct"
                     ],
                     "type": "object"
+                  },
+                  "status": {
+                    "description": "The field of the type whose Workflow escalate moves. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1599,6 +1637,11 @@
                     "description": "When true, a write to an instance with an active lease that does not present the current token as Lease's precondition is refused, the holder's own included, so every process of a principal fences its writes. Exempt and read-only operations, Lease's own operations and a principal with overridePermission are not held to it.",
                     "type": "boolean"
                   },
+                  "status": {
+                    "description": "The field of the type whose Workflow onExpiry and escalate move, and in whose terminal states an expiry does not count. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "sweepMs": {
                     "description": "How often the engine's runner expires the leases past their expiry time or longest hold, in milliseconds; 5000 when absent.",
                     "minimum": 1000,
@@ -2088,10 +2131,24 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "status": {
+                    "description": "The field of the type whose Workflow onMissed, onBeat and ttlByState read and move. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "sweepMs": {
                     "description": "How often the engine's runner misses the instances past their deadline, in milliseconds; 5000 when absent.",
                     "minimum": 1000,
                     "type": "integer"
+                  },
+                  "ttlByState": {
+                    "additionalProperties": {
+                      "minimum": 1000,
+                      "type": "integer"
+                    },
+                    "description": "How long the row stays present in a state of its Workflow, in milliseconds, by state: a beat arms the deadline its row's state gives, and a transition arms it again, counted from the later of the last beat and the entry into the state; ttlMs for a state it does not list. Needs Workflow on the type. A table's alone: an engine type refuses it.",
+                    "minProperties": 1,
+                    "type": "object"
                   },
                   "ttlMs": {
                     "description": "How long the instance stays present after its create or its last beat, in milliseconds.",
@@ -2505,6 +2562,32 @@
                               "minimum": 1,
                               "type": "integer"
                             },
+                            "backoff": {
+                              "additionalProperties": false,
+                              "description": "How long the row waits after a failure of the class before it runs again: firstMs after its first failure of the class since its last success, factor times longer after each next one, never longer than maxMs. The failure sets the row's retryAt; until then a transition into a state of retryInto, and Lease's acquire, are vetoed backing_off. A table's alone: an engine type refuses it.",
+                              "properties": {
+                                "factor": {
+                                  "description": "How many times longer each next wait is; 2 when absent.",
+                                  "minimum": 1,
+                                  "type": "number"
+                                },
+                                "firstMs": {
+                                  "description": "The wait after the first failure, in milliseconds.",
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "maxMs": {
+                                  "description": "The longest wait, in milliseconds, at least firstMs.",
+                                  "minimum": 1,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "firstMs",
+                                "maxMs"
+                              ],
+                              "type": "object"
+                            },
                             "hint": {
                               "description": "What recordAttempt returns for a failure of the class, to steer the worker's next attempt.",
                               "maxLength": 2000,
@@ -2547,6 +2630,11 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "giveUpAfterMs": {
+                    "description": "Exhausts the row at its first failed attempt this many milliseconds or more after the first failure since its last success (failingSince), however much room its caps have left. A table's alone: an engine type refuses it.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
                   "keepBest": {
                     "additionalProperties": false,
                     "description": "Keeps the best scoring result rather than only a success's: a failed attempt's result is kept when its score beats the best kept one by at least minDelta and no neverRegress predicate that held for the kept one fails.",
@@ -2568,6 +2656,11 @@
                     },
                     "type": "object"
                   },
+                  "keyField": {
+                    "description": "An own field whose value keys every class's count: an attempt under another value than the last starts the counts, the total, exhaustion and the wait again, so { attempts: 1 } with keyField: \"version\" is one failure per version. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "limitsField": {
                     "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored. Once the instance exists, only a principal with limitsPermission changes it, and the holder of its active lease does not.",
                     "minLength": 1,
@@ -2588,15 +2681,77 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "retryInto": {
+                    "description": "The states of the Workflow an attempt starts in: a transition into one waits until the row's retryAt has passed (backing_off) and for room in window (throttled), as Lease's acquire does. Needs a class with a backoff, or window. A table's alone: an engine type refuses it.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "status": {
+                    "description": "The field of the type whose Workflow exhaustedState, from, retryInto and then name states of. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "stuckAfter": {
                     "description": "How many failures in a row, none of them kept, with the same signature exhaust the instance as stuck.",
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "then": {
+                    "additionalProperties": false,
+                    "description": "Moves the row's Workflow status when its backoff ends: a deadline armed at retryAt moves it to transition, through Workflow's transition, while the status is one of from; a move a guard vetoes, or that the deadline's caller may not make, leaves the status as it is. Needs a class with a backoff. A table's alone: an engine type refuses it.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
                   "totalAttempts": {
                     "description": "How many failures of every class together an instance may have.",
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "window": {
+                    "additionalProperties": false,
+                    "description": "Caps the attempts the row records in any ms milliseconds: while attempts of them fall in the last ms, a transition into a state of retryInto, and Lease's acquire, are vetoed throttled until the oldest of them leaves the window. An attempt that ran is recorded whatever the window holds. Each attempt's time is a row of the attempts sub-table. Needs retryInto, or Lease on the type. A table's alone: an engine type refuses it.",
+                    "properties": {
+                      "attempts": {
+                        "description": "How many attempts the window holds.",
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "ms": {
+                        "description": "How long the window is, in milliseconds.",
+                        "minimum": 1000,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "attempts",
+                      "ms"
+                    ],
+                    "type": "object"
                   }
                 },
                 "required": [

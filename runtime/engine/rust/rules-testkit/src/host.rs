@@ -200,8 +200,10 @@ impl Logged {
 
     /// The owned fields the write changed, by use id: each it set to a
     /// value other than the one the row held before, as the engine's event
-    /// recorded a change; a use whose fields it left as they were left
-    /// out. A create's are every one it set.
+    /// recorded a change, a JSON object that was one before by the merge
+    /// patch between them, member by member (the engine's `diff_patch`); a
+    /// use whose fields it left as they were left out. A create's are every
+    /// one it set.
     pub fn changed(&self) -> BTreeMap<String, Map<String, Value>> {
         self.owned()
             .into_iter()
@@ -209,11 +211,20 @@ impl Logged {
                 let held = self.before.get(&use_id);
                 let fields: Map<String, Value> = fields
                     .into_iter()
-                    .filter(|(field, value)| {
+                    .filter_map(|(field, value)| {
                         let was = held
-                            .and_then(|held| held.get(field))
+                            .and_then(|held| held.get(&field))
                             .unwrap_or(&Value::Null);
-                        was != value
+                        if *was == value {
+                            return None;
+                        }
+                        let changed = match (was, &value) {
+                            (Value::Object(was), Value::Object(now)) => {
+                                Value::Object(diff_patch(was, now))
+                            }
+                            _ => value,
+                        };
+                        Some((field, changed))
                     })
                     .collect();
                 (use_id, fields)
@@ -221,6 +232,33 @@ impl Logged {
             .filter(|(_, fields)| !fields.is_empty())
             .collect()
     }
+}
+
+// diff_patch is the merge patch that turns one object into another: each
+// member that is new or changed, a nested object changed member by member,
+// and null for a member the second no longer has, as the engine's event
+// recorded the change of an object field.
+fn diff_patch(before: &Map<String, Value>, after: &Map<String, Value>) -> Map<String, Value> {
+    let mut patch = Map::new();
+    for (key, value) in after {
+        let previous = before.get(key);
+        if previous == Some(value) {
+            continue;
+        }
+        let changed = match (previous, value) {
+            (Some(Value::Object(previous)), Value::Object(value)) => {
+                Value::Object(diff_patch(previous, value))
+            }
+            _ => value.clone(),
+        };
+        patch.insert(key.clone(), changed);
+    }
+    for key in before.keys() {
+        if !after.contains_key(key) {
+            patch.insert(key.clone(), Value::Null);
+        }
+    }
+    patch
 }
 
 /// What the host keeps: types, rows, sub-table rows, the outbox, the armed
@@ -566,8 +604,57 @@ impl Store {
                 after.as_deref(),
                 *limit,
             ))),
+            ReadRequest::Holding {
+                type_name,
+                use_id,
+                field,
+                value,
+                after,
+                limit,
+            } => Some(Answer::Linked(self.holding(
+                type_name,
+                use_id,
+                field,
+                value,
+                after.as_deref(),
+                *limit,
+            ))),
             _ => None,
         }
+    }
+
+    /// The rows of a type whose use's owned field holds a value, compared
+    /// as JSON, in key order (by code point), after `after` when given, at
+    /// most `limit`, and whether more follow: a holding read's answer.
+    pub fn holding(
+        &self,
+        type_name: &str,
+        use_id: &str,
+        field: &str,
+        value: &Value,
+        after: Option<&str>,
+        limit: usize,
+    ) -> LinkedRows {
+        let mut rows: Vec<KeyedRow> = self
+            .rows
+            .get(type_name)
+            .into_iter()
+            .flatten()
+            .filter(|(row_key, row)| {
+                row.owned
+                    .get(use_id)
+                    .and_then(|fields| fields.get(field))
+                    .is_some_and(|held| !held.is_null() && held == value)
+                    && after.is_none_or(|after| row_key.as_str() > after)
+            })
+            .map(|(row_key, row)| KeyedRow {
+                key: row_key.clone(),
+                row: row.as_row(),
+            })
+            .collect();
+        let more = rows.len() > limit;
+        rows.truncate(limit);
+        LinkedRows { rows, more }
     }
 
     /// The rows of a type whose own field holds a key, in key order (by

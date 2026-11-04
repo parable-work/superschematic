@@ -1045,8 +1045,10 @@ instead
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)). A
 table that types a field as a behavior, `status: Workflow<{ ... }>`, or
 implements one, `implements Timers<Ticket, { ... }>`, `implements
-Reactions<Project, { ... }>`, or Constants, StateRules and Approvals
+Reactions<Project, { ... }>`, Constants, StateRules and Approvals
 ([Fields a table keeps, freezes and signs off](#fields-a-table-keeps-freezes-and-signs-off)),
+or Lease, Retries, Presence and Budget
+([Rows a worker leases, retries, beats and meters](#rows-a-worker-leases-retries-beats-and-meters)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue and its change queue are
 tables beside it, and its operations change them through the behaviors'
@@ -1332,3 +1334,268 @@ A type that composes these with `@behavior("Constants", ...)` and the like
 is an engine type: its configs have no `oneWay`, `by`, `status`, `resetOn`
 or `pinned`, its `signOff` takes no `version`, and the build and the
 engine refuse each.
+
+### Rows a worker leases, retries, beats and meters
+
+A table implements `Lease`, `Retries`, `Presence` and `Budget` as it
+implements Timers, each with the table itself as its first type argument,
+beside its Workflow field (D16, D103, D104): a job a worker leases and
+retries, a session a device keeps alive, an account whose usage is
+metered. Each keeps its state in the table's columns and sub-tables, and
+each rule over time is a deadline the API's
+[behavior worker](/superschematic/guides/api-routes/#the-worker) runs when
+it falls due.
+
+```ts
+// agents-db
+export abstract class Job
+  implements
+    Lease<Job, {
+      onExpiry: { transition: "queued"; from: ["running"] };
+      maxExpiries: 3;
+      escalate: { transition: "failed"; from: ["running"] };
+      requireToken: true;
+      overridePermission: "jobs.override";
+    }>,
+    Retries<Job, {
+      classes: {
+        timeout: { attempts: 5; backoff: { firstMs: 60000; maxMs: 600000 } };
+        build: { attempts: 1 };
+        rejected: "terminal";
+      };
+      totalAttempts: 6;
+      exhaustedState: "failed";
+      retryInto: ["running"];
+      then: { transition: "queued"; from: ["waiting"] };
+      giveUpAfterMs: 1800000;
+      window: { attempts: 4; ms: 3600000 };
+      keyField: "revision";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  revision: Generic.Int64;
+  status: Workflow<{
+    states: ["queued", "running", "waiting", "done", "failed"];
+    transitions: [ /* queued to running, running to waiting, waiting to queued, ... */ ];
+  }>;
+}
+
+export abstract class Session
+  implements
+    Presence<Session, {
+      ttlMs: 180000;
+      ttlByState: { turn: 900000 };
+      principalField: "device";
+      onMissed: { transition: "missing"; from: ["idle", "turn"] };
+      onBeat: { transition: "idle"; from: ["missing"] };
+      releaseLeases: ["Job"];
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  device: Identity.UUID;
+  status: Workflow<{ states: ["idle", "turn", "missing", "closed"]; transitions: [ /* ... */ ] }>;
+}
+
+export abstract class Account
+  implements
+    Budget<Account, {
+      meters: {
+        questions: { limit: 40; reset: "hourly"; scope: "workspace" };
+        tokens: { limit: 1000000; reset: "daily"; window: "rolling"; scope: "workspace" };
+      };
+      limitPermission: "accounts.limits";
+      observePermission: "accounts.observe";
+      escalate: { transition: "out"; from: ["open"] };
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: string;
+  workspace: Relation<Workspace>;
+  status: Workflow<{ states: ["open", "out"]; transitions: [{ from: "open"; to: "out" }, { from: "out"; to: "open" }] }>;
+}
+```
+
+`Workspace` implements Budget with the same two meters, so an account's
+usage counts against its workspace's caps too. Each config may name
+`status`, the Workflow field its moves and states read when the table has
+several; with one, it is that one.
+
+**Lease.** An exclusive lease on the row, held by one caller's subject and
+numbered by a fencing token. The build adds the columns `lease_holder`,
+`lease_token`, `lease_acquired_at`, `lease_renewed_at`,
+`lease_expires_at`, `lease_expiries` and `lease_ended` (`{ reason, at }`,
+how the last lease ended), the sub-table `job_lease_directives`, the
+directives sent to the holder, and the deadline `expire` on
+`job_deadline_queue`; the repositories read the columns as `leaseHolder`,
+`leaseToken` and the rest. Its operations are `lease.acquire({ ttlMs? })`,
+which answers `{ token, expiresAt, heartbeatMs }`, `heartbeat({
+acknowledge? })`, `release({ abandon? })`, `expire({ holder?,
+notRenewedAfter? })`, `direct`, `acknowledge` and `resetExpiries`. The
+config is the engine's Lease's
+([Work queues](/superschematic/guides/work-queues/#lease)): `ttlMs` (60
+seconds when absent), `heartbeatMs`, `maxHoldMs` or `maxHoldField` (a
+`Generic.Int64` field), `onExpiry` and `escalate` with `maxExpiries`,
+`exempt`, `requireToken` and the permissions.
+
+- **The token.** Every acquire, release and expiry advances it. A write
+  that presents another token than the current one is 409 `vetoed`,
+  `token_stale`, `{ token, current }`, whoever makes it; while a lease is
+  active, a write by any caller but its holder is `held_by_another`, `{
+  expiresAt }`, unless `exempt` lists the operation or the caller holds
+  `overridePermission`; with `requireToken`, the holder's own write that
+  presents no token is `token_required`; and once the lease has lapsed its
+  holder's writes are `lapsed`. `heartbeat` and `acknowledge` always need
+  the token. A write presents it as the `Lease` entry of its
+  preconditions, `{ Lease: { token } }`: an API's request in its body
+  ([A table's leases](/superschematic/guides/api-routes/#a-tables-leases-retries-presence-and-budgets)),
+  a repository's update or delete in its options:
+
+  ```ts
+  const { token } = await sdk.job.lease.acquire(id, {});
+  await orm.withBehaviorCaller({ subject: worker, permissions: [] })
+    .job.updateOne(id, { title: "Rebuilt" }, { preconditions: { Lease: { token } } });
+  ```
+
+  In Go it is the context's, `orm.WithPreconditions(ctx,
+  rules.Preconditions{"Lease": orm.JobLeasePrecondition{Token: token}})`,
+  read by every write the repositories make with it. A precondition for a
+  use whose behavior takes none, or one that is malformed, is 400
+  `invalid_argument` (`preconditions of Job: /Lease/token: must be >= 0`)
+  before the row is read, and a create takes none. A table's TypeScript
+  ORM types the options (`JobPreconditions`), and throws for a precondition
+  given to a table that composes no behavior.
+- **Expiry.** A lease the holder stops renewing expires when its deadline
+  falls due, at `lease_expires_at`, on the worker: the token advances,
+  `lease_expiries` counts it (not in a terminal state), `onExpiry` moves
+  the status from one of its `from` states, and at `maxExpiries` `escalate`
+  moves it instead. `release` ends it at once, and `release({ abandon:
+  true })` counts as an expiry.
+- **Not on a table.** `sweepMs`, how often the engine's runner swept the
+  lapsed leases, is refused, since each lease expires at its own deadline;
+  `directOn` waits for Revisions and Branches on the core; and
+  `expireHolder`, which runs on the table as a whole, is no operation of a
+  table: `@behaviorOperations` leaves it out with a warning.
+
+**Retries.** The row's attempts counted against caps by failure class, as
+the engine's Retries counts them
+([Work queues](/superschematic/guides/work-queues/#retries)), and the time
+between them (D104). `retries.recordAttempt({ failure?, score?,
+signature?, predicates?, detail? })` records one, a success without
+`failure`, and answers `{ failure, score, kept, total, classAttempts,
+exhausted, stuck, hint, retryAt? }`; an exhausted row moves to
+`exhaustedState` and stays out of `acquire` and every move but that one
+(`exhausted`). The build adds the columns `retries_total`,
+`retries_class_attempts`, `retries_best_score`, `retries_exhausted`,
+`retries_stuck`, `retries_retry_at`, `retries_failing_since` and
+`retries_keyed_by`, the sub-table `job_retries_attempts`, every attempt
+with its time, failure, score, subject and key, and the deadline `retry`.
+
+| Member | What it does |
+| --- | --- |
+| a class's `backoff: { firstMs, maxMs, factor? }` | a failure of the class that does not exhaust sets `retryAt` to `firstMs`, then `factor` (2) times as long after each next failure since the last success, up to `maxMs` |
+| `retryInto` | the states an attempt starts in: until `retryAt`, a transition into one, and Lease's `acquire`, is 409 `vetoed`, `backing_off`, `{ retryAt }` |
+| `then: { transition, from }` | when `retryAt` falls due, the worker moves the row from a `from` state to `transition`, back to the state that takes it again; a row that reaches a `from` state after `retryAt` moves at once. The move is the worker's write: another principal's active lease, or any guard's veto, holds it, and the worker tries again a minute on |
+| `giveUpAfterMs` | exhausts the row at its first failure that long after the first failure since its last success |
+| `window: { attempts, ms }` | with `attempts` attempts in the last `ms`, the next start (a move into `retryInto`, Lease's `acquire`) is `throttled`, `{ until }`, the time the oldest leaves the window |
+| `keyField` | an own field whose value keys every count: a new value (`revision: 2`) starts them again, so `{ attempts: 1 }` is once per revision |
+
+The build refuses a member nothing waits for: `then` with no class that
+sets a backoff, `retryInto` with no backoff and no window, a backoff with
+no `retryInto`, no `then` and no Lease, and a window with no `retryInto`
+and no Lease. It refuses `resultField`, whose
+kept result an operation would write to the row, which waits for
+Revisions on the core. A field named `version` cannot be a table's own
+field once it composes behaviors, which keep their version in `_version`:
+key the counts by a field of your own, as `revision` above.
+
+**Presence.** A heartbeat on a row that stands for a principal, the
+subject `principalField` holds (a `string`, `Identity.UUID` or
+`Identity.UserID` field; a UUID in either form). The build adds the
+columns `presence_deadline`, `presence_last_beat_at`, `presence_missed`
+and `presence_released` (what the last miss released, by table) and the
+deadline `miss`. `presence.beat()` by that principal moves the deadline
+`ttlMs` on and answers `{ deadline }`; any other caller is 409
+`not_principal`, a row whose field holds no one is `no_principal`, and an
+update that changes the field once set is `principal_fixed`. With
+`ttlByState`, a state it lists keeps the row present that long instead
+(a session in a turn for fifteen minutes), counted from the later of the
+last beat and the row's entry into the state, so a transition arms the
+deadline again from the entry; a state it does not list takes `ttlMs`.
+When the deadline falls due the worker misses the row: `presence_missed`
+is set, `onMissed` moves the status, and the leases the principal holds
+on each table `releaseLeases` names are expired through that table's
+Lease, unless the principal is present in another row of the table, or
+renewed the lease since it was last seen. The next beat clears the miss,
+and `onBeat` moves the status back. A miss expires another principal's
+leases through Lease's `expire`, which needs the Lease's
+`overridePermission`: the worker holds it only when its decorator lists
+it, `@behaviorWorker(Session, { permissions: ["jobs.override"] })`, and the
+build warns of a worker that does not. `sweepMs` is refused, as Lease's
+is. A table that implements both Lease and Presence lists
+`Presence.miss` in Lease's `exempt`, or another principal's lease vetoes
+the miss.
+
+**Budget.** Reserve-then-settle meters, as the engine's Budget keeps them
+([Work queues](/superschematic/guides/work-queues/#budget)), on the row
+and on the scopes it draws on. The build adds the sub-tables
+`account_budget_meters`, a row per meter with what is used and reserved,
+the period's start and the last observation, `account_budget_holds`, what
+the account holds for the rows inside it, and `account_budget_buckets`, a
+rolling meter's usage by bucket; it adds no column and no queue. Its
+operations are `budget.reserve`, the read-only `checkReserve`,
+`recordUsage`, `settle`, `setLimit`, `observe` and the scope's side,
+`reserveFor`, `settleFor` and `recordUsageFor`.
+
+- **Periods.** A meter's `reset` is `"hourly"`, `"daily"`, `"weekly"`
+  (from Monday 00:00), `"monthly"` (from the first of the month), all in
+  UTC, or `{ everyMs }`, a whole number of minutes. A read writes nothing,
+  and the meter's next write starts its period from zero; reservations
+  carry over. `window: "rolling"` counts the last period instead of the
+  current one, from buckets of a sixtieth of it each (a day's are 24
+  minutes, a month is thirty days): every bucket that overlaps the last
+  period counts, the current one and the sixty before it, so no stretch of
+  a period's length lets more than the cap through, a boundary's included.
+- **Scopes.** A meter's `scope` names a to-one relation of the table,
+  whose target implements Budget with the meter: a reservation fits only
+  within every limit up the chain (409 `over_limit`, `{ meter, amount,
+  remaining, limit, scope }`, `scope` the row whose limit refused it), and
+  usage counts at each. An update of the relation while the meter holds a
+  reservation is `scope_reserved`.
+- **Observe.** `observe({ meter, used, limit?, resetsAt? })` records the
+  usage a provider reports, which replaces what the meter counts, and its
+  `limit` the meter's, until `resetsAt`, else until the meter's next
+  period; usage recorded meanwhile adds to it, and nothing passes up to the
+  scopes. It needs `observePermission` (403 `forbidden` without it,
+  `not_configured` when the config names none).
+- **Limits.** `setLimit` needs `limitPermission`. A meter whose limit
+  `limitField` holds takes a new one by an update of that field, held to
+  the same permission and to what is used and reserved
+  (`below_committed`); `setLimit` of it is refused. On a table that
+  implements Lease, a reservation needs an active lease (`not_leased`),
+  and what an ended lease reserved is settled.
+- **Overruns.** `recordUsage` is never refused for its amount: usage past
+  a limit answers it in `overruns`, and `escalate` moves the status.
+
+The four hold every write through the core: the repositories' creates,
+their updates and deletes of one row by its key, the table's behavior
+operations and its deadlines. Each keeps sub-tables or arms deadlines, so
+the table has no upserts. A write around the core is held to none of them
+and arms no deadline: a repository's bulk and hard writes, a script,
+psql. No trigger or check refuses a raw SQL write of a `lease_*`,
+`retries_*` or `presence_*` column or of a sub-table's row, so an
+operator can repair a row (end a stuck lease, start a count again), but
+none of the four hears it: a lease ended by hand still has its expiry
+queued, which then changes nothing, and a status moved by hand re-arms no
+`ttlByState` deadline until the row's next write through the core or its
+miss. Prefer the operations: `lease.release` by a caller with
+`overridePermission`, `lease.resetExpiries`, `budget.setLimit`.
+
+A type that composes these with `@behavior("Lease", ...)` and the like is
+an engine type: its configs have no `status`, Retries' new members,
+`ttlByState` or Budget's new resets, `window` and `observePermission`, it
+has no `observe`, and the build and the engine refuse each, naming the
+table form.

@@ -406,7 +406,7 @@ async fn attempts<S: Store>(
 ) -> Result<DeadlineRun, Error> {
     let table = table_of(host.layout, type_name)?;
     refuse_checked(host, type_name)?;
-    let run = prepared(host, table, command)?;
+    let run = prepared(host, table, command, options)?;
     refuse_owned_writes(table, &run.action)?;
     let claim = spent.claim();
     let deadline = matches!(spent, Spent::Deadline(_));
@@ -724,7 +724,8 @@ fn queue_of<'t>(table: &'t Table, use_id: &str, name: &str) -> Result<&'t Deadli
     })
 }
 
-/// Runs an operation of a use on a row and returns its result.
+/// Runs an operation of a use on a row with what the options give it
+/// beside (its caller's preconditions) and returns its result.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_operation<S: Store>(
     host: &Host<'_>,
@@ -735,6 +736,7 @@ pub(crate) async fn run_operation<S: Store>(
     operation: &str,
     params: Value,
     caller: Caller,
+    options: &ExecuteOptions,
 ) -> Result<Value, Error> {
     let params = if params.is_null() {
         Value::Object(Map::new())
@@ -748,7 +750,7 @@ pub(crate) async fn run_operation<S: Store>(
         params,
     };
     let command = command_of(host, caller, action);
-    let executed = execute(host, store, type_name, command, &ExecuteOptions::default()).await?;
+    let executed = execute(host, store, type_name, command, options).await?;
     Ok(executed.result)
 }
 
@@ -844,7 +846,8 @@ pub(crate) async fn prepare_create<S: Store>(
         own,
         params: options.params.clone(),
     };
-    let command = command_of(host, caller, action);
+    let mut command = command_of(host, caller, action);
+    present(&mut command, &options.execute);
     refuse_owned_writes(table, &command.action)?;
     let (changes, answers) = settle(host, store, &table.spec, &command)
         .await
@@ -950,17 +953,33 @@ fn define_check(core: &Core, types: &BTreeMap<String, Table>) -> BTreeMap<String
         .collect()
 }
 
-/// The command as every run of it runs: a request id, and a create's key.
-fn prepared(host: &Host<'_>, table: &Table, mut command: Command) -> Result<Command, Error> {
+/// The command as every run of it runs: a request id, the caller's
+/// preconditions the options give, and a create's key.
+fn prepared(
+    host: &Host<'_>,
+    table: &Table,
+    mut command: Command,
+    options: &ExecuteOptions,
+) -> Result<Command, Error> {
     if command.request.is_empty() {
         command.request = host.request();
     }
+    present(&mut command, options);
     if let Action::Create { id, .. } = &mut command.action {
         if id.as_deref().is_none_or(str::is_empty) {
             *id = Some(new_key(table)?);
         }
     }
     Ok(command)
+}
+
+/// Sets the caller's preconditions the options give on the command (D16,
+/// D104), each over the command's own entry of the same use: the core
+/// checks them, and refuses them on a command that takes none.
+fn present(command: &mut Command, options: &ExecuteOptions) {
+    for (use_id, entry) in &options.preconditions {
+        command.preconditions.insert(use_id.clone(), entry.clone());
+    }
 }
 
 /// A key for a create that names none: a UUID's wire form, or a UUID's
@@ -1054,6 +1073,10 @@ async fn settle<S: Store>(
                                 "a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)",
                             )
                             .into()),
+                            ReadRequest::Holding { .. } => return Err(internal(
+                                "a read of the rows whose use's field holds a value under a lock has no check on SQLite or D1 yet (D103)",
+                            )
+                            .into()),
                             _ => {}
                         }
                     }
@@ -1133,6 +1156,23 @@ async fn answer_of<S: Store>(
                 read_linked(store, table, field, key, after.as_deref(), *limit).await?,
             ))
         }
+        ReadRequest::Holding {
+            type_name,
+            use_id,
+            field,
+            value,
+            after,
+            limit,
+        } => {
+            let Some(table) = layout.table(type_name) else {
+                return Ok(Answer::Linked(LinkedRows::default()));
+            };
+            let column = owned_column_of(table, use_id, field)?;
+            let value = to_column(value, column, table)?;
+            Ok(Answer::Linked(
+                read_page(store, table, column, value, after.as_deref(), *limit).await?,
+            ))
+        }
         other => Err(internal(format!(
             "the adapter answers no read of this kind: {}",
             json_of(other)
@@ -1208,10 +1248,7 @@ fn row_of(mut cells: impl Iterator<Item = Cell>, table: &Table, key: &str) -> Re
 }
 
 /// One page of the rows of a table whose own field `field` holds `key`
-/// (D103): live rows alone on a soft-deletable table, in the key column's
-/// order, after the key `after` when given, at most `limit`, each by its
-/// key as the key column reads (a UUID's base62) and read as a row read
-/// reads it, and whether more follow. A field the table has no own column
+/// (D103), as [`read_page`] reads it. A field the table has no own column
 /// for is internal.
 async fn read_linked<S: Store>(
     store: &S,
@@ -1228,8 +1265,48 @@ async fn read_linked<S: Store>(
         ))
         .into());
     };
+    let value = to_column(&Value::String(key.to_owned()), column, table)?;
+    read_page(store, table, column, value, after, limit).await
+}
+
+/// The column of a use's owned field by the use's id and the field's
+/// declared name, or an internal refusal for one the layout lacks: what a
+/// read of the rows whose use's field holds a value compares (D104).
+fn owned_column_of<'t>(table: &'t Table, use_id: &str, field: &str) -> Result<&'t Column, Error> {
+    let Some(used) = table.uses.iter().find(|used| used.id == use_id) else {
+        return Err(internal(format!(
+            "{} has no use {use_id} in the behaviors' layout",
+            table.type_name
+        ))
+        .into());
+    };
+    match used.fields.iter().find(|owned| owned.name == field) {
+        Some(owned) => Ok(&owned.column),
+        None => Err(internal(format!(
+            "{}'s use {use_id} ({}) has no field {field} in the behaviors' layout",
+            table.type_name, used.behavior
+        ))
+        .into()),
+    }
+}
+
+/// One page of the rows of a table whose column holds a value, bound as
+/// the column binds it: live rows alone on a soft-deletable table, in the
+/// key column's order, after the key `after` when given, at most `limit`,
+/// each by its key as the key column reads (a UUID's base62) and read as a
+/// row read reads it, and whether more follow. What a linked read (an own
+/// field holding a row's key, D103) and a holding read (a use's owned
+/// field holding a value, D104) each read.
+async fn read_page<S: Store>(
+    store: &S,
+    table: &Table,
+    column: &Column,
+    value: Bind,
+    after: Option<&str>,
+    limit: usize,
+) -> Result<LinkedRows, Error> {
     let dialect = store.dialect();
-    let mut values = vec![to_column(&Value::String(key.to_owned()), column, table)?];
+    let mut values = vec![value];
     let mut text = format!(
         "SELECT {} AS k, {} FROM {} WHERE {} = {}{}",
         selected(dialect, &table.key.column),

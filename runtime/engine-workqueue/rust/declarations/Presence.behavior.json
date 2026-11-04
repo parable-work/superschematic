@@ -70,10 +70,24 @@
         "type": "array",
         "uniqueItems": true
       },
+      "status": {
+        "description": "The field of the type whose Workflow onMissed, onBeat and ttlByState read and move. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+        "minLength": 1,
+        "type": "string"
+      },
       "sweepMs": {
         "description": "How often the engine's runner misses the instances past their deadline, in milliseconds; 5000 when absent.",
         "minimum": 1000,
         "type": "integer"
+      },
+      "ttlByState": {
+        "additionalProperties": {
+          "minimum": 1000,
+          "type": "integer"
+        },
+        "description": "How long the row stays present in a state of its Workflow, in milliseconds, by state: a beat arms the deadline its row's state gives, and a transition arms it again, counted from the later of the last beat and the entry into the state; ttlMs for a state it does not list. Needs Workflow on the type. A table's alone: an engine type refuses it.",
+        "minProperties": 1,
+        "type": "object"
       },
       "ttlMs": {
         "description": "How long the instance stays present after its create or its last beat, in milliseconds.",
@@ -90,21 +104,26 @@
   "fields": [
     {
       "name": "deadline",
-      "description": "When the instance is missed unless it is beaten, in epoch milliseconds: ttlMs after its create or its last beat; absent on an instance made before the schema composed Presence, until its first beat."
+      "description": "When the instance is missed unless it is beaten, in epoch milliseconds: ttlMs after its create or its last beat; absent on an instance made before the schema composed Presence, until its first beat.",
+      "type": "Temporal.DateTime"
     },
     {
       "name": "lastBeatAt",
-      "description": "When the instance was last beaten, in epoch milliseconds; absent before the first beat."
+      "description": "When the instance was last beaten, in epoch milliseconds; absent before the first beat.",
+      "type": "Temporal.DateTime"
     },
     {
       "name": "missed",
-      "description": "Whether the instance missed its deadline and has not been beaten since."
+      "description": "Whether the instance missed its deadline and has not been beaten since.",
+      "type": "boolean"
     },
     {
       "name": "released",
-      "description": "The instances whose lease the last miss expired, by schema; absent before a miss."
+      "description": "The instances whose lease the last miss expired, by schema; absent before a miss.",
+      "type": "Generic.JSON"
     }
   ],
+  "armsDeadlines": true,
   "operations": [
     {
       "name": "beat",

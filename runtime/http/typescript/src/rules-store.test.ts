@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { MAX_ATTEMPTS, RulesRefusal, execute, readRow, readSubRows, runCreate, runDelete, runOperation, runUpdate, type CoreAnswers, type CoreCaller, type CoreCommand, type CoreStep, type CoreTypeSpec, type RulesCore, type RulesHost, type RulesLayout, type RulesStore } from './rules';
+import { MAX_ATTEMPTS, RulesRefusal, execute, readArmedDeadlines, readRow, readSubRows, runCreate, runDelete, runOperation, runUpdate, type CoreAnswers, type CoreCaller, type CoreCommand, type CoreStep, type CoreTypeSpec, type RulesCore, type RulesHost, type RulesLayout, type RulesStore } from './rules';
 import { bumpVersion, columnTypes, core, postgresDatabase, rulesCore, rulesDsn, sqliteDatabase, type TestDatabase } from './rules.testing';
 
 // The adapter over a real database of each dialect, bun:sqlite through
@@ -9,8 +9,12 @@ import { bumpVersion, columnTypes, core, postgresDatabase, rulesCore, rulesDsn, 
 // status and status_entered_at beside the own title, and @optimistic's
 // _version, with its trigger on Postgres; and tables whose own columns hold
 // subjects, a boolean, a number and JSON, one of which implements
-// Approvals and keeps its sub-table with no queue (D104). The Postgres
-// cases are skipped without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
+// Approvals and keeps its sub-table with no queue (D104); and a table that
+// implements Lease, whose owned columns hold a BIGINT token and JSON, whose
+// directives are a sub-table and whose expiry a message of its deadline
+// queue, and whose writes present the token as Lease's precondition (D16,
+// D104). The Postgres cases are skipped without
+// SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 
 const flow = {
   states: ['draft', 'paid', 'shipped'],
@@ -175,6 +179,62 @@ const docLayout: RulesLayout = {
   },
 };
 
+/**
+ * A table that implements Lease under requireToken (D104), as sqlgen lays
+ * one out: its owned columns lease_holder, lease_token (BIGINT),
+ * lease_acquired_at, lease_renewed_at, lease_expires_at, lease_expiries
+ * (BIGINT) and lease_ended (JSON), its directives a sub-table
+ * (job_lease_directives), and its expiry a message of its deadline queue
+ * (job_deadline_queue).
+ */
+const jobLayout: RulesLayout = {
+  types: {
+    Job: {
+      type: 'Job',
+      table: 'job',
+      key: { field: 'id', column: 'id', type: 'string' },
+      version: '_version',
+      own: [{ field: 'title', column: 'title', type: 'string' }],
+      uses: [
+        {
+          id: 'Lease',
+          behavior: 'Lease',
+          member: 'lease',
+          fields: [
+            { name: 'holder', field: 'leaseHolder', column: 'lease_holder', type: 'string' },
+            { name: 'token', field: 'leaseToken', column: 'lease_token', type: 'Generic.Int64' },
+            { name: 'acquiredAt', field: 'leaseAcquiredAt', column: 'lease_acquired_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+            { name: 'renewedAt', field: 'leaseRenewedAt', column: 'lease_renewed_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+            { name: 'expiresAt', field: 'leaseExpiresAt', column: 'lease_expires_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+            { name: 'expiries', field: 'leaseExpiries', column: 'lease_expiries', type: 'Generic.Int64' },
+            { name: 'ended', field: 'leaseEnded', column: 'lease_ended', type: 'Generic.JSON' },
+          ],
+          operations: ['acquire', 'heartbeat', 'release', 'expire', 'direct', 'acknowledge', 'resetExpiries'].map(name => ({ name, writes: true })),
+          tables: [
+            {
+              name: 'directives',
+              table: 'job_lease_directives',
+              row: 'job_id',
+              key: { name: 'number', field: 'number', column: 'number', type: 'string' },
+              fields: [
+                { name: 'token', field: 'token', column: 'token', type: 'Generic.Int64' },
+                { name: 'name', field: 'name', column: 'name', type: 'string' },
+                { name: 'data', field: 'data', column: 'data', type: 'Generic.JSON' },
+                { name: 'dedupeKey', field: 'dedupeKey', column: 'dedupe_key', type: 'string' },
+                { name: 'sentBy', field: 'sentBy', column: 'sent_by', type: 'string' },
+                { name: 'sentAt', field: 'sentAt', column: 'sent_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+                { name: 'acknowledgedAt', field: 'acknowledgedAt', column: 'acknowledged_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+              ],
+            },
+          ],
+        },
+      ],
+      deadlines: { queue: 'JobDeadline', table: 'job_deadline_queue', rowKey: 'row_key', use: 'use_id', name: 'name', at: 'at', payload: 'payload' },
+      spec: { name: 'Job', uses: [{ behavior: 'Lease', config: { requireToken: true }, anchor: 'type' }], fields: [{ name: 'title', type: 'string' }] },
+    },
+  },
+};
+
 /** A UUID's two forms, its column's hyphenated text and its base62 wire form: dana's, and erin's. */
 const DANA = { column: '0f8fad5b-d9cb-469f-a165-70867728950e', wire: 'TMXp8QPR6yGvKuV2GZQ10' };
 const ERIN = { column: '7c9e6679-7425-40de-944b-e07fc1f90ae7', wire: '3n9R8RlRyqVJBUQUv6toL1' };
@@ -271,6 +331,50 @@ for (const dialect of dialects) {
   consumed_at ${t.timestamp}
 )`);
       await db.exec('CREATE UNIQUE INDEX doc_approvals_sign_offs_row_key ON doc_approvals_sign_offs (doc_id, number)');
+      const surrogate = db.dialect === 'postgres' ? 'UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY' : 'INTEGER PRIMARY KEY';
+      await db.exec(`CREATE TABLE job (
+  id ${t.key},
+  title ${t.text} NOT NULL,
+  lease_holder ${t.text},
+  lease_token ${t.integer},
+  lease_acquired_at ${t.timestamp},
+  lease_renewed_at ${t.timestamp},
+  lease_expires_at ${t.timestamp},
+  lease_expiries ${t.integer},
+  lease_ended ${t.json},
+  _version ${t.version}
+)`);
+      if (db.dialect === 'postgres') for (const ddl of bumpVersion('job')) await db.exec(ddl);
+      await db.exec(`CREATE TABLE job_lease_directives (
+  id ${surrogate},
+  job_id ${t.text} NOT NULL REFERENCES job (id) ON DELETE CASCADE,
+  number ${t.text} NOT NULL,
+  token ${t.integer},
+  name ${t.text},
+  data ${t.json},
+  dedupe_key ${t.text},
+  sent_by ${t.text},
+  sent_at ${t.timestamp},
+  acknowledged_at ${t.timestamp},
+  UNIQUE (job_id, number)
+)`);
+      const now = db.dialect === 'postgres' ? 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP' : "TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+      await db.exec(`CREATE TABLE job_deadline_queue (
+  id ${db.dialect === 'postgres' ? 'UUID DEFAULT gen_random_uuid()' : 'TEXT DEFAULT (lower(hex(randomblob(16))))'} NOT NULL PRIMARY KEY,
+  row_key TEXT NOT NULL,
+  use_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  at ${t.integer} NOT NULL,
+  payload ${t.json},
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at ${now} NOT NULL,
+  claim_expires_at ${t.timestamp},
+  claim_token ${db.dialect === 'postgres' ? 'UUID' : 'TEXT'},
+  last_error TEXT,
+  updated_at ${now} NOT NULL
+)`);
+      await db.exec(`CREATE UNIQUE INDEX job_deadline_queue_live ON job_deadline_queue (row_key, use_id, name) WHERE state IN ('ready', 'claimed')`);
     });
     afterAll(async () => db?.close());
 
@@ -541,6 +645,63 @@ for (const dialect of dialects) {
       await db.transaction(store => runDelete(onDocs(store), 'Doc', 'd2', alice));
       expect(await readDoc('d2')).toBeNull();
       expect(await db.rows(`SELECT number FROM doc_approvals_sign_offs WHERE doc_id = ${p(1)}`, ['d2'])).toEqual([]);
+    });
+
+    /** A host over a transaction of the database with jobLayout, at the test's clock. */
+    const onJobs = (store: RulesStore): RulesHost => ({ core: core(), layout: jobLayout, store, now: () => (clock += 1000) });
+    const fenced = (token: unknown) => ({ preconditions: { Lease: { token } } });
+
+    test("a lease's fencing token, Lease's precondition: an update, an operation and a delete that present the token the row is at are saved, and one that presents none or another is refused and writes nothing", async () => {
+      const wren: CoreCaller = { subject: 'wren', permissions: [] };
+      await db.transaction(store => runCreate(onJobs(store), 'Job', { title: 'Build' }, wren, { id: 'j1' }));
+      const acquired = (await db.transaction(store => runOperation(onJobs(store), 'Job', 'j1', 'Lease', 'acquire', {}, wren))) as { token: number; expiresAt: number };
+      expect(acquired).toEqual({ token: 1, expiresAt: clock + 60000, heartbeatMs: 20000 });
+      // The BIGINT token reads back a number on both dialects, and the expiry is armed.
+      expect((await db.transaction(store => readRow(onJobs(store), 'Job', 'j1')))?.owned).toEqual({
+        Lease: { holder: 'wren', token: 1, acquiredAt: clock, renewedAt: clock, expiresAt: acquired.expiresAt, expiries: 0 },
+      });
+      expect(await db.transaction(store => readArmedDeadlines(onJobs(store), 'Job', 'j1'))).toEqual([{ useId: 'Lease', name: 'expire', at: acquired.expiresAt, payload: null }]);
+      const version = async () => Number((await db.rows(`SELECT _version FROM job WHERE id = ${p(1)}`, ['j1']))[0]!._version);
+      const before = await version();
+      await expect(db.transaction(store => runUpdate(onJobs(store), 'Job', 'j1', { title: 'Mine' }, wren))).rejects.toMatchObject({ code: 'vetoed', details: { vetoCode: 'token_required' } });
+      await expect(db.transaction(store => runUpdate(onJobs(store), 'Job', 'j1', { title: 'Mine' }, wren, fenced(0)))).rejects.toMatchObject({
+        code: 'vetoed',
+        details: { vetoCode: 'token_stale', vetoDetails: { token: 0, current: 1 } },
+      });
+      expect(await version()).toBe(before);
+      await db.transaction(store => runUpdate(onJobs(store), 'Job', 'j1', { title: 'Mine' }, wren, fenced(1)));
+      expect((await db.transaction(store => readRow(onJobs(store), 'Job', 'j1')))?.own).toEqual({ title: 'Mine' });
+      const beat = (await db.transaction(store => runOperation(onJobs(store), 'Job', 'j1', 'Lease', 'heartbeat', {}, wren, fenced(1)))) as { expiresAt: number };
+      expect(beat).toEqual({ expiresAt: clock + 60000, directives: [] });
+      // The heartbeat cleared and armed the expiry again: one live message, at the new expiry.
+      expect(await db.transaction(store => readArmedDeadlines(onJobs(store), 'Job', 'j1'))).toEqual([{ useId: 'Lease', name: 'expire', at: beat.expiresAt, payload: null }]);
+      await expect(db.transaction(store => runDelete(onJobs(store), 'Job', 'j1', wren, fenced(0)))).rejects.toMatchObject({ code: 'vetoed', details: { vetoCode: 'token_stale' } });
+      await db.transaction(store => runDelete(onJobs(store), 'Job', 'j1', wren, fenced(1)));
+      expect(await db.transaction(store => readRow(onJobs(store), 'Job', 'j1'))).toBeNull();
+      expect(await db.rows(`SELECT 1 FROM job_deadline_queue WHERE row_key = ${p(1)}`, ['j1'])).toEqual([]);
+    });
+
+    test("a malformed precondition is refused as invalid_argument before the row is read, a key no row holds among them, and one of a use whose behavior takes none too", async () => {
+      const otto: CoreCaller = { subject: 'otto', permissions: [] };
+      await db.transaction(store => runCreate(onJobs(store), 'Job', { title: 'Test' }, otto, { id: 'j2' }));
+      const malformed = {
+        code: 'invalid_argument',
+        status: 400,
+        class: 'PreconditionsError',
+        message: "preconditions of Job: /Lease: must have required property 'token'",
+        details: { issues: [{ path: '/Lease', message: "must have required property 'token'" }] },
+      };
+      await expect(db.transaction(store => runUpdate(onJobs(store), 'Job', 'j2', { title: 'x' }, otto, { preconditions: { Lease: {} } }))).rejects.toMatchObject({ refusal: malformed });
+      await expect(db.transaction(store => runUpdate(onJobs(store), 'Job', 'j9', { title: 'x' }, otto, { preconditions: { Lease: {} } }))).rejects.toMatchObject({ refusal: malformed });
+      await expect(db.transaction(store => runOperation(onJobs(store), 'Job', 'j2', 'Lease', 'acquire', {}, otto, fenced(-1)))).rejects.toMatchObject({ code: 'invalid_argument', class: 'PreconditionsError' });
+      await expect(db.transaction(store => runDelete(onJobs(store), 'Job', 'j2', otto, { preconditions: { Retries: { token: 1 } } }))).rejects.toMatchObject({
+        code: 'invalid_argument',
+        message: 'preconditions of Job: /Retries: Job has no behavior use Retries (its uses that take preconditions: Lease)',
+      });
+      // A precondition on a create is refused: only an update, a delete and an operation present one.
+      await expect(db.transaction(store => runCreate(onJobs(store), 'Job', { title: 'New' }, otto, { id: 'j3', ...fenced(0) }))).rejects.toMatchObject({ code: 'invalid_argument', class: 'PreconditionsError' });
+      expect(await db.transaction(store => readRow(onJobs(store), 'Job', 'j3'))).toBeNull();
+      expect((await db.transaction(store => readRow(onJobs(store), 'Job', 'j2')))?.version).toBe(1);
     });
 
     if (dialect.name === 'Postgres') {

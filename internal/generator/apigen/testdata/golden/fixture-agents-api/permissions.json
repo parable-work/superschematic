@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "api": "fixture-agents-api",
+  "permissions": [
+    {
+      "name": "accounts.limits",
+      "identity": false,
+      "operations": [
+        "AccountBudgetCheckReserveHandler",
+        "AccountBudgetObserveHandler",
+        "AccountBudgetRecordUsageForHandler",
+        "AccountBudgetRecordUsageHandler",
+        "AccountBudgetReserveForHandler",
+        "AccountBudgetReserveHandler",
+        "AccountBudgetSetLimitHandler",
+        "AccountBudgetSettleForHandler",
+        "AccountBudgetSettleHandler"
+      ]
+    },
+    {
+      "name": "accounts.observe",
+      "identity": false,
+      "operations": [
+        "AccountBudgetCheckReserveHandler",
+        "AccountBudgetObserveHandler",
+        "AccountBudgetRecordUsageForHandler",
+        "AccountBudgetRecordUsageHandler",
+        "AccountBudgetReserveForHandler",
+        "AccountBudgetReserveHandler",
+        "AccountBudgetSetLimitHandler",
+        "AccountBudgetSettleForHandler",
+        "AccountBudgetSettleHandler"
+      ]
+    },
+    {
+      "name": "jobs.override",
+      "identity": false,
+      "operations": [
+        "JobLeaseAcknowledgeHandler",
+        "JobLeaseAcquireHandler",
+        "JobLeaseDirectHandler",
+        "JobLeaseExpireHandler",
+        "JobLeaseHeartbeatHandler",
+        "JobLeaseReleaseHandler",
+        "JobLeaseResetExpiriesHandler"
+      ]
+    }
+  ]
+}

@@ -142,7 +142,7 @@ export type {
   SignedTokenSourceOptions,
   TokenFileSourceOptions,
 } from './credentials.js';
-export { behaviorCaller, behaviorOperation, behaviorParams } from './behavior-routes.js';
+export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPreconditions } from './behavior-routes.js';
 export type { BehaviorCaller } from './behavior-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {

@@ -189,6 +189,12 @@ type ORMTable struct {
 	// Changes is a table whose writes its behaviors hear (D103), whose
 	// repository runs a change its trigger wrote (runChange).
 	Changes bool
+
+	// Preconditions are the preconditions the table's uses take (D16,
+	// D104), in the uses' order, which orm.ts types as <Type>Preconditions
+	// and updateOne, deleteOne and each operation take in their options;
+	// none for a table whose uses take none.
+	Preconditions []ORMPrecondition
 }
 
 // ORMRelation is a to-one relation as orm.ts writes it: Field, the
@@ -426,6 +432,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		}
 		if rules != nil {
 			table.Uses = rules.uses[t.Type]
+			table.Preconditions = rules.preconditions[t.Type]
 			if layout := rules.layout.Types[t.Type]; layout != nil {
 				table.Deadlines = layout.Deadlines != nil
 				table.Changes = layout.Changes != nil
@@ -510,7 +517,7 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 	}
 	taken := map[string]string{}
 	for _, t := range out.Tables {
-		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField", "Uses"} {
+		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField", "Uses", "Preconditions"} {
 			taken[t.Type+suffix] = t.Type
 		}
 		taken[t.Member] = t.Type
@@ -866,6 +873,17 @@ func (o *ORMInfo) RuntimeTypes() []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// HasPreconditions reports whether a table of orm.ts has a use that takes
+// a precondition (D16, D104), which its <Type>Preconditions types.
+func (o *ORMInfo) HasPreconditions() bool {
+	for _, t := range o.Tables {
+		if len(t.Preconditions) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // UsesTypes reports whether a declaration of orm.ts refers to the

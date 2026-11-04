@@ -14,20 +14,23 @@
 //! core's crates directly, with no C ABI between them.
 //!
 //! For each command the adapter builds the command with the caller, the
-//! host's time and a request id of its own, kept for every run, and a
-//! create that names no key gets one (a UUID's base62 wire form for a UUID
-//! key, a UUID's text for a string key). It runs the core and answers its
-//! reads through the transaction: a row by its key, its own and owned
-//! columns converted to the core's JSON (a timestamp to epoch
-//! milliseconds, a UUID to base62), a NULL column absent, and the audit
-//! columns the layout names (`createdBy`, which a Workflow transition's
-//! `by` may name, D104) among its own fields, which no command writes;
-//! whether a table has rows; a type's spec from the layout; a row's rows of
-//! a use's sub-table, in key order. A soft-deletable table's reads and
-//! writes see its live rows alone. A lock is a transaction's advisory lock
-//! on Postgres; SQLite takes none, and the unit that writes begins with a
-//! check of each read made under one. A refusal is returned whole
-//! ([`Error::Refused`]); a change set is applied as one unit in a
+//! host's time, a request id of its own, kept for every run, and the
+//! caller's preconditions, each use's entry by its use id, as the options
+//! give them (D16, D104), and a create that names no key gets one (a
+//! UUID's base62 wire form for a UUID key, a UUID's text for a string key).
+//! It runs the core and answers its reads through the transaction: a row
+//! by its key, its own and owned columns converted to the core's JSON (a
+//! timestamp to epoch milliseconds, a UUID to base62), a NULL column
+//! absent, and the audit columns the layout names (`createdBy`, which a
+//! Workflow transition's `by` may name, D104) among its own fields, which
+//! no command writes; whether a table has rows; a type's spec from the
+//! layout; a row's rows of a use's sub-table, in key order; the rows whose
+//! own field holds a key, and those whose use's owned field holds a value
+//! (D104), by the layout's column, in key order. A soft-deletable table's
+//! reads and writes see its live rows alone. A lock is a transaction's
+//! advisory lock on Postgres; SQLite takes none, and the unit that writes
+//! begins with a check of each read made under one. A refusal is returned
+//! whole ([`Error::Refused`]); a change set is applied as one unit in a
 //! savepoint, every row fenced on the version it was read at, its
 //! sub-table rows written and its deadlines armed and cleared as messages
 //! of the table's deadline queue, and a row that moved runs the command
@@ -103,6 +106,14 @@ pub struct ExecuteOptions {
     /// deleting it, by column (a soft-deletable table's `deletedAt` and
     /// `deletedBy`), fenced on the version as the delete would be.
     pub soft_delete: Option<Map<String, Value>>,
+    /// The caller's preconditions (D16, D104): each use's entry by its use
+    /// id, as the core's command carries them (`{"Lease": {"token": 3}}`),
+    /// set on the command over any entry of the same use it carries. The
+    /// core checks each against its use's behavior before it reads the row
+    /// and hands it to that use's guard; an update, a delete and an
+    /// operation present them, and the core refuses any other command that
+    /// does (`PreconditionsError`), so none is ignored. Empty for none.
+    pub preconditions: Map<String, Value>,
 }
 
 // A value of own_columns or soft_delete binds as its JSON scalar: a string
@@ -117,7 +128,8 @@ pub struct CreateOptions {
     /// Each use's create parameters, by use id.
     pub params: Map<String, Value>,
     /// The rest of what the command takes; a prepared create applies
-    /// nothing and reads none of it.
+    /// nothing and reads none of it but its preconditions, which the core
+    /// refuses on a create.
     pub execute: ExecuteOptions,
 }
 

@@ -106,9 +106,11 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			// Workflow refuses each (D104).
 			checkEngineWorkflowConfig(td, ref, r)
 		} else if !ref.FieldAnchored() && !ref.Implements {
-			// Constants' oneWay, StateRules' by and status, and Approvals'
-			// resetOn, pinned and status are a table's, whose core runs
-			// them; the engine refuses each (D104).
+			// Constants' oneWay, StateRules' by and status, Approvals'
+			// resetOn, pinned and status, Lease's status, Retries' waits,
+			// Presence's ttlByState and status and Budget's periods and
+			// observePermission are a table's, whose core runs them; the
+			// engine refuses each (D104).
 			switch ref.Name {
 			case constantsBehavior:
 				checkEngineConstantsConfig(td, ref, r)
@@ -116,6 +118,14 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 				checkEngineStateRulesConfig(td, ref, r)
 			case approvalsBehavior:
 				checkEngineApprovalsConfig(td, ref, r)
+			case leaseBehavior:
+				checkEngineLeaseConfig(td, ref, r)
+			case retriesBehavior:
+				checkEngineRetriesConfig(td, ref, r)
+			case presenceBehavior:
+				checkEnginePresenceConfig(td, ref, r)
+			case budgetBehavior:
+				checkEngineBudgetConfig(td, ref, r)
 			}
 		}
 		if ref.FieldAnchored() || ref.Implements {
@@ -216,10 +226,13 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // column may take. A Timers use's config is held to the table
 // (checkTimersConfig), a Reactions use's to the table and the tables of
 // its database (checkReactionsConfig), a Workflow use's by to the table's
-// fields (checkWorkflowConfig), and a Constants, StateRules or Approvals
-// use's fields, states, by, gates and resetOn to the table and its
-// Workflow (checkConstantsConfig, checkStateRulesConfig,
-// checkApprovalsConfig, D104).
+// fields (checkWorkflowConfig), a Constants, StateRules or Approvals use's
+// fields, states, by, gates and resetOn to the table and its Workflow
+// (checkConstantsConfig, checkStateRulesConfig, checkApprovalsConfig,
+// D104), and a Lease, Retries, Presence or Budget use's fields, moves,
+// waits and the tables it reads to the table, its Workflow and its
+// database (checkLeaseConfig, checkRetriesConfig, checkPresenceConfig,
+// checkBudgetConfig, D104).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -306,7 +319,7 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
 				}
-			case constantsBehavior, stateRulesBehavior, approvalsBehavior:
+			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {
 					break
 				}
@@ -315,8 +328,16 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 					checkConstantsConfig(schema, td, ref, uses, r)
 				case stateRulesBehavior:
 					checkStateRulesConfig(schema, td, ref, uses, r)
-				default:
+				case approvalsBehavior:
 					checkApprovalsConfig(schema, td, ref, uses, r)
+				case leaseBehavior:
+					checkLeaseConfig(schema, td, ref, uses, r)
+				case retriesBehavior:
+					checkRetriesConfig(schema, td, ref, uses, r)
+				case presenceBehavior:
+					checkPresenceConfig(schema, td, ref, uses, r)
+				default:
+					checkBudgetConfig(schema, td, ref, uses, r)
 				}
 			}
 		}

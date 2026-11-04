@@ -272,6 +272,26 @@ A deadline is the API's enum of the config's deadlines, and the `dueAt`
 that `resetTimer` answers and `snoozeTimer` takes is epoch milliseconds, an
 integer, as Timers declares it.
 
+A table that implements Lease, Retries, Presence or Budget puts their
+operations under `lease`, `retries`, `presence` and `budget` alike (D104,
+[A table's leases, retries, presence and budgets](/superschematic/guides/api-routes/#a-tables-leases-retries-presence-and-budgets)),
+with `recordAttempt`'s `failure` an enum of the config's classes
+(`JobRetriesClass`) and every Budget operation's `meter` one of its meters
+(`AccountBudgetMeter`). On a table whose Lease takes a fencing token,
+every behavior operation's input has an optional `preconditions` member,
+`JobPreconditions`, whose `Lease` is `JobLeasePrecondition` (`token`),
+which the SDK sends in the body as any member:
+
+| Language | Call |
+| --- | --- |
+| Go | `sdk.JobNamespace.Lease.Heartbeat(ctx, id, types.JobLeaseHeartbeatInput{Preconditions: types.InputField[*types.JobPreconditions]{Set: true, Value: &types.JobPreconditions{Lease: types.InputField[*types.JobLeasePrecondition]{Set: true, Value: &types.JobLeasePrecondition{Token: types.GenericInt64(token)}}}}})` |
+| TypeScript | `await sdk.job.lease.heartbeat(id, { preconditions: { Lease: { token } } })` |
+
+The member is named `Lease`, the use's id, in every language's wire form
+(Go's field `Lease`, Rust's `lease` renamed `Lease`, Python's alias). The
+TypeScript and Go SDKs check the token before they send it, so a negative
+one is their validation error rather than the route's 400.
+
 ## Timeouts, retries and hooks
 
 | | Go | TypeScript | Python | Rust |

@@ -1,0 +1,22 @@
+# fixture-agents-api in TypeScript on the local target (D104): its default
+# server serves the operations of fixture-agents-db's Job, Session and
+# Account, and its behavior workers JobDeadlines, the deployable
+# fixture-agents-api-job-deadlines, which runs Job's deadlines (a lease's
+# expiry, the end of a backoff), and SessionPresence, the deployable
+# fixture-agents-api-session-presence, which runs each session's miss,
+# through the database's repositories.
+kind: Stack
+types:
+  Agents:
+    name: Agents
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-agents-api, kind: API }
+      expose:
+        - service: { name: fixture-agents-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

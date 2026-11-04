@@ -173,12 +173,49 @@ type Plan struct {
 	Scalars []string
 }
 
+// PreconditionsMember is the member of a behavior operation's input that
+// presents the caller's preconditions (D16, D104), on a table one of whose
+// uses' behaviors takes one (Lease's fencing token): each use's entry by its
+// use id, { "Lease": { "token": 3 } }, as the core's command carries them.
+// It is a body member rather than a header, beside the parameters, which
+// the build keeps from taking its name (verify.CheckBehaviorOperations).
+const PreconditionsMember = "preconditions"
+
+// PreconditionsType is the name of the type of a table's preconditions
+// member (JobPreconditions), and PreconditionType that of one use's entry
+// of it, by the use's member (JobLeasePrecondition).
+func PreconditionsType(typeName string) string {
+	return typeName + "Preconditions"
+}
+
+// PreconditionType is the name of the type of the entry of the use whose
+// member is use in typeName's preconditions (JobLeasePrecondition).
+func PreconditionType(typeName, use string) string {
+	return typeName + codegen.ToPascalCase(use) + "Precondition"
+}
+
+// TakesPreconditions reports whether a behavior takes a precondition from a
+// caller: its declaration has a preconditionSchema (Lease's, D16).
+func TakesPreconditions(declaration registry.Behavior) bool {
+	text := strings.TrimSpace(string(declaration.PreconditionSchema))
+	return text != "" && text != "null"
+}
+
+// RunsOnARow reports whether op runs on a row, which a @behaviorOperations
+// set serves: an operation that runs on the schema or a namespace as a
+// whole (Lease's expireHolder) needs a command without a row, which the
+// core does not take yet, so the set leaves it out (D103, D104).
+func RunsOnARow(op registry.BehaviorOperation) bool {
+	return op.Scope != registry.OperationScopeSchema && op.Scope != registry.OperationScopeNamespace
+}
+
 // PlanSet works out what the expansion adds for set, a @behaviorOperations
 // set whose table db, the API's database, declares, reading the behaviors' declarations
 // from reg. It assumes the table is one (verify.CheckBehaviorOperations):
 // declared by db, keyed by one field, one of whose fields is a behavior
-// registered in reg, each of whose operations runs on a row. It fails only
-// when a declaration does not narrow.
+// registered in reg. It leaves out an operation that does not run on a row
+// (RunsOnARow), of which the build warns. It fails only when a declaration
+// does not narrow.
 func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan, error) {
 	td := db.Types[set.BehaviorOperations.Type]
 	if td == nil {
@@ -192,6 +229,9 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 	p := &Plan{}
 	b := &builder{plan: p, named: map[string]bool{}}
 	b.useScalar(key.TypeRef.Name)
+	if err := b.preconditions(td, reg); err != nil {
+		return nil, fmt.Errorf("behaviorops: %s: %w", set.Name, err)
+	}
 	for _, ref := range td.TableBehaviors() {
 		declaration, ok := reg.Behavior(ref.Name)
 		if !ok {
@@ -221,6 +261,10 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 		}
 		permissions := ConfigPermissions(ref.Config)
 		for _, op := range declaration.Operations {
+			if !RunsOnARow(op) || !narrowed.Offers(op.Name) {
+				// The build warns of the first (verify.CheckBehaviorOperations).
+				continue
+			}
 			b.use, b.operation = use, op.Name
 			p.Operations = append(p.Operations, b.operationOf(set, db, td, key, ref, op, narrowed, permissions, policy))
 		}
@@ -283,12 +327,20 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 	if !op.Writes {
 		out.Docs.ReplayMode = ir.DocsReplayModeReadOnly
 	}
-	if params, ok := narrowed.Params[op.Name].(map[string]any); ok {
-		if properties, _ := params["properties"].(map[string]any); len(properties) > 0 {
-			name := InputType(td.Name, use, op.Name)
-			b.object(params, properties, name, fmt.Sprintf("The parameters of %s's %s %s.", td.Name, use, op.Name), ir.RoleAPIInput)
-			out.Arguments = append(out.Arguments, &ir.ArgumentDef{Name: ir.BehaviorInputArgument, TypeRef: ir.TypeRef{Name: name}, Required: true})
+	params, _ := narrowed.Params[op.Name].(map[string]any)
+	properties, _ := params["properties"].(map[string]any)
+	if len(properties) > 0 || b.preconditioned != "" {
+		name := InputType(td.Name, use, op.Name)
+		comment := fmt.Sprintf("The parameters of %s's %s %s.", td.Name, use, op.Name)
+		if len(properties) > 0 {
+			b.object(params, properties, name, comment, ir.RoleAPIInput)
+		} else if b.claim("type", name) {
+			b.plan.Types = append(b.plan.Types, &ir.TypeDef{Name: name, Comment: comment, Role: ir.RoleAPIInput, Origin: ir.OriginBehavior})
 		}
+		if b.preconditioned != "" {
+			b.presentPreconditions(name)
+		}
+		out.Arguments = append(out.Arguments, &ir.ArgumentDef{Name: ir.BehaviorInputArgument, TypeRef: ir.TypeRef{Name: name}, Required: true})
 	}
 	result := narrowed.Results[op.Name]
 	name := ResultType(td.Name, use, op.Name)
@@ -373,6 +425,95 @@ type builder struct {
 	aliases map[string]behaviortypes.Alias
 	// use and operation are what the types being added are for.
 	use, operation string
+	// preconditioned is the type of the table's preconditions member
+	// (PreconditionsType), which every operation's input presents; empty
+	// when no use of the table takes a precondition.
+	preconditioned string
+}
+
+// preconditions adds, when one of td's uses' behaviors takes a
+// precondition (TakesPreconditions), the type of td's preconditions member
+// (JobPreconditions): one optional member per such use, named by its use
+// id, of the type its behavior's preconditionSchema is
+// (JobLeasePrecondition), so every operation's input presents it (D16,
+// D104). A table none of whose uses takes one gets none.
+func (b *builder) preconditions(td *ir.TypeDef, reg *registry.Registry) error {
+	// What a refusal of a name the types take says they are for: the
+	// use's preconditions (verify.CheckBehaviorOperations).
+	b.operation = PreconditionsMember
+	var fields []*ir.FieldDef
+	for _, ref := range td.TableBehaviors() {
+		declaration, ok := reg.Behavior(ref.Name)
+		if !ok || !TakesPreconditions(declaration) {
+			continue
+		}
+		schema, err := behaviortypes.DecodeSchema(declaration.PreconditionSchema)
+		if err != nil {
+			return fmt.Errorf("%s's %s, %s: preconditionSchema: %w", td.Name, ref.UseID(), behaviortypes.An(ref.Name), err)
+		}
+		s, _ := schema.(map[string]any)
+		properties, _ := s["properties"].(map[string]any)
+		name := PreconditionType(td.Name, behaviorlayout.UseMember(ref))
+		if len(fields) == 0 {
+			b.use = behaviorlayout.UseMember(ref)
+		}
+		comment := fmt.Sprintf("What a caller presents %s's %s, as its precondition: its guard holds the call to it before the row is read (D16, D104).", td.Name, ref.UseID())
+		if len(properties) > 0 {
+			b.object(s, properties, name, comment, ir.RoleAPIInput)
+		} else if b.claim("type", name) {
+			b.plan.Types = append(b.plan.Types, &ir.TypeDef{Name: name, Comment: comment, Role: ir.RoleAPIInput, Origin: ir.OriginBehavior})
+		}
+		fields = append(fields, &ir.FieldDef{
+			Name:    ref.UseID(),
+			Comment: fmt.Sprintf("%s's precondition; absent, the call presents it none.", ref.UseID()),
+			TypeRef: ir.TypeRef{Name: name},
+			Origin:  ir.OriginBehavior,
+		})
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	b.preconditioned = PreconditionsType(td.Name)
+	if b.claim("type", b.preconditioned) {
+		b.plan.Types = append(b.plan.Types, &ir.TypeDef{
+			Name:    b.preconditioned,
+			Comment: fmt.Sprintf("What the caller asserts of the %s row, by use, which each use's guard holds the call to before the row is read (D16, D104); a call that presents an entry its use refuses, or one for a use that takes none, is refused.", td.Name),
+			Role:    ir.RoleAPIInput,
+			Origin:  ir.OriginBehavior,
+			Fields:  fields,
+		})
+	}
+	return nil
+}
+
+// presentPreconditions adds the preconditions member to the input type
+// name, in its fields' key order, as object adds a parameter.
+func (b *builder) presentPreconditions(name string) {
+	for _, td := range b.plan.Types {
+		if td.Name != name {
+			continue
+		}
+		for _, fd := range td.Fields {
+			if fd.Name == PreconditionsMember {
+				return
+			}
+		}
+		fd := &ir.FieldDef{
+			Name:    PreconditionsMember,
+			Comment: "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+			TypeRef: ir.TypeRef{Name: b.preconditioned},
+			Origin:  ir.OriginBehavior,
+		}
+		at := len(td.Fields)
+		for i, existing := range td.Fields {
+			if existing.Name > PreconditionsMember {
+				at = i
+				break
+			}
+		}
+		td.Fields = slices.Insert(td.Fields, at, fd)
+		return
+	}
 }
 
 // claim records name as added, and reports whether it was not before.

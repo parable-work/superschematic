@@ -92,6 +92,60 @@ func runBehaviorOperation[K, P, R any](ctx context.Context, op func(context.Cont
 	return convertBehaviorJSON(out, result)
 }
 
+{{- if .HasBehaviorPreconditions }}
+
+// runBehaviorOperationWithPreconditions is runBehaviorOperation for an
+// operation whose input carries the caller's preconditions (D16, D104):
+// its member preconditions, each use's entry by its use id, such as a
+// lease's fencing token ({"Lease": {"token": 3}}), is taken out of what
+// converts into the ORM's parameters, and op runs under
+// orm.WithPreconditions, so the core checks each entry against its use's
+// behavior and hands it to that use's guard. A null entry, and an input
+// with none, presents nothing for it.
+func runBehaviorOperationWithPreconditions[K, P, R any](ctx context.Context, op func(context.Context, K, P) (R, error), key K, input, result any) error {
+	var params P
+	var preconditions rules.Preconditions
+	if input != nil {
+		data, err := json.Marshal(input)
+		if err != nil {
+			return err
+		}
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(data, &members); err != nil {
+			return err
+		}
+		if given, ok := members["preconditions"]; ok {
+			delete(members, "preconditions")
+			var entries map[string]json.RawMessage
+			if err := json.Unmarshal(given, &entries); err != nil {
+				return err
+			}
+			for use, entry := range entries {
+				if string(entry) == "null" {
+					continue
+				}
+				if preconditions == nil {
+					preconditions = rules.Preconditions{}
+				}
+				preconditions[use] = entry
+			}
+		}
+		if err := convertBehaviorJSON(members, &params); err != nil {
+			return err
+		}
+	}
+	ctx = orm.WithBehaviorCaller(callerContext(ctx), behaviorCaller(ctx))
+	if len(preconditions) > 0 {
+		ctx = orm.WithPreconditions(ctx, preconditions)
+	}
+	out, err := op(ctx, key, params)
+	if err != nil {
+		return err
+	}
+	return convertBehaviorJSON(out, result)
+}
+{{- end }}
+
 // convertBehaviorJSON copies from into to, a pointer, through encoding/json.
 func convertBehaviorJSON(from, to any) error {
 	data, err := json.Marshal(from)

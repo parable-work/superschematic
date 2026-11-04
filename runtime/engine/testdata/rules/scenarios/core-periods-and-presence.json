@@ -1,0 +1,4064 @@
+{
+  "name": "core-periods-and-presence",
+  "description": "Budget's meters that start again at each period (hourly, daily, weekly, monthly, everyMs, in UTC), count a rolling window, and take the usage a provider reports (observe, observePermission), with setLimit refused for a meter whose limit an own field holds; and Presence's ttlByState, the deadline a beat and a transition arm by the row's state; with each one's define refusals (D104). An engine type refuses each.",
+  "source": "written by hand (D104): runtime/engine/testdata/rules/scenarios/core-periods-and-presence.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Periods and presence > an hourly meter starts again each UTC hour: a read shows it and writes nothing, the next write starts the hour, and reservations are kept",
+      "behaviors": [
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Agent",
+              "types": {
+                "Agent": {
+                  "name": "Agent",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "questions": {
+                            "limit": 3,
+                            "reset": "hourly"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Agent",
+            "version": null,
+            "instanceType": "Agent"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Agent"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Agent",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            {
+              "name": "Ada"
+            },
+            {
+              "id": "a1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a1",
+            "data": {
+              "name": "Ada"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "questions": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 3,
+                    "remaining": 3
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1",
+            "recordUsage",
+            {
+              "meter": "questions",
+              "amount": 2
+            }
+          ],
+          "now": 1791536460000,
+          "expect": {
+            "meter": "questions",
+            "used": 2,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a1",
+            "data": {
+              "name": "Ada"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "questions": {
+                    "used": 2,
+                    "reserved": 0,
+                    "limit": 3,
+                    "remaining": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1",
+            "reserve",
+            {
+              "meter": "questions",
+              "amount": 1
+            }
+          ],
+          "now": 1791536520000,
+          "expect": {
+            "reserved": {
+              "questions": 1
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1",
+            "reserve",
+            {
+              "meter": "questions",
+              "amount": 1
+            }
+          ],
+          "now": 1791536580000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Budget vetoes reserve of Agent a1: meter questions has 0 of its limit 3 left, not 1",
+            "details": {
+              "behavior": "Budget",
+              "action": "reserve",
+              "reason": "meter questions has 0 of its limit 3 left, not 1",
+              "vetoCode": "over_limit",
+              "vetoDetails": {
+                "meter": "questions",
+                "amount": 1,
+                "remaining": 0,
+                "limit": 3,
+                "scope": {
+                  "schema": "Agent",
+                  "id": "a1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1"
+          ],
+          "now": 1791539999999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a1",
+            "data": {
+              "name": "Ada"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "questions": {
+                    "used": 2,
+                    "reserved": 1,
+                    "limit": 3,
+                    "remaining": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1"
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a1",
+            "data": {
+              "name": "Ada"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "questions": {
+                    "used": 0,
+                    "reserved": 1,
+                    "limit": 3,
+                    "remaining": 2
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1",
+            "recordUsage",
+            {
+              "meter": "questions",
+              "amount": 1
+            }
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "meter": "questions",
+            "used": 1,
+            "released": 1,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a1",
+            "data": {
+              "name": "Ada"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "questions": {
+                    "used": 1,
+                    "reserved": 0,
+                    "limit": 3,
+                    "remaining": 2
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1",
+            "checkReserve",
+            {
+              "meter": "questions",
+              "amount": 3
+            }
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "fits": false,
+            "until": 1791543600000,
+            "scopes": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Agent",
+            "a1",
+            "checkReserve",
+            {
+              "meter": "questions",
+              "amount": 2
+            }
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "fits": true,
+            "until": null,
+            "scopes": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > daily, weekly and monthly meters start again at the UTC day, the Monday and the first of the month, and an everyMs meter at each multiple of it from the epoch",
+      "behaviors": [
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Ledger",
+              "types": {
+                "Ledger": {
+                  "name": "Ledger",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "day": {
+                            "limit": 10,
+                            "reset": "daily"
+                          },
+                          "week": {
+                            "limit": 10,
+                            "reset": "weekly"
+                          },
+                          "month": {
+                            "limit": 10,
+                            "reset": "monthly"
+                          },
+                          "tenMinutes": {
+                            "limit": 10,
+                            "reset": {
+                              "everyMs": 600000
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ledger",
+            "version": null,
+            "instanceType": "Ledger"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Ledger"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Ledger",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            {
+              "name": "Main"
+            },
+            {
+              "id": "l1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "month": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1",
+            "recordUsage",
+            {
+              "meter": "day",
+              "amount": 4
+            }
+          ],
+          "expect": {
+            "meter": "day",
+            "used": 4,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1",
+            "recordUsage",
+            {
+              "meter": "week",
+              "amount": 4
+            }
+          ],
+          "expect": {
+            "meter": "week",
+            "used": 4,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1",
+            "recordUsage",
+            {
+              "meter": "month",
+              "amount": 4
+            }
+          ],
+          "expect": {
+            "meter": "month",
+            "used": 4,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1",
+            "recordUsage",
+            {
+              "meter": "tenMinutes",
+              "amount": 4
+            }
+          ],
+          "expect": {
+            "meter": "tenMinutes",
+            "used": 4,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1791536999999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "week": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1791537000000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "week": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1791590399999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "week": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1791590400000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1791763199999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1791763200000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1793491199999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "month": {
+                    "used": 4,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 6
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "now": 1793491200000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "month": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1",
+            "recordUsage",
+            {
+              "meter": "month",
+              "amount": 1
+            }
+          ],
+          "now": 1793491200000,
+          "expect": {
+            "meter": "month",
+            "used": 1,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Ledger",
+            "l1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Ledger",
+            "id": "l1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "day": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "week": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  },
+                  "month": {
+                    "used": 1,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 9
+                  },
+                  "tenMinutes": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > a rolling meter counts every bucket that overlaps the last period, across the boundary a fixed one starts again at, checkReserve gives when the oldest leaves, a period after its end, and a write deletes the buckets that left",
+      "behaviors": [
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Caller",
+              "types": {
+                "Caller": {
+                  "name": "Caller",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10,
+                            "reset": "hourly",
+                            "window": "rolling"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Caller",
+            "version": null,
+            "instanceType": "Caller"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Caller"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Caller",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            {
+              "name": "Cal"
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "recordUsage",
+            {
+              "meter": "calls",
+              "amount": 6
+            }
+          ],
+          "now": 1791538200000,
+          "expect": {
+            "meter": "calls",
+            "used": 6,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "recordUsage",
+            {
+              "meter": "calls",
+              "amount": 3
+            }
+          ],
+          "now": 1791539400000,
+          "expect": {
+            "meter": "calls",
+            "used": 9,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1"
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 9,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "reserve",
+            {
+              "meter": "calls",
+              "amount": 2
+            }
+          ],
+          "now": 1791540000000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Budget vetoes reserve of Caller c1: meter calls has 1 of its limit 10 left, not 2",
+            "details": {
+              "behavior": "Budget",
+              "action": "reserve",
+              "reason": "meter calls has 1 of its limit 10 left, not 2",
+              "vetoCode": "over_limit",
+              "vetoDetails": {
+                "meter": "calls",
+                "amount": 2,
+                "remaining": 1,
+                "limit": 10,
+                "scope": {
+                  "schema": "Caller",
+                  "id": "c1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "checkReserve",
+            {
+              "meter": "calls",
+              "amount": 5
+            }
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "fits": false,
+            "until": 1791541860000,
+            "scopes": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "checkReserve",
+            {
+              "meter": "calls",
+              "amount": 8
+            }
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "fits": false,
+            "until": 1791543060000,
+            "scopes": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "checkReserve",
+            {
+              "meter": "calls",
+              "amount": 11
+            }
+          ],
+          "now": 1791540000000,
+          "expect": {
+            "fits": false,
+            "until": null,
+            "scopes": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1"
+          ],
+          "now": 1791541800000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 9,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1"
+          ],
+          "now": 1791541859999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 9,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1"
+          ],
+          "now": 1791541860000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 3,
+                    "reserved": 0,
+                    "limit": 10,
+                    "remaining": 7
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "recordUsage",
+            {
+              "meter": "calls",
+              "amount": 1
+            }
+          ],
+          "now": 1791541860000,
+          "expect": {
+            "meter": "calls",
+            "used": 4,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1",
+            "reserve",
+            {
+              "meter": "calls",
+              "amount": 5
+            }
+          ],
+          "now": 1791541860000,
+          "expect": {
+            "reserved": {
+              "calls": 5
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 4,
+                    "reserved": 5,
+                    "limit": 10,
+                    "remaining": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Caller",
+            "c1"
+          ],
+          "now": 1791543060000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Caller",
+            "id": "c1",
+            "data": {
+              "name": "Cal"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "calls": {
+                    "used": 1,
+                    "reserved": 5,
+                    "limit": 10,
+                    "remaining": 4
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > observe needs observePermission: the provider's figure replaces what the meter counts until resetsAt, its limit holds while it does, usage recorded after it adds to it, and it lapses at resetsAt or at the meter's next reset",
+      "behaviors": [
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "obs": {
+          "subject": "obs",
+          "permissions": [
+            "keys.observe"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Key",
+              "types": {
+                "Key": {
+                  "name": "Key",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "tokens": {
+                            "limit": 1000,
+                            "reset": "daily"
+                          }
+                        },
+                        "observePermission": "keys.observe"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Key",
+            "version": null,
+            "instanceType": "Key"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Key"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Key",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Key",
+            {
+              "name": "Main"
+            },
+            {
+              "id": "k1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Key",
+            "id": "k1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 1000,
+                    "remaining": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1",
+            "recordUsage",
+            {
+              "meter": "tokens",
+              "amount": 100
+            }
+          ],
+          "expect": {
+            "meter": "tokens",
+            "used": 100,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1",
+            "observe",
+            {
+              "meter": "tokens",
+              "used": 900,
+              "limit": 950,
+              "resetsAt": 1791538200000
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not observe the usage of Key k1: it needs permission keys.observe"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "obs",
+          "args": [
+            "Key",
+            "k1",
+            "observe",
+            {
+              "meter": "tokens",
+              "used": 900,
+              "limit": 950,
+              "resetsAt": 1791538200000
+            }
+          ],
+          "now": 1791536460000,
+          "expect": {
+            "meter": "tokens",
+            "used": 900,
+            "limit": 950,
+            "resetsAt": 1791538200000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Key",
+            "id": "k1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 900,
+                    "reserved": 0,
+                    "limit": 950,
+                    "remaining": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1",
+            "reserve",
+            {
+              "meter": "tokens",
+              "amount": 60
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Budget vetoes reserve of Key k1: meter tokens has 50 of its limit 950 left, not 60",
+            "details": {
+              "behavior": "Budget",
+              "action": "reserve",
+              "reason": "meter tokens has 50 of its limit 950 left, not 60",
+              "vetoCode": "over_limit",
+              "vetoDetails": {
+                "meter": "tokens",
+                "amount": 60,
+                "remaining": 50,
+                "limit": 950,
+                "scope": {
+                  "schema": "Key",
+                  "id": "k1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1",
+            "recordUsage",
+            {
+              "meter": "tokens",
+              "amount": 20
+            }
+          ],
+          "now": 1791536520000,
+          "expect": {
+            "meter": "tokens",
+            "used": 920,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1",
+            "checkReserve",
+            {
+              "meter": "tokens",
+              "amount": 60
+            }
+          ],
+          "expect": {
+            "fits": false,
+            "until": 1791538200000,
+            "scopes": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1"
+          ],
+          "now": 1791538199999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Key",
+            "id": "k1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 920,
+                    "reserved": 0,
+                    "limit": 950,
+                    "remaining": 30
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1"
+          ],
+          "now": 1791538200000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Key",
+            "id": "k1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 120,
+                    "reserved": 0,
+                    "limit": 1000,
+                    "remaining": 880
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "obs",
+          "args": [
+            "Key",
+            "k1",
+            "observe",
+            {
+              "meter": "tokens",
+              "used": 500
+            }
+          ],
+          "now": 1791538200000,
+          "expect": {
+            "meter": "tokens",
+            "used": 500,
+            "limit": 1000,
+            "resetsAt": 1791590400000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1"
+          ],
+          "now": 1791590399999,
+          "expect": {
+            "namespace": "default",
+            "schema": "Key",
+            "id": "k1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 500,
+                    "reserved": 0,
+                    "limit": 1000,
+                    "remaining": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Key",
+            "k1"
+          ],
+          "now": 1791590400000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Key",
+            "id": "k1",
+            "data": {
+              "name": "Main"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 1000,
+                    "remaining": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "obs",
+          "args": [
+            "Key",
+            "k1",
+            "observe",
+            {
+              "meter": "cups",
+              "used": 1
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation observe of behavior Budget: /meter: Key has no meter cups (its meters: tokens)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/meter",
+                  "message": "Key has no meter cups (its meters: tokens)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "obs",
+          "args": [
+            "Key",
+            "k1",
+            "observe",
+            {
+              "meter": "tokens"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation observe of behavior Budget: must have required property 'used'",
+            "details": {
+              "issues": [
+                {
+                  "path": "",
+                  "message": "must have required property 'used'"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > observe on a config that names no observePermission is not_configured, and setLimit of a meter whose limit an own field holds is refused: on a table the limit is set by an update",
+      "behaviors": [
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "lim": {
+          "subject": "lim",
+          "permissions": [
+            "budget.limit"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Step",
+              "types": {
+                "Step": {
+                  "name": "Step",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "cap",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "cpu": {
+                            "limit": 100,
+                            "limitField": "cap"
+                          }
+                        },
+                        "limitPermission": "budget.limit"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Step",
+            "version": null,
+            "instanceType": "Step"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Step"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Step",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Step",
+            {
+              "title": "Build",
+              "cap": 80
+            },
+            {
+              "id": "s1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Step",
+            "id": "s1",
+            "data": {
+              "title": "Build",
+              "cap": 80
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "cpu": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 80,
+                    "remaining": 80
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Step",
+            "s1",
+            "observe",
+            {
+              "meter": "cpu",
+              "used": 1
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Budget vetoes observe of Step s1: its config names no observePermission, which observe needs",
+            "details": {
+              "behavior": "Budget",
+              "action": "observe",
+              "reason": "its config names no observePermission, which observe needs",
+              "vetoCode": "not_configured"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lim",
+          "args": [
+            "Step",
+            "s1",
+            "setLimit",
+            {
+              "meter": "cpu",
+              "limit": 120
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setLimit of behavior Budget: /meter: meter cpu keeps its limit in cap, an own field of Step: setLimit writes no own field on a table, so update cap, which needs limitPermission (D104)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/meter",
+                  "message": "meter cpu keeps its limit in cap, an own field of Step: setLimit writes no own field on a table, so update cap, which needs limitPermission (D104)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "lim",
+          "args": [
+            "Step",
+            "s1",
+            {
+              "cap": 120
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Step",
+            "id": "s1",
+            "data": {
+              "title": "Build",
+              "cap": 120
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "cpu": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 120,
+                    "remaining": 120
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Step",
+            "s1",
+            {
+              "cap": 130
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not change cap, the limit of meter cpu, of Step s1: it needs permission budget.limit"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Step",
+            "s1",
+            "recordUsage",
+            {
+              "meter": "cpu",
+              "amount": 90
+            }
+          ],
+          "expect": {
+            "meter": "cpu",
+            "used": 90,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "lim",
+          "args": [
+            "Step",
+            "s1",
+            {
+              "cap": 80
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Budget vetoes update of Step s1: meter cpu has 90 used and reserved, more than the limit 80",
+            "details": {
+              "behavior": "Budget",
+              "action": "update",
+              "reason": "meter cpu has 90 used and reserved, more than the limit 80",
+              "vetoCode": "below_committed",
+              "vetoDetails": {
+                "meter": "cpu",
+                "committed": 90
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "lim",
+          "args": [
+            "Step",
+            "s1",
+            {
+              "cap": null
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Step",
+            "id": "s1",
+            "data": {
+              "title": "Build"
+            },
+            "behaviors": {
+              "Budget": {
+                "meters": {
+                  "cpu": {
+                    "used": 90,
+                    "reserved": 0,
+                    "limit": 100,
+                    "remaining": 10
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > define refuses a rolling window with no reset, a reset outside its values, an everyMs that is no whole number of minutes, a window other than rolling and an empty observePermission",
+      "behaviors": [
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Meter",
+              "types": {
+                "Meter": {
+                  "name": "Meter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10,
+                            "window": "rolling"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Meter/behaviors/0/config: type Meter: behavior Budget config: meter calls: window rolling counts the last period, and the meter names no reset to give it one",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Meter/behaviors/0/config",
+                  "message": "type Meter: behavior Budget config: meter calls: window rolling counts the last period, and the meter names no reset to give it one"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Meter",
+              "types": {
+                "Meter": {
+                  "name": "Meter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10,
+                            "reset": "yearly"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Meter/behaviors/0: must match \"then\" schema; /types/Meter/behaviors/0/config/meters/calls/reset: must be one of \"hourly\", \"daily\", \"weekly\", \"monthly\"; /types/Meter/behaviors/0/config/meters/calls/reset: must match exactly one schema in oneOf; /types/Meter/behaviors/0/config/meters/calls/reset: must be object",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Meter/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/reset",
+                  "message": "must be one of \"hourly\", \"daily\", \"weekly\", \"monthly\""
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/reset",
+                  "message": "must match exactly one schema in oneOf"
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/reset",
+                  "message": "must be object"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Meter",
+              "types": {
+                "Meter": {
+                  "name": "Meter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10,
+                            "reset": {
+                              "everyMs": 90000
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Meter/behaviors/0: must match \"then\" schema; /types/Meter/behaviors/0/config/meters/calls/reset: must be one of \"hourly\", \"daily\", \"weekly\", \"monthly\"; /types/Meter/behaviors/0/config/meters/calls/reset: must match exactly one schema in oneOf; /types/Meter/behaviors/0/config/meters/calls/reset/everyMs: must be multiple of 60000",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Meter/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/reset",
+                  "message": "must be one of \"hourly\", \"daily\", \"weekly\", \"monthly\""
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/reset",
+                  "message": "must match exactly one schema in oneOf"
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/reset/everyMs",
+                  "message": "must be multiple of 60000"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Meter",
+              "types": {
+                "Meter": {
+                  "name": "Meter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10,
+                            "reset": "hourly",
+                            "window": "fixed"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Meter/behaviors/0: must match \"then\" schema; /types/Meter/behaviors/0/config/meters/calls/window: must be one of \"rolling\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Meter/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/meters/calls/window",
+                  "message": "must be one of \"rolling\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Meter",
+              "types": {
+                "Meter": {
+                  "name": "Meter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10
+                          }
+                        },
+                        "observePermission": ""
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Meter/behaviors/0: must match \"then\" schema; /types/Meter/behaviors/0/config/observePermission: must NOT have fewer than 1 characters",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Meter/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Meter/behaviors/0/config/observePermission",
+                  "message": "must NOT have fewer than 1 characters"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Meter",
+              "types": {
+                "Meter": {
+                  "name": "Meter",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "calls": {
+                            "limit": 10,
+                            "reset": {
+                              "everyMs": 120000
+                            },
+                            "window": "rolling"
+                          }
+                        },
+                        "observePermission": "meters.observe"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Meter",
+            "version": null,
+            "instanceType": "Meter"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > define refuses a ttlByState state the Workflow lacks, ttlByState on a type with no Workflow, a status that names no Workflow, sweepMs, and members its schema refuses, and takes a principalField that holds a UUID",
+      "behaviors": [
+        "Presence",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "device",
+                        "ttlByState": {
+                          "lunch": 600000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Session/behaviors/1/config: type Session: behavior Presence config: ttlByState: \"lunch\" is not a state of the type's Workflow (idle, turn, missing)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Session/behaviors/1/config",
+                  "message": "type Session: behavior Presence config: ttlByState: \"lunch\" is not a state of the type's Workflow (idle, turn, missing)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "device",
+                        "ttlByState": {
+                          "turn": 600000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Session/behaviors/0/config: type Session: behavior Presence config: ttlByState times the states of Workflow, which the type does not list",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Session/behaviors/0/config",
+                  "message": "type Session: behavior Presence config: ttlByState times the states of Workflow, which the type does not list"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "device",
+                        "status": "phase"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Session/behaviors/1/config: type Session: behavior Presence config: status \"phase\" is not a Workflow of the type (its Workflows: Workflow)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Session/behaviors/1/config",
+                  "message": "type Session: behavior Presence config: status \"phase\" is not a Workflow of the type (its Workflows: Workflow)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "device",
+                        "sweepMs": 5000
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Session/behaviors/1/config: type Session: behavior Presence config: sweepMs is the engine's runner's, which missed the instances past their deadline every sweepMs: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Session/behaviors/1/config",
+                  "message": "type Session: behavior Presence config: sweepMs is the engine's runner's, which missed the instances past their deadline every sweepMs: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "device",
+                        "ttlByState": {
+                          "turn": 500
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Session/behaviors/1: must match \"then\" schema; /types/Session/behaviors/1/config/ttlByState/turn: must be >= 1000",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Session/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Session/behaviors/1/config/ttlByState/turn",
+                  "message": "must be >= 1000"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "device",
+                        "ttlByState": {}
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Session/behaviors/1: must match \"then\" schema; /types/Session/behaviors/1/config/ttlByState: must NOT have fewer than 1 properties",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Session/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Session/behaviors/1/config/ttlByState",
+                  "message": "must NOT have fewer than 1 properties"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "holder",
+                      "typeRef": {
+                        "name": "Identity.UUID"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "principalField": "holder",
+                        "ttlByState": {
+                          "turn": 900000
+                        },
+                        "status": "Workflow"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Session",
+            "version": null,
+            "instanceType": "Session"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Periods and presence > ttlByState: a beat arms the deadline its row's state gives, a transition arms it again from the later of the last beat and the entry, a state it does not list takes ttlMs, the miss falls due at it, and a missed row arms nothing until its next beat",
+      "behaviors": [
+        "Presence",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "dev1": {
+          "subject": "dev1",
+          "permissions": []
+        },
+        "dev2": {
+          "subject": "dev2",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1791536400000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Session",
+              "types": {
+                "Session": {
+                  "name": "Session",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "device",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "idle",
+                          "turn",
+                          "missing"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "idle",
+                            "to": "turn"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "idle"
+                          },
+                          {
+                            "from": "idle",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "turn",
+                            "to": "missing"
+                          },
+                          {
+                            "from": "missing",
+                            "to": "idle"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Presence",
+                      "config": {
+                        "ttlMs": 180000,
+                        "ttlByState": {
+                          "turn": 900000
+                        },
+                        "principalField": "device",
+                        "onMissed": {
+                          "transition": "missing",
+                          "from": [
+                            "idle",
+                            "turn"
+                          ]
+                        },
+                        "onBeat": {
+                          "transition": "idle",
+                          "from": [
+                            "missing"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Session",
+            "version": null,
+            "instanceType": "Session"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Session"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Session",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Session",
+            {
+              "device": "dev1",
+              "agent": "a"
+            },
+            {
+              "id": "s1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "idle",
+                "enteredAt": 1791536400000
+              },
+              "Presence": {
+                "deadline": 1791536580000,
+                "missed": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dev2",
+          "args": [
+            "Session",
+            "s1",
+            "beat",
+            {}
+          ],
+          "now": 1791536430000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Presence vetoes beat of Session s1: it stands for another principal, who alone may beat it",
+            "details": {
+              "behavior": "Presence",
+              "action": "beat",
+              "reason": "it stands for another principal, who alone may beat it",
+              "vetoCode": "not_principal"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dev1",
+          "args": [
+            "Session",
+            "s1",
+            "beat",
+            {}
+          ],
+          "now": 1791536460000,
+          "expect": {
+            "deadline": 1791536640000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "idle",
+                "enteredAt": 1791536400000
+              },
+              "Presence": {
+                "deadline": 1791536640000,
+                "lastBeatAt": 1791536460000,
+                "missed": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1",
+            "transition",
+            {
+              "to": "turn"
+            }
+          ],
+          "now": 1791536520000,
+          "expect": {
+            "from": "idle",
+            "to": "turn"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "turn",
+                "enteredAt": 1791536520000
+              },
+              "Presence": {
+                "deadline": 1791537420000,
+                "lastBeatAt": 1791536460000,
+                "missed": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1791536640000,
+          "expect": {
+            "handled": 0,
+            "skipped": 0,
+            "failed": 0,
+            "scheduled": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dev1",
+          "args": [
+            "Session",
+            "s1",
+            "beat",
+            {}
+          ],
+          "now": 1791537000000,
+          "expect": {
+            "deadline": 1791537900000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1",
+            "transition",
+            {
+              "to": "idle"
+            }
+          ],
+          "now": 1791537100000,
+          "expect": {
+            "from": "turn",
+            "to": "idle"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "idle",
+                "enteredAt": 1791537100000
+              },
+              "Presence": {
+                "deadline": 1791537280000,
+                "lastBeatAt": 1791537000000,
+                "missed": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1791537279999,
+          "expect": {
+            "handled": 0,
+            "skipped": 0,
+            "failed": 0,
+            "scheduled": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "idle",
+                "enteredAt": 1791537100000
+              },
+              "Presence": {
+                "deadline": 1791537280000,
+                "lastBeatAt": 1791537000000,
+                "missed": false
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1791537280000,
+          "expect": {
+            "handled": 0,
+            "skipped": 0,
+            "failed": 0,
+            "scheduled": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "missing",
+                "enteredAt": 1791537280000
+              },
+              "Presence": {
+                "deadline": 1791537280000,
+                "lastBeatAt": 1791537000000,
+                "missed": true,
+                "released": {}
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1",
+            "miss",
+            {}
+          ],
+          "now": 1791537290000,
+          "expect": {
+            "missed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1791538400000,
+          "expect": {
+            "handled": 0,
+            "skipped": 0,
+            "failed": 0,
+            "scheduled": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dev1",
+          "args": [
+            "Session",
+            "s1",
+            "beat",
+            {}
+          ],
+          "now": 1791538500000,
+          "expect": {
+            "deadline": 1791538680000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "idle",
+                "enteredAt": 1791538500000
+              },
+              "Presence": {
+                "deadline": 1791538680000,
+                "lastBeatAt": 1791538500000,
+                "missed": false,
+                "released": {}
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1",
+            "transition",
+            {
+              "to": "turn"
+            }
+          ],
+          "now": 1791538600000,
+          "expect": {
+            "from": "idle",
+            "to": "turn"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "a"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "turn",
+                "enteredAt": 1791538600000
+              },
+              "Presence": {
+                "deadline": 1791539500000,
+                "lastBeatAt": 1791538500000,
+                "missed": false,
+                "released": {}
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1",
+            {
+              "device": "dev2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Presence vetoes update of Session s1: device holds the principal the instance stands for, so it cannot change once set",
+            "details": {
+              "behavior": "Presence",
+              "action": "update",
+              "reason": "device holds the principal the instance stands for, so it cannot change once set",
+              "vetoCode": "principal_fixed"
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Session",
+            "s1",
+            {
+              "agent": "b"
+            }
+          ],
+          "now": 1791538700000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Session",
+            "id": "s1",
+            "data": {
+              "device": "dev1",
+              "agent": "b"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "turn",
+                "enteredAt": 1791538600000
+              },
+              "Presence": {
+                "deadline": 1791539500000,
+                "lastBeatAt": 1791538500000,
+                "missed": false,
+                "released": {}
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -5,8 +5,9 @@
 //! composes.
 //!
 //! Each behavior reads its declaration from the file the compiler registers
-//! and the engine embeds (`../behaviors/declarations`), in place, so the
-//! engine and the core read one declaration while both exist. The core
+//! and the engine embeds (`../behaviors/declarations`, and the work queue's
+//! `../../engine-workqueue/rust/declarations`), in place, so the engine and
+//! the core read one declaration while both exist. The core
 //! runs no JSON Schema, so a behavior holds its config and its operations'
 //! parameters to the declaration's schemas in its own code, in the words
 //! the engine gave, which its tests hold to the file.
@@ -22,6 +23,16 @@
 //! D104's order of the work, each with its upgrade: fields that move one
 //! way, who may change a frozen field, and gates whose sign-offs a change
 //! of chosen fields consumes and that pin the version their signer read.
+//! [`Lease`] and [`Retries`], in step 2 of D104's order of the work: a
+//! table's lease with its fencing token, presented as the command's
+//! precondition, its expiry a deadline; and retries that wait between
+//! attempts, give up after a while, cap the attempts in a window and count
+//! per value of a field.
+//! [`Presence`] and [`Budget`], in the same step, each with its upgrade: a
+//! heartbeat whose deadline follows the row's state, its miss a deadline
+//! that expires the principal's leases through Lease's own expire; and
+//! budgets that keep periods, count a rolling window and take the usage a
+//! provider reports.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -47,11 +58,17 @@
 //! ```
 
 pub mod approvals;
+pub mod budget;
 pub mod constants;
 mod declared;
 mod flow;
+pub mod lease;
+mod moves;
 mod paging;
+mod periods;
+pub mod presence;
 pub mod reactions;
+pub mod retries;
 mod schema;
 pub mod staterules;
 pub mod subjects;
@@ -60,13 +77,20 @@ mod values;
 pub mod workflow;
 
 pub use approvals::{Approvals, ApprovalsConfig, ApprovalsGate};
+pub use budget::{Budget, BudgetConfig, BudgetMeter, BudgetReset, BudgetScope, INTEGER_SEGMENTS};
 pub use constants::{
     Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
     ONE_WAY_NUMBERS,
 };
+pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
+pub use moves::StatusMove;
+pub use presence::{Presence, PresenceConfig};
 pub use reactions::{
     Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule, ReactionsTerminal,
     ReactionsThen, ReactionsWhen,
+};
+pub use retries::{
+    Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use timers::{
@@ -82,13 +106,17 @@ use superschematic_rules::Core;
 
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far.
-pub const NAMES: [&str; 6] = [
+pub const NAMES: [&str; 10] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
     staterules::NAME,
     approvals::NAME,
     timers::NAME,
+    lease::NAME,
+    presence::NAME,
+    budget::NAME,
+    retries::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -96,13 +124,17 @@ pub const NAMES: [&str; 6] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 6] = [
+pub const DECLARATIONS: [&str; 10] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
     staterules::DECLARATION,
     approvals::DECLARATION,
     timers::DECLARATION,
+    lease::DECLARATION,
+    presence::DECLARATION,
+    budget::DECLARATION,
+    retries::DECLARATION,
 ];
 
 /// A core with every behavior ported so far, in the engine's order, and
@@ -116,6 +148,10 @@ pub fn core() -> Core {
         .with(StateRules)
         .with(Approvals)
         .with(Timers)
+        .with(Lease)
+        .with(Presence)
+        .with(Budget)
+        .with(Retries)
 }
 
 #[cfg(test)]

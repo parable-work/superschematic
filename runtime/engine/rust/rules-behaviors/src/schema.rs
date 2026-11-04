@@ -150,6 +150,27 @@ pub(crate) fn duplicate(items: &[Value]) -> Option<(usize, usize)> {
     None
 }
 
+/// Two items of any list that are equal, as ajv's `uniqueItems` compares
+/// them (deeply, a number by its value), named as [`duplicate`] names
+/// them: `(j, i)`, from the first pair it meets reading from the end.
+pub(crate) fn duplicate_value(items: &[Value]) -> Option<(usize, usize)> {
+    for i in (0..items.len()).rev() {
+        if let Some(j) =
+            (i + 1..items.len()).find(|j| crate::values::equal(Some(&items[i]), Some(&items[*j])))
+        {
+            return Some((j, i));
+        }
+    }
+    None
+}
+
+/// What a value breaks of `{ "type": "boolean" }`.
+pub(crate) fn boolean_issues(at: &str, value: &Value, issues: &mut Issues) {
+    if !value.is_boolean() {
+        issues.push(at, "type", "must be boolean");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,6 +204,19 @@ mod tests {
             Some((3, 1))
         );
         assert_eq!(duplicate(&[json!("a"), json!(1), json!(1)]), None);
+    }
+
+    #[test]
+    fn a_duplicate_of_any_value_is_named_as_ajv_names_it() {
+        assert_eq!(
+            duplicate_value(&[json!(1), json!(2), json!(1.0)]),
+            Some((2, 0))
+        );
+        assert_eq!(
+            duplicate_value(&[json!(1), json!(2), json!(1), json!(2)]),
+            Some((3, 1))
+        );
+        assert_eq!(duplicate_value(&[json!(1), json!("1")]), None);
     }
 
     #[test]

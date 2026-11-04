@@ -17,6 +17,13 @@
 //! and the command's own operation's change set holds no write, as an
 //! operation that says it writes nothing.
 //!
+//! An update, a delete and an operation may carry the caller's
+//! preconditions, each use's entry by its id (D16, D104): the run holds
+//! them to the type's uses and their behaviors' checks before it reads the
+//! row, and hands each use's guard its entry when the guard is asked about
+//! the command's own write, never about a call a behavior's code makes. Any
+//! other action that carries them is refused.
+//!
 //! A hook runs in a frame: a type, its bound uses and one row. The
 //! command's frame is its own type on its own row; a use reaches another
 //! row through [`crate::Cx::call_on`] and [`crate::Cx::create_row`], which
@@ -512,7 +519,87 @@ impl<'a> Run<'a> {
                 rows.insert(row.key.clone(), present(&row.values));
             }
         }
-        let at = frame.row_ref();
+        Ok(self.with_pending(frame.row_ref(), use_id, table, rows))
+    }
+
+    /// The rows of one sub-table of a use of any row, as the run has them:
+    /// the host's, with the run's writes of them so far applied in order, in
+    /// key order. A row the run creates reads no host, and one it deleted or
+    /// found gone has none. The table is held to the declaration of the
+    /// use's behavior when the core runs it; a use the row's type lacks is a
+    /// defect of the reading use's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sub_rows_of(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        table: &str,
+    ) -> Hook<Vec<SubRow>> {
+        let Some(spec) = self.read_spec(type_name)? else {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!("sub_rows_of: no type has the name {type_name}"),
+            ));
+        };
+        let Some((_, entry)) = spec.use_of(use_id) else {
+            let ids: Vec<String> = spec.uses.iter().map(|u| u.id().to_owned()).collect();
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "sub_rows_of: {type_name} has no behavior use {use_id} (its uses: {})",
+                    listed(&ids)
+                ),
+            ));
+        };
+        if let Some(declaration) = self.core.declaration(&entry.behavior) {
+            if !declaration.has_table(table) {
+                return Err(self.defect_of(
+                    frame,
+                    index,
+                    format!(
+                        "sub_rows_of: {table} is not a sub-table {} declares ({})",
+                        entry.behavior,
+                        listed(&declaration.table_names())
+                    ),
+                ));
+            }
+        }
+        let reached = self.find_row(type_name, key).map(|at| {
+            let rows = self.rows.borrow();
+            (
+                rows[at].version.is_none(),
+                matches!(rows[at].write, Write::Delete | Write::Gone),
+            )
+        });
+        let mut rows: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
+        match reached {
+            Some((_, true)) => return Ok(Vec::new()),
+            Some((true, false)) => {}
+            _ => {
+                let request = ReadRequest::sub_rows(type_name, key, use_id, table);
+                for row in self.read_sub_rows(&request)? {
+                    rows.insert(row.key.clone(), present(&row.values));
+                }
+            }
+        }
+        Ok(self.with_pending(RowRef::new(type_name, Some(key)), use_id, table, rows))
+    }
+
+    // with_pending applies the run's writes of one sub-table of a use on a
+    // row, in order, to its rows as read: an insert adds, an update merges,
+    // a delete removes, a null value is no value.
+    fn with_pending(
+        &self,
+        at: RowRef,
+        use_id: &str,
+        table: &str,
+        mut rows: BTreeMap<String, Map<String, Value>>,
+    ) -> Vec<SubRow> {
         for write in self
             .pending
             .borrow()
@@ -540,10 +627,9 @@ impl<'a> Run<'a> {
                 }
             }
         }
-        Ok(rows
-            .into_iter()
+        rows.into_iter()
             .map(|(key, values)| SubRow { key, values })
-            .collect())
+            .collect()
     }
 
     /// The first write the run has made, named for a defect's message;
@@ -771,12 +857,15 @@ impl<'a> Run<'a> {
         result
     }
 
-    /// A call of an operation of a use of the calling use's row.
+    /// A call of an operation of a use of the calling use's row; `fired`
+    /// for one a deadline's handler makes.
+    #[allow(clippy::too_many_arguments)]
     pub fn call(
         &self,
         from: Frame<'_>,
         from_index: usize,
         writable: bool,
+        fired: bool,
         use_id: &str,
         operation: &str,
         params: &Value,
@@ -791,7 +880,12 @@ impl<'a> Run<'a> {
         }
         let caller = from.uses[from_index].spec.id();
         self.undoing(|| {
-            self.invoke(from, index, declared, params, Some(caller), None, writable)
+            let calling = Calling {
+                caller: Some(caller),
+                caller_type: None,
+                fired,
+            };
+            self.invoke(from, index, declared, params, calling, writable)
                 .map(|invoked| invoked.result)
         })
     }
@@ -799,13 +893,15 @@ impl<'a> Run<'a> {
     /// A call of an operation of a use of another row, of any type: its
     /// parameter check, every guard of that row's type, its handler, and
     /// for a writing operation that row's after-change hooks, the row's
-    /// update held to the version the host read it at.
+    /// update held to the version the host read it at. A call on the
+    /// calling use's own row is a [`Run::call`], `fired` as it was made.
     #[allow(clippy::too_many_arguments)]
     pub fn call_on(
         &self,
         from: Frame<'_>,
         from_index: usize,
         writable: bool,
+        fired: bool,
         type_name: &str,
         key: &str,
         use_id: &str,
@@ -820,7 +916,7 @@ impl<'a> Run<'a> {
             ));
         }
         if from.spec.name == type_name && from.key == Some(key) {
-            return self.call(from, from_index, writable, use_id, operation, params);
+            return self.call(from, from_index, writable, fired, use_id, operation, params);
         }
         let caller = from.uses[from_index].spec.id();
         let caller_type = from.spec.name.as_str();
@@ -843,15 +939,12 @@ impl<'a> Run<'a> {
                         ),
                     ));
                 }
-                let invoked = self.invoke(
-                    frame,
-                    index,
-                    declared,
-                    params,
-                    Some(caller),
-                    Some(caller_type),
-                    writable,
-                )?;
+                let calling = Calling {
+                    caller: Some(caller),
+                    caller_type: Some(caller_type),
+                    fired: false,
+                };
+                let invoked = self.invoke(frame, index, declared, params, calling, writable)?;
                 // A call its use settled wrote nothing: the row is not
                 // written and its after-change hooks do not run.
                 if declared.writes && !invoked.settled {
@@ -987,7 +1080,25 @@ impl<'a> Run<'a> {
     // ---- the command's flow ----
 
     pub fn execute(&self) -> Hook<ChangeSet> {
-        match &self.command.action {
+        let action = &self.command.action;
+        if !matches!(
+            action,
+            Action::Update { .. } | Action::Delete { .. } | Action::Operation { .. }
+        ) && !self.command.preconditions.is_empty()
+        {
+            return Err(Refusal::preconditions(
+                &self.top.spec.name,
+                vec![SchemaIssue::new(
+                    "",
+                    format!(
+                        "a {} takes no preconditions: an update, a delete or an operation of a row presents them",
+                        action.kind()
+                    ),
+                )],
+            )
+            .into());
+        }
+        match action {
             Action::Define => Ok(ChangeSet::default()),
             Action::Publish { from } => {
                 self.publish(from.as_ref())?;
@@ -1045,6 +1156,7 @@ impl<'a> Run<'a> {
     }
 
     fn update(&self, key: &str, patch: &Map<String, Value>) -> Hook<ChangeSet> {
+        self.check_preconditions()?;
         let row = self.load(key)?;
         let after = merge_patch(&row.own, patch);
         self.validation(
@@ -1079,6 +1191,7 @@ impl<'a> Run<'a> {
     }
 
     fn delete(&self, key: &str) -> Hook<ChangeSet> {
+        self.check_preconditions()?;
         self.load(key)?;
         self.guards(self.top, &GuardRequest::Delete)?;
         self.rows.borrow_mut()[self.top.row].write = Write::Delete;
@@ -1093,9 +1206,10 @@ impl<'a> Run<'a> {
         operation: &str,
         params: &Value,
     ) -> Hook<ChangeSet> {
+        self.check_preconditions()?;
         self.load(key)?;
         let (index, declared) = self.find_operation(self.top, use_id, operation)?;
-        let invoked = self.invoke(self.top, index, declared, params, None, None, true)?;
+        let invoked = self.invoke(self.top, index, declared, params, Calling::default(), true)?;
         // An operation that said it writes nothing, or that its use settled,
         // writes no row and runs no after-change hook.
         if declared.writes && !self.unchanged.get() {
@@ -1118,11 +1232,15 @@ impl<'a> Run<'a> {
         let Some((index, _)) = self.top.spec.use_of(use_id) else {
             return Err(self.no_use(self.top, use_id));
         };
-        self.top.uses[index].registered.behavior.deadline(
-            self.scope(self.top, index, name, true),
-            name,
-            payload,
-        )?;
+        // The handler's calls are the worker's requests (`fired`).
+        let scope = Scope {
+            fired: true,
+            ..self.scope(self.top, index, name, true)
+        };
+        self.top.uses[index]
+            .registered
+            .behavior
+            .deadline(scope, name, payload)?;
         self.mark_updated(self.top.row);
         self.after_change(self.top, &Change::Deadline { use_id, name }, name)?;
         Ok(self.changes(Value::Null))
@@ -1446,6 +1564,8 @@ impl<'a> Run<'a> {
             action,
             writable,
             own: false,
+            fired: false,
+            precondition: None,
         }
     }
 
@@ -1551,6 +1671,60 @@ impl<'a> Run<'a> {
         }
     }
 
+    // check_preconditions holds the command's preconditions to the type's
+    // uses before the row is read (D16, D104): each entry names a use whose
+    // behavior takes a precondition, and passes that behavior's check, each
+    // issue under its entry. Entries in the command's order, each entry's
+    // issues in the behavior's.
+    fn check_preconditions(&self) -> Hook<()> {
+        let preconditions = &self.command.preconditions;
+        if preconditions.is_empty() {
+            return Ok(());
+        }
+        let frame = self.top;
+        let taking: Vec<String> = frame
+            .uses
+            .iter()
+            .filter(|bound| bound.registered.declaration.preconditions)
+            .map(|bound| bound.spec.id().to_owned())
+            .collect();
+        let mut issues = Vec::new();
+        for (id, entry) in preconditions {
+            let Some((index, _)) = frame.spec.use_of(id) else {
+                issues.push(SchemaIssue::new(
+                    pointer(id),
+                    format!(
+                        "{} has no behavior use {id} (its uses that take preconditions: {})",
+                        frame.spec.name,
+                        listed(&taking)
+                    ),
+                ));
+                continue;
+            };
+            let bound = &frame.uses[index];
+            if !bound.registered.declaration.preconditions {
+                issues.push(SchemaIssue::new(
+                    pointer(id),
+                    format!("behavior {} takes no precondition", bound.spec.behavior),
+                ));
+                continue;
+            }
+            let found = bound
+                .registered
+                .behavior
+                .check_precondition(&*bound.config, entry)
+                .ok_or_else(|| self.defect_of(frame, index, CONFIG_OF_ANOTHER_TYPE))?;
+            issues.extend(found.into_iter().map(|issue| {
+                SchemaIssue::new(format!("{}{}", pointer(id), issue.path), issue.message)
+            }));
+        }
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(Refusal::preconditions(&frame.spec.name, issues).into())
+        }
+    }
+
     // validation asks every use to judge the own fields a write would
     // store, after the issues the core finds itself, and refuses with
     // them all together.
@@ -1579,14 +1753,30 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// Asks every use's guard in list order; the first veto refuses.
+    /// Asks every use's guard in list order; the first veto refuses. A
+    /// guard asked about the command's own update, delete or operation is
+    /// handed its use's entry of the command's preconditions; one asked
+    /// about a create, a `call()` or a `call_on()` is handed none (D16,
+    /// D104).
     fn guards(&self, frame: Frame<'_>, request: &GuardRequest<'_>) -> Hook<()> {
         let action = request.action();
+        let presents = matches!(
+            request,
+            GuardRequest::Update { .. }
+                | GuardRequest::Delete
+                | GuardRequest::Operation { caller: None, .. }
+        );
         for (index, bound) in frame.uses.iter().enumerate() {
-            let answer = bound
-                .registered
-                .behavior
-                .guard(self.scope(frame, index, action, false), request)?;
+            let precondition = if presents {
+                self.command.preconditions.get(bound.spec.id())
+            } else {
+                None
+            };
+            let scope = Scope {
+                precondition,
+                ..self.scope(frame, index, action, false)
+            };
+            let answer = bound.registered.behavior.guard(scope, request)?;
             if let Some(veto) = answer {
                 return Err(self.veto_refusal(frame, index, action, veto));
             }
@@ -1605,22 +1795,24 @@ impl<'a> Run<'a> {
     }
 
     /// Runs an operation: its parameter check, its use's settle, every
-    /// guard, its handler. `caller` names the use of a `call()` or a
-    /// `call_on()`, and `caller_type` the calling use's type for a
-    /// `call_on()`. An operation its use settles runs no guard and no
-    /// handler; for the command's own operation the run then writes
-    /// nothing, as after [`crate::Cx::unchanged`].
-    #[allow(clippy::too_many_arguments)]
+    /// guard, its handler, `calling` saying who makes the request. An
+    /// operation its use settles runs no guard and no handler; for the
+    /// command's own operation the run then writes nothing, as after
+    /// [`crate::Cx::unchanged`].
     fn invoke(
         &self,
         frame: Frame<'_>,
         index: usize,
         declared: &OperationDecl,
         params: &Value,
-        caller: Option<&str>,
-        caller_type: Option<&str>,
+        calling: Calling<'_>,
         writable: bool,
     ) -> Hook<Invoked> {
+        let Calling {
+            caller,
+            caller_type,
+            fired,
+        } = calling;
         self.nested(
             frame,
             index,
@@ -1668,6 +1860,7 @@ impl<'a> Run<'a> {
                         writes: declared.writes,
                         caller,
                         caller_type,
+                        fired,
                     },
                 )?;
                 // The handler of a caller's operation, not a call's, is the
@@ -1687,6 +1880,17 @@ impl<'a> Run<'a> {
             },
         )
     }
+}
+
+/// Who makes an operation's request, as a guard is told it: `caller` names
+/// the use of a `call()` or a `call_on()`, `caller_type` the calling use's
+/// type for a `call_on()` from another row, and `fired` a call a
+/// deadline's handler makes on its row; the default is a caller's request.
+#[derive(Clone, Copy, Debug, Default)]
+struct Calling<'c> {
+    caller: Option<&'c str>,
+    caller_type: Option<&'c str>,
+    fired: bool,
 }
 
 // anchored_writes is the issues of own fields a write names that are a field

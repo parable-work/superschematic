@@ -81,6 +81,24 @@ pub enum ReadRequest {
         after: Option<String>,
         limit: usize,
     },
+    /// The rows of a type whose use's owned field holds a value
+    /// ([`Answer::Linked`]), in the key column's order, at most `limit`,
+    /// after the key `after` when given: what a rule over the rows a
+    /// principal holds reads (Presence's releaseLeases over Lease's
+    /// holder, D104). The value is compared as the column holds it,
+    /// converted as a command's value of the field is. A soft-deletable
+    /// table's live rows alone; a type the host does not have answers no
+    /// rows.
+    Holding {
+        #[serde(rename = "type")]
+        type_name: String,
+        use_id: String,
+        field: String,
+        value: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+        limit: usize,
+    },
 }
 
 /// How many rows a linked read asks for at a time: Links' page (500).
@@ -156,6 +174,25 @@ impl ReadRequest {
             limit: LINKED_PAGE,
         }
     }
+
+    /// One page of the rows of a type whose use's owned field holds a
+    /// value: [`LINKED_PAGE`] at most, after a key when given.
+    pub fn holding(
+        type_name: impl Into<String>,
+        use_id: impl Into<String>,
+        field: impl Into<String>,
+        value: Value,
+        after: Option<&str>,
+    ) -> Self {
+        ReadRequest::Holding {
+            type_name: type_name.into(),
+            use_id: use_id.into(),
+            field: field.into(),
+            value,
+            after: after.map(str::to_owned),
+            limit: LINKED_PAGE,
+        }
+    }
 }
 
 /// One row as the host read it: its own fields, each use's owned fields by
@@ -225,11 +262,13 @@ pub enum Answer {
     /// The sub-table's rows of the row, in key order; none for a row that
     /// has none, or that does not exist.
     SubRows(Vec<SubRow>),
-    /// The rows a [`ReadRequest::Linked`] asks for, and whether more follow.
+    /// The rows a [`ReadRequest::Linked`] or a [`ReadRequest::Holding`]
+    /// asks for, and whether more follow.
     Linked(LinkedRows),
 }
 
-/// One page of the rows of a type whose own field holds a key, each with
+/// One page of the rows of a type whose own field holds a key, or whose
+/// use's owned field holds a value, each with
 /// its key, in key order, and whether more follow it. A type the host does
 /// not have answers no rows. The core's rules never depend on the order; a
 /// host orders by its key column (the reference host by code point).
@@ -484,6 +523,22 @@ mod tests {
             serde_json::to_value(ReadRequest::linked("Task", "projectId", "p1", Some("t9")))
                 .unwrap(),
             json!({"kind": "linked", "type": "Task", "field": "projectId", "key": "p1", "after": "t9", "limit": 500})
+        );
+        assert_eq!(
+            serde_json::to_value(ReadRequest::holding(
+                "Job",
+                "Lease",
+                "holder",
+                json!("wren"),
+                None
+            ))
+            .unwrap(),
+            json!({"kind": "holding", "type": "Job", "useId": "Lease", "field": "holder", "value": "wren", "limit": 500})
+        );
+        let read: ReadRequest = serde_json::from_value(json!({"kind": "holding", "type": "Job", "useId": "Lease", "field": "holder", "value": "wren", "after": "j1", "limit": 500})).unwrap();
+        assert_eq!(
+            read,
+            ReadRequest::holding("Job", "Lease", "holder", json!("wren"), Some("j1"))
         );
         assert_eq!(
             serde_json::to_value(ReadRequest::linked("Task", "projectId", "p1", None)).unwrap(),

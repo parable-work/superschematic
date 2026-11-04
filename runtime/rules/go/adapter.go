@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"sort"
 	"strings"
@@ -132,6 +133,13 @@ type ExecuteOptions struct {
 	// place of deleting it, by column, as the store binds them, fenced on
 	// the version as the delete would be.
 	SoftDelete map[string]any
+	// Preconditions are the caller's preconditions (D16, D104), each use's
+	// entry by its use id, added to the command's own, an entry here
+	// standing in for the command's of the same use, as TypeScript's and
+	// Rust's adapters merge them: what a repository's WithPreconditions
+	// gives an update, a delete or an operation. The core refuses any other
+	// command that presents one.
+	Preconditions Preconditions
 }
 
 // CreateOptions is what a create through the core takes beside its own
@@ -141,7 +149,9 @@ type CreateOptions struct {
 	ID string
 	// Params are each use's create parameters, by use id.
 	Params map[string]any
-	// ExecuteOptions are ignored by PrepareCreate.
+	// ExecuteOptions are ignored by PrepareCreate but for Preconditions,
+	// which it presents for the core to refuse, as a create presenting any
+	// is refused.
 	ExecuteOptions
 }
 
@@ -212,7 +222,7 @@ func execute(ctx context.Context, host Host, typeName string, command Command, o
 	if refused != nil {
 		return nil, refused
 	}
-	run, err := prepared(host, table, command)
+	run, err := prepared(host, table, command, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +395,7 @@ func PrepareCreate(ctx context.Context, host Host, typeName string, own map[stri
 		return nil, err
 	}
 	command := commandOf(host, caller, action)
+	command.Preconditions = opts.Preconditions
 	if err := refuseOwnedWrites(table, command); err != nil {
 		return nil, err
 	}
@@ -576,12 +587,19 @@ func encodeValue(value any) (json.RawMessage, error) {
 	return json.Marshal(value)
 }
 
-// prepared is the command as every run of it runs: a request id, and a
-// create's key.
-func prepared(host Host, table *Table, command Command) (Command, error) {
+// prepared is the command as every run of it runs: a request id, a
+// create's key, and opts.Preconditions added to the command's own, use by
+// use, the options' entry standing in for the command's of the same use.
+func prepared(host Host, table *Table, command Command, opts *ExecuteOptions) (Command, error) {
 	run := command
 	if run.Request == "" {
 		run.Request = host.request()
+	}
+	if len(opts.Preconditions) > 0 {
+		merged := make(Preconditions, len(run.Preconditions)+len(opts.Preconditions))
+		maps.Copy(merged, run.Preconditions)
+		maps.Copy(merged, opts.Preconditions)
+		run.Preconditions = merged
 	}
 	if run.Action.Kind == ActionCreate && run.Action.ID == "" {
 		key, err := newKey(table)
@@ -756,8 +774,10 @@ func contains(list []string, item string) bool {
 // answerOf is the answer to one of the core's reads, through the store,
 // made while the command holds held locks; a kind of read the adapter does
 // not take refuses the command as internal, and so does a read of
-// sub-table rows or of the rows that link to a row under a lock on a store
-// whose locks are fenced, which its unit has no check of yet.
+// sub-table rows, of the rows that link to a row or of the rows whose use's
+// field holds a value under a lock on a store whose locks are fenced,
+// which its unit has no check of yet. A holding read is answered as a
+// linked read is.
 func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (Answer, error) {
 	switch request.Kind {
 	case ReadKindRow:
@@ -817,6 +837,19 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 			return Answer{}, err
 		}
 		return Answer{Kind: ReadKindLinked, Linked: linked}, nil
+	case ReadKindHolding:
+		if held > 0 && host.Store.Locks() == LocksFenced {
+			return Answer{}, Internal("a read of the rows whose behavior's field holds a value under a lock has no check on SQLite or D1 yet (D103)")
+		}
+		table := host.Layout.Types[request.Type]
+		if table == nil {
+			return Answer{Kind: ReadKindLinked, Linked: &LinkedRows{Rows: []KeyedRow{}}}, nil
+		}
+		holding, err := readHolding(ctx, host.Store, table, request)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindLinked, Linked: holding}, nil
 	default:
 		return Answer{}, Internal("the adapter answers no read of this kind: %s", jsonText(request))
 	}

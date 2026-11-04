@@ -138,13 +138,15 @@ pub fn sqlite_bump(table: &str) -> String {
 }
 
 /// The column types of a test table in a dialect: text, a timestamp, a
-/// version, a key, a number, a boolean, JSON.
+/// version, a key, a number, a whole number (`Generic.Int64`), a boolean,
+/// JSON.
 pub struct ColumnTypes {
     pub text: &'static str,
     pub timestamp: &'static str,
     pub version: &'static str,
     pub key: &'static str,
     pub number: &'static str,
+    pub integer: &'static str,
     pub boolean: &'static str,
     pub json: &'static str,
 }
@@ -157,6 +159,7 @@ pub fn column_types(postgres: bool) -> ColumnTypes {
             version: "BIGINT DEFAULT 1 NOT NULL",
             key: "TEXT PRIMARY KEY",
             number: "DOUBLE PRECISION",
+            integer: "BIGINT",
             boolean: "BOOLEAN",
             json: "JSONB",
         }
@@ -167,6 +170,7 @@ pub fn column_types(postgres: bool) -> ColumnTypes {
             version: "INTEGER DEFAULT 1 NOT NULL",
             key: "TEXT PRIMARY KEY",
             number: "REAL",
+            integer: "INTEGER",
             boolean: "INTEGER",
             json: "TEXT",
         }
@@ -585,6 +589,227 @@ pub fn task_ddl(postgres: bool) -> Vec<String> {
     ddl
 }
 
+/// Job (D104), the end-to-end fixture's leased table as behaviorlayout
+/// writes it, its key a string: the own `title` and a whole-number
+/// `revision`; Lease, Retries and the toy [`Finder`], which it implements,
+/// before its status, a Workflow. Lease's owned columns hold its holder,
+/// its token and its expiries as whole numbers, its times as timestamps and
+/// how the last lease ended as JSON, and its directives a sub-table; Retries'
+/// hold its counts as whole numbers and JSON, its best score as a number,
+/// its flags as booleans and its waits as timestamps, and its attempts a
+/// sub-table; and both arm deadlines in `job_deadline_queue`. A write under
+/// a lease presents its token (`requireToken`), and a timeout waits a
+/// minute before the job runs again, its counts keyed by the revision.
+pub fn job_table() -> Table {
+    let flow = json!({
+        "states": ["queued", "running", "failed"],
+        "transitions": [
+            {"from": "queued", "to": "running"},
+            {"from": "running", "to": "queued"},
+            {"from": "queued", "to": "failed"},
+            {"from": "running", "to": "failed"}
+        ]
+    });
+    let at = |name: &str, column: &str| OwnedField {
+        name: name.into(),
+        column: Column::new(camel(column), column, "Temporal.DateTime")
+            .converted(Convert::EpochMillis),
+        value: false,
+    };
+    let field = |name: &str, column: &str, type_name: &str| {
+        owned(name, &camel(column), column, type_name, false)
+    };
+    let sub = |name: &str, type_name: &str| owned(name, name, &snake(name), type_name, false);
+    let sub_at = |name: &str| OwnedField {
+        name: name.into(),
+        column: Column::new(name, snake(name), "Temporal.DateTime").converted(Convert::EpochMillis),
+        value: false,
+    };
+    let operations = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| Operation {
+                name: (*name).into(),
+                writes: true,
+            })
+            .collect()
+    };
+    let lease = Use {
+        id: "Lease".into(),
+        behavior: "Lease".into(),
+        member: "lease".into(),
+        anchor: None,
+        fields: vec![
+            field("holder", "lease_holder", "string"),
+            field("token", "lease_token", "Generic.Int64"),
+            at("acquiredAt", "lease_acquired_at"),
+            at("renewedAt", "lease_renewed_at"),
+            at("expiresAt", "lease_expires_at"),
+            field("expiries", "lease_expiries", "Generic.Int64"),
+            field("ended", "lease_ended", "Generic.JSON"),
+        ],
+        operations: operations(&[
+            "acquire",
+            "heartbeat",
+            "release",
+            "expire",
+            "direct",
+            "acknowledge",
+            "resetExpiries",
+        ]),
+        tables: vec![SubTable {
+            name: "directives".into(),
+            table: "job_lease_directives".into(),
+            row: "job_id".into(),
+            key: sub("number", "string"),
+            fields: vec![
+                sub("token", "Generic.Int64"),
+                sub("name", "string"),
+                sub("data", "Generic.JSON"),
+                sub("dedupeKey", "string"),
+                sub("sentBy", "string"),
+                sub_at("sentAt"),
+                sub_at("acknowledgedAt"),
+            ],
+        }],
+    };
+    let retries = Use {
+        id: "Retries".into(),
+        behavior: "Retries".into(),
+        member: "retries".into(),
+        anchor: None,
+        fields: vec![
+            field("total", "retries_total", "Generic.Int64"),
+            field("classAttempts", "retries_class_attempts", "Generic.JSON"),
+            field("bestScore", "retries_best_score", "number"),
+            field("exhausted", "retries_exhausted", "boolean"),
+            field("stuck", "retries_stuck", "boolean"),
+            at("retryAt", "retries_retry_at"),
+            at("failingSince", "retries_failing_since"),
+            field("keyedBy", "retries_keyed_by", "string"),
+        ],
+        operations: operations(&["recordAttempt"]),
+        tables: vec![SubTable {
+            name: "attempts".into(),
+            table: "job_retries_attempts".into(),
+            row: "job_id".into(),
+            key: sub("number", "string"),
+            fields: vec![
+                sub_at("at"),
+                sub("failure", "string"),
+                sub("score", "number"),
+                sub("kept", "boolean"),
+                sub("signature", "string"),
+                sub("predicates", "Generic.JSON"),
+                sub("detail", "Generic.JSON"),
+                sub("subject", "string"),
+                sub("keyedBy", "string"),
+            ],
+        }],
+    };
+    let finder = Use {
+        id: "Finder".into(),
+        behavior: "Finder".into(),
+        member: "finder".into(),
+        anchor: None,
+        fields: Vec::new(),
+        operations: vec![Operation {
+            name: "find".into(),
+            writes: false,
+        }],
+        tables: Vec::new(),
+    };
+    let mut status = order_table("Job", "job");
+    let workflow = status.uses.remove(0);
+    let spec = TypeSpec::new("Job")
+        .with(UseSpec::on_type(
+            "Lease",
+            json!({
+                "requireToken": true,
+                "overridePermission": "jobs.override",
+                "onExpiry": {"transition": "queued", "from": ["running"]}
+            }),
+        ))
+        .with(UseSpec::on_type(
+            "Retries",
+            json!({
+                "classes": {
+                    "timeout": {"attempts": 3, "backoff": {"firstMs": 60000, "maxMs": 600000}},
+                    "rejected": "terminal"
+                },
+                "totalAttempts": 3,
+                "exhaustedState": "failed",
+                "retryInto": ["running"],
+                "keyField": "revision"
+            }),
+        ))
+        .with(UseSpec::on_type("Finder", json!({})))
+        .with(UseSpec::on_field("status", "Workflow", flow))
+        .with_field(FieldSpec::new("title", "string"))
+        .with_field(FieldSpec::new("revision", "Generic.Int64"));
+    Table {
+        type_name: "Job".into(),
+        table: "job".into(),
+        key: Column::new("id", "id", "string"),
+        version: "_version".into(),
+        live: None,
+        own: vec![
+            Column::new("title", "title", "string"),
+            Column::new("revision", "revision", "Generic.Int64"),
+        ],
+        audit: Vec::new(),
+        uses: vec![lease, retries, finder, workflow],
+        deadlines: Some(deadlines_of("Job", "job")),
+        changes: None,
+        spec,
+    }
+}
+
+/// [`job_table`]'s tables in a dialect as sqlgen writes them: the row's,
+/// with its version trigger, its whole numbers `BIGINT` on Postgres and
+/// `INTEGER` on SQLite; each sub-table's, a surrogate `id` beside the row's
+/// key and the row's number, unique together, its rows deleted with the
+/// row's; and its deadline queue.
+pub fn job_ddl(postgres: bool) -> Vec<String> {
+    let t = column_types(postgres);
+    let mut ddl = vec![format!(
+        "CREATE TABLE \"job\" (id {key}, title {text} NOT NULL, revision {int}, status {text}, status_entered_at {ts}, lease_holder {text}, lease_token {int}, lease_acquired_at {ts}, lease_renewed_at {ts}, lease_expires_at {ts}, lease_expiries {int}, lease_ended {json}, retries_total {int}, retries_class_attempts {json}, retries_best_score {number}, retries_exhausted {boolean}, retries_stuck {boolean}, retries_retry_at {ts}, retries_failing_since {ts}, retries_keyed_by {text}, _version {version})",
+        key = t.key,
+        text = t.text,
+        int = t.integer,
+        ts = t.timestamp,
+        json = t.json,
+        number = t.number,
+        boolean = t.boolean,
+        version = t.version,
+    )];
+    if postgres {
+        ddl.extend(postgres_bump("job"));
+    } else {
+        ddl.push(sqlite_bump("job"));
+    }
+    let id = if postgres {
+        "UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY"
+    } else {
+        "TEXT DEFAULT (lower(hex(randomblob(16)))) NOT NULL PRIMARY KEY"
+    };
+    ddl.push(format!(
+        "CREATE TABLE \"job_lease_directives\" (id {id}, job_id TEXT NOT NULL REFERENCES \"job\" (id) ON DELETE CASCADE, number TEXT NOT NULL, token {int}, name TEXT, data {json}, dedupe_key TEXT, sent_by TEXT, sent_at {ts}, acknowledged_at {ts}, UNIQUE (job_id, number))",
+        int = t.integer,
+        json = t.json,
+        ts = t.timestamp,
+    ));
+    ddl.push(format!(
+        "CREATE TABLE \"job_retries_attempts\" (id {id}, job_id TEXT NOT NULL REFERENCES \"job\" (id) ON DELETE CASCADE, number TEXT NOT NULL, at {ts}, failure TEXT, score {number}, kept {boolean}, signature TEXT, predicates {json}, detail {json}, subject TEXT, keyed_by TEXT, UNIQUE (job_id, number))",
+        ts = t.timestamp,
+        number = t.number,
+        boolean = t.boolean,
+        json = t.json,
+    ));
+    ddl.extend(deadline_queue_ddl(postgres, "job_deadline_queue", "TEXT"));
+    ddl
+}
+
 /// A deadline queue's layout on a table (D103): `<table>_deadline_queue`,
 /// its columns as behaviorlayout names them.
 pub fn deadlines_of(type_name: &str, table: &str) -> Deadlines {
@@ -983,12 +1208,43 @@ impl Behavior for Echo {
     }
 }
 
-/// Workflow, Timers and the toys.
+/// A behavior of the tests' own that reads the rows of a type whose use's
+/// owned field holds a value (D104), as Presence's releaseLeases reads the
+/// rows whose Lease's holder is a principal: its read-only operation `find`
+/// answers the page of `{type, use, field, value, after}`.
+pub struct Finder;
+
+impl Behavior for Finder {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Finder").operation("find", false)
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn operation(&self, cx: &Cx<'_, Value>, _name: &str, params: &Value) -> Hook<Value> {
+        let param = |name: &str| params.get(name).and_then(Value::as_str);
+        let page = cx.read_holding(
+            param("type").unwrap_or_default(),
+            param("use").unwrap_or_default(),
+            param("field").unwrap_or_default(),
+            params.get("value").unwrap_or(&Value::Null),
+            param("after"),
+        )?;
+        Ok(serde_json::to_value(page).unwrap_or_default())
+    }
+}
+
+/// The core's behaviors and the toys.
 pub fn core() -> superschematic_rules::Core {
     superschematic_rules_behaviors::core()
         .with(OneRoom)
         .with(Hold)
         .with(Echo)
+        .with(Finder)
 }
 
 #[cfg(feature = "sqlite")]

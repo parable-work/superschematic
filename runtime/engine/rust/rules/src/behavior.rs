@@ -76,8 +76,9 @@ impl From<Refusal> for Stop {
 /// What a behavior declares: its name, the fields it owns on a row and the
 /// one that holds a field anchor's value, the ones it computes at a read,
 /// its sub-tables, whether it arms deadlines and whether it hears its row's
-/// writes, its operations, the veto codes it refuses with, and whether a
-/// create gives it parameters. The core holds a behavior's writes to it: a
+/// writes, its operations, the veto codes it refuses with, whether a create
+/// gives it parameters, and whether a caller presents it a precondition. The
+/// core holds a behavior's writes to it: a
 /// field or a sub-table it does not declare is a defect, and so are a value
 /// a sub-table it declares with fields does not hold, a deadline armed or
 /// cleared by a behavior that declares none, and a veto code it does not
@@ -139,6 +140,14 @@ pub struct Declaration {
     /// use whose behavior takes none is refused, `{}` included.
     #[serde(default)]
     pub create_params: bool,
+    /// Whether a caller presents the behavior a precondition (D16, D104), as
+    /// a declaration with a preconditionSchema says: an update's, a delete's
+    /// or an operation's entry of the command's preconditions by the use's
+    /// id, which [`Behavior::check_precondition`] holds to its shape and the
+    /// use's guard reads ([`crate::View::precondition`]). An entry for a use
+    /// whose behavior takes none is refused.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preconditions: bool,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -294,6 +303,12 @@ impl Declaration {
     /// The declaration of a behavior a create gives parameters.
     pub fn create_params(mut self) -> Self {
         self.create_params = true;
+        self
+    }
+
+    /// The declaration of a behavior a caller presents a precondition.
+    pub fn preconditions(mut self) -> Self {
+        self.preconditions = true;
         self
     }
 
@@ -493,6 +508,11 @@ pub enum GuardRequest<'a> {
         /// another row; `None` for a call on the same row and for a
         /// caller's.
         caller_type: Option<&'a str>,
+        /// Whether a deadline's handler made the call itself (D103, D104):
+        /// the request of the worker that runs the deadline, the command's
+        /// caller, as the engine's runner made one; false for a caller's
+        /// request and for a call another operation's handler makes.
+        fired: bool,
     },
 }
 
@@ -695,6 +715,17 @@ pub trait Behavior: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Checks the use's entry of a command's preconditions before the row
+    /// is read, as a preconditionSchema would: issues, by JSON pointer into
+    /// the entry, refuse the command as `invalid_argument`
+    /// (`PreconditionsError`). The core asks it only of a behavior whose
+    /// declaration takes preconditions ([`Declaration::preconditions`]); an
+    /// entry for any other is refused without it.
+    fn check_precondition(&self, config: &Self::Config, entry: &Value) -> Vec<SchemaIssue> {
+        let _ = (config, entry);
+        Vec::new()
+    }
+
     /// Checks an operation's parameters before any guard sees them, as a
     /// paramsSchema would: issues, by JSON pointer into the parameters,
     /// refuse the call as `invalid_argument`. It runs for a caller's
@@ -830,6 +861,21 @@ pub trait Behavior: Send + Sync + 'static {
         let _ = (config, row, tables);
         Map::new()
     }
+
+    /// The fields a read shows for the use at a time, beyond its owned
+    /// columns: [`Behavior::read_fields`] with the time the read is made
+    /// at, for a field that turns on the clock (Lease's `active`, D104).
+    /// The default is `read_fields`'.
+    fn read_fields_at(
+        &self,
+        config: &Self::Config,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Map<String, Value> {
+        let _ = now;
+        self.read_fields(config, row, tables)
+    }
 }
 
 #[cfg(test)]
@@ -851,6 +897,17 @@ mod tests {
         assert!(!declaration.has_table("rows"));
         assert!(!declaration.arms_deadlines);
         assert!(!declaration.hears_changes);
+        assert!(!declaration.preconditions);
+        assert!(serde_json::to_value(&declaration)
+            .unwrap()
+            .get("preconditions")
+            .is_none());
+        let fenced = Declaration::new("Lease").preconditions();
+        assert!(fenced.preconditions);
+        assert_eq!(
+            serde_json::to_value(&fenced).unwrap()["preconditions"],
+            json!(true)
+        );
         assert_eq!(
             declaration.find_operation("transition").map(|op| op.writes),
             Some(true)
@@ -918,6 +975,7 @@ mod tests {
             writes: true,
             caller: Some("Dispatch"),
             caller_type: None,
+            fired: false,
         };
         assert_eq!(request.action(), "transition");
         assert_eq!(request.operation_of("status", "transition"), Some(&params));

@@ -294,7 +294,12 @@ func buildType(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) (Type,
 		index := b.reserve(name, fmt.Sprintf("%s holds the fields %s's %s adds, as a read returns them: a field with no value is absent.", name, An(td.Name), declaration.Name))
 		var fields []Member
 		for _, field := range declaration.Fields {
-			shape := behavior.Narrowed.Fields[field.Name]
+			shape, ok := behavior.Narrowed.Fields[field.Name]
+			if !ok {
+				// The type's form keeps none of it (an engine type's
+				// Retries' retryAt, D104).
+				continue
+			}
 			fieldName := MemberName(field.Name)
 			typed, err := b.shape(WithoutDescription(shape.Schema), name+fieldName, name+"."+field.Name)
 			if err != nil {

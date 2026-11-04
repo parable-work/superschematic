@@ -72,6 +72,49 @@ func (e EndpointInfo) BehaviorRepositoryCall() string {
 	return "Get" + bo.Type + "Repository()." + codegen.ToPascalCase(bo.Use) + "()." + codegen.ToPascalCase(bo.Operation)
 }
 
+// BehaviorPreconditionsMember is the member of a behavior operation's input
+// that carries the caller's preconditions (D16, D104), each use's entry by
+// its use id, on a table one of whose uses takes them: a body member
+// rather than a header, so an SDK call and an MCP tool carry it as any
+// input member.
+const BehaviorPreconditionsMember = "preconditions"
+
+// carriesBehaviorPreconditions reports whether input, the input type of
+// op, carries the caller's preconditions: op is a behavior operation and
+// input holds the member BehaviorPreconditionsMember of the type the
+// loader names for its table, <Table>Preconditions, which it adds beside
+// the operation's parameters and refuses a parameter of that name beside.
+func carriesBehaviorPreconditions(op *ir.FieldDef, input *ir.TypeDef) bool {
+	if op == nil || op.BehaviorOperation == nil || input == nil {
+		return false
+	}
+	for _, field := range input.Fields {
+		if field.Name == BehaviorPreconditionsMember && field.Origin == ir.OriginBehavior && field.TypeRef.Name == op.BehaviorOperation.Type+"Preconditions" && !field.TypeRef.IsArray && !field.TypeRef.IsMap {
+			return true
+		}
+	}
+	return false
+}
+
+// HasBehaviorPreconditions reports whether a behavior operation the API
+// serves carries the caller's preconditions in its input
+// (EndpointInfo.BehaviorPreconditions): behaviors.go then holds the
+// handler's runBehaviorOperationWithPreconditions.
+func (o *APIOutput) HasBehaviorPreconditions() bool {
+	return slices.ContainsFunc(o.HandlerEndpoints(), func(ep EndpointInfo) bool { return ep.BehaviorPreconditions })
+}
+
+// BehaviorRunner is the function a behavior endpoint's handler runs its
+// operation with: runBehaviorOperationWithPreconditions for one whose
+// input carries the caller's preconditions, runBehaviorOperation
+// otherwise.
+func (e EndpointInfo) BehaviorRunner() string {
+	if e.BehaviorPreconditions {
+		return "runBehaviorOperationWithPreconditions"
+	}
+	return "runBehaviorOperation"
+}
+
 // BehaviorResultGoType is the Go type a behavior endpoint's handler
 // decodes the operation's result into: the map for a map, the list for a
 // list, and the output itself otherwise.

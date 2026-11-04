@@ -71,7 +71,24 @@ type BehaviorInfo struct {
 	// Permissions are the permissions the use's config names, which the
 	// core checks for the moves that name them.
 	Permissions []string
+
+	// Preconditions reports whether the operation's input carries the
+	// caller's preconditions (D16, D104): on a table one of whose uses'
+	// behaviors takes one, the loader gives every behavior operation's
+	// input the member PreconditionsMember, of the table's
+	// <Table>Preconditions type, each use's entry by its use id. The
+	// handler takes it out of the input's JSON and hands it to the core
+	// with the command, as the adapter's run_operation_with takes it.
+	Preconditions bool
 }
+
+// PreconditionsMember is the member of a behavior operation's input that
+// carries the caller's preconditions (D16, D104), a body member rather
+// than a header, as every server and SDK reads it: the loader adds it to
+// every behavior operation's input on a table one of whose uses' behaviors
+// takes a precondition, typed <Table>Preconditions, and refuses a
+// parameter of the name there.
+const PreconditionsMember = "preconditions"
 
 // DepsBehaviors is what the API crate runs its behavior operations with,
 // which the dispatch layer sets in its Deps (D103): the layout document
@@ -108,6 +125,11 @@ func behaviorInfo(endpoint apigen.EndpointInfo, info EndpointInfo) (*BehaviorInf
 			b.KeyField = arg.Field
 		}
 	}
+	for _, field := range endpoint.InputTypeFields {
+		if field.Name == PreconditionsMember && field.Type == op.Type+"Preconditions" {
+			b.Preconditions = true
+		}
+	}
 	if b.KeyField == "" {
 		return nil, fmt.Errorf("rustrestgen: operation %s.%s runs %s's %s %s (D103), and its route has no path parameter %s, the key of %s", endpoint.Namespace, endpoint.Name, op.Type, op.Use, op.Operation, op.Key, op.Type)
 	}
@@ -124,6 +146,19 @@ func behaviorInfo(endpoint apigen.EndpointInfo, info EndpointInfo) (*BehaviorInf
 func (o *APIOutput) HasBehaviorOperations() bool {
 	for _, endpoint := range o.Endpoints {
 		if endpoint.Behavior != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// HasBehaviorPreconditions reports whether a behavior operation the router
+// mounts takes the caller's preconditions in its input (D16, D104):
+// src/behaviors.rs then has run_operation_with_preconditions, which that
+// operation's handler calls.
+func (o *APIOutput) HasBehaviorPreconditions() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Behavior != nil && endpoint.Behavior.Preconditions {
 			return true
 		}
 	}
@@ -247,6 +282,9 @@ func (o *APIOutput) BehaviorUses() []string {
 	if o.HasBehaviorOperations() {
 		adapter = append(adapter, "Error", "Refusal")
 		runtime = append(runtime, "ApiError", "RequestContext")
+	}
+	if o.HasBehaviorPreconditions() {
+		adapter = append(adapter, "ExecuteOptions")
 	}
 	if len(o.BehaviorWorkers) > 0 {
 		adapter = append(adapter, "Claim")
@@ -487,12 +525,18 @@ func rustCall(indent, fn string, args []string, tail string) string {
 // router's Behaviors, the request's context, the table, the row's key from
 // its Args, the use, the operation and its input, or, for an operation
 // whose parameters declare no property, the empty object the Go and
-// TypeScript servers send.
+// TypeScript servers send. An operation whose input carries the caller's
+// preconditions calls behaviors::run_operation_with_preconditions, which
+// takes them out of it (D16, D104).
 func (e EndpointInfo) BehaviorCall() string {
 	b := e.Behavior
 	params := "&Value::Object(Default::default())"
 	if e.Input != nil {
 		params = "&args.input"
+	}
+	run := "run_operation"
+	if b.Preconditions {
+		run = "run_operation_with_preconditions"
 	}
 	const indent = "    "
 	args := []string{
@@ -504,7 +548,7 @@ func (e EndpointInfo) BehaviorCall() string {
 		rustString(b.Operation),
 		params,
 	}
-	head := indent + "let result: Result<" + e.OutputRustType + ", ApiError> = behaviors::run_operation("
+	head := indent + "let result: Result<" + e.OutputRustType + ", ApiError> = behaviors::" + run + "("
 	return head + "\n" + indent + indent + strings.Join(args, ",\n"+indent+indent) + ",\n" + indent + ")\n" + indent + ".await;"
 }
 

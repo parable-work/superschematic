@@ -682,8 +682,10 @@ A DB table may type a field as a behavior, `status: Workflow<{ ... }>`, or
 implement a behavior of the whole table, `implements Timers<Ticket, { ...
 }>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker)),
 `implements Reactions<Project, { ... }>` ([A table's
-reactions](#a-tables-reactions-and-its-change-queue)) or `implements
+reactions](#a-tables-reactions-and-its-change-queue)), `implements
 Approvals<Task, { ... }>` ([A table's sign-offs](#a-tables-sign-offs-approvals))
+or `implements Lease<Job, { ... }>` and the work-queue behaviors beside it
+([A table's leases, retries, presence and budgets](#a-tables-leases-retries-presence-and-budgets))
 (D103). The table
 stays a table: the behavior's fields are its columns (`status`,
 `status_entered_at`), the generated repositories read them and leave them
@@ -1260,6 +1262,128 @@ write, each holding the row's columns, until one does; an operator may
 delete them, and the writes they held then go unheard. A table's rows
 written before its trigger existed have no messages; their deadlines
 reconcile at their next write.
+
+## A table's leases, retries, presence and budgets
+
+A table that implements Lease, Retries, Presence or Budget
+([Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters))
+has their operations, which a `@behaviorOperations` set serves beside its
+Workflow field's `transition`, and deadlines, which a `@behaviorWorker`
+runs (D104):
+
+```ts
+// agents-api
+import { auth, behaviorOperations, behaviorWorker } from "@superschematic/api";
+import { Account, Job, Session } from "@acme/agents-db";
+
+@behaviorOperations(Job)
+@auth
+export abstract class JobActions {}
+
+@behaviorWorker(Job)
+export abstract class JobDeadlines {}
+
+@behaviorOperations(Session)
+@auth
+export abstract class SessionActions {}
+
+@behaviorWorker(Session, { permissions: ["jobs.override"] })
+export abstract class SessionPresence {}
+
+@behaviorOperations(Account)
+@auth
+export abstract class AccountActions {}
+```
+
+| Table | Routes, under `POST /api/<table>/{id}/` | Deadlines the worker runs |
+| --- | --- | --- |
+| `Job`'s Lease | `lease/acquire`, `lease/heartbeat`, `lease/release`, `lease/expire`, `lease/direct`, `lease/acknowledge`, `lease/reset-expiries` | `expire`, when a lease lapses: `onExpiry` moves the job, the token advances |
+| `Job`'s Retries | `retries/record-attempt` | `retry`, when a backoff ends: `then` moves the job back |
+| `Session`'s Presence | `presence/beat`, `presence/miss` | `miss`, at the session's deadline: `onMissed` moves it, and the leases its principal holds on the tables `releaseLeases` names expire |
+| `Account`'s Budget | `budget/reserve`, `budget/check-reserve`, `budget/record-usage`, `budget/settle`, `budget/set-limit`, `budget/observe`, `budget/reserve-for`, `budget/settle-for`, `budget/record-usage-for` | none |
+
+The SDK methods and MCP tools follow the behavior's name, as Timers' do
+(`sdk.job.lease.acquire(id, {})`, `job_lease_acquire`;
+`sdk.account.budget.observe(id, { meter: "tokens", used, resetsAt })`,
+`account_budget_observe`). The types are typed by the config:
+`recordAttempt`'s `failure` is `JobRetriesClass`, the config's classes,
+and every Budget operation's `meter` is `AccountBudgetMeter`, its meters.
+Lease's `expireHolder` runs on the table as a whole, and no route serves
+it: the build warns of it and leaves it out of the set. A Budget scope's
+operations (`reserveFor` and the rest) are the core's calls from a row
+inside it; a route serves them, and the core refuses one from a row that
+does not draw the meter from the scope. A table's API has no update or
+delete route of its own, so its updates and deletes present a token
+through the repositories.
+
+The core checks the configs' permissions on each call, against the
+caller's: `observe` needs `observePermission`, `setLimit`
+`limitPermission`, `resetExpiries` and another holder's `release` or
+`expire` Lease's `overridePermission`, so an `@auth` set admits any
+signed-in caller and the config decides the rest. The refusals are the
+vetoes the database guide lists, 409 `vetoed` with
+`details.vetoCode` (`held_by_another`, `token_stale`, `token_required`,
+`backing_off`, `throttled`, `exhausted`, `not_principal`, `over_limit`,
+and the rest), and 403 `forbidden` for a permission the caller lacks. The
+permission catalog lists each permission under the operations that need
+it, and Lease's `overridePermission`, Retries' `limitsPermission` and
+Budget's `limitPermission` under each operation that updates a row of the
+table through a `@source` view of it, as the core checks them on that
+update.
+
+### A precondition: the lease's token
+
+A Lease's fencing token is a precondition of the call
+([Rows a worker leases](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
+the caller asserts what it holds, and the core checks it before it reads
+the row. On a table one of whose uses takes a precondition, every
+behavior operation's input has a member `preconditions`, keyed by the
+use, `Lease` for a table's Lease, in the body beside the parameters:
+
+```http
+POST /api/job/{id}/lease/heartbeat
+Content-Type: application/json
+
+{ "preconditions": { "Lease": { "token": 3 } } }
+```
+
+| | Presenting `Job`'s token |
+| --- | --- |
+| HTTP | the body's `preconditions`, `{ "Lease": { "token": 3 } }`, beside the operation's parameters (`{ "to": "running", "preconditions": ... }`) |
+| Types | `JobPreconditions`, whose `Lease` is `JobLeasePrecondition` (`token`, an integer of at least 0); every input of the table's behavior operations has it, optional |
+| SDK | `sdk.job.lease.heartbeat(id, { preconditions: { Lease: { token } } })`, `sdk.job.status.transition(id, { to: "running", preconditions: { Lease: { token } } })` |
+| MCP tool | the tool's `preconditions` argument, `job_lease_heartbeat` with `{ id, preconditions: { Lease: { token: 3 } } }` |
+| Repositories | TypeScript's `updateOne(id, update, { preconditions })`, `deleteOne(id, { preconditions })`; Go's `orm.WithPreconditions(ctx, ...)`; Rust's `ExecuteOptions.preconditions` |
+
+It is a member of the body rather than a header, so an SDK's call and an
+MCP tool carry it as any other member, and the build refuses a parameter
+named `preconditions` on such a table. The generated handlers take it out
+of the body and hand it to the core. A token that is not the lease's is
+409 `vetoed`, `token_stale`, `{ token, current }`; a write under
+`requireToken` that presents none is `token_required`; a malformed one is
+the route's 400 before the core runs (the TypeScript and Go SDKs check it
+before they send it); and one for a use whose behavior takes none, or a use the table
+lacks, is 400 `invalid_argument` from the core, class
+`PreconditionsError` (`preconditions of Job: /Retries: behavior Retries
+takes no precondition`). An engine type's routes read the token from the
+`Preconditions` header instead
+([Work queues](/superschematic/guides/work-queues/#lease)).
+
+### Their worker
+
+A table whose behaviors arm deadlines needs a `@behaviorWorker` on an API
+over its database ([The worker](#the-worker)): Lease's expiry, Retries'
+`then` and Presence's miss each fall due on its deadline queue,
+`job_deadline_queue` and `session_deadline_queue`, and nothing moves the
+row until a worker runs them. The worker runs each as itself, the subject
+`agents-api/SessionPresence`, holding the permissions its decorator lists:
+a miss that expires another principal's leases through `releaseLeases`
+needs that table's Lease `overridePermission`, so the worker lists it,
+and the build warns of one that does not. A fire that another
+principal's active lease vetoes (a Timers fire, a Presence miss on a table
+that also implements Lease) is released and falls due a minute later, as
+every vetoed fire is; list the operation in Lease's `exempt`
+(`"Timers.fireTimer"`, `"Presence.miss"`) to let it through. Budget arms nothing and needs no worker.
 
 ## OpenAPI
 

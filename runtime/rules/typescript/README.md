@@ -47,7 +47,10 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   SubRow[] }`, each `{ key, values }` in key order, the key's field left
   out and a NULL column absent) or one page of a type's rows whose own
   field holds a key (`linked`: `{ kind: 'linked', type, field, key, after?,
-  limit }`, answered `{ linked: { rows, more } }`, each row `{ key, row }`).
+  limit }`, answered `{ linked: { rows, more } }`, each row `{ key, row }`),
+  or one page of a type's rows whose use's owned field holds a value
+  (`holding`: `{ kind: 'holding', type, useId, field, value, after?, limit
+  }`, answered as a linked read is, D104).
   A spec may list the type's own fields (`TypeSpec.fields`, each a
   `FieldSpec`: `name`, `type`, `dateTime` and, for a to-one relation's,
   `relation`: `{ name, type }`), which a config that names a field is held
@@ -55,13 +58,17 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   its target. A command's action may be a change of a row from its table's
   change queue (`{ kind: 'change', key, change: { write, at, before?,
   after? } }`, D103), and a change set may write a row gone (`{ kind:
-  'gone', type, key }`).
+  'gone', type, key }`). An update, a delete and an operation may carry the
+  caller's `preconditions`, each use's entry by its use id (`{ Lease: {
+  token: 3 } }`, D16, D104), which the core checks before it reads the
+  row; any other action that carries one is refused.
 - `declarations()` returns each registered behavior's declaration file,
   each field's column type and the value field among them, its sub-tables
   (`tables`: each its name, key and typed fields), whether it arms
   deadlines (`armsDeadlines`) and whether it hears its row's writes
-  (`hearsChanges`), in the order Workflow, Reactions, Constants, StateRules,
-  Approvals, Timers.
+  (`hearsChanges`), and the entry a caller presents it as a precondition
+  (`preconditionSchema`), in the order Workflow, Reactions, Constants,
+  StateRules, Approvals, Timers, Lease, Presence, Budget, Retries.
 - `check(specs, { caller, now }?)` returns each spec's define check: null,
   or its refusal.
 - An input the module cannot read throws `RulesError` (`invalid_json`,

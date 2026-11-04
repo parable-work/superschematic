@@ -1,7 +1,11 @@
 //! The checked-in transcripts of the recorded scenarios the core runs
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, D103),
-//! Workflow's, Timers', Reactions' two, Constants', StateRules' and
-//! Approvals': the core's commands and what each must answer, which every language's adapter replays against tables of
+//! Workflow's, Timers', Reactions' two, Constants', StateRules',
+//! Approvals', and Lease's, Presence's, Budget's and Retries' (`core-lease`,
+//! `core-presence`, `core-budget` and `core-retries`, of the work queue's
+//! `workqueue-lease.json`, `workqueue-presence.json`, `workqueue-budget.json`
+//! and `workqueue-retries.json`):
+//! the core's commands and what each must answer, which every language's adapter replays against tables of
 //! its own. The test fails when a file is not what the writer writes from
 //! its recording, so a change to the core, a behavior or the replayer that
 //! changes an answer changes the file in the same commit.
@@ -136,18 +140,107 @@ const APPROVALS_FLOOR: usize = 122;
 /// this one.
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
+/// The steps `core-lease.transcript.json` holds, of `workqueue-lease.json`'s
+/// 691 (D104, step 2): 113 define and publish checks and 323 commands,
+/// creates, updates, deletes and invokes, 84 of them presenting Lease's
+/// token as the command's precondition, and the 3 expiries the runner's
+/// runDue ran as deadlines, each under the step number of the
+/// `runner.runDue` that ran it, in the 43 scenarios the core an adapter
+/// embeds runs, the configs with sweepMs left out. The three that compose
+/// test.Gate or test.Signal, which the reference host runs as fixtures,
+/// hold none (31 steps); the rest of the 255 left out are opens, reads of
+/// rows and of the event log, the runDues that ran nothing, and what the
+/// replay skips: the scenario that composes Dependencies, expireHolder and
+/// the steps after it wrote rows, the engines with a value store, Comments'
+/// steps (incidental), the reads of the engine's store and the options the
+/// reference host does not take. An adapter's replay holds its own count to
+/// this one.
+const LEASE_FLOOR: usize = 436;
+
+/// The steps `core-presence.transcript.json` holds, of the engine's
+/// `workqueue-presence.json`'s 226 (D104): 52 define and publish checks,
+/// eight of them refused, and 89 commands, 30 creates, 48 operations
+/// (beats, misses, transitions and Lease's acquires and heartbeats), 2
+/// updates, a delete and the 8 deadlines the runner's sweeps ran, each a
+/// miss under the step number of the `runner.runDue` that ran it, three of
+/// them expiring the principal's leases through Lease's expire with the
+/// Job rows as their others, in 17 of its 18 scenarios. The one whose
+/// defines name releaseLeases' schemas holds none, since the engine refused
+/// it for another schema's state, which the build holds. The rest of the
+/// 85 left out are opens, reads of rows, of the event log and of the
+/// runner's status, the sweeps that ran nothing, and the steps after a
+/// sweep whose recording failed. An adapter's replay holds its own count to
+/// this one.
+const PRESENCE_FLOOR: usize = 141;
+
+/// The steps `core-budget.transcript.json` holds, of the engine's
+/// `workqueue-budget.json`'s 796 (D104): 164 define and publish checks,
+/// seven of them refused, and 331 commands, 99 creates, 162 operations, 68
+/// updates (the engine's link and unlink among them, as updates of a
+/// relation's column) and 2 deletes, 46 of them writing the scopes they
+/// reach as their others, in the 31 scenarios that compose no Queue, with
+/// each row's meters, holds and buckets as its sub-rows. The five claimed
+/// through Queue hold none, and the two limitField scenarios stop at their
+/// setLimit of a meter whose limit an own field holds; the rest of the 301
+/// left out are opens, reads of rows, of the event log and of the engine's
+/// store, Links' own validation and the defines that name Links. An
+/// adapter's replay holds its own count to this one.
+const BUDGET_FLOOR: usize = 495;
+
+/// The steps `core-retries.transcript.json` holds, of
+/// `workqueue-retries.json`'s 379 (D104, step 2): 54 define and publish
+/// checks and 196 commands, creates, updates and invokes, one of them
+/// presenting Lease's token, in the 14 scenarios the core an adapter embeds
+/// runs. The rest of the 129 left out are the scenarios that compose Queue,
+/// the five whose config gives resultField from their define on, the define
+/// the engine's requires check refused, opens, and reads of rows and of the
+/// event log. An adapter's replay holds its own count to this one.
+const RETRIES_FLOOR: usize = 250;
+
+/// The steps `core-retries-waits.transcript.json` holds, of the
+/// hand-written `core-retries-waits.json`'s 159 (D104): 36 define and
+/// publish checks, seventeen of them refused, and 98 commands, creates,
+/// updates, deletes, transitions, attempts and Lease's operations, 23 of
+/// them presenting a precondition, and the 3 deadlines the runner's runDue
+/// ran (two of then's moves, a lease's expiry), each holding its row's
+/// version after the step, in its 10 scenarios; none is a repeat. The 26
+/// left out are the opens, the reads of rows and the runDues that ran
+/// nothing. An adapter's replay holds its own count to this one.
+const RETRIES_WAITS_FLOOR: usize = 134;
+
+/// The steps `core-periods-and-presence.transcript.json` holds, of the
+/// hand-written `core-periods-and-presence.json`'s 118 (D104): 25 define
+/// and publish checks, eleven of them refused, and 52 commands (creates,
+/// updates, Budget's operations, Presence's beats and miss, transitions and
+/// the one deadline the runner's sweeps ran), each holding its row's
+/// version after the step, with Budget's meters and buckets as their
+/// sub-rows and Presence's miss as its armed deadline, in its 8 scenarios;
+/// none is a repeat. The 41 left out are the opens, the reads of rows and
+/// the sweeps that ran nothing. An adapter's replay holds its own count to
+/// this one.
+const PERIODS_AND_PRESENCE_FLOOR: usize = 77;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
-    for (name, floor) in [
-        ("core-workflow", WORKFLOW_FLOOR),
-        ("core-timers", TIMERS_FLOOR),
-        ("core-reactions", REACTIONS_FLOOR),
-        ("core-reactions-changes", REACTIONS_CHANGES_FLOOR),
-        ("core-constants", CONSTANTS_FLOOR),
-        ("core-staterules", STATERULES_FLOOR),
-        ("core-approvals", APPROVALS_FLOOR),
+    // Each transcript by its name, from the recording of its source's name.
+    for (name, source, floor) in [
+        ("core-workflow", "core-workflow", WORKFLOW_FLOOR),
+        ("core-timers", "core-timers", TIMERS_FLOOR),
+        ("core-reactions", "core-reactions", REACTIONS_FLOOR),
+        (
+            "core-reactions-changes",
+            "core-reactions-changes",
+            REACTIONS_CHANGES_FLOOR,
+        ),
+        ("core-constants", "core-constants", CONSTANTS_FLOOR),
+        ("core-staterules", "core-staterules", STATERULES_FLOOR),
+        ("core-approvals", "core-approvals", APPROVALS_FLOOR),
+        ("core-lease", "workqueue-lease", LEASE_FLOOR),
+        ("core-presence", "workqueue-presence", PRESENCE_FLOOR),
+        ("core-budget", "workqueue-budget", BUDGET_FLOOR),
+        ("core-retries", "workqueue-retries", RETRIES_FLOOR),
     ] {
-        let written = written(name, &scenario_path(name), transcript);
+        let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
             written
                 .scenarios
@@ -185,6 +278,12 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         (
             "core-freezes-and-sign-offs",
             FREEZES_AND_SIGN_OFFS_FLOOR,
+            false,
+        ),
+        ("core-retries-waits", RETRIES_WAITS_FLOOR, false),
+        (
+            "core-periods-and-presence",
+            PERIODS_AND_PRESENCE_FLOOR,
             false,
         ),
     ] {
@@ -257,11 +356,13 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
 // The writer of a scenario file's transcript.
 type Writer = fn(&ScenarioFile, &dyn Fn() -> Core) -> Result<Transcript, String>;
 
-// written writes a scenario file's transcript, rewrites the checked-in file
-// when UPDATE_TRANSCRIPTS=1, and holds the checked-in file to it.
+// written writes a scenario file's transcript under a name, which names the
+// file it is written to and its `file`, rewrites the checked-in file when
+// UPDATE_TRANSCRIPTS=1, and holds the checked-in file to it.
 fn written(name: &str, source: &std::path::Path, write: Writer) -> Transcript {
     let file = load(source).unwrap_or_else(|error| panic!("{error}"));
-    let written = write(&file, &ported).unwrap_or_else(|error| panic!("{error}"));
+    let mut written = write(&file, &ported).unwrap_or_else(|error| panic!("{error}"));
+    written.file = name.to_owned();
     let text = written.render();
     let path = transcript_path(name);
     if std::env::var("UPDATE_TRANSCRIPTS").is_ok_and(|value| value == "1") {

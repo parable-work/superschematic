@@ -1,4 +1,4 @@
-//! The host the tests of Constants, StateRules and Approvals share: a source
+//! The host the tests of the ported behaviors share: a source
 //! in memory that keeps rows, their sub-table rows and the deadlines the
 //! core arms, as a table's adapter keeps them, and the define, command and
 //! read helpers each file's cases are written with.
@@ -181,7 +181,21 @@ impl Host {
 
     /// Drives a command to its outcome and applies its change set.
     pub fn run(&mut self, caller: &Caller, now: i64, action: Action) -> Outcome {
-        let command = Command::new(caller.clone(), now, action).with_request("r1");
+        self.run_presenting(caller, now, action, Map::new())
+    }
+
+    /// Drives a command that presents the caller's preconditions, by use id
+    /// (D104), to its outcome and applies its change set.
+    pub fn run_presenting(
+        &mut self,
+        caller: &Caller,
+        now: i64,
+        action: Action,
+        preconditions: Map<String, Value>,
+    ) -> Outcome {
+        let command = Command::new(caller.clone(), now, action)
+            .with_request("r1")
+            .with_preconditions(preconditions);
         let outcome = self.core.drive(&self.spec, &command, &mut self.memory);
         if let Outcome::Changed(changes) = &outcome {
             self.memory.apply(&command, changes);
@@ -291,6 +305,22 @@ impl Host {
         tables.insert(table.to_owned(), self.sub_rows(key, use_id, table));
         self.core
             .read_fields(&self.spec, use_id, self.row(key), &tables)
+            .expect("its fields")
+    }
+
+    /// The fields a read of a row at a time shows for a use beyond its
+    /// owned columns (D104).
+    pub fn read_fields_at(
+        &self,
+        key: &str,
+        use_id: &str,
+        table: &str,
+        now: i64,
+    ) -> Map<String, Value> {
+        let mut tables = BTreeMap::new();
+        tables.insert(table.to_owned(), self.sub_rows(key, use_id, table));
+        self.core
+            .read_fields_at(&self.spec, use_id, self.row(key), &tables, now)
             .expect("its fields")
     }
 }

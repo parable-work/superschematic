@@ -19,6 +19,22 @@ writes them, and `test/corpus.test.ts` does not list them.
   sign-offs a change of chosen fields consumes (`resetOn`) and that pin the
   version their signer read (`pinned`, and a `version` on a gate that is
   not pinned), with each one's define refusals. An engine type refuses each.
+- `core-retries-waits.json` (D104, step 2): Retries' attempts that wait
+  (a class's `backoff`, and `retryInto`, `then`, `giveUpAfterMs`, `window`
+  and `keyField`; `then`'s move armed again at a status's entry, held by
+  another principal's active lease and by the window), Lease's acquire
+  while a row backs off, and Lease's
+  fencing token presented as the command's precondition on a table
+  (`token_required`, `token_stale`), its expiry a deadline; with each one's
+  define refusals. An engine type refuses each.
+- `core-periods-and-presence.json` (D104, step 2): Budget's meters that
+  start again at each period (`reset`: hourly, daily, weekly, monthly and
+  `{ everyMs }`, in UTC), count a rolling window (`window: "rolling"`) and
+  take the usage a provider reports (`observe`, `observePermission`), with
+  setLimit refused for a meter whose limit an own field holds; and
+  Presence's `ttlByState`, the deadline a beat and a transition arm by the
+  row's state, its miss falling due as a deadline; with each one's define
+  refusals. An engine type refuses each.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
@@ -28,8 +44,10 @@ timestamps, the schema document a define echoes back) is left out. A
 test behavior a file composes is the test kit's fixture
 (`runtime/engine/rust/rules-testkit/src/fixtures.rs`), registered for the file by its name.
 
-`runtime/engine/rust/rules-testkit/tests/workflow_principals_scenarios.rs` and
-`runtime/engine/rust/rules-testkit/tests/freezes_and_sign_offs_scenarios.rs` replay each file on
+`runtime/engine/rust/rules-testkit/tests/workflow_principals_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/freezes_and_sign_offs_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/retries_waits_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/periods_and_presence_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with
 `hand_written_transcript`, which also holds each command's row version

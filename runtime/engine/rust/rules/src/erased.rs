@@ -22,8 +22,10 @@ pub(crate) type AnyConfig = Box<dyn Any + Send + Sync>;
 
 /// Where a hook runs: the run, the frame (a type, its uses and a row), the
 /// use's position in the type's list, the action a veto refuses, whether
-/// the hook may write, and whether it is the command's own operation's
-/// handler.
+/// the hook may write, whether it is the command's own operation's
+/// handler, whether it is a deadline's handler, whose calls are the
+/// worker's requests, and the use's entry of the command's preconditions,
+/// which only a guard asked about the command's own write is handed.
 #[derive(Clone, Copy)]
 pub(crate) struct Scope<'s> {
     pub run: &'s Run<'s>,
@@ -32,6 +34,8 @@ pub(crate) struct Scope<'s> {
     pub action: &'s str,
     pub writable: bool,
     pub own: bool,
+    pub fired: bool,
+    pub precondition: Option<&'s Value>,
 }
 
 pub(crate) trait Erased: Send + Sync {
@@ -54,6 +58,11 @@ pub(crate) trait Erased: Send + Sync {
         operation: &str,
         params: &Value,
     ) -> Option<Vec<SchemaIssue>>;
+    fn check_precondition(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        entry: &Value,
+    ) -> Option<Vec<SchemaIssue>>;
     fn initialize(&self, scope: Scope<'_>, params: &Value) -> Hook<()>;
     fn settle(&self, scope: Scope<'_>, operation: &str, params: &Value) -> Hook<Option<Value>>;
     fn guard(&self, scope: Scope<'_>, request: &GuardRequest<'_>) -> Hook<Option<Veto>>;
@@ -72,6 +81,13 @@ pub(crate) trait Erased: Send + Sync {
         config: &(dyn Any + Send + Sync),
         row: &Row,
         tables: &BTreeMap<String, Vec<SubRow>>,
+    ) -> Option<Map<String, Value>>;
+    fn read_fields_at(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
     ) -> Option<Map<String, Value>>;
 }
 
@@ -112,6 +128,7 @@ impl<B: Behavior> Typed<B> {
             index: scope.index,
             config,
             action: scope.action,
+            precondition: scope.precondition,
         })
     }
 
@@ -120,6 +137,7 @@ impl<B: Behavior> Typed<B> {
             view: self.view(scope)?,
             writable: scope.writable,
             own: scope.own,
+            fired: scope.fired,
         })
     }
 }
@@ -165,6 +183,15 @@ impl<B: Behavior> Erased for Typed<B> {
     ) -> Option<Vec<SchemaIssue>> {
         let config = config.downcast_ref::<B::Config>()?;
         Some(self.0.check_params(config, operation, params))
+    }
+
+    fn check_precondition(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        entry: &Value,
+    ) -> Option<Vec<SchemaIssue>> {
+        let config = config.downcast_ref::<B::Config>()?;
+        Some(self.0.check_precondition(config, entry))
     }
 
     fn initialize(&self, scope: Scope<'_>, params: &Value) -> Hook<()> {
@@ -216,5 +243,16 @@ impl<B: Behavior> Erased for Typed<B> {
     ) -> Option<Map<String, Value>> {
         let config = config.downcast_ref::<B::Config>()?;
         Some(self.0.read_fields(config, row, tables))
+    }
+
+    fn read_fields_at(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Option<Map<String, Value>> {
+        let config = config.downcast_ref::<B::Config>()?;
+        Some(self.0.read_fields_at(config, row, tables, now))
     }
 }

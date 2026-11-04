@@ -28,10 +28,14 @@ import (
 // orm.ticket.timers.fireTimer(key, { deadline: 'respond' }). A table whose
 // behaviors arm deadlines has runDeadline, and one whose writes its
 // behaviors hear runChange, which a behavior worker's handlers call, and
-// one whose behaviors keep sub-tables or arm deadlines has no upserts. Nothing here names a behavior: the operations, their
-// parameters and results, and the owned fields' types come from each
-// behavior's declaration, narrowed by its config where behaviortypes
-// narrows one.
+// one whose behaviors keep sub-tables or arm deadlines has no upserts. A
+// table one of whose uses takes a precondition (D16, D104) types the
+// preconditions a write presents as <Type>Preconditions, each such use's
+// entry by its id, which updateOne, deleteOne and each operation take in
+// their options. Nothing here names a behavior: the operations, their
+// parameters and results, the preconditions and the owned fields' types
+// come from each behavior's declaration, narrowed by its config where
+// behaviortypes narrows one.
 
 // repositoryMembers are the members of a table's repository in the HTTP
 // runtime (runtime/http/typescript/src/orm.ts's TableRepository), which a
@@ -55,7 +59,7 @@ var repositoryMembers = []string{
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
 	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
-	"clearActor", "runDeadline", "runChange",
+	"clearActor", "runDeadline", "runChange", "refusePreconditions",
 }
 
 // ORMUse is a use of a behavior on a table as orm.ts writes it: ID, the
@@ -81,15 +85,27 @@ type ORMOperation struct {
 	Result string
 }
 
+// ORMPrecondition is the precondition a use of a table takes (D16, D104),
+// as orm.ts types it in <Type>Preconditions: the use's id, the member a
+// write's preconditions name it by, its behavior, and the TypeScript type
+// of its entry, from the behavior's preconditionSchema.
+type ORMPrecondition struct {
+	ID       string
+	Behavior string
+	Type     string
+}
+
 // ormRules is what orm.ts writes of schema's tables whose fields are
-// behaviors: the layout document, each table's uses by its type, and the
+// behaviors: the layout document, each table's uses by its type, the
 // TypeScript type of each owned field whose declared type its use's
-// config narrows (a state machine's states), by type and field. It is nil
-// for a schema with no such table.
+// config narrows (a state machine's states), by type and field, and the
+// preconditions each table's uses take, by type. It is nil for a schema
+// with no such table.
 type ormRules struct {
-	layout *behaviorlayout.Layout
-	uses   map[string][]ORMUse
-	types  map[string]map[string]string
+	layout        *behaviorlayout.Layout
+	uses          map[string][]ORMUse
+	types         map[string]map[string]string
+	preconditions map[string][]ORMPrecondition
 }
 
 // typeScriptRules builds ormRules for schema, whose behaviors reg declares.
@@ -98,7 +114,7 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 	if err != nil || layout == nil {
 		return nil, err
 	}
-	out := &ormRules{layout: layout, uses: map[string][]ORMUse{}, types: map[string]map[string]string{}}
+	out := &ormRules{layout: layout, uses: map[string][]ORMUse{}, types: map[string]map[string]string{}, preconditions: map[string][]ORMPrecondition{}}
 	for name, table := range layout.Types {
 		td := schema.Types[name]
 		out.types[name] = map[string]string{}
@@ -153,6 +169,12 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 						out.types[name][field.Field] = rendered
 					}
 				}
+			}
+			// A use whose behavior takes a precondition (Lease's fencing
+			// token) is a member of the table's <Type>Preconditions, by its
+			// id, as the core's command keys it.
+			if narrowed.Preconditions != nil {
+				out.preconditions[name] = append(out.preconditions[name], ORMPrecondition{ID: use.ID, Behavior: use.Behavior, Type: renderNarrowed(narrowed.Preconditions, aliases, "  ")})
 			}
 			ormUse := ORMUse{ID: use.ID, Member: member, Behavior: use.Behavior}
 			for _, op := range use.Operations {

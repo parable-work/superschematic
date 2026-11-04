@@ -1,0 +1,2989 @@
+{
+  "name": "fixture-agents-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-agents-db",
+      "types": [
+        "Account",
+        "Job",
+        "Session"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-agents-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "AccountBudgetCheckReserveInput": {
+      "name": "AccountBudgetCheckReserveInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget checkReserve.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "amount",
+          "comment": "How much of the meter; its configured reservation when absent. Needs meter.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter; every meter with a configured reservation when absent.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetCheckReserveResult": {
+      "name": "AccountBudgetCheckReserveResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget checkReserve returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "fits",
+          "comment": "Whether the reservation fits now.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "scopes",
+          "comment": "The enclosing scopes the answer read, innermost first, each with the values of it the answer turns on: a move of one can change it.",
+          "typeRef": {
+            "name": "AccountBudgetCheckReserveResultScopes",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "until",
+          "comment": "When it does not fit: the start of the next UTC day, when the daily meters starting again make it fit with nothing else changing; null when only a change can make it fit, and when it fits.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetCheckReserveResultScopes": {
+      "name": "AccountBudgetCheckReserveResultScopes",
+      "owner": "fixture-agents-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "hears",
+          "comment": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope as a read returns it (/behaviors/Budget/meters/\u003cmeter\u003e/remaining, /behaviors/Links/targets/\u003clink\u003e), and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
+          "typeRef": {
+            "name": "AccountBudgetCheckReserveResultScopesHears",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetCheckReserveResultScopesHears": {
+      "name": "AccountBudgetCheckReserveResultScopesHears",
+      "owner": "fixture-agents-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "crosses",
+          "typeRef": {
+            "name": "number"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "path",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetObserveInput": {
+      "name": "AccountBudgetObserveInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget observe.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "limit",
+          "comment": "The limit the provider holds the row to, while the observation holds; the meter's own when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "resetsAt",
+          "comment": "When the provider's count starts again, in epoch milliseconds: the observation lapses then.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "used",
+          "comment": "What the provider counts as used.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetObserveResult": {
+      "name": "AccountBudgetObserveResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget observe returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "limit",
+          "comment": "The meter's limit while the observation holds; null when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "resetsAt",
+          "comment": "When the observation lapses, in epoch milliseconds: resetsAt, else the meter's next reset; null when it holds until the next observe.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "used",
+          "comment": "The meter's usage after this call: the figure given.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetRecordUsageForInput": {
+      "name": "AccountBudgetRecordUsageForInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget recordUsageFor.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "amount",
+          "comment": "How much it used.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "comment": "Its id.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "released",
+          "comment": "How much of its reservation the usage drew down.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "comment": "The schema of the instance inside this scope.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetRecordUsageForResult": {
+      "name": "AccountBudgetRecordUsageForResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget recordUsageFor returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "overruns",
+          "comment": "This instance and every scope up from it whose usage of the meter is over its limit after the usage, innermost first.",
+          "typeRef": {
+            "name": "AccountBudgetRecordUsageForResultOverruns",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "released",
+          "comment": "What this instance released.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetRecordUsageForResultOverruns": {
+      "name": "AccountBudgetRecordUsageForResultOverruns",
+      "owner": "fixture-agents-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "escalated",
+          "comment": "Whether its escalate moved its status in this call.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "used",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetRecordUsageInput": {
+      "name": "AccountBudgetRecordUsageInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget recordUsage.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "amount",
+          "comment": "How much was used.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetRecordUsageResult": {
+      "name": "AccountBudgetRecordUsageResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget recordUsage returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "directed",
+          "comment": "Whether this call sent onExceeded's directive.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "overruns",
+          "comment": "Every instance of the chain whose usage of the meter is over its limit after this call, this one first, then outward.",
+          "typeRef": {
+            "name": "AccountBudgetRecordUsageResultOverruns",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "released",
+          "comment": "The part of the instance's own reservation the usage drew down.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "used",
+          "comment": "The instance's usage of the meter after this call.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetRecordUsageResultOverruns": {
+      "name": "AccountBudgetRecordUsageResultOverruns",
+      "owner": "fixture-agents-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "escalated",
+          "comment": "Whether its escalate moved its status in this call.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "limit",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "used",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetReserveForInput": {
+      "name": "AccountBudgetReserveForInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget reserveFor.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "amount",
+          "comment": "How much to hold.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "comment": "Its id.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "comment": "The schema of the instance inside this scope.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetReserveForResult": {
+      "name": "AccountBudgetReserveForResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget reserveFor returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "held",
+          "comment": "What this instance now holds of the meter for that one.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetReserveInput": {
+      "name": "AccountBudgetReserveInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget reserve.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "amount",
+          "comment": "How much to reserve of the meter; its configured reservation when absent. Needs meter.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter; every meter with a configured reservation when absent.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetReserveResult": {
+      "name": "AccountBudgetReserveResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget reserve returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "reserved",
+          "comment": "What this call reserved, by meter.",
+          "typeRef": {
+            "name": "Generic.Int64",
+            "isMap": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetSetLimitInput": {
+      "name": "AccountBudgetSetLimitInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget setLimit.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "limit",
+          "comment": "The new limit.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetSetLimitResult": {
+      "name": "AccountBudgetSetLimitResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget setLimit returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "limit",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "previous",
+          "comment": "The limit before; null when there was none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetSettleForInput": {
+      "name": "AccountBudgetSettleForInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget settleFor.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "amount",
+          "comment": "How much to release.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "comment": "Its id.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "meter",
+          "comment": "The meter.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "schema",
+          "comment": "The schema of the instance inside this scope.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetSettleForResult": {
+      "name": "AccountBudgetSettleForResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget settleFor returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "released",
+          "comment": "What this instance released.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetSettleInput": {
+      "name": "AccountBudgetSettleInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's budget settle.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "meter",
+          "comment": "The meter; every meter when absent.",
+          "typeRef": {
+            "name": "AccountBudgetMeter"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountBudgetSettleResult": {
+      "name": "AccountBudgetSettleResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's budget settle returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "released",
+          "comment": "What this call released, by meter.",
+          "typeRef": {
+            "name": "Generic.Int64",
+            "isMap": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountStatusTransitionInput": {
+      "name": "AccountStatusTransitionInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Account's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "AccountStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "AccountStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountStatusTransitionResult": {
+      "name": "AccountStatusTransitionResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Account's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "AccountStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "AccountStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseAcknowledgeInput": {
+      "name": "JobLeaseAcknowledgeInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease acknowledge.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "ids",
+          "comment": "The directives' numbers.",
+          "typeRef": {
+            "name": "Generic.Int64",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseAcquireInput": {
+      "name": "JobLeaseAcquireInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease acquire.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "ttlMs",
+          "comment": "How long the lease lasts after its acquire and each heartbeat, in milliseconds, at most the config's ttlMs; the config's when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1000,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseAcquireResult": {
+      "name": "JobLeaseAcquireResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's lease acquire returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "expiresAt",
+          "comment": "When the lease expires unless renewed, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "heartbeatMs",
+          "comment": "How often to send a heartbeat, in milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "token",
+          "comment": "The lease's fencing token, which the holder's writes present as Lease's precondition.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseDirectInput": {
+      "name": "JobLeaseDirectInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease direct.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "data",
+          "comment": "Its data.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "dedupeKey",
+          "comment": "Sends the directive once per lease: when one was sent under the current token with this key, acknowledged or not, that one stands and nothing is sent.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "validateMaxLength": 128,
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "What the directive asks.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validatePattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseDirectResult": {
+      "name": "JobLeaseDirectResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's lease direct returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "created",
+          "comment": "Whether this call sent it; false when one with dedupeKey was already sent.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "comment": "The directive's number in its lease: the one sent, or the one already sent with dedupeKey.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseExpireInput": {
+      "name": "JobLeaseExpireInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease expire.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "holder",
+          "comment": "The principal whose lease to expire now, active or not; it needs overridePermission.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "notRenewedAfter",
+          "comment": "With holder: an active lease its holder acquired or renewed after this time, in epoch milliseconds, is spared, since its own heartbeats show the process holding it is alive. A lapsed one expires all the same.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseExpireResult": {
+      "name": "JobLeaseExpireResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's lease expire returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "expired",
+          "comment": "Whether a lease expired.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "reason",
+          "comment": "Why, when one expired: ttl, its holder stopped renewing it; maxHold, it reached its longest hold; holder, it was active and expired by its holder's name.",
+          "typeRef": {
+            "name": "JobLeaseExpireResultReason"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseHeartbeatInput": {
+      "name": "JobLeaseHeartbeatInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease heartbeat.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "acknowledge",
+          "comment": "Directives of the lease to mark handled first, as acknowledge does, so a heartbeat acknowledges in the same write; empty, none.",
+          "typeRef": {
+            "name": "Generic.Int64",
+            "isArray": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseHeartbeatResult": {
+      "name": "JobLeaseHeartbeatResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's lease heartbeat returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "directives",
+          "comment": "The directives sent under this lease and not acknowledged, oldest first.",
+          "typeRef": {
+            "name": "JobLeaseHeartbeatResultDirectives",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "expiresAt",
+          "comment": "When the lease now expires unless renewed, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseHeartbeatResultDirectives": {
+      "name": "JobLeaseHeartbeatResultDirectives",
+      "owner": "fixture-agents-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "createdBy",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "data",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "dedupeKey",
+          "comment": "The key it was sent with, when it was.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "id",
+          "comment": "The directive's number in its lease.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeasePrecondition": {
+      "name": "JobLeasePrecondition",
+      "owner": "fixture-agents-api",
+      "comment": "What a caller presents Job's Lease, as its precondition: its guard holds the call to it before the row is read (D16, D104).",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "token",
+          "comment": "The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseReleaseInput": {
+      "name": "JobLeaseReleaseInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease release.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "abandon",
+          "comment": "Whether the work is given up as failed, so the release counts as an expiry.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseResetExpiriesInput": {
+      "name": "JobLeaseResetExpiriesInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease resetExpiries.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseResetExpiriesResult": {
+      "name": "JobLeaseResetExpiriesResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's lease resetExpiries returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "expiries",
+          "comment": "The count before the reset.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobPreconditions": {
+      "name": "JobPreconditions",
+      "owner": "fixture-agents-api",
+      "comment": "What the caller asserts of the Job row, by use, which each use's guard holds the call to before the row is read (D16, D104); a call that presents an entry its use refuses, or one for a use that takes none, is refused.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "Lease",
+          "comment": "Lease's precondition; absent, the call presents it none.",
+          "typeRef": {
+            "name": "JobLeasePrecondition"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobRetriesRecordAttemptInput": {
+      "name": "JobRetriesRecordAttemptInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's retries recordAttempt.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "detail",
+          "comment": "Anything about the attempt worth keeping, such as validation errors: recorded in the operation's event and nowhere else.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "failure",
+          "comment": "The failure class; a success when absent.",
+          "typeRef": {
+            "name": "JobRetriesClass"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "predicates",
+          "comment": "Named checks the attempt passed or failed, for keepBest's neverRegress; a predicate absent here counts as failed.",
+          "typeRef": {
+            "name": "boolean",
+            "isMap": true
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "result",
+          "comment": "The attempt's result, written to resultField when it is kept; needs resultField.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "score",
+          "comment": "The attempt's score; higher is better.",
+          "typeRef": {
+            "name": "number"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "signature",
+          "comment": "What identifies the failure, for stuckAfter: the same signature in a row is the same failure.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "validateMaxLength": 512,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobRetriesRecordAttemptResult": {
+      "name": "JobRetriesRecordAttemptResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's retries recordAttempt returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "classAttempts",
+          "comment": "Failures counted so far, by class.",
+          "typeRef": {
+            "name": "Generic.Int64",
+            "isMap": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "exhausted",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "failure",
+          "comment": "The failure class; null for a success.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "hint",
+          "comment": "The failure class's hint; null for a success and a class without one.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "kept",
+          "comment": "Whether the attempt's result was kept.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When the row may run again, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type answers none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "score",
+          "typeRef": {
+            "name": "number"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "stuck",
+          "comment": "Whether a repeated signature exhausted the instance.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "total",
+          "comment": "Failures counted so far.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobStatusTransitionInput": {
+      "name": "JobStatusTransitionInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "preconditions",
+          "comment": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+          "typeRef": {
+            "name": "JobPreconditions"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobStatusTransitionResult": {
+      "name": "JobStatusTransitionResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "JobStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SessionPresenceBeatResult": {
+      "name": "SessionPresenceBeatResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Session's presence beat returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "deadline",
+          "comment": "When the instance is missed unless beaten again, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SessionPresenceMissResult": {
+      "name": "SessionPresenceMissResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Session's presence miss returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "missed",
+          "comment": "Whether this call missed the instance.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "released",
+          "comment": "When it did: the instances whose lease it expired, by releaseLeases schema; empty when another instance that stands for the principal is present.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true,
+            "isMap": true
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SessionStatusTransitionInput": {
+      "name": "SessionStatusTransitionInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Session's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "SessionStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "SessionStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SessionStatusTransitionResult": {
+      "name": "SessionStatusTransitionResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Session's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "SessionStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "SessionStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "AccountBudgetMeter": {
+      "name": "AccountBudgetMeter",
+      "owner": "fixture-agents-api",
+      "comment": "A meter of Account's Budget.",
+      "values": [
+        {
+          "name": "Questions",
+          "serializedAs": "questions"
+        },
+        {
+          "name": "Tokens",
+          "serializedAs": "tokens"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "AccountStatusState": {
+      "name": "AccountStatusState",
+      "owner": "fixture-agents-api",
+      "comment": "A state of Account's status Workflow.",
+      "values": [
+        {
+          "name": "Open",
+          "serializedAs": "open"
+        },
+        {
+          "name": "Out",
+          "serializedAs": "out"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseExpireResultReason": {
+      "name": "JobLeaseExpireResultReason",
+      "owner": "fixture-agents-api",
+      "comment": "Why, when one expired: ttl, its holder stopped renewing it; maxHold, it reached its longest hold; holder, it was active and expired by its holder's name.",
+      "values": [
+        {
+          "name": "Ttl",
+          "serializedAs": "ttl"
+        },
+        {
+          "name": "MaxHold",
+          "serializedAs": "maxHold"
+        },
+        {
+          "name": "Holder",
+          "serializedAs": "holder"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobRetriesClass": {
+      "name": "JobRetriesClass",
+      "owner": "fixture-agents-api",
+      "comment": "A failure class of Job's Retries.",
+      "values": [
+        {
+          "name": "Build",
+          "serializedAs": "build"
+        },
+        {
+          "name": "Rejected",
+          "serializedAs": "rejected"
+        },
+        {
+          "name": "Timeout",
+          "serializedAs": "timeout"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobStatusState": {
+      "name": "JobStatusState",
+      "owner": "fixture-agents-api",
+      "comment": "A state of Job's status Workflow.",
+      "values": [
+        {
+          "name": "Queued",
+          "serializedAs": "queued"
+        },
+        {
+          "name": "Running",
+          "serializedAs": "running"
+        },
+        {
+          "name": "Waiting",
+          "serializedAs": "waiting"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SessionStatusState": {
+      "name": "SessionStatusState",
+      "owner": "fixture-agents-api",
+      "comment": "A state of Session's status Workflow.",
+      "values": [
+        {
+          "name": "Idle",
+          "serializedAs": "idle"
+        },
+        {
+          "name": "Turn",
+          "serializedAs": "turn"
+        },
+        {
+          "name": "Missing",
+          "serializedAs": "missing"
+        },
+        {
+          "name": "Closed",
+          "serializedAs": "closed"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "AccountActions",
+      "comment": "An account's budget and status operations (D104), for any signed-in caller:\nthe core checks accounts.limits on a limit's change and accounts.observe on\na provider's usage.",
+      "operations": [
+        {
+          "name": "budgetReserve",
+          "comment": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+          "docs": {
+            "title": "Account budget: reserve",
+            "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+            "capability": "account.budget.reserve",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_reserve",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetReserveResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetReserveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "reserve",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/reserve",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetCheckReserve",
+          "comment": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+          "docs": {
+            "title": "Account budget: check reserve",
+            "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+            "capability": "account.budget.check-reserve",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "account_budget_check_reserve",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetCheckReserveResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetCheckReserveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "checkReserve",
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/check-reserve",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetRecordUsage",
+          "comment": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+          "docs": {
+            "title": "Account budget: record usage",
+            "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+            "capability": "account.budget.record-usage",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_record_usage",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetRecordUsageResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetRecordUsageInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "recordUsage",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/record-usage",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetSettle",
+          "comment": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+          "docs": {
+            "title": "Account budget: settle",
+            "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+            "capability": "account.budget.settle",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_settle",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetSettleResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetSettleInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "settle",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/settle",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetSetLimit",
+          "comment": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+          "docs": {
+            "title": "Account budget: set limit",
+            "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+            "capability": "account.budget.set-limit",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_set_limit",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetSetLimitResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetSetLimitInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "setLimit",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/set-limit",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetReserveFor",
+          "comment": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+          "docs": {
+            "title": "Account budget: reserve for",
+            "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+            "capability": "account.budget.reserve-for",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_reserve_for",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetReserveForResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetReserveForInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "reserveFor",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/reserve-for",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetSettleFor",
+          "comment": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+          "docs": {
+            "title": "Account budget: settle for",
+            "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+            "capability": "account.budget.settle-for",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_settle_for",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetSettleForResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetSettleForInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "settleFor",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/settle-for",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetRecordUsageFor",
+          "comment": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+          "docs": {
+            "title": "Account budget: record usage for",
+            "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+            "capability": "account.budget.record-usage-for",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_record_usage_for",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetRecordUsageForResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetRecordUsageForInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "recordUsageFor",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/record-usage-for",
+          "origin": "behavior"
+        },
+        {
+          "name": "budgetObserve",
+          "comment": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+          "docs": {
+            "title": "Account budget: observe",
+            "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+            "capability": "account.budget.observe",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_budget_observe",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountBudgetObserveResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountBudgetObserveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "Budget",
+            "behavior": "Budget",
+            "operation": "observe",
+            "writes": true,
+            "permissions": [
+              "accounts.limits",
+              "accounts.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/budget/observe",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Account status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "account.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "account_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "AccountStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Account row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "AccountStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Account",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "account/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Account"
+      },
+      "auth": true
+    },
+    {
+      "name": "JobActions",
+      "comment": "A job's lease, retries and status operations (D104), for any signed-in\ncaller: the core decides who holds a job, whose writes its token fences\nand when it may run again.",
+      "operations": [
+        {
+          "name": "leaseAcquire",
+          "comment": "Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first.",
+          "docs": {
+            "title": "Job lease: acquire",
+            "description": "Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first.",
+            "capability": "job.lease.acquire",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_acquire",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobLeaseAcquireResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseAcquireInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "acquire",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/acquire",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseHeartbeat",
+          "comment": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
+          "docs": {
+            "title": "Job lease: heartbeat",
+            "description": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
+            "capability": "job.lease.heartbeat",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_heartbeat",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobLeaseHeartbeatResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseHeartbeatInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "heartbeat",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/heartbeat",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseRelease",
+          "comment": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
+          "docs": {
+            "title": "Job lease: release",
+            "description": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
+            "capability": "job.lease.release",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_release",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseReleaseInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "release",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/release",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseExpire",
+          "comment": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
+          "docs": {
+            "title": "Job lease: expire",
+            "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
+            "capability": "job.lease.expire",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_expire",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobLeaseExpireResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseExpireInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "expire",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/expire",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseDirect",
+          "comment": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+          "docs": {
+            "title": "Job lease: direct",
+            "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+            "capability": "job.lease.direct",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_direct",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobLeaseDirectResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseDirectInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "direct",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/direct",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseAcknowledge",
+          "comment": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
+          "docs": {
+            "title": "Job lease: acknowledge",
+            "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
+            "capability": "job.lease.acknowledge",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_acknowledge",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseAcknowledgeInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "acknowledge",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/acknowledge",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseResetExpiries",
+          "comment": "Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none.",
+          "docs": {
+            "title": "Job lease: reset expiries",
+            "description": "Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none.",
+            "capability": "job.lease.reset-expiries",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_reset_expiries",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobLeaseResetExpiriesResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseResetExpiriesInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "resetExpiries",
+            "writes": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/lease/reset-expiries",
+          "origin": "behavior"
+        },
+        {
+          "name": "retriesRecordAttempt",
+          "comment": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+          "docs": {
+            "title": "Job retries: record attempt",
+            "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+            "capability": "job.retries.record-attempt",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_retries_record_attempt",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobRetriesRecordAttemptResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobRetriesRecordAttemptInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Retries",
+            "behavior": "Retries",
+            "operation": "recordAttempt",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/retries/record-attempt",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Job status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "job.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Job row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "job/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Job"
+      },
+      "auth": true
+    },
+    {
+      "name": "SessionActions",
+      "comment": "A session's presence and status operations (D104), for any signed-in\ncaller: the core decides who may beat a session, its device's principal.",
+      "operations": [
+        {
+          "name": "presenceBeat",
+          "comment": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+          "docs": {
+            "title": "Session presence: beat",
+            "description": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+            "capability": "session.presence.beat",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "session_presence_beat",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "SessionPresenceBeatResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Session row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Session",
+            "key": "id",
+            "use": "Presence",
+            "behavior": "Presence",
+            "operation": "beat",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "session/{id}/presence/beat",
+          "origin": "behavior"
+        },
+        {
+          "name": "presenceMiss",
+          "comment": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+          "docs": {
+            "title": "Session presence: miss",
+            "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+            "capability": "session.presence.miss",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "session_presence_miss",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "SessionPresenceMissResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Session row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Session",
+            "key": "id",
+            "use": "Presence",
+            "behavior": "Presence",
+            "operation": "miss",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "session/{id}/presence/miss",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Session status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "session.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "session_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "SessionStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Session row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "SessionStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Session",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "session/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Session"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "JobDeadlines",
+      "comment": "Runs Job's deadlines as they fall due (D103, D104): a lease's expiry and\nthe end of a backoff. The worker fixture-agents-api-job-deadlines.",
+      "queue": "JobDeadline",
+      "queues": [
+        "JobDeadline"
+      ],
+      "behaviorWorker": {
+        "type": "Job"
+      },
+      "origin": "behavior"
+    },
+    {
+      "name": "SessionPresence",
+      "comment": "Runs each session's miss as it falls due (D104): the worker\nfixture-agents-api-session-presence. A miss expires the leases the device\nholds on jobs through Lease's expire, which needs Job's Lease\noverridePermission, so the worker holds it.",
+      "queue": "SessionDeadline",
+      "queues": [
+        "SessionDeadline"
+      ],
+      "behaviorWorker": {
+        "type": "Session",
+        "permissions": [
+          "jobs.override"
+        ]
+      },
+      "origin": "behavior"
+    }
+  ]
+}

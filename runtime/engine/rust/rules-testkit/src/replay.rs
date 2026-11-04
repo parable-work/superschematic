@@ -25,7 +25,9 @@
 //!   kept the creator beside the instance, and which no comparison with the
 //!   recording reads; a hand-written file declares it where it wants one.
 //! - `instances.create`, `update`, `delete` and `invoke` run the core's
-//!   commands; `get`, `list` and `events.read` read the host. A write's
+//!   commands, an update's, a delete's and an invoke's `preconditions`
+//!   option the command's preconditions (D16, D104); `get`, `list` and
+//!   `events.read` read the host. A write's
 //!   own date-time fields are stored in their canonical form, as the
 //!   engine's parse of the scalar stores them. A record is compared by its
 //!   id, its own fields (`data`) and its `behaviors`, the fields each
@@ -57,6 +59,17 @@
 //!   holds a list of targets or pins one stops the scenario, and Links' own
 //!   validation, a refusal that names Links, and a define refused of a type
 //!   that lists Links (its paths count Links among the uses) are skipped.
+//! - A config member only the engine's runner read ([`RUNNER_MEMBERS`]:
+//!   Lease's sweepMs) is left out of a recording's configs, since a table's
+//!   deadlines replace the sweep and its behavior refuses the member; a
+//!   behavior a recording composes only incidentally ([`INCIDENTAL`]) is
+//!   left out of its types and of what its steps expect, and a step that
+//!   calls one of its operations, or whose refusal names it, is skipped. A
+//!   row that predates a use a publish added is compared without the use's
+//!   owned fields the core holds no value of, where the engine's readers
+//!   gave their defaults. A define the engine refused because it was opened
+//!   without the package that implements a behavior the core runs is not
+//!   compared.
 //! - `schemas.list`, `schemas.live` and `schemas.behaviors` are compared
 //!   by the types defined, the live version's behavior configs, and each
 //!   behavior's declared fields, operations and veto codes.
@@ -109,6 +122,11 @@ use crate::shape::{self, FieldDef};
 use crate::symbols::Symbols;
 use crate::transcript::{Recorded, TranscriptClock};
 
+/// The option of an update, a delete and an invoke that carries the
+/// caller's preconditions (D16), which the replay maps onto the command
+/// (D104).
+const PRECONDITIONS: &str = "preconditions";
+
 /// Where the wall clock of a replay starts: an instant of the recording's
 /// span (thirteen digits), far from any fixed clock's.
 const WALL_START: i64 = 1_767_225_600_000;
@@ -121,8 +139,49 @@ pub type SweepParams = fn(&str) -> Value;
 /// due, by its behavior, and the parameters it calls it with from the
 /// deadline's name: the engine's sweep invoked it, so its log holds the
 /// deadline's change as that operation's event.
-pub const SWEEP_OPERATIONS: [(&str, &str, SweepParams); 1] =
-    [("Timers", "fireTimer", |name| json!({ "deadline": name }))];
+pub const SWEEP_OPERATIONS: [(&str, &str, SweepParams); 3] = [
+    ("Timers", "fireTimer", |name| json!({ "deadline": name })),
+    ("Lease", "expire", |_| json!({})),
+    ("Presence", "miss", |_| json!({})),
+];
+
+/// The config members of a behavior only the engine's runner read, by
+/// behavior: how often it swept. A table's behavior refuses each, since its
+/// deadlines replace the runner's sweep (D103, D104), so in the engine's
+/// recordings alone the replay leaves each out of a recorded config before
+/// it defines the type, and out of every recorded config it compares.
+pub const RUNNER_MEMBERS: [(&str, &str); 2] = [("Lease", "sweepMs"), ("Presence", "sweepMs")];
+
+/// The behaviors a recording composes only incidentally, by file, each
+/// with why: the replay leaves the behavior's use out of each type it
+/// defines, its members out of every record and event it compares (an
+/// event of its operation left out whole), and skips each step that calls
+/// one of its operations or whose recorded refusal names it.
+pub const INCIDENTAL: [(&str, &str, &str); 2] = [
+    ("workqueue-lease", "Comments", COMMENTS_INCIDENTAL),
+    ("workqueue-budget", "Comments", BUDGET_COMMENTS_INCIDENTAL),
+];
+
+const COMMENTS_INCIDENTAL: &str = "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation";
+
+const BUDGET_COMMENTS_INCIDENTAL: &str = "Comments, which the core does not run (D103, step 4), is composed beside Budget only as another behavior of the scope type: its use and its members are not compared";
+
+/// Why an events.read that holds a write one row's operation or deadline
+/// made of another row is not compared.
+const EVENTS_OF_CALLS: &str = "a read of the engine's event log that holds a write one row's operation or deadline made of another row through that row's operation, which the engine logged as the operation's own event and a table's change set logs under the command that wrote it (D103)";
+
+/// Why a scenario stops at a setLimit of a meter whose limit an own field
+/// holds.
+const LIMIT_FIELD_SET_LIMIT: &str = "setLimit of a meter with limitField writes the field through the engine's update(), and the core writes no own field from an operation (D103): on a table the limit is the field's, set by an update (D104)";
+
+/// Why a scenario stops at a define the engine refused for another
+/// schema's state.
+const OTHER_SCHEMA_DEFINE: &str = "a define check that reads another schema, which the core's define check cannot make: the build holds a table's releaseLeases to its database (D104)";
+
+/// Why a define the engine refused for the behavior's package it was
+/// opened without is not compared.
+const NO_IMPLEMENTATION: &str =
+    "the engine opened without the package that implements the behavior, which the core runs (D104)";
 
 /// Whether a config change, from the published config to the new one,
 /// either absent, is one a behavior's engine afterConfigChange rewrote
@@ -421,10 +480,16 @@ fn skip_reason(file: &str, scenario: &Value, runs: &[String]) -> Option<String> 
             listed(&unported)
         ));
     }
-    // Links is mapped onto relations, which no behavior runs.
+    // Links is mapped onto relations, which no behavior runs, and an
+    // incidental behavior of the file is left out (INCIDENTAL).
     let missing: Vec<String> = names(scenario, "behaviors")
         .into_iter()
-        .filter(|name| !tests.contains(name) && !runs.contains(name) && name != shape::LINKS)
+        .filter(|name| {
+            !tests.contains(name)
+                && !runs.contains(name)
+                && name != shape::LINKS
+                && incidental(file, name).is_none()
+        })
         .collect();
     if !missing.is_empty() {
         return Some(format!(
@@ -441,6 +506,123 @@ fn listed(names: &[&String]) -> String {
         .map(|name| name.as_str())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+// incidental is why a file composes a behavior only incidentally
+// (INCIDENTAL), or None.
+fn incidental(file: &str, behavior: &str) -> Option<&'static str> {
+    INCIDENTAL
+        .iter()
+        .find(|(known, name, _)| *known == file && *name == behavior)
+        .map(|(_, _, reason)| *reason)
+}
+
+// incidental_operations is the operations of a file's incidental behaviors,
+// each with its behavior's reason, from the engine's declarations, which
+// the core does not register.
+fn incidental_operations(file: &str) -> Vec<(String, &'static str)> {
+    INCIDENTAL
+        .iter()
+        .filter(|(known, _, _)| *known == file)
+        .flat_map(|(_, behavior, reason)| {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../behaviors/declarations")
+                .join(format!("{behavior}.behavior.json"));
+            let file: Value = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or(Value::Null);
+            file.get("operations")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|operation| operation.get("name").and_then(Value::as_str))
+                .map(|name| (name.to_owned(), *reason))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+// without_runner_members leaves the members only the engine's runner read
+// (RUNNER_MEMBERS) out of each use's config of a type.
+fn without_runner_members(spec: &mut TypeSpec) {
+    for entry in &mut spec.uses {
+        let Some(Value::Object(config)) = &mut entry.config else {
+            continue;
+        };
+        for (behavior, member) in RUNNER_MEMBERS {
+            if entry.behavior == behavior {
+                config.remove(member);
+            }
+        }
+    }
+}
+
+// without_incidental is a step with a file's incidental behaviors left out
+// of what it expects (INCIDENTAL): a record's or a listed item's owned
+// fields, an event of an incidental behavior's operation whole and the
+// fields it set in any other, and an entry of a type's behaviors.
+fn without_incidental(file: &str, step: &Value) -> Value {
+    let behaviors: Vec<&str> = INCIDENTAL
+        .iter()
+        .filter(|(known, _, _)| *known == file)
+        .map(|(_, behavior, _)| *behavior)
+        .collect();
+    let mut step = step.clone();
+    if behaviors.is_empty() {
+        return step;
+    }
+    let Some(expect) = step.get_mut("expect") else {
+        return step;
+    };
+    let strip = |holder: &mut Value| {
+        if let Some(owned) = holder.get_mut("behaviors").and_then(Value::as_object_mut) {
+            for behavior in &behaviors {
+                owned.remove(*behavior);
+            }
+        }
+    };
+    strip(expect);
+    for item in expect
+        .get_mut("items")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        strip(item);
+    }
+    if let Some(events) = expect.get_mut("events").and_then(Value::as_array_mut) {
+        events.retain(|event| {
+            !event["change"]
+                .get("behavior")
+                .and_then(Value::as_str)
+                .is_some_and(|behavior| behaviors.contains(&behavior))
+        });
+        for event in events {
+            if let Some(change) = event.get_mut("change") {
+                strip(change);
+                if let Some(patch) = change.get_mut("patch") {
+                    strip(patch);
+                }
+            }
+        }
+    }
+    if let Some(listed) = expect.as_array_mut() {
+        listed.retain(|entry| {
+            !entry
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| behaviors.contains(&name))
+        });
+    }
+    step
+}
+
+// without_incidental_uses leaves a file's incidental behaviors' uses out
+// of a type (INCIDENTAL).
+fn without_incidental_uses(file: &str, spec: &mut TypeSpec) {
+    spec.uses
+        .retain(|entry| incidental(file, &entry.behavior).is_none());
 }
 
 // is_read_only says whether a call the replayer does not map changes
@@ -495,6 +677,12 @@ struct Engine {
     creators: BTreeSet<String>,
     /// The principal its runner runs the due deadlines as.
     runner: Caller,
+    /// The uses each row predates, by its type and key: those a publish
+    /// added to its type while it had rows. Such a row holds none of the
+    /// use's columns, where the engine's readers gave their defaults, which
+    /// the core reads alike (D103), so its record is compared without the
+    /// use's owned fields the core holds no value of.
+    predates: BTreeMap<(String, String), Vec<String>>,
 }
 
 // What a step expects.
@@ -582,6 +770,9 @@ struct Run<'r> {
     /// replay gives the creator field the engine kept ([`CREATOR_READERS`]);
     /// a hand-written file declares it where it wants one.
     recording: bool,
+    /// The operations of the file's incidental behaviors, each with why
+    /// its steps are not compared ([`INCIDENTAL`]).
+    incidental_ops: Vec<(String, &'static str)>,
 }
 
 impl<'r> Run<'r> {
@@ -602,6 +793,7 @@ impl<'r> Run<'r> {
             current: (0, String::new()),
             recorded: None,
             recording: false,
+            incidental_ops: incidental_operations(file),
             report: ScenarioReport {
                 name: scenario
                     .get("name")
@@ -669,6 +861,19 @@ impl<'r> Run<'r> {
         if call == "open" {
             return self.open(step);
         }
+        // A file's incidental behaviors are left out of what a step
+        // expects, and a step that calls one of their operations, or whose
+        // refusal names one, is not compared.
+        let adjusted;
+        let step = if INCIDENTAL.iter().any(|(file, _, _)| *file == self.file) {
+            if let Some(reason) = self.incidental_step(step) {
+                return Done::Skipped(reason.to_owned());
+            }
+            adjusted = without_incidental(self.file, step);
+            &adjusted
+        } else {
+            step
+        };
         let at = match step.get("engine").and_then(Value::as_str) {
             Some(name) => self.engines.iter().position(|engine| engine.name == name),
             None => self.engines.len().checked_sub(1),
@@ -748,6 +953,7 @@ impl<'r> Run<'r> {
             "events.read" => self.events(&cx),
             "runner.runDue" => self.run_due(&cx),
             "storage.run" => self.raw_write(&cx),
+            "instances.invokeSchema" => self.invoke_schema(&cx),
             "storage.exec" | "storage.transaction" => Done::Halted(format!(
                 "it writes with SQL of its own ({call}), which the reference host has no notion of, and the steps after it read what it wrote"
             )),
@@ -758,6 +964,36 @@ impl<'r> Run<'r> {
                 "{call} is outside the reference host's surface, and the steps after it may read what it changed"
             )),
         }
+    }
+
+    // incidental_step says why a step of an incidental behavior's
+    // (INCIDENTAL) is not compared: it invokes one of its operations, or
+    // its recorded refusal names it.
+    fn incidental_step(&self, step: &Value) -> Option<&'static str> {
+        let message = step
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let named = INCIDENTAL
+            .iter()
+            .filter(|(file, _, _)| *file == self.file)
+            .find(|(_, behavior, _)| message.contains(behavior))
+            .map(|(_, _, reason)| *reason);
+        if named.is_some() {
+            return named;
+        }
+        if call_of(step) != "instances.invoke" {
+            return None;
+        }
+        let operation = step
+            .get("args")
+            .and_then(|args| args.get(2))
+            .and_then(Value::as_str)?;
+        self.incidental_ops
+            .iter()
+            .find(|(name, _)| name == operation)
+            .map(|(_, reason)| *reason)
     }
 
     // ---- open, callers and clocks ----
@@ -810,7 +1046,11 @@ impl<'r> Run<'r> {
             }
         }
         // A test behavior the engine registers is the file's fixture, whether
-        // or not the scenario composes it.
+        // or not the scenario composes it. A behavior of an extension's
+        // package the engine registers (a name with no dot: the work queue's)
+        // that the core does not run leaves the engine on: a scenario that
+        // composes it is skipped for it, and one that does not reads none
+        // of it.
         for behavior in options
             .get("behaviors")
             .and_then(Value::as_array)
@@ -819,7 +1059,8 @@ impl<'r> Run<'r> {
             .filter_map(Value::as_str)
         {
             let known = fixtures::register(self.file, behavior, &mut core)
-                || core.declaration(behavior).is_some();
+                || core.declaration(behavior).is_some()
+                || !behavior.contains('.');
             if !known {
                 off.get_or_insert_with(|| {
                     format!("it registers {behavior}, which the core does not run")
@@ -880,6 +1121,7 @@ impl<'r> Run<'r> {
             fields: BTreeMap::new(),
             creators: BTreeSet::new(),
             runner,
+            predates: BTreeMap::new(),
         });
         Done::Checked(Vec::new())
     }
@@ -1029,6 +1271,10 @@ impl<'r> Run<'r> {
                 ))
             }
         };
+        if self.recording {
+            without_runner_members(&mut defined.spec);
+        }
+        without_incidental_uses(self.file, &mut defined.spec);
         if self.recording && with_creator(&mut defined) {
             self.engines[cx.at]
                 .creators
@@ -1046,12 +1292,21 @@ impl<'r> Run<'r> {
             if defined.links || names_links(error) {
                 return Done::Skipped(LINKS_REFUSAL.to_owned());
             }
-            if error
+            let message = error
                 .get("message")
                 .and_then(Value::as_str)
-                .is_some_and(|message| message.contains(" requires behavior "))
-            {
+                .unwrap_or_default();
+            if message.contains(" requires behavior ") {
                 return Done::Skipped(REQUIRES_REFUSAL.to_owned());
+            }
+            if message.contains("no implementation registered") {
+                return Done::Skipped(NO_IMPLEMENTATION.to_owned());
+            }
+            if self.recording
+                && (message.contains("releaseLeases: schema ")
+                    || message.contains("does not compose Lease, so it holds no lease to expire"))
+            {
+                return Done::Halted(OTHER_SCHEMA_DEFINE.to_owned());
             }
         }
         let type_name = defined.spec.name.clone();
@@ -1119,8 +1374,25 @@ impl<'r> Run<'r> {
         }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
+        let added = added_uses(engine.host.store(), type_name);
         let pending = engine.host.publish_command(type_name, cx.caller, cx.now);
         let published = engine.host.publish(type_name, cx.caller, cx.now);
+        if let (Ok(Some(_)), false) = (&published, added.is_empty()) {
+            let keys: Vec<String> = engine
+                .host
+                .store()
+                .rows(type_name)
+                .into_iter()
+                .map(|(key, _)| key.to_owned())
+                .collect();
+            for key in keys {
+                engine
+                    .predates
+                    .entry((type_name.to_owned(), key))
+                    .or_default()
+                    .extend(added.iter().cloned());
+            }
+        }
         if let (Some(recorded), Some((spec, check))) = (&mut self.recorded, pending) {
             recorded.check(
                 &self.current,
@@ -1168,6 +1440,7 @@ impl<'r> Run<'r> {
             .live(type_name)
             .map_or(Value::Null, |spec| json!({ "behaviors": uses_of(spec) }));
         let name = type_name.to_owned();
+        let (recording, file) = (self.recording, self.file);
         self.judge(
             cx,
             type_name,
@@ -1182,7 +1455,13 @@ impl<'r> Run<'r> {
                     .get("document")
                     .and_then(|document| shape::read_document(document).ok())
                     .filter(|defined| defined.spec.name == name)
-                    .map_or(Value::Null, |defined| uses_of(&defined.spec));
+                    .map_or(Value::Null, |mut defined| {
+                        if recording {
+                            without_runner_members(&mut defined.spec);
+                        }
+                        without_incidental_uses(file, &mut defined.spec);
+                        uses_of(&defined.spec)
+                    });
                 checks.eq("document.behaviors", &recorded, &actual["behaviors"]);
             },
         )
@@ -1213,6 +1492,7 @@ impl<'r> Run<'r> {
                         .collect(),
                 )
             });
+        let recording = self.recording;
         self.judge(cx, type_name, 0, Ok(actual), |checks, expected, actual| {
             // The engine's Links is the type's relations, no use of it.
             let recorded: Vec<Value> = expected
@@ -1221,9 +1501,21 @@ impl<'r> Run<'r> {
                 .flatten()
                 .filter(|entry| entry.get("name").and_then(Value::as_str) != Some(shape::LINKS))
                 .map(|entry| {
+                    let name = entry
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let mut config = entry.get("config").cloned().unwrap_or_else(|| json!({}));
+                    if let (true, Some(members)) = (recording, config.as_object_mut()) {
+                        for (behavior, member) in RUNNER_MEMBERS {
+                            if behavior == name {
+                                members.remove(member);
+                            }
+                        }
+                    }
                     json!({
                         "name": entry.get("name").cloned().unwrap_or(Value::Null),
-                        "config": entry.get("config").cloned().unwrap_or_else(|| json!({})),
+                        "config": config,
                         "declaration": entry
                             .get("declaration")
                             .map_or(Value::Null, recorded_declaration),
@@ -1292,7 +1584,7 @@ impl<'r> Run<'r> {
             own,
             params,
         };
-        self.write(cx, type_name, action)
+        self.write(cx, type_name, action, Map::new())
     }
 
     // link maps Links' link and unlink onto an update of the relation's own
@@ -1381,7 +1673,7 @@ impl<'r> Run<'r> {
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        if let Some(reason) = unmapped_options(&options, &[]) {
+        if let Some(reason) = unmapped_options(&options, &[PRECONDITIONS]) {
             return Done::Skipped(reason);
         }
         if let Some(done) = self.store_refuses(cx, type_name, patch, false) {
@@ -1391,7 +1683,7 @@ impl<'r> Run<'r> {
             key: key.to_owned(),
             patch: self.stored(cx.at, type_name, patch),
         };
-        self.write(cx, type_name, action)
+        self.write(cx, type_name, action, preconditions_of(&options))
     }
 
     // stored is a write's own fields as the store keeps them: its date-time
@@ -1427,15 +1719,36 @@ impl<'r> Run<'r> {
         })
     }
 
-    // write runs a create or an update and compares the record it leaves.
-    fn write(&mut self, cx: &Cx<'_>, type_name: &str, action: Action) -> Done {
+    // write runs a create or an update, with the caller's preconditions,
+    // and compares the record it leaves.
+    fn write(
+        &mut self,
+        cx: &Cx<'_>,
+        type_name: &str,
+        action: Action,
+        preconditions: Map<String, Value>,
+    ) -> Done {
         let live_version = self.engines[cx.at].host.store().live_version(type_name);
-        let command = Command::new(cx.caller.clone(), cx.now, action);
+        let predated = match &action {
+            Action::Update { key, .. } => self.predated(cx.at, type_name, key),
+            _ => Vec::new(),
+        };
+        let command =
+            Command::new(cx.caller.clone(), cx.now, action).with_preconditions(preconditions);
         let outcome = self.execute(cx.at, type_name, command);
         let engine = &self.engines[cx.at];
-        let outcome = outcome
-            .map(|applied| record_of(&engine.host, &engine.creators, type_name, &applied.key));
-        self.judge(cx, type_name, live_version, outcome, compare_record)
+        let outcome = outcome.map(|applied| {
+            record_of(
+                &engine.host,
+                &engine.creators,
+                type_name,
+                &applied.key,
+                cx.now,
+            )
+        });
+        self.judge(cx, type_name, live_version, outcome, move |checks, e, a| {
+            compare_record(checks, &without_predated(e, a, &predated), a);
+        })
     }
 
     // execute runs a command on an engine's host, and records it with what
@@ -1471,6 +1784,15 @@ impl<'r> Run<'r> {
         ) else {
             return Done::Skipped("a delete without a schema and an id".to_owned());
         };
+        let options = cx
+            .args
+            .get(2)
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(reason) = unmapped_options(&options, &[PRECONDITIONS]) {
+            return Done::Skipped(reason);
+        }
         let live_version = self.engines[cx.at].host.store().live_version(type_name);
         let command = Command::new(
             cx.caller.clone(),
@@ -1478,7 +1800,8 @@ impl<'r> Run<'r> {
             Action::Delete {
                 key: key.to_owned(),
             },
-        );
+        )
+        .with_preconditions(preconditions_of(&options));
         let outcome = match self.execute(cx.at, type_name, command) {
             Ok(_) => Ok(Value::Bool(true)),
             // The engine answers false for a row that is not there.
@@ -1505,7 +1828,7 @@ impl<'r> Run<'r> {
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        if let Some(reason) = unmapped_options(&options, &[]) {
+        if let Some(reason) = unmapped_options(&options, &[PRECONDITIONS]) {
             return Done::Skipped(reason);
         }
         let linked = self.engines[cx.at]
@@ -1515,6 +1838,12 @@ impl<'r> Run<'r> {
             .is_some_and(|spec| spec.fields.iter().any(|field| field.relation.is_some()));
         if linked && matches!(operation, "link" | "unlink" | "listLinked") {
             return self.link(cx, type_name, key, operation, &params);
+        }
+        if self.recording
+            && operation == "setLimit"
+            && sets_limit_field(self.engines[cx.at].host.store(), type_name, &params)
+        {
+            return Done::Halted(LIMIT_FIELD_SET_LIMIT.to_owned());
         }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
@@ -1564,7 +1893,8 @@ impl<'r> Run<'r> {
                         operation: operation.to_owned(),
                         params,
                     },
-                );
+                )
+                .with_preconditions(preconditions_of(&options));
                 self.execute(cx.at, type_name, command)
                     .map(|applied| applied.result().clone())
             }
@@ -1579,6 +1909,38 @@ impl<'r> Run<'r> {
         })
     }
 
+    // invoke_schema maps no operation of a type as a whole: a row's core
+    // runs a row's operations (D104). One a behavior the core runs
+    // declares of its table (Lease's expireHolder) is skipped with that
+    // reason, the scenario stopping there when it wrote rows the steps
+    // after it read; any other is outside the host's surface.
+    fn invoke_schema(&mut self, cx: &Cx<'_>) -> Done {
+        let operation = cx.args.get(1).and_then(Value::as_str).unwrap_or_default();
+        let declared = cx
+            .args
+            .first()
+            .and_then(Value::as_str)
+            .and_then(|type_name| self.engines[cx.at].host.store().live(type_name))
+            .is_some_and(|spec| {
+                spec.uses
+                    .iter()
+                    .any(|entry| declares_row_less(&entry.behavior, operation))
+            });
+        if !declared {
+            return Done::Halted(
+                "instances.invokeSchema is outside the reference host's surface, and the steps after it may read what it changed"
+                    .to_owned(),
+            );
+        }
+        let reason = format!(
+            "{operation} runs on the table as a whole, which waits for a command without a row (D104)"
+        );
+        match cx.expected {
+            Expected::Error(_) => Done::Skipped(reason),
+            _ => Done::Halted(reason),
+        }
+    }
+
     fn get(&mut self, cx: &Cx<'_>) -> Done {
         let (Some(type_name), Some(key)) = (
             cx.args.first().and_then(Value::as_str),
@@ -1587,8 +1949,35 @@ impl<'r> Run<'r> {
             return Done::Skipped("a get without a schema and an id".to_owned());
         };
         let engine = &self.engines[cx.at];
-        let found = record_of(&engine.host, &engine.creators, type_name, key);
-        self.judge(cx, type_name, 0, Ok(found), compare_record)
+        let found = record_of(&engine.host, &engine.creators, type_name, key, cx.now);
+        let predated = self.predated(cx.at, type_name, key);
+        self.judge(cx, type_name, 0, Ok(found), move |checks, e, a| {
+            compare_record(checks, &without_predated(e, a, &predated), a);
+        })
+    }
+
+    // predated is the uses a row predates ([`Engine::predates`]), each with
+    // the owned fields its behavior declares, which no column of the row
+    // holds until a write through the core sets them.
+    fn predated(&self, at: usize, type_name: &str, key: &str) -> Vec<(String, Vec<String>)> {
+        let engine = &self.engines[at];
+        let Some(uses) = engine.predates.get(&(type_name.to_owned(), key.to_owned())) else {
+            return Vec::new();
+        };
+        let spec = engine.host.store().live(type_name);
+        uses.iter()
+            .filter_map(|use_id| {
+                let (_, entry) = spec?.use_of(use_id)?;
+                let declaration = engine.host.core().declaration(&entry.behavior)?;
+                let owned: Vec<String> = declaration
+                    .fields
+                    .iter()
+                    .filter(|field| !declaration.is_computed(field))
+                    .cloned()
+                    .collect();
+                Some((use_id.clone(), owned))
+            })
+            .collect()
     }
 
     fn list(&mut self, cx: &Cx<'_>) -> Done {
@@ -1617,6 +2006,13 @@ impl<'r> Run<'r> {
                 "a filter other than equality, which the reference host does not take".to_owned(),
             );
         }
+        let predated: BTreeMap<String, Vec<(String, Vec<String>)>> = self.engines[cx.at]
+            .host
+            .store()
+            .rows(type_name)
+            .into_iter()
+            .map(|(key, _)| (key.to_owned(), self.predated(cx.at, type_name, key)))
+            .collect();
         let host = &self.engines[cx.at].host;
         let store = host.store();
         let spec = store.live(type_name);
@@ -1646,6 +2042,7 @@ impl<'r> Run<'r> {
                             key,
                             row,
                             &store.sub_tables(type_name, key),
+                            cx.now,
                         ),
                         &self.engines[cx.at].creators,
                         type_name,
@@ -1670,7 +2067,12 @@ impl<'r> Run<'r> {
                     return;
                 }
                 for (recorded, found) in recorded.iter().zip(&found) {
-                    compare_record(checks, recorded, found);
+                    let uses = found["id"]
+                        .as_str()
+                        .and_then(|key| predated.get(key))
+                        .cloned()
+                        .unwrap_or_default();
+                    compare_record(checks, &without_predated(recorded, found, &uses), found);
                 }
             },
         )
@@ -1712,6 +2114,14 @@ impl<'r> Run<'r> {
         });
         if heard {
             return Done::Skipped(HEARD_WRITE.to_owned());
+        }
+        let called = store.log().iter().any(|logged| {
+            schema.is_none_or(|schema| logged.type_name == schema)
+                && instance.is_none_or(|key| logged.key == key)
+                && written_by_a_call(logged)
+        });
+        if called {
+            return Done::Skipped(EVENTS_OF_CALLS.to_owned());
         }
         let events: Vec<Value> = store
             .log()
@@ -1892,6 +2302,74 @@ fn unmapped_options(options: &Map<String, Value>, taken: &[&str]) -> Option<Stri
     })
 }
 
+// written_by_a_call says whether a logged write is of a row another row's
+// operation or deadline reached through an operation of the row (a
+// scope's reserveFor, a Lease's expire from a miss): the command runs on
+// another key.
+fn written_by_a_call(logged: &Logged) -> bool {
+    matches!(
+        logged.command.action,
+        Action::Operation { .. } | Action::Deadline { .. }
+    ) && logged.command.action.key() != Some(logged.key.as_str())
+}
+
+// sets_limit_field says whether a setLimit names a meter whose live
+// Budget config keeps its limit in an own field (limitField), which the
+// engine's setLimit wrote through update().
+fn sets_limit_field(store: &Store, type_name: &str, params: &Value) -> bool {
+    let meter = params
+        .get("meter")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    store.live(type_name).is_some_and(|spec| {
+        spec.uses.iter().any(|entry| {
+            entry.behavior == "Budget"
+                && entry
+                    .config
+                    .as_ref()
+                    .and_then(|config| config.get("meters"))
+                    .and_then(|meters| meters.get(meter))
+                    .and_then(|spec| spec.get("limitField"))
+                    .is_some()
+        })
+    })
+}
+
+// declares_row_less says whether a behavior the core runs declares an
+// operation of its table or namespace as a whole by a name, which its
+// declaration file holds and the core's declaration leaves out (D104).
+fn declares_row_less(behavior: &str, operation: &str) -> bool {
+    superschematic_rules_behaviors::DECLARATIONS
+        .iter()
+        .any(|text| {
+            let file: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+            file.get("name").and_then(Value::as_str) == Some(behavior)
+                && file
+                    .get("operations")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|declared| {
+                        declared.get("name").and_then(Value::as_str) == Some(operation)
+                            && matches!(
+                                declared.get("scope").and_then(Value::as_str),
+                                Some("schema" | "namespace")
+                            )
+                    })
+        })
+}
+
+// preconditions_of is the caller's preconditions an update's, a delete's
+// or an invoke's options give (D16), each use's entry by its name, which is
+// an implements use's id, as the core's command carries them (D104).
+fn preconditions_of(options: &Map<String, Value>) -> Map<String, Value> {
+    options
+        .get(PRECONDITIONS)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
 // names_links says whether a recorded refusal names the engine's Links.
 fn names_links(error: &Value) -> bool {
     serde_json::to_string(error).is_ok_and(|text| text.contains(shape::LINKS))
@@ -1960,6 +2438,8 @@ fn compare_error(
     type_name: &str,
     live_version: usize,
 ) {
+    let canonical = canonical_changes(expected);
+    let expected = &canonical;
     let actual = shape::engine_error(refusal, type_name, live_version);
     let member = |error: &Value, key: &str| error.get(key).cloned().unwrap_or(Value::Null);
     checks.eq(
@@ -1989,6 +2469,83 @@ fn compare_error(
         &member(expected, "message"),
         &member(&actual, "message"),
     );
+}
+
+// canonical_changes is a recorded incompatible change with each config its
+// messages print as the core prints them, members sorted: the engine
+// printed the new config in the order its document gave it, and the core
+// prints a config the same however its host ordered it.
+fn canonical_changes(error: &Value) -> Value {
+    let mut error = error.clone();
+    if error.get("class").and_then(Value::as_str) != Some("IncompatibleChangeError") {
+        return error;
+    }
+    if let Some(Value::String(message)) = error.get_mut("message") {
+        *message = canonical_configs(message);
+    }
+    if let Some(changes) = error
+        .get_mut("details")
+        .and_then(|details| details.get_mut("changes"))
+        .and_then(Value::as_array_mut)
+    {
+        for change in changes {
+            if let Some(Value::String(message)) = change.get_mut("message") {
+                *message = canonical_configs(message);
+            }
+        }
+    }
+    error
+}
+
+// canonical_configs rewrites each `config from {..} to {..}` of a message
+// with both configs' members sorted.
+fn canonical_configs(message: &str) -> String {
+    const FROM: &str = " cannot change its config from ";
+    let mut out = String::new();
+    let mut rest = message;
+    while let Some(at) = rest.find(FROM) {
+        out.push_str(&rest[..at + FROM.len()]);
+        rest = &rest[at + FROM.len()..];
+        for (index, joint) in [" to ", ""].iter().enumerate() {
+            let mut values = serde_json::Deserializer::from_str(rest).into_iter::<Value>();
+            match values.next() {
+                Some(Ok(value)) => {
+                    let end = values.byte_offset();
+                    out.push_str(&sorted(&value).to_string());
+                    rest = &rest[end..];
+                }
+                _ => return format!("{out}{rest}"),
+            }
+            if index == 0 {
+                match rest.strip_prefix(joint) {
+                    Some(after) => {
+                        out.push_str(joint);
+                        rest = after;
+                    }
+                    None => return format!("{out}{rest}"),
+                }
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+// sorted is a value with every object's members sorted by name.
+fn sorted(value: &Value) -> Value {
+    match value {
+        Value::Object(members) => {
+            let mut keys: Vec<&String> = members.keys().collect();
+            keys.sort();
+            Value::Object(
+                keys.into_iter()
+                    .map(|key| (key.clone(), sorted(&members[key])))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
 }
 
 // compare_record compares a record by its id, its own fields where the
@@ -2066,9 +2623,15 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
     }
 }
 
-// record_of is a row as the engine's record, the creator the replay gave
-// its type left out, or null.
-fn record_of(host: &MemoryHost, creators: &BTreeSet<String>, type_name: &str, key: &str) -> Value {
+// record_of is a row as the engine's record at a time, the creator the
+// replay gave its type left out, or null.
+fn record_of(
+    host: &MemoryHost,
+    creators: &BTreeSet<String>,
+    type_name: &str,
+    key: &str,
+    now: i64,
+) -> Value {
     let store = host.store();
     match (store.live(type_name), store.row(type_name, key)) {
         (Some(spec), Some(row)) => without_creator(
@@ -2078,12 +2641,61 @@ fn record_of(host: &MemoryHost, creators: &BTreeSet<String>, type_name: &str, ke
                 key,
                 row,
                 &store.sub_tables(type_name, key),
+                now,
             ),
             creators,
             type_name,
         ),
         _ => Value::Null,
     }
+}
+
+// added_uses is the uses a type's draft adds to its live version, by id,
+// when the type has rows: each row then predates them.
+fn added_uses(store: &Store, type_name: &str) -> Vec<String> {
+    let Some(draft) = store.draft(type_name) else {
+        return Vec::new();
+    };
+    if !store.has_rows(type_name) {
+        return Vec::new();
+    }
+    let live = store.live(type_name);
+    draft
+        .uses
+        .iter()
+        .filter(|entry| {
+            !live.is_some_and(|live| {
+                live.uses
+                    .iter()
+                    .any(|known| known.id() == entry.id() && known.behavior == entry.behavior)
+            })
+        })
+        .map(|entry| entry.id().to_owned())
+        .collect()
+}
+
+// without_predated is a recorded record with the owned fields of each use
+// its row predates left out where the core's record holds no value of
+// them: a row that predates its use holds none of its columns, where the
+// engine's readers gave their defaults, which the core reads alike (D103).
+fn without_predated(expected: &Value, actual: &Value, uses: &[(String, Vec<String>)]) -> Value {
+    let mut expected = expected.clone();
+    for (use_id, fields) in uses {
+        let held = actual["behaviors"].get(use_id.as_str());
+        let Some(recorded) = expected
+            .get_mut("behaviors")
+            .and_then(|behaviors| behaviors.get_mut(use_id.as_str()))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        for field in fields {
+            if held.and_then(|held| held.get(field)).is_none() {
+                recorded.remove(field);
+            }
+        }
+    }
+    expected
 }
 
 // with_creator gives a document's type an own field createdBy, a string,
@@ -2161,16 +2773,25 @@ fn sweep_event(spec: Option<&TypeSpec>, logged: &Logged, event: Value) -> Value 
 }
 
 // computed_fields lists, by use id, the fields each use of a type computes
-// on a read: the members its read_fields gives for a row with nothing in
-// it.
+// on a read: those its declaration computes, and the members its
+// read_fields gives for a row with nothing in it.
 fn computed_fields(core: &Core, spec: &TypeSpec) -> BTreeMap<String, Vec<String>> {
     spec.uses
         .iter()
         .filter_map(|entry| {
-            let fields = core
+            let mut fields: Vec<String> = core
+                .declaration(&entry.behavior)
+                .map(|declaration| declaration.computed.clone())
+                .unwrap_or_default();
+            let read = core
                 .read_fields(spec, entry.id(), &Row::default(), &BTreeMap::new())
                 .ok()?;
-            (!fields.is_empty()).then(|| (entry.id().to_owned(), fields.keys().cloned().collect()))
+            for field in read.keys() {
+                if !fields.contains(field) {
+                    fields.push(field.clone());
+                }
+            }
+            (!fields.is_empty()).then(|| (entry.id().to_owned(), fields))
         })
         .collect()
 }
@@ -2365,11 +2986,19 @@ fn recorded_declaration(declaration: &Value) -> Value {
         names.sort();
         names
     };
+    // An operation of a table or a namespace as a whole, which a row's core
+    // does not run (D104), is left out.
     let mut operations: Vec<(String, bool)> = declaration
         .get("operations")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .filter(|operation| {
+            !matches!(
+                operation.get("scope").and_then(Value::as_str),
+                Some("schema" | "namespace")
+            )
+        })
         .filter_map(|operation| {
             Some((
                 operation.get("name")?.as_str()?.to_owned(),
