@@ -1305,13 +1305,15 @@ a move into a state whose rule or gate is unmet is `missing_fields` or
 `approvals_missing` before Workflow's `by` or permission is asked; a move
 the Workflow's transitions do not allow is Workflow's veto.
 
-A write around the core is held to none of them: a repository's bulk and
-hard writes (`updateMany`, `UpdateMany`), an upsert's update of the row
-its key already holds (`upsertOne` and `upsertMany`, `UpsertOne` and
-`UpsertMany`, which insert a new row through the core's create and set a
-held row's own fields as `updateMany` does), a script, psql. Keep a
-constant, a oneWay field and a frozen one out of an upsert's update. A
-table with Approvals keeps a sub-table, so it has no upserts. No trigger or
+An upsert (`upsertOne` and `upsertMany`, `UpsertOne` and `UpsertMany`)
+inserts a new row through the core's create and updates the row its key
+already holds through the core's update, as `updateOne` does, so the same
+rules hold it: an upsert that would change a constant, move a oneWay field
+back or edit a frozen field is refused, and an `upsertMany` that one of
+its rows is refused for writes none of them. A table with Approvals keeps
+a sub-table, so it has no upserts. A write around the core is held to none
+of them: a repository's bulk and hard writes (`updateMany`,
+`UpdateMany`), a script, psql. No trigger or
 check refuses a raw SQL write of a constant or a frozen column, so an
 operator can repair a row, and such a write consumes no sign-off, since
 Approvals hears no change. A frozen field, or a `by` field, is only as

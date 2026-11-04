@@ -385,12 +385,12 @@ Most are load errors; knowing them saves a build round-trip:
   only as strong as the update operations that take it: keep a StateRules
   `by` field out of every update input a caller who should not edit what
   the state freezes can write, or list it in Constants' `fields` (the
-  build warns of a `@source` input that carries one). A raw SQL write, the
-  bulk and hard writes (`updateMany`, `UpdateMany`) and an upsert's update
-  of the row its key holds (`upsertOne`, `upsertMany`, Go's `UpsertOne`,
-  `UpsertMany`) skip all three and consume no sign-off: keep a Constants,
-  oneWay or frozen field out of an upsert's update, and use the others only
-  to repair a row. The core reads no value of a field encrypted at rest or
+  build warns of a `@source` input that carries one). An upsert's update of
+  the row its key holds (`upsertOne`, `upsertMany`, Go's `UpsertOne`,
+  `UpsertMany`) runs through the core as `updateOne` does, so all three
+  hold it. A raw SQL write and the bulk and hard writes (`updateMany`,
+  `UpdateMany`) skip all three and consume no sign-off: use them only to
+  repair a row. The core reads no value of a field encrypted at rest or
   a list or map of date-times, so the build refuses one in Constants,
   StateRules' `required` and `frozen` and `resetOn`. These members are a
   table's alone: an engine type's `@behavior` refuses `oneWay`, `by`,

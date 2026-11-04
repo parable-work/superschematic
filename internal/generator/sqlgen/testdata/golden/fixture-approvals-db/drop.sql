@@ -8,12 +8,15 @@ DROP INDEX IF EXISTS idx_task_approvals_sign_offs_task_number CASCADE;
 -- Drop version bump triggers and functions
 DROP TRIGGER IF EXISTS trg_task_bump_version ON task;
 DROP FUNCTION IF EXISTS task_bump_version();
+DROP TRIGGER IF EXISTS trg_note_bump_version ON note;
+DROP FUNCTION IF EXISTS note_bump_version();
 
 -- Drop join tables first
 
 -- Drop tables in reverse order (to handle foreign key dependencies)
 DROP TABLE IF EXISTS task_approvals_sign_offs CASCADE;
 DROP TABLE IF EXISTS task CASCADE;
+DROP TABLE IF EXISTS note CASCADE;
 
 -- Note: Extensions are not dropped automatically
 -- To drop extensions, run:

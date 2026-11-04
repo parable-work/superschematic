@@ -10,6 +10,26 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// NoteRepositoryInterface defines the contract for Note data access.
+type NoteRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *NoteGetOptions) (*types.Note, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error)
+	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
+	FindMany(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) ([]*types.Note, int, error)
+	FindPage(ctx context.Context, filter *NoteFilter, opts *NotePageOptions) (*NotePage, error)
+	CreateOne(ctx context.Context, input *NoteCreate) (*types.Note, error)
+	CreateMany(ctx context.Context, inputs []*NoteCreate) ([]*types.Note, error)
+	UpsertOne(ctx context.Context, input *NoteCreate, on NoteUniqueKey, update *NoteUpdate) (*types.Note, error)
+	UpsertOneResult(ctx context.Context, input *NoteCreate, on NoteUniqueKey, update *NoteUpdate, opts *UpsertOptions) (UpsertResult[*types.Note], error)
+	UpsertMany(ctx context.Context, inputs []*NoteCreate, on NoteUniqueKey, update NoteFields, opts *UpsertOptions) ([]UpsertResult[*types.Note], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *NoteUpdate) (*types.Note, error)
+	UpdateMany(ctx context.Context, filter *NoteFilter, update *NoteUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *NoteFilter) (int, error)
+	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
+	Status() NoteStatusOperations
+}
+
 // TaskRepositoryInterface defines the contract for Task data access.
 type TaskRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *TaskGetOptions) (*types.Task, error)
@@ -33,6 +53,7 @@ type DatabaseInterface interface {
 	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
+	GetNoteRepository() NoteRepositoryInterface
 	GetTaskRepository() TaskRepositoryInterface
 }
 
@@ -41,17 +62,20 @@ type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	GetNoteRepository() NoteRepositoryInterface
 	GetTaskRepository() TaskRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
 	tx   *NoOpTx
+	Note *NoOpNoteRepository
 	Task *NoOpTaskRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
+	Note *NoOpNoteRepository
 	Task *NoOpTaskRepository
 }
 
@@ -59,6 +83,8 @@ type NoOpTx struct {
 func NewNoOpDatabase() *NoOpDatabase {
 	tx := &NoOpTx{}
 	db := &NoOpDatabase{tx: tx}
+	db.Note = &NoOpNoteRepository{}
+	tx.Note = db.Note
 	db.Task = &NoOpTaskRepository{}
 	tx.Task = db.Task
 	return db
@@ -107,6 +133,99 @@ func (noOpRows) Close()                        {}
 func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+func (db *NoOpDatabase) GetNoteRepository() NoteRepositoryInterface {
+	return db.Note
+}
+
+func (tx *NoOpTx) GetNoteRepository() NoteRepositoryInterface {
+	return tx.Note
+}
+
+// NoOpNoteRepository provides deterministic no-op repository behavior.
+type NoOpNoteRepository struct{}
+
+func (r *NoOpNoteRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *NoteGetOptions) (*types.Note, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpNoteRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error) {
+	return map[types.IdentityUUID]*types.Note{}, nil
+}
+
+func (r *NoOpNoteRepository) FindOne(_ context.Context, _ *NoteFilter, _ *NoteFindOptions) (*types.Note, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpNoteRepository) FindMany(_ context.Context, _ *NoteFilter, _ *NoteFindOptions) ([]*types.Note, int, error) {
+	return []*types.Note{}, 0, nil
+}
+
+func (r *NoOpNoteRepository) FindPage(_ context.Context, _ *NoteFilter, _ *NotePageOptions) (*NotePage, error) {
+	return &NotePage{Rows: []*types.Note{}}, nil
+}
+
+func (r *NoOpNoteRepository) CreateOne(_ context.Context, input *NoteCreate) (*types.Note, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpNoteRepository) CreateMany(_ context.Context, inputs []*NoteCreate) ([]*types.Note, error) {
+	rows := make([]*types.Note, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+func (r *NoOpNoteRepository) UpsertOne(_ context.Context, input *NoteCreate, _ NoteUniqueKey, _ *NoteUpdate) (*types.Note, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpNoteRepository) UpsertOneResult(_ context.Context, input *NoteCreate, _ NoteUniqueKey, _ *NoteUpdate, _ *UpsertOptions) (UpsertResult[*types.Note], error) {
+	return UpsertResult[*types.Note]{Row: input.row(), Status: UpsertInserted}, nil
+}
+
+func (r *NoOpNoteRepository) UpsertMany(_ context.Context, inputs []*NoteCreate, _ NoteUniqueKey, _ NoteFields, _ *UpsertOptions) ([]UpsertResult[*types.Note], error) {
+	results := make([]UpsertResult[*types.Note], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Note]{Row: input.row(), Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpNoteRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *NoteUpdate) (*types.Note, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpNoteRepository) UpdateMany(_ context.Context, _ *NoteFilter, _ *NoteUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpNoteRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpNoteRepository) DeleteMany(_ context.Context, _ *NoteFilter) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpNoteRepository) HardDeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+// Status returns operations of Note's status that find no row.
+func (r *NoOpNoteRepository) Status() NoteStatusOperations {
+	return noOpNoteStatusOperations{}
+}
+
+// noOpNoteStatusOperations answers each operation of NoteStatusOperations
+// with ErrNotFound.
+type noOpNoteStatusOperations struct{}
+
+func (noOpNoteStatusOperations) Transition(_ context.Context, _ types.IdentityUUID, _ NoteStatusTransitionParams) (*NoteStatusTransitionResult, error) {
+	var none *NoteStatusTransitionResult
+	return none, ErrNotFound
+}
 
 func (db *NoOpDatabase) GetTaskRepository() TaskRepositoryInterface {
 	return db.Task
@@ -210,6 +329,8 @@ var (
 	_ DatabaseInterface       = (*NoOpDatabase)(nil)
 	_ TxInterface             = (*Tx)(nil)
 	_ TxInterface             = (*NoOpTx)(nil)
+	_ NoteRepositoryInterface = (*NoteRepository)(nil)
+	_ NoteRepositoryInterface = (*NoOpNoteRepository)(nil)
 	_ TaskRepositoryInterface = (*TaskRepository)(nil)
 	_ TaskRepositoryInterface = (*NoOpTaskRepository)(nil)
 )

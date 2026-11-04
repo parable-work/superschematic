@@ -7,6 +7,32 @@ import type {
 } from './scalars';
 
 /**
+ * Note - A note a person drafts and publishes, kept by its slug (D104). It keeps
+ * no sub-table, so it has upserts, and an upsert's update of the note its
+ * slug holds runs through the core as an update does: its author stays who
+ * its create named, and pinned and views only go up, unless the caller
+ * holds notes.admin; while it is a draft only its creator edits its body.
+ * A deleted note is kept, deletedAt stamped, and an upsert of its slug
+ * finds none.
+ */
+export interface Note {
+  id?: IdentityUUID | null;
+  slug: string;
+  title: string;
+  body: string;
+  author: IdentityUUID;
+  pinned: boolean;
+  views: number;
+  createdBy: IdentityUUID;
+  deletedAt?: TemporalDateTime | null;
+  /** The state the instance is in. */
+  status: string;
+  /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+  statusEnteredAt?: TemporalDateTime | null;
+  _version: number;
+}
+
+/**
  * Task - A task a person plans and its owner proves (D104). Its plan is approved
  * before it is proved, and that approval survives later edits of the plan;
  * its proof is approved against the version its reviewer read, and a change

@@ -9,6 +9,30 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Create tables (without foreign key constraints)
 
+CREATE TABLE note (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  slug TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  author UUID NOT NULL,
+  pinned BOOLEAN NOT NULL,
+  views DOUBLE PRECISION NOT NULL,
+  created_by UUID NOT NULL,
+  deleted_at TIMESTAMPTZ,
+  status TEXT NOT NULL,
+  status_entered_at TIMESTAMPTZ,
+  _version BIGINT DEFAULT 1 NOT NULL,
+  UNIQUE (slug)
+);
+
+COMMENT ON TABLE note IS 'A note a person drafts and publishes, kept by its slug (D104). It keeps
+no sub-table, so it has upserts, and an upsert''s update of the note its
+slug holds runs through the core as an update does: its author stays who
+its create named, and pinned and views only go up, unless the caller
+holds notes.admin; while it is a draft only its creator edits its body.
+A deleted note is kept, deletedAt stamped, and an upsert of its slug
+finds none.';
+
 CREATE TABLE task (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   title TEXT NOT NULL,
@@ -58,6 +82,18 @@ ALTER TABLE task_approvals_sign_offs
 CREATE UNIQUE INDEX idx_task_approvals_sign_offs_task_number ON task_approvals_sign_offs USING BTREE (task_id, number);
 
 -- Create version bump functions and triggers for optimistic entities
+
+CREATE OR REPLACE FUNCTION note_bump_version() RETURNS trigger AS $$
+BEGIN
+  -- BEFORE UPDATE: the stored row takes the next version.
+  NEW._version := OLD._version + 1;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_note_bump_version
+  BEFORE UPDATE ON note
+  FOR EACH ROW EXECUTE FUNCTION note_bump_version();
 
 CREATE OR REPLACE FUNCTION task_bump_version() RETURNS trigger AS $$
 BEGIN

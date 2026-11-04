@@ -701,9 +701,10 @@ refused as `internal`, as a `subRows` read is.
 An upsert's insert applies no change set of the core's, so it binds what
 the core's create of the row gives it: the adapter runs the create to its
 change set and applies nothing (`prepareCreate`), and the repository
-inserts the row with the owned fields that change set holds and updates a
-row the unique key already holds by its own fields alone, as the
-repository's `updateMany` does.
+inserts the row with the owned fields that change set holds. A row the
+unique key already holds the statement leaves as it is, and the
+repository then updates it through the core's update, as its `updateOne`
+does, so every use's guards hold an upsert's update (D104).
 
 A row's version is the column `@optimistic` keeps, `_version`, which a
 trigger bumps on every update (`BEFORE UPDATE` on Postgres, `AFTER

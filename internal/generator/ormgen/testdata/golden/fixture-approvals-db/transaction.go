@@ -65,6 +65,7 @@ func (o TxOptions) begin() (string, error) {
 // repositories bound to it.
 func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
 	wrapped := &Tx{tx: tx, db: db, depth: depth}
+	wrapped.Note = &NoteRepository{tx: tx, txDB: db}
 	wrapped.Task = &TaskRepository{tx: tx, txDB: db}
 	return wrapped
 }

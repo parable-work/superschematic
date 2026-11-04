@@ -72,7 +72,8 @@ older key under the current one. No filter holds such a column; updateMany
 cannot set one. An upsert seals an insert's under the input's key, and
 sets an update's on the row it updates by a second statement, sealed
 under that row's key, when the value differs from what the row holds
-(D89).
+(D89); on a table that composes behaviors, the core's update of the row
+seals and sets it with the update's other fields (D103).
 
 A read selects some members and includes relations (D90), as the Go ORM's
 field selection and hydration read them: select lists the members a row
@@ -103,33 +104,44 @@ actor, as the repository's own deletes do. upsertOne and upsertMany run,
 in a transaction, the core's create of each input to its change set,
 without applying it (prepareCreate), and insert the row with the owned
 fields it gives, so an inserted row holds what createOne would have
-written; the update of a row the key already holds sets the update's own
-fields alone, as updateMany does, and refuses an owned one, so like
-updateMany it goes around the core: the rules a use holds an update to,
-Constants' and StateRules' (D104), do not run on it. updateMany and
-deleteMany do not go through the core. Each use's operations are members
-under the use's member, its field or, for a use the table implements, the
-behavior (orm.order.status.transition(key, { to: 'paid' }),
-orm.ticket.timers.fireTimer(key, { deadline: 'respond' })), run as the
-acting user with no permissions unless the call names its caller, each
-stamping updatedAt and updatedBy on the row it writes.
+written. The update of a row the key already holds runs through the
+core's update, as updateOne's does: the upsert's conflict branch holds
+for no row, so it locks the row the key holds and writes nothing, its
+version and history as they were, and the repository reads the row back
+by the key's columns and updates it through the core with the update's
+fields, upsertMany's taken from each input in the inputs' order, as the
+repository's caller, so the rules each use holds an update to, Constants'
+and StateRules' (D104), hold it, its version moves once, and a refusal of
+the core's writes nothing of the upsert. Only if changed, a row whose
+fields already hold the update's values, as the database compares them,
+is read back as it was, unchanged, and the core runs nothing. A key over
+an expression cannot find the row, so an upsert on one whose update sets
+a field is refused, as is an update that names an owned field, before
+anything is written; one that sets no field leaves the row as it was.
+updateMany and deleteMany do not go through the core. Each use's
+operations are members under the use's member, its field or, for a use the
+table implements, the behavior (orm.order.status.transition(key, { to:
+'paid' }), orm.ticket.timers.fireTimer(key, { deadline: 'respond' })), run
+as the acting user with no permissions unless the call names its caller,
+each stamping updatedAt and updatedBy on the row it writes.
 orm.withBehaviorCaller({ subject, permissions }) runs every command of the
 ORM's repositories and transactions as that caller instead, a create's, an
 update's and a delete's through the core among them, so an update that
 needs a permission a behavior's config names (Constants' and StateRules'
 permission, D104) can hold it; the acting user still stamps the audit
 fields. A table whose behaviors keep sub-tables or arm deadlines has no
-upserts: an upsert's insert applies no change set, and the core's create of such a row writes
-its sub-table rows and arms its deadlines. Its repository's runDeadline
-runs a due deadline, as a behavior worker claimed it, through the core in
-a transaction (./rules, runDeadline). A table whose writes its behaviors
-hear keeps a change queue its trigger writes on every write of a row, the
-repositories' own and updateMany's, deleteMany's and hardDeleteOne's
-among them, and its repository's runChange runs one, as a behavior worker
-claimed it, through the core in a transaction (./rules, runChange): so a
-bulk or hard write, and a raw SQL write, arms and clears its deadlines
-after its commit, when the worker runs its change. A raw SQL write of an
-owned column or a sub-table row is never refused (D103).
+upserts: an upsert's insert applies no change set, and the core's create
+of such a row writes its sub-table rows and arms its deadlines. Its
+repository's runDeadline runs a due deadline, as a behavior worker claimed
+it, through the core in a transaction (./rules, runDeadline). A table
+whose writes its behaviors hear keeps a change queue its trigger writes on
+every write of a row, the repositories' own and updateMany's,
+deleteMany's and hardDeleteOne's among them, and its repository's
+runChange runs one, as a behavior worker claimed it, through the core in a
+transaction (./rules, runChange): so a bulk or hard write, and a raw SQL
+write, arms and clears its deadlines after its commit, when the worker
+runs its change. A raw SQL write of an owned column or a sub-table row is
+never refused (D103).
 
 The @versioned history readers are the Go ORM's alone for now.
 */
@@ -738,7 +750,9 @@ export interface Repository<
    * update of no field leaves each such row as it is; a deleted row of a
    * soft-deletable table that holds a key throws NotFoundError, as
    * upsertOne does. Two inputs of one batch that hold one key fail the
-   * statement. A key over an expression is refused: the rows the statement
+   * statement, unless the table composes behaviors, update names a field
+   * and a row holds the key, which each input's update then updates in
+   * turn, through the core. A key over an expression is refused: the rows the statement
    * returns are matched to the inputs by the key's columns.
    */
   upsertMany(inputs: readonly Create[], on: UniqueKey, update: readonly UpsertField<Update>[], options?: UpsertManyOptions): Promise<UpsertResult<Row>[]>;
@@ -1920,12 +1934,20 @@ class TableRepository {
     for (const [member, value] of Object.entries(change)) {
       if (value !== undefined) this.refuseOwnedUpdate('upsertOne', member);
     }
+    // A table that composes behaviors updates the row the key holds through
+    // the core, which finds it by the key's columns (D103).
+    if (!key.rows && this.behaviors && setsField(this.def.columns, change)) {
+      throw new Error(
+        `orm: upsertOne of ${this.def.name} on ${name}, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key`
+      );
+    }
     // An encrypted field the update sets is sealed under the key of the row
     // it updates, which only the upsert's statement names, so a second
     // statement sets it (D89); either the upsert or a read of a row it left
     // as it was may need one, in its transaction. A table that composes
     // behaviors runs the core's create of the row in it first, whose locks
-    // it holds.
+    // it holds, and the core's update of a row the key holds after, which
+    // seals the field itself (D103), so a refusal of either writes nothing.
     const sealing = this.encrypted.filter(c => change[c.name] !== undefined && change[c.name] !== null);
     const write = async (repo: TableRepository): Promise<UpsertResult<Values>> => repo.upsertRow((await repo.upsertInputs([input]))[0]!, name, key, change, sealing, onlyIfChanged);
     return this.behaviors || sealing.length > 0 || onlyIfChanged ? this.atomically(write) : write(this);
@@ -1993,10 +2015,11 @@ class TableRepository {
    * the row it would insert gives it, by member, on a table that composes
    * behaviors (D103): each create runs to its change set, its uses'
    * validation, guards and initializers with it, and applies nothing
-   * (prepareCreate), so the insert writes what createOne would have and the
-   * update, which sets none of them, leaves them as the row holds them. A
-   * refusal of the core's is thrown before anything is written. Any other
-   * table's inputs, as they are.
+   * (prepareCreate), so the insert writes what createOne would have; the
+   * update of a row the key holds sets none of them and runs through the
+   * core's update (upsertRow, upsertBatches). A refusal of the core's is
+   * thrown before anything is written. Any other table's inputs, as they
+   * are.
    */
   private async upsertInputs(inputs: readonly Values[]): Promise<readonly Values[]> {
     const behaviors = this.behaviors;
@@ -2050,20 +2073,44 @@ class TableRepository {
     return this.whereOf(conditions);
   }
 
-  /** upsertOneResult on the repository's runner: the upsert, a read of a row it left as it was, and the second statement of an encrypted field. */
+  /**
+   * upsertOneResult on the repository's runner: the upsert, a read of a row
+   * it left as it was, and the second statement of an encrypted field. On a
+   * table that composes behaviors, the conflict branch of an update that
+   * sets a field locks the row the key holds and writes nothing, and the
+   * update runs through the core's on the row read back by the key (D103).
+   */
   private async upsertRow(input: Values, name: string, key: UniqueKeyDefinition, update: Values, sealing: readonly TableColumn[], onlyIfChanged: boolean): Promise<UpsertResult<Values>> {
     const args: unknown[] = [];
     const sealed = this.sealed(this.stamped(input), 'upsert');
     const { columns, placeholders } = this.insertOne(sealed, args);
     const plain = { ...update };
     for (const column of sealing) delete plain[column.name];
+    const s = this.def.statements;
+    if (this.behaviors && setsField(this.def.columns, update)) {
+      // A branch that compares nothing updates and returns no row, and
+      // locks the one the key holds, so its version and history stay as
+      // they were until the core's update writes it.
+      const where = this.upsertWhere([], [], true);
+      const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), `(${placeholders.join(', ')})`, key.conflict, key.keep, where), args);
+      if (rows.length > 0) return { row: this.decode(rows[0]!), status: 'inserted' };
+      const keyColumns = this.keyColumns(name);
+      const [found] = await this.rowsOfKeys(name, key, keyColumns, [keyColumns.map(c => this.insertValue(sealed, c))]);
+      if (onlyIfChanged) {
+        const read: unknown[] = [this.encode(found![this.def.key], this.keyColumn(), 'key')];
+        const compared = { current: [] as string[], next: [] as string[] };
+        this.setClauses(plain, read, false, compared);
+        const differs = compared.current.length > 0 && (await run(this.runner, changedRead(this.def, this.clauses, this.keyColumn(), compared), read)).rows.length > 0;
+        if (!differs) return this.resealed({ row: found!, status: 'unchanged' }, update, sealing);
+      }
+      return { row: await this.updateThroughCore(found![this.def.key], update), status: 'updated' };
+    }
     const compared = { current: [] as string[], next: [] as string[] };
     const sets = this.setClauses(plain, args, false, compared);
     // An update that sets no field leaves the row as it is, stamps and
     // all, and returns it.
     const assignments = sets.length === 0 ? [key.keep] : [...sets];
     if (sets.length > 0) this.stamp(assignments, update, args);
-    const s = this.def.statements;
     const where = this.upsertWhere(compared.current, compared.next, onlyIfChanged);
     const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), `(${placeholders.join(', ')})`, key.conflict, assignments.join(', '), where), args);
     let result: UpsertResult<Values>;
@@ -2079,7 +2126,13 @@ class TableRepository {
     return this.resealed(result, update, sealing);
   }
 
-  /** upsertMany on the repository's runner, a batch at a time. */
+  /**
+   * upsertMany on the repository's runner, a batch at a time. On a table
+   * that composes behaviors, the conflict branch of an update of a field
+   * locks the rows the keys hold and writes nothing, and the update runs
+   * through the core's on each row read back by its key, with the fields
+   * its input gives, in the inputs' order (D103).
+   */
   private async upsertBatches(
     inputs: readonly Values[],
     name: string,
@@ -2093,6 +2146,7 @@ class TableRepository {
     const at = keyColumns.map(c => order.indexOf(c));
     const plain = fields.filter(c => !c.encrypted);
     const sealing = fields.filter(c => c.encrypted);
+    const core = this.behaviors !== undefined && fields.length > 0;
     const c = this.clauses;
     const s = this.def.statements;
     const results: UpsertResult<Values>[] = [];
@@ -2104,13 +2158,15 @@ class TableRepository {
       });
       const args: unknown[] = [];
       const { columns, tuples } = this.insertTuples(order, cells, args);
-      // Each field takes the value the input would have inserted.
-      const sets = plain.map(column => fill(c.setExcluded, column.column, column.column));
+      // Each field takes the value the input would have inserted; through
+      // the core, the branch compares nothing, so it updates and returns no
+      // row, and locks each one a key holds.
+      const sets = core ? [] : plain.map(column => fill(c.setExcluded, column.column, column.column));
       const current = plain.map(column => this.compareAs(column, column.qualified));
       const next = plain.map(column => this.compareAs(column, fill(c.excluded, column.column)));
       const assignments = sets.length === 0 ? [key.keep] : [...sets];
       if (sets.length > 0) this.stamp(assignments, {}, args);
-      const where = this.upsertWhere(current, next, onlyIfChanged);
+      const where = core ? this.upsertWhere([], [], true) : this.upsertWhere(current, next, onlyIfChanged);
       const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), tuples.join(', '), key.conflict, assignments.join(', '), where), args);
       // A row is its input's by the key's values; an input that sets none
       // of them, whose key the database generates, takes the next row whose
@@ -2129,11 +2185,12 @@ class TableRepository {
         if (i === undefined) throw new Error(`orm: upsertMany of ${this.def.name} wrote a row whose ${name} no input holds`);
         matched[i] = { row: this.decode(raw), status: raw[UPSERT_INSERTED] === true ? 'inserted' : sets.length > 0 ? 'updated' : 'unchanged' };
       }
-      // A row it did not return is one it left as it was, only if changed,
-      // which it reads back by its key, or a deleted one.
+      // A row it did not return is one it left as it was, only if changed
+      // or for the core to update, which it reads back by its key, or a
+      // deleted one.
       const left = matched.flatMap((result, i) => (result === undefined ? [i] : []));
       if (left.length > 0) {
-        if (!onlyIfChanged) throw new NotFoundError(`the ${this.def.name} row that holds the ${name} of input ${start + left[0]!} is deleted`);
+        if (!onlyIfChanged && !core) throw new NotFoundError(`the ${this.def.name} row that holds the ${name} of input ${start + left[0]!} is deleted`);
         const found = await this.rowsOfKeys(name, key, keyColumns, left.map(i => at.map(j => cells[i]![j]!)));
         left.forEach((i, n) => {
           matched[i] = { row: found[n]!, status: 'unchanged' };
@@ -2141,6 +2198,21 @@ class TableRepository {
       }
       for (const [i, result] of matched.entries()) {
         const input = chunk[i]!;
+        if (core && result!.status !== 'inserted') {
+          // Only if changed, a row whose fields hold its input's values
+          // already, as the database compares them, is left as it was.
+          let differs = true;
+          if (onlyIfChanged) {
+            const read: unknown[] = [this.encode(result!.row[this.def.key], this.keyColumn(), 'key')];
+            const compared = { current: [] as string[], next: [] as string[] };
+            this.setClauses(insertedFields(input, plain), read, false, compared);
+            differs = compared.current.length > 0 && (await run(this.runner, changedRead(this.def, c, this.keyColumn(), compared), read)).rows.length > 0;
+          }
+          if (differs) {
+            results.push({ row: await this.updateThroughCore(result!.row[this.def.key], insertedFields(input, fields)), status: 'updated' });
+            continue;
+          }
+        }
         const update: Values = {};
         for (const column of sealing) update[column.name] = input[column.name] ?? null;
         results.push(await this.resealed(result!, update, sealing));
@@ -2505,6 +2577,35 @@ class TableRepository {
 /** Whether null is a value of the column: the JSON null, in a JSON column that may not be SQL NULL. */
 function jsonNull(column: TableColumn): boolean {
   return Boolean((column.json || column.jsonText) && column.required);
+}
+
+/** Whether update sets a field of a table of columns, a column an update sets (setClauses'): any but the key, the audit fields and internal metadata. */
+function setsField(columns: readonly TableColumn[], update: Values): boolean {
+  return columns.some(column => !column.key && !column.audit && !column.internal && update[column.name] !== undefined);
+}
+
+/** The update upsertMany makes of the row that holds input's key (D89): each of fields at the value input would have inserted, its member's, else its default, else null. */
+function insertedFields(input: Values, fields: readonly TableColumn[]): Values {
+  const update: Values = {};
+  for (const column of fields) {
+    const value = input[column.name];
+    if (value === null && jsonNull(column)) update[column.name] = null;
+    else if (value !== undefined && value !== null && !(column.default !== undefined && value === '')) update[column.name] = value;
+    else update[column.name] = column.default ?? null;
+  }
+  return update;
+}
+
+/**
+ * The read of a table's row whose key, keyColumn, is $1 when its columns
+ * compared.current differ from the values compared.next, IS DISTINCT FROM,
+ * findOne's statement: an upsert only if changed of a table that composes
+ * behaviors asks it of the row its key holds, which its statement locked
+ * and left as it was, before the core's update (D89, D103).
+ */
+function changedRead(def: TableDefinition, clauses: Clauses, keyColumn: TableColumn, compared: { readonly current: readonly string[]; readonly next: readonly string[] }): string {
+  const conditions = [fill(clauses.eq, keyColumn.qualified, 1), fill(clauses.changed, compared.current.join(', '), compared.next.join(', '))];
+  return fill(def.statements.findOne, def.statements.columns, clauses.where + conditions.join(clauses.and), '');
 }
 
 /** The values of values that are neither null nor undefined, each once, in order. */

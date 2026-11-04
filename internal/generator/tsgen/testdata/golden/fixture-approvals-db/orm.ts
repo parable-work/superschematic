@@ -38,16 +38,188 @@ creates, updates and deletes its rows through the behaviors' core, which
 the runtime's adapter runs in the ORM's transaction over the layout
 fixtureApprovalsDbRules records. An upsert inserts a new row with the owned
 fields the core's create gives it, and updates a row the key holds by its
-own fields alone; a table whose behaviors keep sub-tables or arm deadlines
-has no upserts, and its repository runs a due deadline, as a behavior
-worker claimed it (runDeadline). A behavior's sub-table has no repository:
-only its operations write it. A raw SQL write of an owned column or a
-sub-table row is never refused, and arms or clears no deadline.
+own fields alone, through the core's update as updateOne's does, so each
+use's guards hold it, Constants' and StateRules' among them (D104): its
+statement locks the row and writes nothing of it, and the row is read back
+by the key's columns. A table whose behaviors keep sub-tables or arm
+deadlines has no upserts, and its repository runs a due deadline, as a
+behavior worker claimed it (runDeadline). A behavior's sub-table has no
+repository: only its operations write it. A raw SQL write of an owned
+column or a sub-table row is never refused, and arms or clears no deadline.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, RulesLayout, SoftDeleteRepository, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
+
+/**
+ * A row of Note, the note table: A note a person drafts and publishes, kept by its slug (D104). It keeps
+ * no sub-table, so it has upserts, and an upsert's update of the note its
+ * slug holds runs through the core as an update does: its author stays who
+ * its create named, and pinned and views only go up, unless the caller
+ * holds notes.admin; while it is a draft only its creator edits its body.
+ * A deleted note is kept, deletedAt stamped, and an upsert of its slug
+ * finds none.
+ */
+export interface NoteRow {
+  id: T.IdentityUUID;
+  slug: string;
+  title: string;
+  body: string;
+  author: T.IdentityUUID;
+  pinned: boolean;
+  views: number;
+  createdBy: T.IdentityUUID;
+  deletedAt: T.TemporalDateTime | null;
+  status: 'draft' | 'published';
+  statusEnteredAt: T.TemporalDateTime | null;
+  _version: number;
+}
+
+/** What a create of a row of Note sets; a member left unset takes its column's default, or the schema's. */
+export interface NoteCreate {
+  id?: T.IdentityUUID | null;
+  slug: string;
+  title: string;
+  body: string;
+  author: T.IdentityUUID;
+  pinned: boolean;
+  views: number;
+}
+
+/** What an update of a row of Note sets: each member set, null setting a column that may be null to NULL. */
+export interface NoteUpdate {
+  slug?: string;
+  title?: string;
+  body?: string;
+  author?: T.IdentityUUID;
+  pinned?: boolean;
+  views?: number;
+}
+
+/** The rows of Note a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface NoteFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  slug?: StringFilter<string>;
+  title?: StringFilter<string>;
+  body?: StringFilter<string>;
+  author?: UuidFilter<T.IdentityUUID>;
+  pinned?: BoolFilter;
+  views?: NumberFilter<number>;
+  status?: StringFilter<'draft' | 'published'>;
+  statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  _version?: NumberFilter<number>;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly NoteFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly NoteFilter[];
+}
+
+/** The members findOne and findMany order rows of Note by. */
+export type NoteOrderField = "id" | "slug" | "title" | "body" | "author" | "pinned" | "views" | "createdBy" | "deletedAt" | "status" | "statusEnteredAt" | "_version";
+
+/** The members findPage orders rows of Note by (D60, amended); ties break by id. */
+export type NoteSortField = "id" | "slug" | "title" | "body" | "author" | "views" | "status";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type NoteUniqueKey = readonly ["id"] | readonly ["slug"];
+
+/** The position of a row of Note in a findPage order: its id. */
+export interface NotePageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Note includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface NoteRelations {
+}
+
+/** The behaviors of Note (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
+export interface NoteUses {
+  /** The operations of status, a Workflow. */
+  readonly status: UseOperations<{
+    /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+    transition: {
+      params: { from?: 'draft' | 'published'; to: 'draft' | 'published' };
+      result: {
+        from: 'draft' | 'published';
+        to: 'draft' | 'published';
+        unchanged?: boolean;
+      };
+    };
+  }, T.IdentityUUID>;
+}
+
+/** The repository of Note. */
+export type NoteRepository = SoftDeleteRepository<
+  NoteRow,
+  NoteCreate,
+  NoteUpdate,
+  NoteFilter,
+  NoteOrderField,
+  NoteSortField,
+  NoteUniqueKey,
+  T.IdentityUUID,
+  NotePageKey,
+  NoteRelations
+> & NoteUses;
+
+/** The note table, as the runtime reads and writes it. */
+export const noteTable: TableDefinition = {
+  name: "Note",
+  table: "note",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "note.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "slug", column: "slug", field: "slug", qualified: "note.slug", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "note.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "body", column: "body", field: "body", qualified: "note.body", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "author", column: "author", field: "author", qualified: "note.author", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "pinned", column: "pinned", field: "pinned", qualified: "note.pinned", boolean: true, required: true, filter: ["eq", "in", "isNull"] },
+    { name: "views", column: "views", field: "views", qualified: "note.views", required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "note.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "note.deleted_at", timestamp: true, audit: "deletedAt" },
+    { name: "status", column: "status", field: "status", qualified: "note.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "note.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "_version", column: "_version", field: "_version", qualified: "note._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\"",
+    qualifiedColumns: "\"note\".\"id\", \"note\".\"slug\", \"note\".\"title\", \"note\".\"body\", \"note\".\"author\", \"note\".\"pinned\", \"note\".\"views\", \"note\".\"created_by\", \"note\".\"deleted_at\", \"note\".\"status\", \"note\".\"status_entered_at\", \"note\".\"_version\"",
+    selectColumn: "\"note\".\"%s\"",
+    getOne: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE id = $1",
+    getOneFields: "SELECT %s FROM note WHERE id = $1",
+    getMany: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE id IN (%s)",
+    live: " AND deleted_at IS NULL",
+    liveWhere: " WHERE deleted_at IS NULL",
+    liveCondition: "note.deleted_at IS NULL",
+    findOne: "SELECT %s FROM note%s%s LIMIT 1",
+    findMany: "SELECT %s FROM note%s%s%s",
+    count: "SELECT COUNT(*) FROM note%s",
+    page: "SELECT %s FROM note%s%s LIMIT %d",
+    pageAfterKey: "note.id %s %s",
+    pageAfter: "(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)",
+    pageOrder: " ORDER BY %s %s",
+    pageTiebreak: ", note.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM note WHERE note.id = $1)",
+    insert: "INSERT INTO note (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO note (%s) VALUES %s RETURNING %s",
+    update: "UPDATE note SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\"",
+    updateMany: "UPDATE note SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "UPDATE note SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL",
+    softDeleteMany: "UPDATE note SET deleted_at = $1%s",
+    delete: "DELETE FROM note WHERE id = $1",
+    deleteMany: "DELETE FROM note%s",
+  },
+  softDelete: true,
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE (id) IN (%s)" },
+    "slug": { conflict: "(slug)", keep: "slug = EXCLUDED.slug", rows: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE (slug) IN (%s)" },
+  },
+};
 
 /**
  * A row of Task, the task table: A task a person plans and its owner proves (D104). Its plan is approved
@@ -263,6 +435,7 @@ export const taskTable: TableDefinition = {
 
 /** The repositories of fixture-approvals-db, by table. */
 export interface FixtureApprovalsDbRepositories {
+  readonly note: NoteRepository;
   readonly task: TaskRepository;
 }
 
@@ -275,6 +448,185 @@ export type FixtureApprovalsDbTx = OrmTx<FixtureApprovalsDbRepositories>;
 /** Where the behaviors' core finds each table whose fields are behaviors (D103): its table, key, version, the column a soft-deletable table's live rows hold NULL, and own columns, each behavior's owned columns and operations, and the type as the core runs it. */
 export const fixtureApprovalsDbRules: RulesLayout = {
   "types": {
+    "Note": {
+      "type": "Note",
+      "table": "note",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "live": {
+        "column": "deleted_at"
+      },
+      "own": [
+        {
+          "field": "slug",
+          "column": "slug",
+          "type": "string"
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "body",
+          "column": "body",
+          "type": "string"
+        },
+        {
+          "field": "author",
+          "column": "author",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "pinned",
+          "column": "pinned",
+          "type": "boolean"
+        },
+        {
+          "field": "views",
+          "column": "views",
+          "type": "number"
+        }
+      ],
+      "audit": [
+        {
+          "field": "createdBy",
+          "column": "created_by",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Constants",
+          "behavior": "Constants",
+          "member": "constants",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "StateRules",
+          "behavior": "StateRules",
+          "member": "staterules",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Note",
+        "uses": [
+          {
+            "behavior": "Constants",
+            "config": {
+              "fields": [
+                "author"
+              ],
+              "oneWay": {
+                "pinned": "up",
+                "views": "up"
+              },
+              "permission": "notes.admin"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "StateRules",
+            "config": {
+              "states": {
+                "draft": {
+                  "by": [
+                    "createdBy"
+                  ],
+                  "frozen": [
+                    "body"
+                  ]
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "draft",
+                "published"
+              ],
+              "transitions": [
+                {
+                  "from": "draft",
+                  "to": "published"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "slug",
+            "type": "string"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "author",
+            "type": "Identity.UUID"
+          },
+          {
+            "name": "pinned",
+            "type": "boolean"
+          },
+          {
+            "name": "views",
+            "type": "number"
+          },
+          {
+            "name": "createdBy",
+            "type": "Identity.UUID"
+          }
+        ]
+      }
+    },
     "Task": {
       "type": "Task",
       "table": "task",
@@ -633,6 +985,7 @@ export const fixtureApprovalsDbOrm: OrmDefinition = {
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {
+    note: noteTable,
     task: taskTable,
   },
   rules: fixtureApprovalsDbRules,

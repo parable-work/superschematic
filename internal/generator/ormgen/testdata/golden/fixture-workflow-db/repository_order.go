@@ -1128,8 +1128,16 @@ func (r *OrderRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Orde
 // UpsertOne inserts input, or, when a row already holds its value of the
 // unique key on, applies update to that row instead, and returns the row
 // (D79). The insert writes the row with the fields its behaviors own as the
-// core's create gives them (D103), and the update sets update's own fields
-// alone; an update that sets no field leaves the row as it is.
+// core's create gives them (D103). The update of the row the key holds runs
+// through the core's update as UpdateOne's does, so each use's guards hold
+// it, Constants' and StateRules' among them (D104): the statement locks the
+// row and writes nothing of it, the row is read back by the key's columns,
+// and the core's update sets update's own fields alone, as the caller
+// WithBehaviorCaller names, stamped as UpdateOne stamps them, its version
+// moved once. A refusal of the core's is the *rules.Refusal UpdateOne
+// returns; in a transaction of its own, nothing of the upsert is written. An
+// update that sets no field leaves the row as it is, and one that sets a
+// field on a key over an expression, whose columns read no row, is refused.
 func (r *OrderRepository) UpsertOne(ctx context.Context, input *OrderCreate, on OrderUniqueKey, update *OrderUpdate) (*types.Order, error) {
 	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
 	if err != nil {
@@ -1143,7 +1151,8 @@ func (r *OrderRepository) UpsertOne(ctx context.Context, input *OrderCreate, on 
 // With opts.OnlyIfChanged it updates the row only when a field the update
 // sets differs from what the row holds, which it reads back otherwise. It
 // runs in a transaction of its own when none is open: the core's create of
-// the row comes first, in it (D103).
+// the row comes first, in it (D103), then the statement, then the core's
+// update of the row the key holds (D104).
 func (r *OrderRepository) UpsertOneResult(ctx context.Context, input *OrderCreate, on OrderUniqueKey, update *OrderUpdate, opts *UpsertOptions) (UpsertResult[*types.Order], error) {
 	var none UpsertResult[*types.Order]
 	key, ok := orderUniqueKeys[on]
@@ -1173,9 +1182,99 @@ func (r *OrderRepository) UpsertOneResult(ctx context.Context, input *OrderCreat
 	})
 }
 
-// upsertRow is UpsertOneResult on the repository's connection: the upsert,
-// a read of the row it left as it was, only if changed, and the second
-// statement of an encrypted field.
+// updateThroughCore is UpdateOne on the repository's transaction, for an
+// upsert's update of the row id names, which its statement locked and left as
+// it was (D104): update's own fields set through the behaviors' core, whose
+// uses' guards hold them, as the caller WithBehaviorCaller names, with
+// UpdateOne's stamps, and the row read back. It returns ErrNotFound when no
+// live row holds id, and any other refusal of the core's as the
+// *rules.Refusal it is.
+func (r *OrderRepository) updateThroughCore(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error) {
+	patch := r.corePatch(update)
+	columns, err := r.updateColumns(ctx, update)
+	if err != nil {
+		return nil, err
+	}
+	if err := rules.RunUpdate(ctx, rulesHost(r.tx), "Order", id.String(), patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns}); err != nil {
+		return nil, behaviorNotFound(err, "Order", id)
+	}
+	return r.GetOne(ctx, id, nil)
+}
+
+// upsertHeld is an upsert's update of held, the row the key holds, which
+// its statement locked and left as it was (D104): update's fields of it
+// through the core's update, as UpdateOne's, and UpsertUpdated; or, only if
+// changed, held as it is and UpsertUnchanged when it already holds the
+// values update sets, with nothing written.
+func (r *OrderRepository) upsertHeld(ctx context.Context, held *types.Order, update *OrderUpdate, onlyIfChanged bool) (*UpsertResult[*types.Order], error) {
+	id := *held.Id
+	if onlyIfChanged {
+		changed, err := r.upsertChanged(ctx, id, update)
+		if err != nil {
+			return nil, err
+		}
+		if !changed {
+			return &UpsertResult[*types.Order]{Row: held, Status: UpsertUnchanged}, nil
+		}
+	}
+	updated, err := r.updateThroughCore(ctx, id, update)
+	if err != nil {
+		return nil, err
+	}
+	return &UpsertResult[*types.Order]{Row: updated, Status: UpsertUpdated}, nil
+}
+
+// orderCompared are the columns an upsert only if changed compares (D89), in
+// the table's order: each own column an update sets, the row's value of it
+// and the placeholder of the update's, as its condition compares them.
+var orderCompared = []struct{ column, current, next string }{
+	{"title", `"order".title`, `$%d`},
+	{"placed_at", `"order".placed_at`, `$%d`},
+}
+
+// upsertChanged reports whether update sets a column of the row id names,
+// which an upsert's statement locked, to a value the row does not hold, as
+// an upsert only if changed compares them (D89): each column
+// orderCompared lists that UpdateOne would set. It reads the row when
+// they differ, and none when it holds them.
+func (r *OrderRepository) upsertChanged(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (bool, error) {
+	columns, err := r.updateColumns(ctx, update)
+	if err != nil {
+		return false, err
+	}
+	values := []any{id.ToUUID()}
+	var current, next []string
+	for _, compared := range orderCompared {
+		value, ok := columns[compared.column]
+		if !ok {
+			continue
+		}
+		current = append(current, compared.current)
+		if value == nil {
+			next = append(next, `NULL`)
+			continue
+		}
+		values = append(values, value)
+		next = append(next, fmt.Sprintf(compared.next, len(values)))
+	}
+	if len(current) == 0 {
+		return false, nil
+	}
+	query := `SELECT "id", "title", "placed_at", "status", "status_entered_at", "_version" FROM "order" WHERE id = $1` + ` AND ` + fmt.Sprintf(`(%s) IS DISTINCT FROM (%s)`, strings.Join(current, ", "), strings.Join(next, ", ")) + ` LIMIT 1`
+	switch _, err := r.scanReturned(r.tx.QueryRow(ctx, query, values...), nil); {
+	case err == nil:
+		return true, nil
+	case err == pgx.ErrNoRows:
+		return false, nil
+	default:
+		return false, fmt.Errorf("failed to compare the Order row the upsert holds: %w", err)
+	}
+}
+
+// upsertRow is UpsertOneResult on the repository's transaction: the upsert,
+// which, when update sets a field, locks the row the key holds and writes
+// nothing of it; a read of that row by its key; and the core's update of it
+// (D104), unless only if changed finds it holding update's values.
 func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate, onlyIfChanged bool) (*UpsertResult[*types.Order], error) {
 	key := orderUniqueKeys[on]
 	// Set audit fields
@@ -1227,6 +1326,11 @@ func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on 
 
 	// Handle relationship foreign key columns
 
+	// inserts is how many values the insert binds, every value the
+	// statement binds when update sets a field, whose values the core's
+	// update binds.
+	inserts := len(values)
+
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
 	var setClauses, compareCurrent, compareNext []string
@@ -1253,15 +1357,24 @@ func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on 
 	}
 
 	assigned := len(setClauses)
-	if assigned == 0 {
-		// An update that sets no field leaves the row as it is, stamps and
-		// all, and returns it.
-		setClauses = append(setClauses, key.keep)
-	} else {
-		// Set updated_at
-
-		// Set updated_by
-
+	// sets is whether update sets a field, whose update of the row the key
+	// holds runs through the core's update, as UpdateOne's does (D104).
+	sets := assigned > 0
+	// The statement's update of the row the key holds is the key's keep
+	// assignment: an update that sets no field leaves the row as it is,
+	// stamps and all, and returns it. One that sets a field never runs it:
+	// Postgres locks the row and returns none, and the row is read back by
+	// its key and updated through the core below, so its version moves
+	// once, as UpdateOne's does. The statement then binds the insert's
+	// values alone.
+	setClauses = []string{key.keep}
+	where := upsertWhere(``, compareCurrent, compareNext, onlyIfChanged)
+	if sets {
+		if key.rows == "" {
+			return nil, fmt.Errorf("orm: UpsertOne of Order on %s, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key", string(on))
+		}
+		values = values[:inserts]
+		where = upsertWhere(``, nil, nil, true)
 	}
 
 	query := fmt.Sprintf(
@@ -1270,7 +1383,7 @@ func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on 
 		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
-		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		where,
 	)
 
 	// Execute query
@@ -1285,20 +1398,21 @@ func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on 
 	var upserted *UpsertResult[*types.Order]
 	switch {
 	case err == nil:
+		// The row it inserted, or the row the key holds, as it is, for an
+		// update that sets no field.
 		status := UpsertUnchanged
 		if inserted {
 			status = UpsertInserted
-		} else if assigned > 0 {
-			status = UpsertUpdated
 		}
 		upserted = &UpsertResult[*types.Order]{Row: scanned, Status: status}
 	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
-	case !onlyIfChanged:
+	case !sets && !onlyIfChanged:
 		// The row the key conflicts with is soft-deleted.
 		return nil, ErrNotFound
 	default:
-		// The row the key conflicts with already held the update's values.
+		// The row the key conflicts with, which the statement left as it
+		// was, read back by its key: a soft-deleted one is ErrNotFound.
 		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
 		if !ok {
 			return nil, fmt.Errorf("no Order row holds an unset %s: %w", string(on), ErrNotFound)
@@ -1308,6 +1422,13 @@ func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on 
 			return nil, err
 		}
 		upserted = &UpsertResult[*types.Order]{Row: found[0], Status: UpsertUnchanged}
+		if sets {
+			held, err := r.upsertHeld(ctx, found[0], update, onlyIfChanged)
+			if err != nil {
+				return nil, err
+			}
+			upserted = held
+		}
 	}
 	return upserted, nil
 }
@@ -1317,13 +1438,21 @@ func (r *OrderRepository) upsertRow(ctx context.Context, input *types.Order, on 
 // the input would have inserted, and returns each input's row and what it did
 // with it, in the inputs' order (D89). Each insert writes the row with the
 // fields its behaviors own as the core's create gives them (D103), and update
-// names none of them: only their operations change them. It runs in a
-// transaction of its own when none is open, the core's creates first, then a
-// statement per batch of rows, opts.Batch or as many as Postgres binds the
-// parameters of. An update that names no field leaves each row that holds a
-// key as it is. Two inputs of one batch that hold one key fail the statement,
-// and a key over an expression, whose rows the statement's cannot be matched
-// to the inputs by, is refused.
+// names none of them: only their operations change them. The update of each
+// row a key holds runs through the core's update as UpdateOne's does, in the
+// inputs' order, so each use's guards hold it, Constants' and StateRules'
+// among them (D104); a refusal of the core's is the *rules.Refusal UpdateOne
+// returns, and in a transaction of its own nothing of the upsert is written,
+// the other inputs' rows among it. It runs in a transaction of its own when
+// none is open, the core's creates first, then a statement per batch of rows,
+// opts.Batch or as many as Postgres binds the parameters of, which locks each
+// row a key holds and writes nothing of it, then a read of those rows by
+// their keys and the core's update of each, its version moved once. An update
+// that names no field leaves each row that holds a key as it is. Two inputs
+// of one batch that hold one key fail the statement, unless update names a
+// field and a row holds the key, which each input's update then updates in
+// turn; a key over an expression, whose rows the statement's cannot be
+// matched to the inputs by, is refused.
 func (r *OrderRepository) UpsertMany(ctx context.Context, inputs []*OrderCreate, on OrderUniqueKey, update OrderFields, opts *UpsertOptions) ([]UpsertResult[*types.Order], error) {
 	key, ok := orderUniqueKeys[on]
 	if !ok {
@@ -1364,9 +1493,33 @@ func (r *OrderRepository) UpsertMany(ctx context.Context, inputs []*OrderCreate,
 	})
 }
 
-// upsertBatches is UpsertMany on the repository's connection, a batch at a
-// time: each batch's statement, a read of the rows it left as they were,
-// only if changed, and the second statement of each encrypted field.
+// upsertUpdate is the update UpsertMany runs through the core's update of
+// the row that holds input's key (D104): each field fields names at the
+// value input's insert binds, and one the insert leaves unset at its
+// default, else cleared, as the insert leaves its column; one whose column
+// the database fills (a generated value, now, or a default no Go literal
+// gives) is left as the row holds it.
+func (r *OrderRepository) upsertUpdate(input *types.Order, fields OrderFields) *OrderUpdate {
+	update := &OrderUpdate{}
+	if fields.Title {
+		value := input.Title
+		update.Title = &value
+	}
+	if fields.PlacedAt {
+		if input.PlacedAt != nil {
+			update.PlacedAt = input.PlacedAt
+		} else {
+			update.PlacedAtSetNull = true
+		}
+	}
+	return update
+}
+
+// upsertBatches is UpsertMany on the repository's transaction, a batch at a
+// time: each batch's statement, which, when update names a field, locks each
+// row a key holds and writes nothing of it; a read of those rows by their
+// keys; and the core's update of each, in the inputs' order (D104), unless
+// only if changed finds it holding the input's values.
 func (r *OrderRepository) upsertBatches(ctx context.Context, inputs []*types.Order, on OrderUniqueKey, update OrderFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Order], error) {
 	key := orderUniqueKeys[on]
 
@@ -1384,6 +1537,16 @@ func (r *OrderRepository) upsertBatches(ctx context.Context, inputs []*types.Ord
 		setClauses = append(setClauses, `placed_at = EXCLUDED.placed_at`)
 		compareCurrent = append(compareCurrent, `"order".placed_at`)
 		compareNext = append(compareNext, `EXCLUDED.placed_at`)
+	}
+	// The statement sets none of them: sets is whether update names a
+	// field, whose update of each row a key holds runs through the core's
+	// update, as UpdateOne's does (D104). The statement's update of such a
+	// row never runs then: Postgres locks the row and returns none, and the
+	// row is read back by its key, so its version moves once.
+	sets := len(setClauses) > 0
+	where := upsertWhere(``, compareCurrent, compareNext, onlyIfChanged)
+	if sets {
+		where = upsertWhere(``, nil, nil, true)
 	}
 
 	results := make([]UpsertResult[*types.Order], 0, len(inputs))
@@ -1440,19 +1603,15 @@ func (r *OrderRepository) upsertBatches(ctx context.Context, inputs []*types.Ord
 			rows = append(rows, row)
 		}
 		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
-		assignments := append([]string(nil), setClauses...)
-		if len(setClauses) == 0 {
-			// An update that names no field leaves each row as it is.
-			assignments = append(assignments, key.keep)
-		} else {
-		}
+		// The statement's update of each row a key holds sets nothing.
+		assignments := []string{key.keep}
 		query := fmt.Sprintf(
 			`INSERT INTO "order" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "title", "placed_at", "status", "status_entered_at", "_version", (xmax = 0) AS _inserted`,
 			strings.Join(fieldNames, ", "),
 			strings.Join(valuePlaceholders, ", "),
 			key.conflict,
 			strings.Join(assignments, ", "),
-			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+			where,
 		)
 		returned, inserted, err := r.upsertReturned(ctx, query, values)
 		if err != nil {
@@ -1478,14 +1637,12 @@ func (r *OrderRepository) upsertBatches(ctx context.Context, inputs []*types.Ord
 			status := UpsertUnchanged
 			if inserted[n] {
 				status = UpsertInserted
-			} else if len(setClauses) > 0 {
-				status = UpsertUpdated
 			}
 			matched[i] = &UpsertResult[*types.Order]{Row: row, Status: status}
 		}
 
-		// A row it did not return is one it left as it was, only if changed,
-		// which it reads back by its key, or a deleted one.
+		// A row it did not return is one a key holds, which it left as it
+		// was and reads back by its key, or a deleted one.
 		var left []int
 		for i := range matched {
 			if matched[i] == nil {
@@ -1493,7 +1650,7 @@ func (r *OrderRepository) upsertBatches(ctx context.Context, inputs []*types.Ord
 			}
 		}
 		if len(left) > 0 {
-			if !onlyIfChanged {
+			if !onlyIfChanged && !sets {
 				return nil, fmt.Errorf("the Order row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
 			}
 			keyValues := make([][]any, len(left))
@@ -1513,7 +1670,16 @@ func (r *OrderRepository) upsertBatches(ctx context.Context, inputs []*types.Ord
 				matched[i] = &UpsertResult[*types.Order]{Row: found[n], Status: UpsertUnchanged}
 			}
 		}
-		for _, result := range matched {
+		for i, result := range matched {
+			if sets && result.Status == UpsertUnchanged {
+				// The row the key holds: the fields update names, at the
+				// input's values.
+				held, err := r.upsertHeld(ctx, result.Row, r.upsertUpdate(chunk[i], update), onlyIfChanged)
+				if err != nil {
+					return nil, err
+				}
+				result = held
+			}
 			results = append(results, *result)
 		}
 	}

@@ -47,9 +47,9 @@
 //!
 //! The core has no write of own fields from an operation (the engine's
 //! `update()`), so the update a Constants use holds is every own-field
-//! write through the core: a caller's update and a repository's update of
-//! one row by its key. A write around the core (a bulk update, an upsert's
-//! update of the row its key holds, raw SQL) is held to none of it, the
+//! write through the core: a caller's update, a repository's update of one
+//! row by its key and an upsert's update of the row its key holds. A write
+//! around the core (a bulk update, raw SQL) is held to none of it, the
 //! escape hatch D103 keeps.
 //!
 //! The config is checked at define as the engine checked it: first as the

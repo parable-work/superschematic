@@ -68,9 +68,9 @@
 //!
 //! The core has no write of own fields from an operation (the engine's
 //! `update()`), so the update the rules hold is every own-field write
-//! through the core; a write around it (a bulk update, an upsert's update
-//! of the row its key holds, raw SQL) is held to none of them, the escape
-//! hatch D103 keeps.
+//! through the core, an upsert's update of the row its key holds among
+//! them; a write around it (a bulk update, raw SQL) is held to none of
+//! them, the escape hatch D103 keeps.
 //!
 //! The config is checked at define as the engine checked it: first as the
 //! declaration's configSchema holds it, each issue at its path in the

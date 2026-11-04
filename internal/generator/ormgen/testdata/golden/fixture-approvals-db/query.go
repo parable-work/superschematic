@@ -193,6 +193,255 @@ var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 // Type-Safe Field Selectors and Options
 // ========================================
 
+// NoteFields specifies which Note fields to select
+type NoteFields struct {
+	Id              bool
+	Slug            bool
+	Title           bool
+	Body            bool
+	Author          bool
+	Pinned          bool
+	Views           bool
+	CreatedBy       bool
+	DeletedAt       bool
+	Status          bool
+	StatusEnteredAt bool
+	Version         bool
+}
+
+// ToStringSlice converts NoteFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f NoteFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Slug {
+		fields = append(fields, "slug")
+	}
+	if f.Title {
+		fields = append(fields, "title")
+	}
+	if f.Body {
+		fields = append(fields, "body")
+	}
+	if f.Author {
+		fields = append(fields, "author")
+	}
+	if f.Pinned {
+		fields = append(fields, "pinned")
+	}
+	if f.Views {
+		fields = append(fields, "views")
+	}
+	if f.CreatedBy {
+		fields = append(fields, "created_by")
+	}
+	if f.DeletedAt {
+		fields = append(fields, "deleted_at")
+	}
+	if f.Status {
+		fields = append(fields, "status")
+	}
+	if f.StatusEnteredAt {
+		fields = append(fields, "status_entered_at")
+	}
+	if f.Version {
+		fields = append(fields, "_version")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f NoteFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	return true
+}
+
+// All returns a NoteFields with all fields selected
+func (NoteFields) All() NoteFields {
+	return NoteFields{
+		Id:              true,
+		Slug:            true,
+		Title:           true,
+		Body:            true,
+		Author:          true,
+		Pinned:          true,
+		Views:           true,
+		CreatedBy:       true,
+		DeletedAt:       true,
+		Status:          true,
+		StatusEnteredAt: true,
+		Version:         true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (NoteFields) Minimal() NoteFields {
+	return NoteFields{
+		Id:   true,
+		Slug: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (NoteFields) WithoutAudit() NoteFields {
+	return NoteFields{
+		Id:              true,
+		Slug:            true,
+		Title:           true,
+		Body:            true,
+		Author:          true,
+		Pinned:          true,
+		Views:           true,
+		Status:          true,
+		StatusEnteredAt: true,
+		Version:         true,
+	}
+}
+
+// NoteOrderByField represents a field that can be used for ordering
+type NoteOrderByField string
+
+const (
+	NoteOrderById              NoteOrderByField = "id"
+	NoteOrderBySlug            NoteOrderByField = "slug"
+	NoteOrderByTitle           NoteOrderByField = "title"
+	NoteOrderByBody            NoteOrderByField = "body"
+	NoteOrderByAuthor          NoteOrderByField = "author"
+	NoteOrderByPinned          NoteOrderByField = "pinned"
+	NoteOrderByViews           NoteOrderByField = "views"
+	NoteOrderByCreatedBy       NoteOrderByField = "created_by"
+	NoteOrderByDeletedAt       NoteOrderByField = "deleted_at"
+	NoteOrderByStatus          NoteOrderByField = "status"
+	NoteOrderByStatusEnteredAt NoteOrderByField = "status_entered_at"
+	NoteOrderByVersion         NoteOrderByField = "_version"
+)
+
+// NoteOrderBy specifies ordering for Note queries
+type NoteOrderBy struct {
+	Field NoteOrderByField
+	Desc  bool
+}
+
+// NoteGetOptions contains options for Note GetOne operations
+type NoteGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields NoteFields
+}
+
+// NoteFindOptions contains options for Note Find operations
+type NoteFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields NoteFields
+	// OrderBy specifies sorting order
+	OrderBy []NoteOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// NoteSortField is a field FindPage orders Note rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type NoteSortField string
+
+const (
+	NoteSortById     NoteSortField = "id"
+	NoteSortBySlug   NoteSortField = "slug"
+	NoteSortByTitle  NoteSortField = "title"
+	NoteSortByBody   NoteSortField = "body"
+	NoteSortByAuthor NoteSortField = "author"
+	NoteSortByViews  NoteSortField = "views"
+	NoteSortByStatus NoteSortField = "status"
+)
+
+// NoteSort is the order FindPage reads Note rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type NoteSort struct {
+	Field NoteSortField
+	Desc  bool
+}
+
+// ParseNoteSort reads a sort as a page request writes it, "slug" or
+// "-slug": an error for a field Note cannot be sorted by.
+func ParseNoteSort(text string) (NoteSort, error) {
+	parsed := NoteSort{Field: NoteSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case NoteSortById, NoteSortBySlug, NoteSortByTitle, NoteSortByBody, NoteSortByAuthor, NoteSortByViews, NoteSortByStatus:
+		return parsed, nil
+	}
+	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, slug, title, body, author, views and status, not %q", text)
+}
+
+// NoteUniqueKey names a unique key of Note that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type NoteUniqueKey string
+
+const (
+	NoteUniqueById   NoteUniqueKey = "id"
+	NoteUniqueBySlug NoteUniqueKey = "slug"
+)
+
+// NotePageKey is the position of a Note row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type NotePageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *NotePageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Note key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// notePageKeyOf is row's key: its id.
+func notePageKeyOf(row *types.Note) *NotePageKey {
+	key := &NotePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// NotePageOptions are FindPage's options.
+type NotePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields NoteFields
+	// Sort is the order the rows are read in.
+	Sort NoteSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *NotePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// NotePage is a page of Note rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type NotePage struct {
+	Rows []*types.Note
+	Next *NotePageKey
+}
+
 // TaskFields specifies which Task fields to select
 type TaskFields struct {
 	Id              bool
@@ -442,6 +691,486 @@ type TaskPage struct {
 // ========================================
 // Filters and Update Structs
 // ========================================
+
+// NoteFilter provides filtering for Note queries
+type NoteFilter struct {
+	Id              *UUIDFilter
+	Slug            *StringFilter
+	Title           *StringFilter
+	Body            *StringFilter
+	Author          *UUIDFilter
+	Pinned          *BoolFilter
+	Views           *FloatFilter
+	Status          *StringFilter
+	StatusEnteredAt *DateTimeFilter
+	Version         *Int64Filter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []NoteFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []NoteFilter
+}
+
+// NoteUpdate provides fields that can be updated
+type NoteUpdate struct {
+	Slug   *string
+	Title  *string
+	Body   *string
+	Author *types.IdentityUUID
+	Pinned *bool
+	Views  *float64
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewNoteSnapshotUpdate maps every mutable field from a complete
+// Note value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewNoteSnapshotUpdate(input *types.Note) *NoteUpdate {
+	update := &NoteUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Slug = &input.Slug
+	update.Title = &input.Title
+	update.Body = &input.Body
+	update.Author = &input.Author
+	update.Pinned = &input.Pinned
+	update.Views = &input.Views
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *NoteUpdate) ApplyTo(row *types.Note) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Slug != nil {
+		row.Slug = *u.Slug
+	}
+	if u.Title != nil {
+		row.Title = *u.Title
+	}
+	if u.Body != nil {
+		row.Body = *u.Body
+	}
+	if u.Author != nil {
+		row.Author = *u.Author
+	}
+	if u.Pinned != nil {
+		row.Pinned = *u.Pinned
+	}
+	if u.Views != nil {
+		row.Views = *u.Views
+	}
+}
+
+// NoteFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND, then deleted_at IS NULL unless
+// its options include deleted rows. That soft-delete condition is not
+// among them: a query that leaves deleted rows out adds it itself. A nil
+// filter has none.
+func NoteFilterConditions(filter *NoteFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a NoteFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *NoteFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `note.id IS NULL`)
+			} else {
+				conditions = append(conditions, `note.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Slug != nil {
+		if f.Slug.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.slug = $%d`, paramNum))
+			*args = append(*args, *f.Slug.Eq)
+		}
+		if len(f.Slug.In) > 0 {
+			placeholders := make([]string, len(f.Slug.In))
+			for i, value := range f.Slug.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.slug IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Slug.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.slug ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Slug.ILike+"%")
+		}
+		if f.Slug.IsNull != nil {
+			if *f.Slug.IsNull {
+				conditions = append(conditions, `note.slug IS NULL`)
+			} else {
+				conditions = append(conditions, `note.slug IS NOT NULL`)
+			}
+		}
+	}
+	if f.Title != nil {
+		if f.Title.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.title = $%d`, paramNum))
+			*args = append(*args, *f.Title.Eq)
+		}
+		if len(f.Title.In) > 0 {
+			placeholders := make([]string, len(f.Title.In))
+			for i, value := range f.Title.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Title.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.title ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Title.ILike+"%")
+		}
+		if f.Title.IsNull != nil {
+			if *f.Title.IsNull {
+				conditions = append(conditions, `note.title IS NULL`)
+			} else {
+				conditions = append(conditions, `note.title IS NOT NULL`)
+			}
+		}
+	}
+	if f.Body != nil {
+		if f.Body.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.body = $%d`, paramNum))
+			*args = append(*args, *f.Body.Eq)
+		}
+		if len(f.Body.In) > 0 {
+			placeholders := make([]string, len(f.Body.In))
+			for i, value := range f.Body.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.body IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Body.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.body ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Body.ILike+"%")
+		}
+		if f.Body.IsNull != nil {
+			if *f.Body.IsNull {
+				conditions = append(conditions, `note.body IS NULL`)
+			} else {
+				conditions = append(conditions, `note.body IS NOT NULL`)
+			}
+		}
+	}
+	if f.Author != nil {
+		if f.Author.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.author = $%d`, paramNum))
+			*args = append(*args, f.Author.Eq.ToUUID())
+		}
+		if len(f.Author.In) > 0 {
+			placeholders := make([]string, len(f.Author.In))
+			for i, id := range f.Author.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.author IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Author.IsNull != nil {
+			if *f.Author.IsNull {
+				conditions = append(conditions, `note.author IS NULL`)
+			} else {
+				conditions = append(conditions, `note.author IS NOT NULL`)
+			}
+		}
+	}
+	if f.Pinned != nil {
+		if f.Pinned.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.pinned = $%d`, paramNum))
+			*args = append(*args, *f.Pinned.Eq)
+		}
+		if len(f.Pinned.In) > 0 {
+			placeholders := make([]string, len(f.Pinned.In))
+			for i, value := range f.Pinned.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.pinned IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Pinned.IsNull != nil {
+			if *f.Pinned.IsNull {
+				conditions = append(conditions, `note.pinned IS NULL`)
+			} else {
+				conditions = append(conditions, `note.pinned IS NOT NULL`)
+			}
+		}
+	}
+	if f.Views != nil {
+		if f.Views.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views = $%d`, paramNum))
+			*args = append(*args, *f.Views.Eq)
+		}
+		if f.Views.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views > $%d`, paramNum))
+			*args = append(*args, *f.Views.Gt)
+		}
+		if f.Views.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views >= $%d`, paramNum))
+			*args = append(*args, *f.Views.Gte)
+		}
+		if f.Views.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views < $%d`, paramNum))
+			*args = append(*args, *f.Views.Lt)
+		}
+		if f.Views.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views <= $%d`, paramNum))
+			*args = append(*args, *f.Views.Lte)
+		}
+		if f.Views.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views >= $%d`, paramNum))
+			*args = append(*args, f.Views.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views <= $%d`, paramNum))
+			*args = append(*args, f.Views.Between.Max)
+		}
+		if len(f.Views.In) > 0 {
+			placeholders := make([]string, len(f.Views.In))
+			for i, value := range f.Views.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.views IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Views.IsNull != nil {
+			if *f.Views.IsNull {
+				conditions = append(conditions, `note.views IS NULL`)
+			} else {
+				conditions = append(conditions, `note.views IS NOT NULL`)
+			}
+		}
+	}
+	if f.Status != nil {
+		if f.Status.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status = $%d`, paramNum))
+			*args = append(*args, *f.Status.Eq)
+		}
+		if len(f.Status.In) > 0 {
+			placeholders := make([]string, len(f.Status.In))
+			for i, value := range f.Status.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.status IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Status.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Status.ILike+"%")
+		}
+		if f.Status.IsNull != nil {
+			if *f.Status.IsNull {
+				conditions = append(conditions, `note.status IS NULL`)
+			} else {
+				conditions = append(conditions, `note.status IS NOT NULL`)
+			}
+		}
+	}
+	if f.StatusEnteredAt != nil {
+		if f.StatusEnteredAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at = $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Eq)
+		}
+		if f.StatusEnteredAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at > $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Gt)
+		}
+		if f.StatusEnteredAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at >= $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Gte)
+		}
+		if f.StatusEnteredAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at < $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Lt)
+		}
+		if f.StatusEnteredAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at <= $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Lte)
+		}
+		if f.StatusEnteredAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at >= $%d`, paramNum))
+			*args = append(*args, f.StatusEnteredAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at <= $%d`, paramNum))
+			*args = append(*args, f.StatusEnteredAt.Between.End)
+		}
+		if len(f.StatusEnteredAt.In) > 0 {
+			placeholders := make([]string, len(f.StatusEnteredAt.In))
+			for i, value := range f.StatusEnteredAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.StatusEnteredAt.IsNull != nil {
+			if *f.StatusEnteredAt.IsNull {
+				conditions = append(conditions, `note.status_entered_at IS NULL`)
+			} else {
+				conditions = append(conditions, `note.status_entered_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.Version != nil {
+		if f.Version.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version = $%d`, paramNum))
+			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version > $%d`, paramNum))
+			*args = append(*args, *f.Version.Gt)
+		}
+		if f.Version.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version >= $%d`, paramNum))
+			*args = append(*args, *f.Version.Gte)
+		}
+		if f.Version.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version < $%d`, paramNum))
+			*args = append(*args, *f.Version.Lt)
+		}
+		if f.Version.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version <= $%d`, paramNum))
+			*args = append(*args, *f.Version.Lte)
+		}
+		if f.Version.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version >= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version <= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `note._version IS NULL`)
+			} else {
+				conditions = append(conditions, `note._version IS NOT NULL`)
+			}
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
 
 // TaskFilter provides filtering for Task queries
 type TaskFilter struct {

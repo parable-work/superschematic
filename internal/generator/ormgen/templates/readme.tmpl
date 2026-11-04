@@ -93,12 +93,16 @@ and each field's operations{{ with .RulesExample }}
 run through the behaviors' core in a transaction over `RulesLayout`, as
 the context's user holding no permissions unless `WithBehaviorCaller` names
 a caller. An upsert inserts a new row with what the core's create gives it,
-and updates a row the key holds by its own fields alone. `UpdateMany` and
-`DeleteMany` do not go through the core, and a table whose fields are
-behaviors has no `UpdateOneIfVersion` or `DeleteOneIfVersion`: its version
-is the fence every write through the core holds. A refusal of the core's is
-a `*rules.Refusal`, and one of an operation on a key no live row holds wraps
-`ErrNotFound` too. A raw SQL write of an owned column (`Tx.Exec`) is never
+and updates a row the key holds by its own fields alone, through the core's
+update as `UpdateOne` does, so each use's guards hold it, Constants' and
+StateRules' among them (D104): its statement locks the row and writes
+nothing of it, and the row is read back by the key's columns, so an upsert
+whose update sets a field on a key over an expression is refused.
+`UpdateMany` and `DeleteMany` do not go through the core, and a table whose
+fields are behaviors has no `UpdateOneIfVersion` or `DeleteOneIfVersion`:
+its version is the fence every write through the core holds. A refusal of
+the core's is a `*rules.Refusal`, and one of an operation on a key no live
+row holds wraps `ErrNotFound` too. A raw SQL write of an owned column (`Tx.Exec`) is never
 refused. The module requires `{{ .Naming.RulesGoModule }}`,
 which links the core's static archive through cgo: build it from a
 superschematic checkout with `make rules-archive` (a `replace` directive to

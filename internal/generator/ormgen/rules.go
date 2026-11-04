@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -296,6 +297,58 @@ func (r Repository) CreateInput() string {
 // fence every write through the core holds (D103).
 func (r Repository) HasIfVersion() bool {
 	return r.HasVersion && !r.HasBehaviors
+}
+
+// declaredDefault is a field's @default as the schema writes it, or "".
+func declaredDefault(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// UpsertDefault is the Go expression, of the field's value type, of its
+// @default, which UpsertMany's update of the row a key holds sets a field
+// the input leaves unset to, as the insert leaves the column to it (D104):
+// a boolean's, a number's, a string's or an enum member's. It is "" for a
+// field with none, or with one no literal gives (now, a list's, a JSON
+// value's, a UUID's or a time's), which that update leaves as the row
+// holds it.
+func (f Field) UpsertDefault() string {
+	if !f.HasDefault || f.IsArray || f.IsMap || f.IsUnion || f.IsJSONField || f.DefaultsToNow || codegen.IsDefaultNow(f.IRType, &f.DeclaredDefault) {
+		return ""
+	}
+	raw := strings.TrimSpace(f.DeclaredDefault)
+	value := f.ValueGoType()
+	switch {
+	case f.IsEnum:
+		return fmt.Sprintf("%s(%q)", value, f.DeclaredDefault)
+	case f.IsBoolLike:
+		if raw == "true" || raw == "false" {
+			return value + "(" + raw + ")"
+		}
+	case f.IsIntLike && !f.IsDecimal:
+		if _, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return value + "(" + raw + ")"
+		}
+	case f.IsFloatLike && !f.IsDecimal:
+		if _, err := strconv.ParseFloat(raw, 64); err == nil {
+			return value + "(" + raw + ")"
+		}
+	case f.IsStringLike && !f.IsUUIDLike && !f.IsDateTimeLike && !f.IsDateLike:
+		return fmt.Sprintf("%s(%q)", value, f.DeclaredDefault)
+	}
+	return ""
+}
+
+// UpsertsThroughCore reports whether the repository's upserts update the
+// row a key holds through the behaviors' core (D104): a table that
+// composes behaviors and has upserts (not NoUpsert). When the upsert's
+// update sets a field, its statement locks that row and writes nothing of
+// it, and the core's update, as UpdateOne runs it, sets the fields the
+// upsert's update sets, so each use's guards hold it.
+func (r Repository) UpsertsThroughCore() bool {
+	return r.HasBehaviors && !r.NoUpsert
 }
 
 // FieldColumn is the column of the field named name, unquoted, or "" when

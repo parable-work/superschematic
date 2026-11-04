@@ -35,7 +35,9 @@ const reactionsFixture = "fixture-reactions-db"
 
 // approvalsFixture is the DB fixture whose Task implements Constants,
 // StateRules and Approvals beside its Workflow on status (D104): its
-// sign-offs in a sub-table, no deadline queue and no change queue.
+// sign-offs in a sub-table, no deadline queue and no change queue. Its
+// Note implements Constants and StateRules and keeps no sub-table, so it
+// has upserts, whose update of the row a key holds runs through the core.
 const approvalsFixture = "fixture-approvals-db"
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -141,8 +143,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// A table that implements Constants, StateRules and Approvals
 		// (D104): Approvals' operations under Approvals(), its gates'
 		// states TaskApprovalsGate, no upsert, no repository of its
-		// sub-table, and no queue.
-		{approvalsFixture, []string{"repository_task.go", "rules.go"}},
+		// sub-table, and no queue; and one that implements Constants and
+		// StateRules and keeps no sub-table, whose upserts update the row
+		// a key holds through the core.
+		{approvalsFixture, []string{"repository_note.go", "repository_task.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

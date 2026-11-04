@@ -24,6 +24,7 @@ const (
 // Database represents the ORM database connection
 type Database struct {
 	pool *pgxpool.Pool
+	Note *NoteRepository
 	Task *TaskRepository
 }
 
@@ -34,6 +35,7 @@ type Tx struct {
 	// it is nested in, 0 for a transaction of its own (D89).
 	db    *Database
 	depth int
+	Note  *NoteRepository
 	Task  *TaskRepository
 }
 
@@ -63,6 +65,7 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db := &Database{pool: pool}
 
 	// Initialize repositories
+	db.Note = &NoteRepository{db: db}
 	db.Task = &TaskRepository{db: db}
 
 	return db, nil
@@ -83,6 +86,7 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db := &Database{pool: pool}
 
 	// Initialize repositories
+	db.Note = &NoteRepository{db: db}
 	db.Task = &TaskRepository{db: db}
 
 	return db, nil
@@ -93,9 +97,19 @@ func (db *Database) Close() {
 	db.pool.Close()
 }
 
+// GetNoteRepository returns the Note repository interface.
+func (db *Database) GetNoteRepository() NoteRepositoryInterface {
+	return db.Note
+}
+
 // GetTaskRepository returns the Task repository interface.
 func (db *Database) GetTaskRepository() TaskRepositoryInterface {
 	return db.Task
+}
+
+// GetNoteRepository returns the Note transaction repository interface.
+func (tx *Tx) GetNoteRepository() NoteRepositoryInterface {
+	return tx.Note
 }
 
 // GetTaskRepository returns the Task transaction repository interface.
@@ -113,6 +127,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper := &Tx{tx: tx, db: db}
 
 	// Initialize transaction repositories with parent database reference
+	txWrapper.Note = &NoteRepository{tx: tx, txDB: db}
 	txWrapper.Task = &TaskRepository{tx: tx, txDB: db}
 
 	defer func() {

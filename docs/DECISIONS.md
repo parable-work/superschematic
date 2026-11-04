@@ -13769,8 +13769,9 @@ built. The names and rules are reversible until the first release.
   its rows and leaves them out of its create, update and upsert inputs. It
   creates, updates and deletes a row through the core. An upsert inserts
   a new row with the owned fields the core's create gives it (run to its
-  change set and not applied), and updates a row the key holds by its own
-  fields alone, as `updateMany` does. An operation on a key no live row
+  change set and not applied), and updates a row the key holds through
+  the core's update, as `updateOne` does (D104's step 2; before it, by its
+  own fields alone, as `updateMany` does). An operation on a key no live row
   holds throws `NotFoundError`. Each use's operations sit under its field,
   `orm.order.status.transition(key, { to: 'paid' })`, typed from the
   declaration as the config narrows it. A raw SQL write of an owned
@@ -13807,8 +13808,9 @@ built. The names and rules are reversible until the first release.
   create's and upsert's input, and `<Type>Update` hold none.
   `CreateOne`, `CreateMany`, `UpdateOne` and `DeleteOne` run through the
   core in the repository's transaction; an upsert inserts a new row with
-  the owned fields the core's create gives it and updates a held row by
-  its own fields alone, as the repository's `updateMany` does.
+  the owned fields the core's create gives it and updates a held row
+  through the core's update, as `UpdateOne` does (D104's step 2; before
+  it, by its own fields alone, as the repository's `updateMany` does).
   `UpdateMany`, `DeleteMany` and `HardDeleteOne` bypass the core, and
   `UpdateOneIfVersion` and `DeleteOneIfVersion` are not generated for
   such a table. Each use's operations sit under a method named for its
@@ -15254,10 +15256,8 @@ release.
   answers it whatever the list order. Each holds every write through the
   core: creates, the repositories' updates of one row by its key, the
   operations and the deadlines, a Timers `then` and a Reactions move made
-  through `call()` among them. An upsert's update of the row its unique key
-  already holds is not one: D103's repositories set that row's own fields
-  as `updateMany` does, so it goes around the core (below). The core
-  needed no change.
+  through `call()` among them, and an upsert's update of the row its
+  unique key already holds (below). The core needed no change.
   `tests/constants.rs` has 11 cases, `tests/staterules.rs` 11 and
   `tests/approvals.rs` 14.
 - **Constants' `oneWay`.** `oneWay: { <field>: "up" | "down" }`: a
@@ -15384,6 +15384,34 @@ release.
   gains `withBehaviorCaller({ subject, permissions })`, as Go's has
   `WithBehaviorCaller`, so an update names the caller whose permissions
   the core checks.
+- **Upserts through the core.** On a table that composes behaviors, an
+  upsert whose update sets a field (`upsertOne`, `upsertOneResult`,
+  `upsertMany`; Go's `UpsertOne`, `UpsertOneResult`, `UpsertMany`)
+  updates the row its key holds through the core's update, as `updateOne`
+  does, so every use's guards hold it, Constants' and StateRules' among
+  them. Its statement keeps D103's insert and conflict target, and its
+  conflict branch sets the key's no-op assignment under `WHERE FALSE`
+  (behind the live condition of a soft-deletable table): Postgres locks
+  the held row and writes nothing of it, so neither the version trigger
+  nor the change queue's fires. The repository reads each held row back
+  by the key's columns (`NotFoundError`, `ErrNotFound`, for a deleted
+  one), asks only if changed whether the update's values differ (`SELECT
+  ... WHERE <key> = $1 AND (<columns>) IS DISTINCT FROM (<values>)`), and
+  runs the core's update of each in the inputs' order, as the repository's
+  caller, its version moved once; a refusal writes nothing of an upsert in
+  a transaction of its own, the batch's new rows among it. Two inputs of
+  one batch whose key a row holds each update it in turn, where the
+  statement refused them before. An update that sets no field keeps
+  D103's statement, and an upsert on a key over an expression whose update
+  sets a field is refused, since no read finds the row it holds by its
+  columns. A table whose behaviors keep sub-tables or arm deadlines still
+  has no upserts. `fixture-approvals-db` gains a `Note` with a unique
+  `slug`, Constants (`author`, `oneWay` on `pinned` and `views`) and
+  StateRules (a draft's `body` frozen, `by: ["createdBy"]`), whose upserts
+  `TestNoteUpsertsOnPostgres` holds in nine cases, and the TypeScript
+  runtime's `rules-orm.test.ts` holds the same rules on a table of its own,
+  with an expression key; the Go ORM goldens of every behavior table with
+  upserts change by the new flow.
 - **The specification.** `core-constants.json` replays 45 of its steps,
   20 skipped (an operation's `update()`, through Revisions, and Variants'
   document); `core-staterules.json` 88, 38 skipped (`test.Recorder`'s
@@ -15530,21 +15558,6 @@ release.
     sign-off, since Approvals hears no change: hearing them would give
     each Approvals table a change queue and a worker. The docs and the
     agent skill say so, and no trigger or check refuses such a write.
-  - An upsert's update of the row its unique key already holds
-    (`upsertOne`, `upsertMany`, `UpsertOne`, `UpsertMany`) is such a write:
-    D103's repositories insert a new row through the core's create and set
-    a held row's own fields in the statement's `ON CONFLICT ... DO UPDATE`,
-    as `updateMany` does, so a table that implements Constants or
-    StateRules beside its Workflow, and keeps no sub-table, has upserts
-    whose update can change a constant, move a oneWay field back or edit a
-    frozen one. A table with Approvals keeps a sub-table and has none. The
-    guide and the agent skill name upserts among the writes around the
-    core; the generated repositories' doc comments say the update sets the
-    row's own fields alone. Running a held row's update through the core's
-    update (a statement that inserts or leaves the row, then
-    `runUpdate`/`RunUpdate` of the row it holds, in the upsert's
-    transaction) changes both ORMs' upserts and every behavior table's
-    goldens, and is left.
   - The core reads no value of an own field encrypted at rest (neither ORM
     gives it a command's envelope) or of a list or a map of date-times (no
     adapter converts one), so the build refuses either in Constants'

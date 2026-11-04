@@ -24,6 +24,185 @@ use superschematic_rules_adapter::{postgres, Caller, Core, Error, Host, Layout, 
 /// core's names live.
 pub const RULES_LAYOUT: &str = r#"{
   "types": {
+    "Note": {
+      "type": "Note",
+      "table": "note",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "live": {
+        "column": "deleted_at"
+      },
+      "own": [
+        {
+          "field": "slug",
+          "column": "slug",
+          "type": "string"
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "body",
+          "column": "body",
+          "type": "string"
+        },
+        {
+          "field": "author",
+          "column": "author",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "pinned",
+          "column": "pinned",
+          "type": "boolean"
+        },
+        {
+          "field": "views",
+          "column": "views",
+          "type": "number"
+        }
+      ],
+      "audit": [
+        {
+          "field": "createdBy",
+          "column": "created_by",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Constants",
+          "behavior": "Constants",
+          "member": "constants",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "StateRules",
+          "behavior": "StateRules",
+          "member": "staterules",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Note",
+        "uses": [
+          {
+            "behavior": "Constants",
+            "config": {
+              "fields": [
+                "author"
+              ],
+              "oneWay": {
+                "pinned": "up",
+                "views": "up"
+              },
+              "permission": "notes.admin"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "StateRules",
+            "config": {
+              "states": {
+                "draft": {
+                  "by": [
+                    "createdBy"
+                  ],
+                  "frozen": [
+                    "body"
+                  ]
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "draft",
+                "published"
+              ],
+              "transitions": [
+                {
+                  "from": "draft",
+                  "to": "published"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "slug",
+            "type": "string"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "author",
+            "type": "Identity.UUID"
+          },
+          {
+            "name": "pinned",
+            "type": "boolean"
+          },
+          {
+            "name": "views",
+            "type": "number"
+          },
+          {
+            "name": "createdBy",
+            "type": "Identity.UUID"
+          }
+        ]
+      }
+    },
     "Task": {
       "type": "Task",
       "table": "task",
