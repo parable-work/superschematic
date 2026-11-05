@@ -229,7 +229,7 @@ export const problemTable: TableDefinition = {
     deleteMany: "DELETE FROM problem%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"agent\", \"status\", \"status_entered_at\", \"_version\" FROM problem WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = problem.id", rows: "SELECT \"id\", \"title\", \"agent\", \"status\", \"status_entered_at\", \"_version\" FROM problem WHERE (id) IN (%s)" },
   },
 };
 
@@ -405,7 +405,7 @@ export const sandboxTable: TableDefinition = {
     deleteMany: "DELETE FROM sandbox%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"status\", \"status_entered_at\", \"observed\", \"observed_observed_at\", \"observed_drift\", \"observed_reconciled_at\", \"_version\" FROM sandbox WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = sandbox.id", rows: "SELECT \"id\", \"name\", \"status\", \"status_entered_at\", \"observed\", \"observed_observed_at\", \"observed_drift\", \"observed_reconciled_at\", \"_version\" FROM sandbox WHERE (id) IN (%s)" },
   },
 };
 
