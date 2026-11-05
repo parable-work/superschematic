@@ -146,8 +146,8 @@ export const apiCredentialTable: TableDefinition = {
     reseal: "UPDATE api_credential SET secret = $1 WHERE id = $2 AND secret IS NOT DISTINCT FROM $3",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE (id) IN (%s)" },
-    "service": { conflict: "(service)", keep: "service = EXCLUDED.service", rows: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE (service) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = api_credential.id", rows: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE (id) IN (%s)" },
+    "service": { conflict: "(service)", keep: "service = api_credential.service", rows: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE (service) IN (%s)" },
   },
 };
 
@@ -281,8 +281,8 @@ export const plaidItemTable: TableDefinition = {
   softDelete: true,
   search: "plaid_item.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE (id) IN (%s)" },
-    "itemId": { conflict: "(item_id)", keep: "item_id = EXCLUDED.item_id", rows: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE (item_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = plaid_item.id", rows: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE (id) IN (%s)" },
+    "itemId": { conflict: "(item_id)", keep: "item_id = plaid_item.item_id", rows: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE (item_id) IN (%s)" },
   },
 };
 

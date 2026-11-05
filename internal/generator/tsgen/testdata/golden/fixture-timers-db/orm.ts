@@ -229,7 +229,7 @@ export const invoiceTable: TableDefinition = {
     deleteMany: "DELETE FROM invoice%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"number\", \"status\", \"status_entered_at\", \"payment\", \"payment_entered_at\", \"_version\" FROM invoice WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = invoice.id", rows: "SELECT \"id\", \"number\", \"status\", \"status_entered_at\", \"payment\", \"payment_entered_at\", \"_version\" FROM invoice WHERE (id) IN (%s)" },
   },
 };
 
@@ -393,7 +393,7 @@ export const ticketTable: TableDefinition = {
     deleteMany: "DELETE FROM ticket%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"visit_at\", \"status\", \"status_entered_at\", \"_version\" FROM ticket WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = ticket.id", rows: "SELECT \"id\", \"title\", \"visit_at\", \"status\", \"status_entered_at\", \"_version\" FROM ticket WHERE (id) IN (%s)" },
   },
 };
 

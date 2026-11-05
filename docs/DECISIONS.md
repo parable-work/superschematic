@@ -16572,3 +16572,24 @@ are reversible until the first release.
   - The engine advertises `by`'s seat entries through the shared
     declarations and refuses every `by` on an engine type, until engine
     types go (D103, step 7).
+
+## D105. An upsert whose update sets no field writes nothing, and reads the row its key holds back, by the key's columns or by its expression's value (D79, D89 amended)
+
+D79 has an upsert whose update sets no field leave the row as it is,
+stamps and all. Both ORMs wrote that update as the key's keep, an
+assignment of a column to itself, `ON CONFLICT (handle) DO UPDATE SET
+handle = account.handle`, so `RETURNING` gave back the row the key held.
+That is still an update. The bump trigger of a `@versioned` or
+`@optimistic` table moved `_version`, a versioned table recorded a history
+row whose image matched the one before, and every other update trigger
+fired, `@enqueueOnChange`'s among them (D80). A sign-off that pins the
+version it read (D104) was reset by an upsert that changed nothing, and a
+get-or-create by a case-insensitive email moved the account's version at
+every sign-in.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An upsert whose update sets no field, `upsertOne`'s and `upsertMany`'s, adds `WHERE FALSE` (`Clauses.Never`) to its update, as an upsert only if changed that compares no column does (D89): Postgres locks the row a key holds and writes nothing, so no trigger fires. The repository reads the row back by its key, in the upsert's transaction, which it opens when none is open, and reports it `unchanged`. A deleted row of a full key reads back deleted and is `ErrNotFound` (`NotFoundError`), as before. The keep stays as the update's assignment, which `DO UPDATE` needs and the `WHERE` never runs. On a table that composes behaviors (D103) the statement already wrote nothing when the update set a field; now it writes nothing when it sets none. | A `WHEN` on the bump and history triggers, or `IF NEW IS NOT DISTINCT FROM OLD` in them: a migration of every database's triggers, and a change to every `UpdateOne` that sets a field to its own value, whose callers may count on the version moving. `DO NOTHING`, which locks no row, so a write between the statement and the read could change or delete it. A CTE that reads the row in the statement, whose snapshot misses a row committed while the statement ran, which `ON CONFLICT` still finds. |
+| Go decides before the statement whether it needs the transaction: `<type>UpdateSetsField` compares the update with one that holds its `UpdatedBy` alone, since every other member of `<Type>Update` sets a field's value or null, and `UpsertMany`'s fields name none when they equal `<Type>Fields{}`. | A transaction for every upsert, two more round trips for one that sets a field. |
+| A key over an expression has no read by its columns (D89), so it gains one: `UniqueKey.Held`, `SELECT <columns> FROM category WHERE (lower(label)) = (SELECT (lower(label)) FROM (VALUES (CAST($1 AS TEXT))) AS category (label))`, and its partial index's predicate. The expression is evaluated over the input's values of the key's columns, which the index's keys name (D83), each cast to its column's type, under the table's name, so a column the expression qualifies resolves to the input's value too. Go's `<type>UniqueKeys` and the `./orm` entry's `held` carry it. `upsertMany` and an upsert only if changed still refuse such a key. | Evaluating the expression in the client. Substituting the input's values into the expression's text, which would parse SQL. Keeping the write for such a key alone, the key a get-or-create by a case-insensitive email upserts on. |
+| An update that sets only an `Encrypted<T>` field sets no field in the statement (D89), so its upsert of a held row is three statements, the upsert, the read and the second statement that seals the field, where it was two; the row's version moves once, where it moved twice. | Keeping the keep's write when a second statement follows, which records two history rows for one change. |

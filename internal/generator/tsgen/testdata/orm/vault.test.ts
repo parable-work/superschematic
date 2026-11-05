@@ -109,12 +109,14 @@ describe.skipIf(dsn === '')('Encrypted<T> fields under the repositories', () => 
     expect(byKey.accessToken.reveal()).toBe('token-4');
     expect((await orm.plaidItem.getOne(item.id)).accessToken.reveal()).toBe('token-4');
     // By itemId (D89): the envelope is sealed under the row's key, not the
-    // one the insert generated, and opens there.
+    // one the insert generated, and opens there. The statement sets no
+    // field, so it updates nothing and the row it holds is read back before
+    // the second statement, which moves its version once.
     const { pool, statements } = recording(db.pool);
     const recorded = createOrm(pool, { fieldKeys: current });
     const byItem = await recorded.plaidItem.upsertOneResult({ itemId: 'upsert-1', institution: 'U', accessToken: 'token-5' }, ['itemId'], { accessToken: 'token-5' });
     expect([byItem.status, byItem.row.id, byItem.row.accessToken.reveal()]).toEqual(['updated', item.id, 'token-5']);
-    expect(statements.filter(s => s !== 'BEGIN' && s !== 'COMMIT').map(s => s.split(' ')[0])).toEqual(['INSERT', 'UPDATE']);
+    expect(statements.filter(s => s !== 'BEGIN' && s !== 'COMMIT').map(s => s.split(' ')[0])).toEqual(['INSERT', 'SELECT', 'UPDATE']);
     expect((await orm.plaidItem.getOne(item.id)).accessToken.reveal()).toBe('token-5');
     // The same token again changes nothing, and writes no second statement.
     statements.length = 0;

@@ -302,7 +302,7 @@ export const accountTable: TableDefinition = {
     deleteMany: "DELETE FROM account%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"workspace_id\", \"status\", \"status_entered_at\", \"_version\" FROM account WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = account.id", rows: "SELECT \"id\", \"name\", \"workspace_id\", \"status\", \"status_entered_at\", \"_version\" FROM account WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "workspace", column: "workspaceId", target: "workspace", probe: "account.workspace_id IN (SELECT workspace.id FROM workspace%s)" },
@@ -562,7 +562,7 @@ export const jobTable: TableDefinition = {
     deleteMany: "DELETE FROM job%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"revision\", \"lease_holder\", \"lease_token\", \"lease_acquired_at\", \"lease_renewed_at\", \"lease_expires_at\", \"lease_expiries\", \"lease_ended\", \"retries_total\", \"retries_class_attempts\", \"retries_best_score\", \"retries_exhausted\", \"retries_stuck\", \"retries_retry_at\", \"retries_failing_since\", \"retries_keyed_by\", \"status\", \"status_entered_at\", \"_version\" FROM job WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = job.id", rows: "SELECT \"id\", \"title\", \"revision\", \"lease_holder\", \"lease_token\", \"lease_acquired_at\", \"lease_renewed_at\", \"lease_expires_at\", \"lease_expiries\", \"lease_ended\", \"retries_total\", \"retries_class_attempts\", \"retries_best_score\", \"retries_exhausted\", \"retries_stuck\", \"retries_retry_at\", \"retries_failing_since\", \"retries_keyed_by\", \"status\", \"status_entered_at\", \"_version\" FROM job WHERE (id) IN (%s)" },
   },
 };
 
@@ -732,7 +732,7 @@ export const sessionTable: TableDefinition = {
     deleteMany: "DELETE FROM \"session\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"device\", \"agent\", \"presence_deadline\", \"presence_last_beat_at\", \"presence_missed\", \"presence_released\", \"status\", \"status_entered_at\", \"_version\" FROM \"session\" WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"session\".id", rows: "SELECT \"id\", \"device\", \"agent\", \"presence_deadline\", \"presence_last_beat_at\", \"presence_missed\", \"presence_released\", \"status\", \"status_entered_at\", \"_version\" FROM \"session\" WHERE (id) IN (%s)" },
   },
 };
 
@@ -957,7 +957,7 @@ export const workspaceTable: TableDefinition = {
     deleteMany: "DELETE FROM workspace%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"_version\" FROM workspace WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = workspace.id", rows: "SELECT \"id\", \"name\", \"_version\" FROM workspace WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByAccountWorkspace", probe: "SELECT 1 FROM account WHERE account.workspace_id = workspace.id" },

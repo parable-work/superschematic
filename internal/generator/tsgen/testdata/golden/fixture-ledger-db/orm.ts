@@ -170,8 +170,8 @@ export const accountTable: TableDefinition = {
   },
   search: "account.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE (id) IN (%s)" },
-    "code": { conflict: "(code)", keep: "code = EXCLUDED.code", rows: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE (code) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = account.id", rows: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE (id) IN (%s)" },
+    "code": { conflict: "(code)", keep: "code = account.code", rows: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE (code) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByEntryAccount", probe: "SELECT 1 FROM entry WHERE entry.account_id = account.id", live: " AND entry.deleted_at IS NULL" },
@@ -356,8 +356,8 @@ export const entryTable: TableDefinition = {
   softDelete: true,
   search: "entry.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (id) IN (%s)" },
-    "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = EXCLUDED.account_id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)" },
+    "id": { conflict: "(id)", keep: "id = entry.id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (id) IN (%s)" },
+    "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = entry.account_id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)" },
   },
   relations: [
     { field: "account", column: "accountId", target: "account", probe: "entry.account_id IN (SELECT account.id FROM account%s)" },

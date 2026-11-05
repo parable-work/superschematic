@@ -180,8 +180,8 @@ export const tenantTable: TableDefinition = {
   },
   search: "tenant.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE (id) IN (%s)" },
-    "slug": { conflict: "(slug)", keep: "slug = EXCLUDED.slug", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE (slug) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = tenant.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE (id) IN (%s)" },
+    "slug": { conflict: "(slug)", keep: "slug = tenant.slug", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE (slug) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByTenantUserTenant", probe: "SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id", live: " AND tenant_user.deleted_at IS NULL" },
@@ -317,8 +317,8 @@ export const tenantUserTable: TableDefinition = {
   softDelete: true,
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE (id) IN (%s)" },
-    "tenant,displayName": { conflict: "(tenant_id, display_name) WHERE deleted_at IS NULL", keep: "tenant_id = EXCLUDED.tenant_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE (tenant_id, display_name) IN (%s) AND (deleted_at IS NULL)" },
+    "id": { conflict: "(id)", keep: "id = tenant_user.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE (id) IN (%s)" },
+    "tenant,displayName": { conflict: "(tenant_id, display_name) WHERE deleted_at IS NULL", keep: "tenant_id = tenant_user.tenant_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE (tenant_id, display_name) IN (%s) AND (deleted_at IS NULL)" },
   },
   relations: [
     { field: "tenant", column: "tenantId", target: "tenant", probe: "tenant_user.tenant_id IN (SELECT tenant.id FROM tenant%s)" },

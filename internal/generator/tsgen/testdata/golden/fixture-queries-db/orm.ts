@@ -138,7 +138,7 @@ export const accountTable: TableDefinition = {
     deleteMany: "DELETE FROM account%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\" FROM account WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = account.id", rows: "SELECT \"id\", \"name\" FROM account WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByLineItemAccount", probe: "SELECT 1 FROM line_item WHERE line_item.account_id = account.id" },
@@ -276,7 +276,7 @@ export const categoryTable: TableDefinition = {
     deleteMany: "DELETE FROM category%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"parent_id\", \"budget\", \"budget_since\" FROM category WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = category.id", rows: "SELECT \"id\", \"name\", \"parent_id\", \"budget\", \"budget_since\" FROM category WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByCategoryParent", probe: "SELECT 1 FROM category WHERE category.parent_id = category.id" },
@@ -428,7 +428,7 @@ export const lineItemTable: TableDefinition = {
     deleteMany: "DELETE FROM line_item%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"date\", \"name\", \"amount\", \"account_id\", \"category_id\", \"transfer_group_id\" FROM line_item WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = line_item.id", rows: "SELECT \"id\", \"date\", \"name\", \"amount\", \"account_id\", \"category_id\", \"transfer_group_id\" FROM line_item WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "account", column: "accountId", target: "account", probe: "line_item.account_id IN (SELECT account.id FROM account%s)" },
@@ -544,7 +544,7 @@ export const transferGroupTable: TableDefinition = {
     deleteMany: "DELETE FROM transfer_group%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"note\" FROM transfer_group WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = transfer_group.id", rows: "SELECT \"id\", \"note\" FROM transfer_group WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByLineItemTransferGroup", probe: "SELECT 1 FROM line_item WHERE line_item.transfer_group_id = transfer_group.id" },

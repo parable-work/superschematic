@@ -213,7 +213,7 @@ export const questionTable: TableDefinition = {
     deleteMany: "DELETE FROM question%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"prompt\", \"asked_of\", \"created_by\", \"status\", \"status_entered_at\", \"review\", \"review_entered_at\", \"_version\" FROM question WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = question.id", rows: "SELECT \"id\", \"prompt\", \"asked_of\", \"created_by\", \"status\", \"status_entered_at\", \"review\", \"review_entered_at\", \"_version\" FROM question WHERE (id) IN (%s)" },
   },
 };
 

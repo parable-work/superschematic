@@ -55,7 +55,7 @@ var repositoryMembers = []string{
 	"sealedUpdate", "setsEncrypted", "encode", "requireUser", "conditions", "group", "whereOf", "liveWhere",
 	"orderBy", "loaded", "nearestSettings", "stamped", "insertValue", "insertable", "insertOne",
 	"insertOrder", "insertTuples", "setClauses", "compareAs", "stamp", "uniqueKey", "expressionKey",
-	"keyColumns", "upsertWhere", "upsertRow", "upsertBatches", "rowsOfKeys", "resealed", "rulesHost",
+	"keyColumns", "upsertWhere", "upsertRow", "upsertBatches", "heldRow", "rowsOfKeys", "resealed", "rulesHost",
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
 	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
