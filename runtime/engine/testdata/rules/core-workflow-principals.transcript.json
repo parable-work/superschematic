@@ -11,7 +11,9 @@
     "Lease",
     "Presence",
     "Budget",
-    "Retries"
+    "Retries",
+    "Seats",
+    "Reconcile"
   ],
   "scenarios": [
     {
@@ -5461,7 +5463,7 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)",
+              "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which Question does not implement",
               "details": {
                 "issues": [
                   {
@@ -5470,7 +5472,7 @@
                     "behavior": "Workflow",
                     "kind": "rule",
                     "path": "/config",
-                    "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"
+                    "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which Question does not implement"
                   }
                 ]
               }

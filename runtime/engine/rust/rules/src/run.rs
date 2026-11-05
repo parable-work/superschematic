@@ -858,7 +858,9 @@ impl<'a> Run<'a> {
     }
 
     /// A call of an operation of a use of the calling use's row; `fired`
-    /// for one a deadline's handler makes.
+    /// for one a deadline's handler makes, `as_caller` for one the calling
+    /// use makes as the command's caller's own request
+    /// ([`crate::Cx::call_as_caller`], D104).
     #[allow(clippy::too_many_arguments)]
     pub fn call(
         &self,
@@ -866,6 +868,7 @@ impl<'a> Run<'a> {
         from_index: usize,
         writable: bool,
         fired: bool,
+        as_caller: bool,
         use_id: &str,
         operation: &str,
         params: &Value,
@@ -884,6 +887,7 @@ impl<'a> Run<'a> {
                 caller: Some(caller),
                 caller_type: None,
                 fired,
+                as_caller,
             };
             self.invoke(from, index, declared, params, calling, writable)
                 .map(|invoked| invoked.result)
@@ -916,7 +920,9 @@ impl<'a> Run<'a> {
             ));
         }
         if from.spec.name == type_name && from.key == Some(key) {
-            return self.call(from, from_index, writable, fired, use_id, operation, params);
+            return self.call(
+                from, from_index, writable, fired, false, use_id, operation, params,
+            );
         }
         let caller = from.uses[from_index].spec.id();
         let caller_type = from.spec.name.as_str();
@@ -943,6 +949,7 @@ impl<'a> Run<'a> {
                     caller: Some(caller),
                     caller_type: Some(caller_type),
                     fired: false,
+                    as_caller: false,
                 };
                 let invoked = self.invoke(frame, index, declared, params, calling, writable)?;
                 // A call its use settled wrote nothing: the row is not
@@ -1754,10 +1761,11 @@ impl<'a> Run<'a> {
     }
 
     /// Asks every use's guard in list order; the first veto refuses. A
-    /// guard asked about the command's own update, delete or operation is
-    /// handed its use's entry of the command's preconditions; one asked
-    /// about a create, a `call()` or a `call_on()` is handed none (D16,
-    /// D104).
+    /// guard asked about the command's own update, delete or operation, or
+    /// about a call made as the caller's own request
+    /// ([`crate::Cx::call_as_caller`]), is handed its use's entry of the
+    /// command's preconditions; one asked about a create, any other
+    /// `call()` or a `call_on()` is handed none (D16, D104).
     fn guards(&self, frame: Frame<'_>, request: &GuardRequest<'_>) -> Hook<()> {
         let action = request.action();
         let presents = matches!(
@@ -1765,6 +1773,10 @@ impl<'a> Run<'a> {
             GuardRequest::Update { .. }
                 | GuardRequest::Delete
                 | GuardRequest::Operation { caller: None, .. }
+                | GuardRequest::Operation {
+                    as_caller: true,
+                    ..
+                }
         );
         for (index, bound) in frame.uses.iter().enumerate() {
             let precondition = if presents {
@@ -1812,6 +1824,7 @@ impl<'a> Run<'a> {
             caller,
             caller_type,
             fired,
+            as_caller,
         } = calling;
         self.nested(
             frame,
@@ -1861,6 +1874,7 @@ impl<'a> Run<'a> {
                         caller,
                         caller_type,
                         fired,
+                        as_caller,
                     },
                 )?;
                 // The handler of a caller's operation, not a call's, is the
@@ -1884,13 +1898,16 @@ impl<'a> Run<'a> {
 
 /// Who makes an operation's request, as a guard is told it: `caller` names
 /// the use of a `call()` or a `call_on()`, `caller_type` the calling use's
-/// type for a `call_on()` from another row, and `fired` a call a
-/// deadline's handler makes on its row; the default is a caller's request.
+/// type for a `call_on()` from another row, `fired` a call a deadline's
+/// handler makes on its row, and `as_caller` a call the calling use makes
+/// as the command's caller's own request; the default is a caller's
+/// request.
 #[derive(Clone, Copy, Debug, Default)]
 struct Calling<'c> {
     caller: Option<&'c str>,
     caller_type: Option<&'c str>,
     fired: bool,
+    as_caller: bool,
 }
 
 // anchored_writes is the issues of own fields a write names that are a field

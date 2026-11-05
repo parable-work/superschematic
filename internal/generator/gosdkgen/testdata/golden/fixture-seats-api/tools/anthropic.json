@@ -1,0 +1,87 @@
+{
+  "tools": [
+    {
+      "name": "problem.seats.leaveSeat",
+      "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "seat": {"description":"A ProblemSeatsSeat value","enum":["accountable","handles","responsible"],"type":"string"},
+          "subject": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id", "seat"]
+      }
+    },
+    {
+      "name": "problem.seats.listSeats",
+      "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "seat": {"description":"A ProblemSeatsSeat value","enum":["accountable","handles","responsible",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "problem.seats.takeSeat",
+      "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "seat": {"description":"A ProblemSeatsSeat value","enum":["accountable","handles","responsible"],"type":"string"},
+          "subject": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id", "seat"]
+      }
+    },
+    {
+      "name": "problem.status.transition",
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A ProblemStatusState value","enum":["open","working","review","done",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A ProblemStatusState value","enum":["open","working","review","done"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      }
+    },
+    {
+      "name": "sandbox.observed.observe",
+      "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "at": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "state": {"description":"A SandboxObservedState value","enum":["pending","starting","running","stopping","stopped","failed","unreachable"],"type":"string"}
+        },
+        "required": ["at", "id", "state"]
+      }
+    },
+    {
+      "name": "sandbox.status.transition",
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A SandboxStatusState value","enum":["pending","starting","running","stopping","stopped","failed","unreachable",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A SandboxStatusState value","enum":["pending","starting","running","stopping","stopped","failed","unreachable"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      }
+    }
+  ]
+}

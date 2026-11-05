@@ -77,7 +77,8 @@ func TestLayoutOfConstantsStateRulesAndApprovals(t *testing.T) {
 // The audit names createdBy when a use reads it (D104): a StateRules
 // state's by that names it, or an Approvals gate that excludes the creator,
 // excludeCreator absent or true; neither, and a Workflow by that names it
-// not, reads none. SpecFields, the fields a refusal of a config names, are
+// not, reads none, nor does a by's seat entry, seat:<name>, whatever the
+// seat's name: a seat is the table's Seats', never a field. SpecFields, the fields a refusal of a config names, are
 // the spec's either way.
 func TestLayoutReadsCreatedByForStateRulesAndApprovals(t *testing.T) {
 	reg := registry.New(naming.Default())
@@ -100,6 +101,7 @@ func TestLayoutReadsCreatedByForStateRulesAndApprovals(t *testing.T) {
 		{"a gate excludes the creator when excludeCreator is absent", `{"states":{"planned":{"frozen":["plan"],"by":["reviewer"]}}}`, `{"gates":{"done":{"count":1,"permission":"p"}}}`, true},
 		{"a gate excludes the creator", `{"states":{"planned":{"frozen":["plan"]}}}`, `{"gates":{"proving":{"count":1,"permission":"p","excludeCreator":false},"done":{"count":1,"permission":"p","excludeCreator":true}}}`, true},
 		{"neither", `{"states":{"planned":{"frozen":["plan"],"by":["reviewer"]}}}`, `{"gates":{"done":{"count":1,"permission":"p","excludeCreator":false}}}`, false},
+		{"a seat by names, whatever its name", `{"states":{"planned":{"frozen":["plan"],"by":["seat:createdBy"]}}}`, `{"gates":{"done":{"count":1,"permission":"p","excludeCreator":false}}}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for i, ref := range td.Behaviors {

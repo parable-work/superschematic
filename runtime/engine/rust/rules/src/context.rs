@@ -97,11 +97,12 @@ impl<'r, C> View<'r, C> {
     }
 
     /// The use's own entry of the command's preconditions, in a guard asked
-    /// about the command's own update, delete or operation (D16, D104),
-    /// held to its behavior's precondition check before the row was read;
-    /// `None` in every other hook, and in a guard asked about a `call()`, a
-    /// `call_on()` or a create, so a request a behavior's code makes
-    /// presents nothing.
+    /// about the command's own update, delete or operation (D16, D104), or
+    /// about a call a behavior makes as the caller's own request
+    /// ([`Cx::call_as_caller`]), held to its behavior's precondition check
+    /// before the row was read; `None` in every other hook, and in a guard
+    /// asked about any other `call()`, a `call_on()` or a create, so a
+    /// request a behavior's code makes for itself presents nothing.
     pub fn precondition(&self) -> Option<&'r Value> {
         self.precondition
     }
@@ -544,6 +545,29 @@ impl<'r, C> Cx<'r, C> {
             self.view.index,
             self.writable,
             self.fired,
+            false,
+            use_id,
+            operation,
+            params,
+        )
+    }
+
+    /// Calls an operation of a use of the row as [`Cx::call`] does, as the
+    /// command's caller's own request (D104): each guard is told so
+    /// (`GuardRequest::Operation`'s `as_caller`) and is handed its use's
+    /// entry of the command's preconditions, as for the command's own
+    /// operation, so a rule that lets a behavior's request through (Lease's,
+    /// D16) holds this one as the caller's. What a behavior that makes a
+    /// move for its caller calls: Reconcile's steps toward an observed
+    /// state. A deadline's handler's call is `fired` as well. A refused call
+    /// is undone and returned as a call's is.
+    pub fn call_as_caller(&self, use_id: &str, operation: &str, params: &Value) -> Hook<Value> {
+        self.view.run.call(
+            self.view.frame,
+            self.view.index,
+            self.writable,
+            self.fired,
+            true,
             use_id,
             operation,
             params,

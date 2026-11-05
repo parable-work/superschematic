@@ -2559,12 +2559,12 @@
           "error": {
             "class": "SchemaDocumentError",
             "code": "invalid_schema",
-            "message": "schema: /types/Plan/behaviors/0/config: type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which the core does not run yet (D104, step 3)",
+            "message": "schema: /types/Plan/behaviors/0/config: type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which Plan does not implement",
             "details": {
               "issues": [
                 {
                   "path": "/types/Plan/behaviors/0/config",
-                  "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which the core does not run yet (D104, step 3)"
+                  "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which Plan does not implement"
                 }
               ]
             }

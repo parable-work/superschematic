@@ -1,0 +1,3143 @@
+{
+  "name": "core-seats",
+  "description": "Seats' seats on a table, D104: a caller takes a seat for itself, or seats and unseats another, a full seat refuses a take or displaces the subject seated longest, and a field's subject is seated and cannot leave, an update that gives the field a new subject held to the seat's max; a Workflow transition's by and a StateRules state's by name a seat (seat:<name>), with overridePermission past it; with each one's define refusals. Cases written by hand in the recorded format, since no engine implements Seats. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D104): runtime/engine/testdata/rules/scenarios/core-seats.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Seats > a caller holding take seats itself, a repeat answers unchanged, and with onFull displace the next to take a full seat displaces the longest seated; the parameters are checked first",
+      "behaviors": [
+        "Seats"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": [
+            "problems.own"
+          ]
+        },
+        "ada": {
+          "subject": "ada",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "nobody": {
+          "subject": "",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1,
+                            "onFull": "displace",
+                            "take": "problems.own",
+                            "assign": "problems.assign"
+                          },
+                          "handles": {
+                            "max": 2,
+                            "onFull": "refuse",
+                            "assign": "problems.release"
+                          },
+                          "responsible": {
+                            "fromField": "agent",
+                            "take": "problems.work",
+                            "assign": "problems.assign"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "seat": "accountable",
+            "subject": "alice",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "expect": {
+            "seat": "accountable",
+            "subject": "alice",
+            "displaced": [],
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "accountable",
+                "subject": "alice",
+                "seatedAt": 1001000,
+                "seatedBy": "alice",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "seat": "accountable",
+            "subject": "bob",
+            "displaced": [
+              "alice"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "accountable",
+                "subject": "bob",
+                "seatedAt": 1002000,
+                "seatedBy": "bob",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "carol may not take a seat in Problem p1's accountable: it needs permission problems.own"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "owners"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation takeSeat of behavior Seats: /seat: \"owners\" is not a seat of Problem's Seats (accountable, handles, responsible)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/seat",
+                  "message": "\"owners\" is not a seat of Problem's Seats (accountable, handles, responsible)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "nobody",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation takeSeat of behavior Seats: /subject: a caller with no subject takes no seat itself: name the subject to seat",
+            "details": {
+              "issues": [
+                {
+                  "path": "/subject",
+                  "message": "a caller with no subject takes no seat itself: name the subject to seat"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles",
+              "note": "x"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation takeSeat of behavior Seats: must NOT have additional properties: note",
+            "details": {
+              "issues": [
+                {
+                  "path": "",
+                  "message": "must NOT have additional properties: note"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seats > a full seat under onFull refuse is seat_full; a subject leaves a seat it holds without a permission, a leave of a seat not held answers unchanged, and seating or unseating another needs the seat's assign",
+      "behaviors": [
+        "Seats"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        },
+        "ada": {
+          "subject": "ada",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "eli": {
+          "subject": "eli",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "pat": {
+          "subject": "pat",
+          "permissions": [
+            "problems.release"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1,
+                            "onFull": "displace",
+                            "take": "problems.own",
+                            "assign": "problems.assign"
+                          },
+                          "handles": {
+                            "max": 2,
+                            "onFull": "refuse",
+                            "assign": "problems.release"
+                          },
+                          "responsible": {
+                            "fromField": "agent",
+                            "take": "problems.work",
+                            "assign": "problems.assign"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "seat": "handles",
+            "subject": "ada",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "seat": "handles",
+            "subject": "eli",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Seats vetoes takeSeat of Problem p1: Problem p1's handles seats at most 2, and it is full (ada, eli)",
+            "details": {
+              "behavior": "Seats",
+              "action": "takeSeat",
+              "reason": "Problem p1's handles seats at most 2, and it is full (ada, eli)",
+              "vetoCode": "seat_full",
+              "vetoDetails": {
+                "seat": "handles",
+                "max": 2,
+                "seated": [
+                  "ada",
+                  "eli"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "handles"
+            }
+          ],
+          "expect": {
+            "seat": "handles",
+            "subject": "ada"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "handles"
+            }
+          ],
+          "expect": {
+            "seat": "handles",
+            "subject": "ada",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "handles",
+              "subject": "eli"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "carol may not unseat eli from Problem p1's handles: unseating another needs permission problems.release"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "pat",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "handles",
+              "subject": "eli"
+            }
+          ],
+          "expect": {
+            "seat": "handles",
+            "subject": "eli"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles",
+              "subject": "carol"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "alice may not seat carol in Problem p1's handles: seating another needs permission problems.release"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "pat",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "handles",
+              "subject": "carol"
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "seat": "handles",
+            "subject": "carol",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "handles",
+                "subject": "carol",
+                "seatedAt": 1003000,
+                "seatedBy": "pat",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible",
+              "subject": "eli"
+            }
+          ],
+          "now": 1004000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "eli",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "responsible",
+                "subject": "eli",
+                "seatedAt": 1004000,
+                "seatedBy": "alice",
+                "fromField": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seats > fromField seats the subject the field holds: it counts toward max and is listed first, its take answers unchanged, it is never displaced, it cannot leave while the field holds it, and a new value seats the new subject",
+      "behaviors": [
+        "Seats"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        },
+        "ada": {
+          "subject": "ada",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "eli": {
+          "subject": "eli",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "ivy": {
+          "subject": "ivy",
+          "permissions": [
+            "problems.work"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "responsible": {
+                            "max": 2,
+                            "onFull": "displace",
+                            "fromField": "agent",
+                            "take": "problems.work",
+                            "assign": "problems.assign"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test",
+              "agent": "ada"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test",
+              "agent": "ada"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "responsible",
+                "subject": "ada",
+                "seatedAt": null,
+                "seatedBy": null,
+                "fromField": true
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "expect": {
+            "seat": "responsible",
+            "subject": "ada",
+            "displaced": [],
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "eli",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ivy",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "ivy",
+            "displaced": [
+              "eli"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Seats vetoes leaveSeat of Problem p1: ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+            "details": {
+              "behavior": "Seats",
+              "action": "leaveSeat",
+              "reason": "ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+              "vetoCode": "held_by_field",
+              "vetoDetails": {
+                "seat": "responsible",
+                "subject": "ada",
+                "field": "agent"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "responsible",
+              "subject": "ada"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Seats vetoes leaveSeat of Problem p1: ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+            "details": {
+              "behavior": "Seats",
+              "action": "leaveSeat",
+              "reason": "ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+              "vetoCode": "held_by_field",
+              "vetoDetails": {
+                "seat": "responsible",
+                "subject": "ada",
+                "field": "agent"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "agent": "eli"
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test",
+              "agent": "eli"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "responsible",
+                "subject": "eli",
+                "seatedAt": null,
+                "seatedBy": null,
+                "fromField": true
+              },
+              {
+                "seat": "responsible",
+                "subject": "ivy",
+                "seatedAt": 1002000,
+                "seatedBy": "ivy",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "now": 1004000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "ada",
+            "displaced": [
+              "ivy"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "responsible",
+                "subject": "eli",
+                "seatedAt": null,
+                "seatedBy": null,
+                "fromField": true
+              },
+              {
+                "seat": "responsible",
+                "subject": "ada",
+                "seatedAt": 1004000,
+                "seatedBy": "ada",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "agent": null
+            }
+          ],
+          "now": 1005000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "responsible",
+                "subject": "ada",
+                "seatedAt": 1004000,
+                "seatedBy": "ada",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "expect": {
+            "seat": "responsible",
+            "subject": "eli",
+            "unchanged": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seats > an update that gives a fromField a subject not seated takes the seat as a take would: past a full seat's max it is seat_full under onFull refuse, naming the field and the subject, and under displace the longest seated leaves; a subject seated already moves into the field",
+      "behaviors": [
+        "Seats"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        },
+        "ada": {
+          "subject": "ada",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "eli": {
+          "subject": "eli",
+          "permissions": [
+            "problems.work"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "owner",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "owners": {
+                            "max": 2,
+                            "fromField": "owner",
+                            "take": "problems.work"
+                          },
+                          "responsible": {
+                            "max": 2,
+                            "onFull": "displace",
+                            "fromField": "agent",
+                            "take": "problems.work"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "owners"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "seat": "owners",
+            "subject": "ada",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "owners"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "seat": "owners",
+            "subject": "eli",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "owner": "ivy"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Seats vetoes update of Problem p1: Problem p1's owners seats at most 2, and it is full (ada, eli): owner cannot seat ivy in it",
+            "details": {
+              "behavior": "Seats",
+              "action": "update",
+              "reason": "Problem p1's owners seats at most 2, and it is full (ada, eli): owner cannot seat ivy in it",
+              "vetoCode": "seat_full",
+              "vetoDetails": {
+                "seat": "owners",
+                "max": 2,
+                "seated": [
+                  "ada",
+                  "eli"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "owner": "eli"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test",
+              "owner": "eli"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {
+              "seat": "owners"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "owners",
+                "subject": "eli",
+                "seatedAt": 1002000,
+                "seatedBy": "eli",
+                "fromField": true
+              },
+              {
+                "seat": "owners",
+                "subject": "ada",
+                "seatedAt": 1001000,
+                "seatedBy": "ada",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "ada",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "now": 1004000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "eli",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "agent": "ivy"
+            }
+          ],
+          "now": 1005000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test",
+              "owner": "eli",
+              "agent": "ivy"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "responsible",
+                "subject": "ivy",
+                "seatedAt": null,
+                "seatedBy": null,
+                "fromField": true
+              },
+              {
+                "seat": "responsible",
+                "subject": "eli",
+                "seatedAt": 1004000,
+                "seatedBy": "eli",
+                "fromField": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seats > a Workflow transition whose by names a seat is made by a subject seated there, through an occupant row or its field; another caller is not_principal naming the seat as by lists it, and overridePermission moves past it",
+      "behaviors": [
+        "Seats",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": [
+            "problems.own"
+          ]
+        },
+        "ada": {
+          "subject": "ada",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "eli": {
+          "subject": "eli",
+          "permissions": [
+            "problems.work"
+          ]
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        },
+        "mod": {
+          "subject": "mod",
+          "permissions": [
+            "problems.override"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1,
+                            "onFull": "displace",
+                            "take": "problems.own",
+                            "assign": "problems.assign"
+                          },
+                          "responsible": {
+                            "fromField": "agent",
+                            "take": "problems.work",
+                            "assign": "problems.assign"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "review",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working",
+                            "by": [
+                              "seat:responsible"
+                            ]
+                          },
+                          {
+                            "from": "working",
+                            "to": "review",
+                            "by": [
+                              "seat:responsible"
+                            ]
+                          },
+                          {
+                            "from": "review",
+                            "to": "done",
+                            "by": [
+                              "seat:accountable"
+                            ]
+                          },
+                          {
+                            "from": "review",
+                            "to": "working",
+                            "by": [
+                              "agent",
+                              "seat:accountable"
+                            ]
+                          }
+                        ],
+                        "overridePermission": "problems.override"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test",
+              "agent": "ada"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test",
+              "agent": "ada"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Problem p1: carol may not move Problem p1 from open to working: the transition is made by a subject seated in responsible",
+            "details": {
+              "behavior": "Workflow",
+              "action": "transition",
+              "reason": "carol may not move Problem p1 from open to working: the transition is made by a subject seated in responsible",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "open",
+                "to": "working",
+                "by": [
+                  "seat:responsible"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "from": "open",
+            "to": "working"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "responsible"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "seat": "responsible",
+            "subject": "eli",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "eli",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "review"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "from": "working",
+            "to": "review"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Problem p1: ada may not move Problem p1 from review to done: the transition is made by a subject seated in accountable",
+            "details": {
+              "behavior": "Workflow",
+              "action": "transition",
+              "reason": "ada may not move Problem p1 from review to done: the transition is made by a subject seated in accountable",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "review",
+                "to": "done",
+                "by": [
+                  "seat:accountable"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "seat": "accountable",
+            "subject": "bob",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Problem p1: carol may not move Problem p1 from review to working: the transition is made by the subject agent holds or a subject seated in accountable",
+            "details": {
+              "behavior": "Workflow",
+              "action": "transition",
+              "reason": "carol may not move Problem p1 from review to working: the transition is made by the subject agent holds or a subject seated in accountable",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "review",
+                "to": "working",
+                "by": [
+                  "agent",
+                  "seat:accountable"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "now": 1004000,
+          "expect": {
+            "from": "review",
+            "to": "done"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test",
+              "agent": "ada"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "done",
+                "enteredAt": 1004000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Second"
+            },
+            {
+              "id": "p2"
+            }
+          ],
+          "now": 1005000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p2",
+            "data": {
+              "title": "Second"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1005000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "mod",
+          "args": [
+            "Problem",
+            "p2",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "now": 1005000,
+          "expect": {
+            "from": "open",
+            "to": "working"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p2",
+            "transition",
+            {
+              "to": "review"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Problem p2: alice may not move Problem p2 from working to review: the transition is made by a subject seated in responsible",
+            "details": {
+              "behavior": "Workflow",
+              "action": "transition",
+              "reason": "alice may not move Problem p2 from working to review: the transition is made by a subject seated in responsible",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "working",
+                "to": "review",
+                "by": [
+                  "seat:responsible"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seats > a StateRules state whose by names a seat lets a subject seated there, before the update, change a field it freezes, and no other caller, the refusal naming the seat",
+      "behaviors": [
+        "Seats",
+        "StateRules",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": [
+            "problems.own"
+          ]
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1,
+                            "take": "problems.own"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "review": {
+                            "frozen": [
+                              "title"
+                            ],
+                            "by": [
+                              "seat:accountable"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "review"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "review"
+                          },
+                          {
+                            "from": "review",
+                            "to": "open"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            {
+              "title": "Draft"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Draft"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "review"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "from": "open",
+            "to": "review"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "carol",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "title": "Mine"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Problem p1: Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "review",
+                "fields": [
+                  "title"
+                ],
+                "by": [
+                  "seat:accountable"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "seat": "accountable",
+            "subject": "bob",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "title": "Reviewed"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Reviewed"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "review",
+                "enteredAt": 1001000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "accountable"
+            }
+          ],
+          "expect": {
+            "seat": "accountable",
+            "subject": "bob"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "bob",
+          "args": [
+            "Problem",
+            "p1",
+            {
+              "title": "Again"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Problem p1: Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "review",
+                "fields": [
+                  "title"
+                ],
+                "by": [
+                  "seat:accountable"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Problem",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Reviewed"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "review",
+                "enteredAt": 1001000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seats > define refuses a seat a by names that the type's Seats lacks, or on a type with no Seats, an onFull with no max, a fromField that is no field or holds no subject, and Seats' config shape",
+      "behaviors": [
+        "Seats",
+        "StateRules",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "problems.own",
+            "problems.assign"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working",
+                            "by": [
+                              "seat:responsible"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0/config: type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:responsible\" in by, a seat of Seats, which Problem does not implement",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0/config",
+                  "message": "type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:responsible\" in by, a seat of Seats, which Problem does not implement"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working",
+                            "by": [
+                              "seat:owners"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:owners\" in by, which is not a seat of Problem's Seats (its seats: accountable)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:owners\" in by, which is not a seat of Problem's Seats (its seats: accountable)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "working": {
+                            "frozen": [
+                              "title"
+                            ],
+                            "by": [
+                              "seat:accountable"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0/config: type Problem: behavior StateRules config: states.working.by names \"seat:accountable\", a seat of Seats, which Problem does not implement",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0/config",
+                  "message": "type Problem: behavior StateRules config: states.working.by names \"seat:accountable\", a seat of Seats, which Problem does not implement"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "working": {
+                            "frozen": [
+                              "title"
+                            ],
+                            "by": [
+                              "seat:owners"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior StateRules config: states.working.by names \"seat:owners\", which is not a seat of Problem's Seats (its seats: accountable)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior StateRules config: states.working.by names \"seat:owners\", which is not a seat of Problem's Seats (its seats: accountable)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "handles": {
+                            "onFull": "refuse"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0/config: type Problem: behavior Seats config: seats.handles.onFull names what a full seat does, and handles has no max to fill",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0/config",
+                  "message": "type Problem: behavior Seats config: seats.handles.onFull names what a full seat does, and handles has no max to fill"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "responsible": {
+                            "fromField": "owner"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0/config: type Problem: behavior Seats config: seats.responsible.fromField: owner is not a field of Problem (its fields: title, agent, count)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0/config",
+                  "message": "type Problem: behavior Seats config: seats.responsible.fromField: owner is not a field of Problem (its fields: title, agent, count)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "responsible": {
+                            "fromField": "count"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0/config: type Problem: behavior Seats config: seats.responsible.fromField names count, a number field of Problem: fromField names a field that holds a subject (string, Identity.UUID or Identity.UserID)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0/config",
+                  "message": "type Problem: behavior Seats config: seats.responsible.fromField names count, a number field of Problem: fromField names a field that holds a subject (string, Identity.UUID or Identity.UserID)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {}
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0: must match \"then\" schema; /types/Problem/behaviors/0/config/seats: must NOT have fewer than 1 properties",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/0/config/seats",
+                  "message": "must NOT have fewer than 1 properties"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 0,
+                            "onFull": "evict"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0: must match \"then\" schema; /types/Problem/behaviors/0/config/seats/accountable/max: must be >= 1; /types/Problem/behaviors/0/config/seats/accountable/onFull: must be one of \"refuse\", \"displace\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/0/config/seats/accountable/max",
+                  "message": "must be >= 1"
+                },
+                {
+                  "path": "/types/Problem/behaviors/0/config/seats/accountable/onFull",
+                  "message": "must be one of \"refuse\", \"displace\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "agent",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "count",
+                      "typeRef": {
+                        "name": "number"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "accountable": {
+                            "max": 1,
+                            "onFull": "displace",
+                            "take": "problems.own",
+                            "assign": "problems.assign"
+                          },
+                          "handles": {
+                            "max": 2,
+                            "onFull": "refuse",
+                            "assign": "problems.release"
+                          },
+                          "responsible": {
+                            "fromField": "agent",
+                            "take": "problems.work",
+                            "assign": "problems.assign"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        }
+      ]
+    }
+  ]
+}

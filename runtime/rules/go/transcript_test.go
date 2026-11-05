@@ -25,8 +25,9 @@ import (
 // core-presence, core-budget and core-retries, D104), and from the
 // scenarios written by hand in their format where the engine recorded
 // none, core-workflow-principals.json, core-freezes-and-sign-offs.json,
-// core-retries-waits.json and core-periods-and-presence.json (D104), whose
-// transcripts hold each command's row version too
+// core-retries-waits.json, core-periods-and-presence.json, core-seats.json
+// and core-reconcile.json (D104), whose transcripts hold each command's
+// row version too
 // (runtime/engine/testdata/rules/*.transcript.json, whose format its
 // transcript module states) replayed through this adapter on SQLite and on
 // Postgres, as the TypeScript adapter replays them
@@ -54,7 +55,10 @@ import (
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
 // workflow_status and workflow_entered_at, Timers' sub-table
-// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs). The
+// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs; but
+// core-reconcile's Workflow and Reconcile, anchored on the fields status
+// and observed: status and status_entered_at, observed and
+// observed_observed_at). The
 // layout the generator writes
 // (internal/generator/behaviorlayout) is held by the generated packages'
 // own end-to-end tests, not by this one.
@@ -83,6 +87,8 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-retries.transcript.json", 250},
 	{"../../engine/testdata/rules/core-retries-waits.transcript.json", 158},
 	{"../../engine/testdata/rules/core-periods-and-presence.transcript.json", 77},
+	{"../../engine/testdata/rules/core-seats.transcript.json", 88},
+	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 }
 
 type transcript struct {

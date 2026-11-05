@@ -70,13 +70,19 @@
 //! caller with `overridePermission`; with `requireToken`, it refuses the
 //! holder's too unless they present the token. A read-only operation
 //! passes, and so does a request a behavior's own code makes (`call()`,
-//! `call_on()`), but for a use's call of its own operation on its row and
-//! any call a deadline's handler makes on its row (the core's `fired`): a
+//! `call_on()`), but for a use's call of its own operation on its row, any
+//! call a deadline's handler makes on its row (the core's `fired`) and a
+//! call a behavior makes as the caller's own request (`as_caller`, D104): a
 //! deadline's handler calls its own operation (Timers' `fireTimer`, Lease's
 //! `expire`, Presence's `miss`) as the engine's runner invoked it, or
 //! moves the row itself (Retries' `then`, Workflow's `transition`), as the
 //! command's caller, so the worker's fire meets an active lease as the
 //! runner's did, and a table that wants it through lists it in `exempt`.
+//! Reconcile's steps toward an observed state are each the observer's own
+//! (`Cx::call_as_caller`), held as its request whatever `exempt` says of
+//! `observe`, and presented the observer's token, so an observation that
+//! lands while another principal holds the lease moves nothing past its
+//! holder: a step is held unless `exempt` lists `Workflow.transition`.
 //! Lease's own operations check their callers themselves, but for
 //! `direct`, whose permission the guard asks of a caller. Nothing changes
 //! the field that limits the hold while a lease is held. The engine's pass
@@ -907,18 +913,19 @@ impl Behavior for Lease {
             }
         }
         // A request a behavior's code makes passes, but for a use's call of
-        // its own operation on its row and a call a deadline's handler
-        // makes: each is the command's caller's request, as the engine's
-        // runner invoked it.
+        // its own operation on its row, a call a deadline's handler makes
+        // and a call made as the caller's own request (D104): each is the
+        // command's caller's request, as the engine's runner invoked it.
         if let GuardRequest::Operation {
             caller: Some(caller),
             use_id,
             caller_type,
             fired,
+            as_caller,
             ..
         } = request
         {
-            if !((caller == use_id || *fired) && caller_type.is_none()) {
+            if !((caller == use_id || *fired || *as_caller) && caller_type.is_none()) {
                 return Ok(None);
             }
         }

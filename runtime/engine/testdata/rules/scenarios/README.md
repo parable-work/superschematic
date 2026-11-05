@@ -35,19 +35,36 @@ writes them, and `test/corpus.test.ts` does not list them.
   Presence's `ttlByState`, the deadline a beat and a transition arm by the
   row's state, its miss falling due as a deadline; with each one's define
   refusals. An engine type refuses each.
+- `core-seats.json` (D104, step 3): Seats' seats, takes and leaves, a full
+  seat refused and displaced, a field's subject seated and an update of the
+  field held to the seat's `max`, and `by` naming a seat on a Workflow
+  transition and a StateRules state, with `overridePermission`; with each
+  one's define refusals.
+- `core-reconcile.json` (D104, step 3): Reconcile's observations and the
+  fewest transitions they move a Workflow field along, an older one, drift
+  on a refused step and with no path, other uses' guards holding each
+  step, the stale deadline to unreachable and back, and each one's define
+  refusals. Its Workflow and Reconcile are anchored on fields (`field`).
+  No engine implements either.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
 refusal whole (its class, code, message and details), in the core's words.
 What only the engine's store answers (sequence numbers, versions,
 timestamps, the schema document a define echoes back) is left out. A
-test behavior a file composes is the test kit's fixture
+behavior entry that names a `field` (`{ "name": "Reconcile", "field":
+"observed", "config": { ... } }`, the IR's `BehaviorRef.field`) is a use
+anchored on that field, whose owned fields a record holds under the
+field's name (`behaviors.observed`); one without is anchored on the type.
+A test behavior a file composes is the test kit's fixture
 (`runtime/engine/rust/rules-testkit/src/fixtures.rs`), registered for the file by its name.
 
 `runtime/engine/rust/rules-testkit/tests/workflow_principals_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/freezes_and_sign_offs_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/retries_waits_scenarios.rs` and
-`runtime/engine/rust/rules-testkit/tests/periods_and_presence_scenarios.rs` replay each file on
+`runtime/engine/rust/rules-testkit/tests/retries_waits_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/periods_and_presence_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/seats_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with
 `hand_written_transcript`, which also holds each command's row version

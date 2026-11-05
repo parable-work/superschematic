@@ -1,0 +1,6303 @@
+{
+  "file": "core-reconcile",
+  "source": "runtime/engine/testdata/rules/scenarios/core-reconcile.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile"
+  ],
+  "scenarios": [
+    {
+      "name": "Reconcile > observe records an observation and moves the status along the fewest transitions its Workflow allows, each through Workflow's transition; a repeat, an older observation and a bad parameter change nothing",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Sandbox",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Sandbox",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "pending",
+                      "starting",
+                      "running",
+                      "stopping",
+                      "stopped",
+                      "failed",
+                      "lost"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "pending",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "stopping",
+                        "permission": "sandboxes.stop"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "running",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "pending"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "running"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopping"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "Reconcile",
+                  "config": {
+                    "status": "status",
+                    "unreachable": "lost",
+                    "staleAfterMs": 60000,
+                    "observePermission": "sandboxes.observe"
+                  },
+                  "anchor": {
+                    "field": "observed"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "s1",
+              "own": {
+                "name": "box"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "s1",
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "status": {
+                  "status": "pending",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1001000
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1001000,
+              "status": "running",
+              "moves": [
+                {
+                  "from": "pending",
+                  "to": "starting"
+                },
+                {
+                  "from": "starting",
+                  "to": "running"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1001000,
+                  "reconciledAt": 1002000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1061000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1001000
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1001000,
+              "status": "running",
+              "moves": [],
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1001000,
+                  "reconciledAt": 1002000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1061000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "pending",
+                "at": 1000500
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1001000,
+              "status": "running",
+              "moves": [],
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1001000,
+                  "reconciledAt": 1002000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1061000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1004000
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1004000,
+              "status": "running",
+              "moves": []
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1005000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "hibernating",
+                "at": 1006000
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation observe of behavior Reconcile on field observed: /state: \"hibernating\" is not a state of Sandbox.status (pending, starting, running, stopping, stopped, failed, lost)",
+              "details": {
+                "use": "observed",
+                "issues": [
+                  {
+                    "path": "/state",
+                    "message": "\"hibernating\" is not a state of Sandbox.status (pending, starting, running, stopping, stopped, failed, lost)"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1005000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1007000
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation observe of behavior Reconcile on field observed: /at: 1970-01-01T00:16:47.000Z is after the command's time, 1970-01-01T00:16:46.000Z: an observation reports a state already seen",
+              "details": {
+                "use": "observed",
+                "issues": [
+                  {
+                    "path": "/at",
+                    "message": "1970-01-01T00:16:47.000Z is after the command's time, 1970-01-01T00:16:46.000Z: an observation reports a state already seen"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1005000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1006000
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "carol may not observe Sandbox s1's observed: observe needs permission sandboxes.observe"
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1005000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation observe of behavior Reconcile on field observed: must have required property 'at'",
+              "details": {
+                "use": "observed",
+                "issues": [
+                  {
+                    "path": "",
+                    "message": "must have required property 'at'"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1005000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": -1
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation observe of behavior Reconcile on field observed: /at: must be >= 0",
+              "details": {
+                "use": "observed",
+                "issues": [
+                  {
+                    "path": "/at",
+                    "message": "must be >= 0"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1005000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Reconcile > a step the observer may not make stops the path and records drift, an observation the path reaches clears it, and with no path from a terminal state the drift is no_path",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Sandbox",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Sandbox",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "pending",
+                      "starting",
+                      "running",
+                      "stopping",
+                      "stopped",
+                      "failed",
+                      "lost"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "pending",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "stopping",
+                        "permission": "sandboxes.stop"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "running",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "pending"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "running"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopping"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "Reconcile",
+                  "config": {
+                    "status": "status",
+                    "unreachable": "lost",
+                    "staleAfterMs": 60000,
+                    "observePermission": "sandboxes.observe"
+                  },
+                  "anchor": {
+                    "field": "observed"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "s1",
+              "own": {
+                "name": "box"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "s1",
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "status": {
+                  "status": "pending",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1001000
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1001000,
+              "status": "running",
+              "moves": [
+                {
+                  "from": "pending",
+                  "to": "starting"
+                },
+                {
+                  "from": "starting",
+                  "to": "running"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1001000,
+                  "reconciledAt": 1001000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1061000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "stopped",
+                "at": 1002000
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "observed": "stopped",
+              "observedAt": 1002000,
+              "status": "running",
+              "moves": [],
+              "drift": {
+                "status": "running",
+                "observed": "stopped",
+                "code": "forbidden"
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "stopped",
+                  "observedAt": 1002000,
+                  "reconciledAt": 1001000,
+                  "drift": {
+                    "status": "running",
+                    "observed": "stopped",
+                    "code": "forbidden"
+                  }
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1062000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "operator",
+              "permissions": [
+                "sandboxes.observe",
+                "sandboxes.stop"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "stopped",
+                "at": 1003000
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "observed": "stopped",
+              "observedAt": 1003000,
+              "status": "stopped",
+              "moves": [
+                {
+                  "from": "running",
+                  "to": "stopping"
+                },
+                {
+                  "from": "stopping",
+                  "to": "stopped"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "stopped",
+                  "observedAt": 1003000,
+                  "reconciledAt": 1003000
+                },
+                "status": {
+                  "status": "stopped",
+                  "enteredAt": 1003000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1063000,
+                "payload": {}
+              }
+            ],
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "create",
+              "id": "s2",
+              "own": {
+                "name": "spare"
+              },
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "key": "s2",
+            "row": {
+              "own": {
+                "name": "spare"
+              },
+              "owned": {
+                "status": {
+                  "status": "pending",
+                  "enteredAt": 1004000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "s2",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "failed",
+                "at": 1004000
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "observed": "failed",
+              "observedAt": 1004000,
+              "status": "failed",
+              "moves": [
+                {
+                  "from": "pending",
+                  "to": "failed"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "spare"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "failed",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1004000
+                },
+                "status": {
+                  "status": "failed",
+                  "enteredAt": 1004000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "s2",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1005000
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1005000,
+              "status": "failed",
+              "moves": [],
+              "drift": {
+                "status": "failed",
+                "observed": "running",
+                "code": "no_path"
+              }
+            },
+            "row": {
+              "own": {
+                "name": "spare"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1005000,
+                  "reconciledAt": 1004000,
+                  "drift": {
+                    "status": "failed",
+                    "observed": "running",
+                    "code": "no_path"
+                  }
+                },
+                "status": {
+                  "status": "failed",
+                  "enteredAt": 1004000
+                }
+              }
+            },
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 9,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 13,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Reconcile > other uses' guards hold each step: StateRules' missing_fields and another principal's active lease, the observe itself listed in Lease's exempt, record drift, and the holder's own observation moves the row",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Sandbox",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "endpoint",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Sandbox",
+              "uses": [
+                {
+                  "behavior": "Lease",
+                  "config": {
+                    "exempt": [
+                      "Reconcile.observe"
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "StateRules",
+                  "config": {
+                    "states": {
+                      "running": {
+                        "required": [
+                          "endpoint"
+                        ]
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "pending",
+                      "starting",
+                      "running",
+                      "stopping",
+                      "stopped",
+                      "failed",
+                      "lost"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "pending",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "stopping",
+                        "permission": "sandboxes.stop"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "running",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "pending"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "running"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopping"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "Reconcile",
+                  "config": {
+                    "status": "status",
+                    "unreachable": "lost",
+                    "staleAfterMs": 60000,
+                    "observePermission": "sandboxes.observe"
+                  },
+                  "anchor": {
+                    "field": "observed"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "endpoint",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "config": {
+                  "exempt": [
+                    "Reconcile.observe"
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "running": {
+                      "required": [
+                        "endpoint"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "config": {
+                  "exempt": [
+                    "Reconcile.observe"
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "running": {
+                      "required": [
+                        "endpoint"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "s1",
+              "own": {
+                "name": "box"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "s1",
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "status": {
+                  "status": "pending",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1001000
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1001000,
+              "status": "starting",
+              "moves": [
+                {
+                  "from": "pending",
+                  "to": "starting"
+                }
+              ],
+              "drift": {
+                "status": "starting",
+                "observed": "running",
+                "code": "missing_fields"
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1001000,
+                  "drift": {
+                    "status": "starting",
+                    "observed": "running",
+                    "code": "missing_fields"
+                  }
+                },
+                "status": {
+                  "status": "starting",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1061000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "operator",
+              "permissions": [
+                "sandboxes.observe",
+                "sandboxes.stop"
+              ]
+            },
+            "now": 1001500,
+            "action": {
+              "kind": "update",
+              "key": "s1",
+              "patch": {
+                "endpoint": "https://box.example"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "box",
+                "endpoint": "https://box.example"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1001000,
+                  "drift": {
+                    "status": "starting",
+                    "observed": "running",
+                    "code": "missing_fields"
+                  }
+                },
+                "status": {
+                  "status": "starting",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1061000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1002000
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1002000,
+              "status": "running",
+              "moves": [
+                {
+                  "from": "starting",
+                  "to": "running"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box",
+                "endpoint": "https://box.example"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1002000,
+                  "reconciledAt": 1002000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1062000,
+                "payload": {}
+              }
+            ],
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": [
+                "sandboxes.observe",
+                "sandboxes.stop"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "token": 1,
+              "expiresAt": 1062000,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "name": "box",
+                "endpoint": "https://box.example"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1002000,
+                  "renewedAt": 1002000,
+                  "expiresAt": 1062000
+                },
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1002000,
+                  "reconciledAt": 1002000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1062000,
+                "payload": null
+              },
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1062000,
+                "payload": {}
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "operator",
+              "permissions": [
+                "sandboxes.observe",
+                "sandboxes.stop"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "stopped",
+                "at": 1003000
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "observed": "stopped",
+              "observedAt": 1003000,
+              "status": "running",
+              "moves": [],
+              "drift": {
+                "status": "running",
+                "observed": "stopped",
+                "code": "held_by_another"
+              }
+            },
+            "row": {
+              "own": {
+                "name": "box",
+                "endpoint": "https://box.example"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1002000,
+                  "renewedAt": 1002000,
+                  "expiresAt": 1062000
+                },
+                "observed": {
+                  "observed": "stopped",
+                  "observedAt": 1003000,
+                  "reconciledAt": 1002000,
+                  "drift": {
+                    "status": "running",
+                    "observed": "stopped",
+                    "code": "held_by_another"
+                  }
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1062000,
+                "payload": null
+              },
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1063000,
+                "payload": {}
+              }
+            ],
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": [
+                "sandboxes.observe",
+                "sandboxes.stop"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "stopped",
+                "at": 1004000
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "observed": "stopped",
+              "observedAt": 1004000,
+              "status": "stopped",
+              "moves": [
+                {
+                  "from": "running",
+                  "to": "stopping"
+                },
+                {
+                  "from": "stopping",
+                  "to": "stopped"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box",
+                "endpoint": "https://box.example"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1002000,
+                  "renewedAt": 1002000,
+                  "expiresAt": 1062000
+                },
+                "observed": {
+                  "observed": "stopped",
+                  "observedAt": 1004000,
+                  "reconciledAt": 1004000
+                },
+                "status": {
+                  "status": "stopped",
+                  "enteredAt": 1004000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1062000,
+                "payload": null
+              },
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1064000,
+                "payload": {}
+              }
+            ],
+            "version": 7
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Reconcile > staleAfterMs arms a deadline from each observation's at; a newer observation moves it, its fire, as the runner, moves the row to unreachable along the fewest transitions and records it as observed, and a newer observation moves it back",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Sandbox",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Sandbox",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "pending",
+                      "starting",
+                      "running",
+                      "stopping",
+                      "stopped",
+                      "failed",
+                      "lost"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "pending",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "stopping",
+                        "permission": "sandboxes.stop"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "running",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "pending"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "running"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopping"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "Reconcile",
+                  "config": {
+                    "status": "status",
+                    "unreachable": "lost",
+                    "staleAfterMs": 60000,
+                    "observePermission": "sandboxes.observe"
+                  },
+                  "anchor": {
+                    "field": "observed"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "s1",
+              "own": {
+                "name": "box"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "s1",
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "status": {
+                  "status": "pending",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1000000
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1000000,
+              "status": "running",
+              "moves": [
+                {
+                  "from": "pending",
+                  "to": "starting"
+                },
+                {
+                  "from": "starting",
+                  "to": "running"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1000000,
+                  "reconciledAt": 1000000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1060000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1030000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1030000
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1030000,
+              "status": "running",
+              "moves": []
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1030000,
+                  "reconciledAt": 1030000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1090000,
+                "payload": {}
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1090000,
+            "action": {
+              "kind": "deadline",
+              "key": "s1",
+              "useId": "observed",
+              "name": "stale",
+              "at": 1090000,
+              "payload": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "lost",
+                  "observedAt": 1030000,
+                  "reconciledAt": 1090000
+                },
+                "status": {
+                  "status": "lost",
+                  "enteredAt": 1090000
+                }
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1095000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1095000
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1095000,
+              "status": "running",
+              "moves": [
+                {
+                  "from": "lost",
+                  "to": "running"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1095000,
+                  "reconciledAt": 1095000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1095000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1155000,
+                "payload": {}
+              }
+            ],
+            "version": 5
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Reconcile > a stale move a guard vetoes records drift, and the deadline is spent: the row stays until a newer observation",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Sandbox",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "note",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Sandbox",
+              "uses": [
+                {
+                  "behavior": "StateRules",
+                  "config": {
+                    "states": {
+                      "lost": {
+                        "required": [
+                          "note"
+                        ]
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "pending",
+                      "starting",
+                      "running",
+                      "stopping",
+                      "stopped",
+                      "failed",
+                      "lost"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "pending",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "stopping",
+                        "permission": "sandboxes.stop"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "pending",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "starting",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "running",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopping",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "stopped",
+                        "to": "lost"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "pending"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "starting"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "running"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopping"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "stopped"
+                      },
+                      {
+                        "from": "lost",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "Reconcile",
+                  "config": {
+                    "status": "status",
+                    "unreachable": "lost",
+                    "staleAfterMs": 60000,
+                    "observePermission": "sandboxes.observe"
+                  },
+                  "anchor": {
+                    "field": "observed"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "note",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "lost": {
+                      "required": [
+                        "note"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "note",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "lost": {
+                      "required": [
+                        "note"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "note",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "s1",
+              "own": {
+                "name": "box"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "s1",
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "status": {
+                  "status": "pending",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1000000
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1000000,
+              "status": "running",
+              "moves": [
+                {
+                  "from": "pending",
+                  "to": "starting"
+                },
+                {
+                  "from": "starting",
+                  "to": "running"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1000000,
+                  "reconciledAt": 1000000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1060000,
+                "payload": {}
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "deadline",
+              "key": "s1",
+              "useId": "observed",
+              "name": "stale",
+              "at": 1060000,
+              "payload": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "lost",
+                  "observedAt": 1000000,
+                  "reconciledAt": 1000000,
+                  "drift": {
+                    "status": "running",
+                    "observed": "lost",
+                    "code": "missing_fields"
+                  }
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1210000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "running",
+                "at": 1210000
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "observed": "running",
+              "observedAt": 1210000,
+              "status": "running",
+              "moves": []
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "running",
+                  "observedAt": 1210000,
+                  "reconciledAt": 1210000
+                },
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "observed",
+                "name": "stale",
+                "at": 1270000,
+                "payload": {}
+              }
+            ],
+            "version": 4
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 8,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        }
+      ]
+    },
+    {
+      "name": "Reconcile > define refuses an unreachable some state other than a terminal one cannot reach or from which some state cannot be reached, an unreachable or a staleAfterMs alone, a status that names no Workflow, and the config's shape",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "phase",
+                  "observePermission": "x"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: status \"phase\" is not a Workflow of the type (its Workflows: status)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: status \"phase\" is not a Workflow of the type (its Workflows: status)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "observePermission": "x"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: unreachable names the state the stale deadline moves a row to, and the config gives no staleAfterMs to arm it",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: unreachable names the state the stale deadline moves a row to, and the config gives no staleAfterMs to arm it"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "staleAfterMs": 60000,
+                  "observePermission": "x"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: staleAfterMs arms a deadline that moves a row to unreachable, and the config names no unreachable state",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: staleAfterMs arms a deadline that moves a row to unreachable, and the config names no unreachable state"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "gone",
+                  "staleAfterMs": 60000,
+                  "observePermission": "x"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: unreachable \"gone\" is not a state of the type's Workflow (pending, starting, running, stopping, stopped, failed, lost)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: unreachable \"gone\" is not a state of the type's Workflow (pending, starting, running, stopping, stopped, failed, lost)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "running",
+                    "paused",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "paused"
+                    },
+                    {
+                      "from": "paused",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "paused"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: unreachable \"lost\" cannot be reached from \"running\", which is not a terminal state: the stale deadline moves a row there from any state but a terminal one",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: unreachable \"lost\" cannot be reached from \"running\", which is not a terminal state: the stale deadline moves a row there from any state but a terminal one"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: \"pending\" cannot be reached from unreachable \"lost\": an observation moves a row from it to any state",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: \"pending\" cannot be reached from unreachable \"lost\": an observation moves a row from it to any state"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: must have required property 'observePermission'",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "schema",
+                    "path": "/config",
+                    "message": "must have required property 'observePermission'"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 10,
+                  "observePermission": "x"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: /staleAfterMs: must be >= 1000",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 1,
+                    "behavior": "Reconcile",
+                    "kind": "schema",
+                    "path": "/config/staleAfterMs",
+                    "message": "must be >= 1000"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Sandbox: field observed: behavior Reconcile config: status \"status\" is not a Workflow of the type (its Workflows: none)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "observed",
+                    "index": 0,
+                    "behavior": "Reconcile",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Sandbox: field observed: behavior Reconcile config: status \"status\" is not a Workflow of the type (its Workflows: none)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "pending",
+                    "starting",
+                    "running",
+                    "stopping",
+                    "stopped",
+                    "failed",
+                    "lost"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "pending",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "stopping",
+                      "permission": "sandboxes.stop"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "pending",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "starting",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "running",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopping",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "stopped",
+                      "to": "lost"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "pending"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "starting"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "running"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopping"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "stopped"
+                    },
+                    {
+                      "from": "lost",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "unreachable": "lost",
+                  "staleAfterMs": 60000,
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Reconcile > the path is breadth first in the config's transition order: of two shortest paths the one whose first step the config lists first",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Sandbox",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Sandbox",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "left",
+                      "right",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "left"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "right"
+                      },
+                      {
+                        "from": "left",
+                        "to": "done"
+                      },
+                      {
+                        "from": "right",
+                        "to": "done"
+                      },
+                      {
+                        "from": "done",
+                        "to": "draft"
+                      }
+                    ]
+                  },
+                  "anchor": {
+                    "field": "status"
+                  }
+                },
+                {
+                  "behavior": "Reconcile",
+                  "config": {
+                    "status": "status",
+                    "observePermission": "sandboxes.observe"
+                  },
+                  "anchor": {
+                    "field": "observed"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "left",
+                    "right",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "left"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "right"
+                    },
+                    {
+                      "from": "left",
+                      "to": "done"
+                    },
+                    {
+                      "from": "right",
+                      "to": "done"
+                    },
+                    {
+                      "from": "done",
+                      "to": "draft"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Sandbox",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "left",
+                    "right",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "left"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "right"
+                    },
+                    {
+                      "from": "left",
+                      "to": "done"
+                    },
+                    {
+                      "from": "right",
+                      "to": "done"
+                    },
+                    {
+                      "from": "done",
+                      "to": "draft"
+                    }
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              },
+              {
+                "behavior": "Reconcile",
+                "config": {
+                  "status": "status",
+                  "observePermission": "sandboxes.observe"
+                },
+                "anchor": {
+                  "field": "observed"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "s1",
+              "own": {
+                "name": "box"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "s1",
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "status": {
+                  "status": "draft",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "done",
+                "at": 1001000
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "observed": "done",
+              "observedAt": 1001000,
+              "status": "done",
+              "moves": [
+                {
+                  "from": "draft",
+                  "to": "left"
+                },
+                {
+                  "from": "left",
+                  "to": "done"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "done",
+                  "observedAt": 1001000,
+                  "reconciledAt": 1001000
+                },
+                "status": {
+                  "status": "done",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Sandbox",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "poller",
+              "permissions": [
+                "sandboxes.observe"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "s1",
+              "useId": "observed",
+              "operation": "observe",
+              "params": {
+                "state": "right",
+                "at": 1002000
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "observed": "right",
+              "observedAt": 1002000,
+              "status": "right",
+              "moves": [
+                {
+                  "from": "done",
+                  "to": "draft"
+                },
+                {
+                  "from": "draft",
+                  "to": "right"
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "name": "box"
+              },
+              "owned": {
+                "observed": {
+                  "observed": "right",
+                  "observedAt": 1002000,
+                  "reconciledAt": 1002000
+                },
+                "status": {
+                  "status": "right",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    }
+  ]
+}

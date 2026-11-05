@@ -1,0 +1,6035 @@
+{
+  "file": "core-seats",
+  "source": "runtime/engine/testdata/rules/scenarios/core-seats.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile"
+  ],
+  "scenarios": [
+    {
+      "name": "Seats > a caller holding take seats itself, a repeat answers unchanged, and with onFull displace the next to take a full seat displaces the longest seated; the parameters are checked first",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Problem",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "agent",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Problem",
+              "uses": [
+                {
+                  "behavior": "Seats",
+                  "config": {
+                    "seats": {
+                      "accountable": {
+                        "max": 1,
+                        "onFull": "displace",
+                        "take": "problems.own",
+                        "assign": "problems.assign"
+                      },
+                      "handles": {
+                        "max": 2,
+                        "onFull": "refuse",
+                        "assign": "problems.release"
+                      },
+                      "responsible": {
+                        "fromField": "agent",
+                        "take": "problems.work",
+                        "assign": "problems.assign"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "handles": {
+                      "max": 2,
+                      "onFull": "refuse",
+                      "assign": "problems.release"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "handles": {
+                      "max": 2,
+                      "onFull": "refuse",
+                      "assign": "problems.release"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Flaky test"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "seat": "accountable",
+              "subject": "alice",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "alice",
+                      "seatedAt": 1001000,
+                      "seatedBy": "alice"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "seat": "accountable",
+              "subject": "alice",
+              "displaced": [],
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "alice",
+                      "seatedAt": 1001000,
+                      "seatedBy": "alice"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "accountable",
+                  "subject": "alice",
+                  "seatedAt": 1001000,
+                  "seatedBy": "alice",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "alice",
+                      "seatedAt": 1001000,
+                      "seatedBy": "alice"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "seat": "accountable",
+              "subject": "bob",
+              "displaced": [
+                "alice"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "accountable",
+                  "subject": "bob",
+                  "seatedAt": 1002000,
+                  "seatedBy": "bob",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "carol may not take a seat in Problem p1's accountable: it needs permission problems.own"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "owners"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation takeSeat of behavior Seats: /seat: \"owners\" is not a seat of Problem's Seats (accountable, handles, responsible)",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/seat",
+                    "message": "\"owners\" is not a seat of Problem's Seats (accountable, handles, responsible)"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation takeSeat of behavior Seats: /subject: a caller with no subject takes no seat itself: name the subject to seat",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/subject",
+                    "message": "a caller with no subject takes no seat itself: name the subject to seat"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles",
+                "note": "x"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation takeSeat of behavior Seats: must NOT have additional properties: note",
+              "details": {
+                "issues": [
+                  {
+                    "path": "",
+                    "message": "must NOT have additional properties: note"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Seats > a full seat under onFull refuse is seat_full; a subject leaves a seat it holds without a permission, a leave of a seat not held answers unchanged, and seating or unseating another needs the seat's assign",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Problem",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "agent",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Problem",
+              "uses": [
+                {
+                  "behavior": "Seats",
+                  "config": {
+                    "seats": {
+                      "accountable": {
+                        "max": 1,
+                        "onFull": "displace",
+                        "take": "problems.own",
+                        "assign": "problems.assign"
+                      },
+                      "handles": {
+                        "max": 2,
+                        "onFull": "refuse",
+                        "assign": "problems.release"
+                      },
+                      "responsible": {
+                        "fromField": "agent",
+                        "take": "problems.work",
+                        "assign": "problems.assign"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "handles": {
+                      "max": 2,
+                      "onFull": "refuse",
+                      "assign": "problems.release"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "handles": {
+                      "max": 2,
+                      "onFull": "refuse",
+                      "assign": "problems.release"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Flaky test"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "seat": "handles",
+              "subject": "ada",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "seat": "handles",
+              "subject": "eli",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Seats vetoes takeSeat of Problem p1: Problem p1's handles seats at most 2, and it is full (ada, eli)",
+              "details": {
+                "behavior": "Seats",
+                "action": "takeSeat",
+                "reason": "Problem p1's handles seats at most 2, and it is full (ada, eli)",
+                "vetoCode": "seat_full",
+                "vetoDetails": {
+                  "seat": "handles",
+                  "max": 2,
+                  "seated": [
+                    "ada",
+                    "eli"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "handles"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "seat": "handles",
+              "subject": "ada"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "handles"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "seat": "handles",
+              "subject": "ada",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "handles",
+                "subject": "eli"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "carol may not unseat eli from Problem p1's handles: unseating another needs permission problems.release"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "pat",
+              "permissions": [
+                "problems.release"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "handles",
+                "subject": "eli"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "seat": "handles",
+              "subject": "eli"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles",
+                "subject": "carol"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "alice may not seat carol in Problem p1's handles: seating another needs permission problems.release"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "pat",
+              "permissions": [
+                "problems.release"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "handles",
+                "subject": "carol"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "seat": "handles",
+              "subject": "carol",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "carol",
+                      "seatedAt": 1003000,
+                      "seatedBy": "pat"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {}
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "handles",
+                  "subject": "carol",
+                  "seatedAt": 1003000,
+                  "seatedBy": "pat",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "carol",
+                      "seatedAt": 1003000,
+                      "seatedBy": "pat"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible",
+                "subject": "eli"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "eli",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "carol",
+                      "seatedAt": 1003000,
+                      "seatedBy": "pat"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1004000,
+                      "seatedBy": "alice"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 7
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "responsible",
+                  "subject": "eli",
+                  "seatedAt": 1004000,
+                  "seatedBy": "alice",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "handles",
+                      "subject": "carol",
+                      "seatedAt": 1003000,
+                      "seatedBy": "pat"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1004000,
+                      "seatedBy": "alice"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 7
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Seats > fromField seats the subject the field holds: it counts toward max and is listed first, its take answers unchanged, it is never displaced, it cannot leave while the field holds it, and a new value seats the new subject",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Problem",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "agent",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Problem",
+              "uses": [
+                {
+                  "behavior": "Seats",
+                  "config": {
+                    "seats": {
+                      "responsible": {
+                        "max": 2,
+                        "onFull": "displace",
+                        "fromField": "agent",
+                        "take": "problems.work",
+                        "assign": "problems.assign"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "responsible": {
+                      "max": 2,
+                      "onFull": "displace",
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "responsible": {
+                      "max": 2,
+                      "onFull": "displace",
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "responsible",
+                  "subject": "ada",
+                  "seatedAt": null,
+                  "seatedBy": null,
+                  "fromField": true
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "ada",
+              "displaced": [],
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "eli",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ivy",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "ivy",
+              "displaced": [
+                "eli"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ivy",
+                      "seatedAt": 1002000,
+                      "seatedBy": "ivy"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Seats vetoes leaveSeat of Problem p1: ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+              "details": {
+                "behavior": "Seats",
+                "action": "leaveSeat",
+                "reason": "ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+                "vetoCode": "held_by_field",
+                "vetoDetails": {
+                  "seat": "responsible",
+                  "subject": "ada",
+                  "field": "agent"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ivy",
+                      "seatedAt": 1002000,
+                      "seatedBy": "ivy"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "responsible",
+                "subject": "ada"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Seats vetoes leaveSeat of Problem p1: ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+              "details": {
+                "behavior": "Seats",
+                "action": "leaveSeat",
+                "reason": "ada holds Problem p1's responsible through its field agent, and leaves it only when agent names another subject",
+                "vetoCode": "held_by_field",
+                "vetoDetails": {
+                  "seat": "responsible",
+                  "subject": "ada",
+                  "field": "agent"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ivy",
+                      "seatedAt": 1002000,
+                      "seatedBy": "ivy"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "agent": "eli"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ivy",
+                      "seatedAt": 1002000,
+                      "seatedBy": "ivy"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {}
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "responsible",
+                  "subject": "eli",
+                  "seatedAt": null,
+                  "seatedBy": null,
+                  "fromField": true
+                },
+                {
+                  "seat": "responsible",
+                  "subject": "ivy",
+                  "seatedAt": 1002000,
+                  "seatedBy": "ivy",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ivy",
+                      "seatedAt": 1002000,
+                      "seatedBy": "ivy"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "ada",
+              "displaced": [
+                "ivy"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1004000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {}
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "responsible",
+                  "subject": "eli",
+                  "seatedAt": null,
+                  "seatedBy": null,
+                  "fromField": true
+                },
+                {
+                  "seat": "responsible",
+                  "subject": "ada",
+                  "seatedAt": 1004000,
+                  "seatedBy": "ada",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1004000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "agent": null
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1004000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {}
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "responsible",
+                  "subject": "ada",
+                  "seatedAt": 1004000,
+                  "seatedBy": "ada",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1004000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "eli",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1004000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Seats > an update that gives a fromField a subject not seated takes the seat as a take would: past a full seat's max it is seat_full under onFull refuse, naming the field and the subject, and under displace the longest seated leaves; a subject seated already moves into the field",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Problem",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "owner",
+              "type": "string"
+            },
+            {
+              "name": "agent",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Problem",
+              "uses": [
+                {
+                  "behavior": "Seats",
+                  "config": {
+                    "seats": {
+                      "owners": {
+                        "max": 2,
+                        "fromField": "owner",
+                        "take": "problems.work"
+                      },
+                      "responsible": {
+                        "max": 2,
+                        "onFull": "displace",
+                        "fromField": "agent",
+                        "take": "problems.work"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "owner",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "owners": {
+                      "max": 2,
+                      "fromField": "owner",
+                      "take": "problems.work"
+                    },
+                    "responsible": {
+                      "max": 2,
+                      "onFull": "displace",
+                      "fromField": "agent",
+                      "take": "problems.work"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "owners": {
+                      "max": 2,
+                      "fromField": "owner",
+                      "take": "problems.work"
+                    },
+                    "responsible": {
+                      "max": 2,
+                      "onFull": "displace",
+                      "fromField": "agent",
+                      "take": "problems.work"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "owner",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Flaky test"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "owners"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "seat": "owners",
+              "subject": "ada",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "owners"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "seat": "owners",
+              "subject": "eli",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "owner": "ivy"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Seats vetoes update of Problem p1: Problem p1's owners seats at most 2, and it is full (ada, eli): owner cannot seat ivy in it",
+              "details": {
+                "behavior": "Seats",
+                "action": "update",
+                "reason": "Problem p1's owners seats at most 2, and it is full (ada, eli): owner cannot seat ivy in it",
+                "vetoCode": "seat_full",
+                "vetoDetails": {
+                  "seat": "owners",
+                  "max": 2,
+                  "seated": [
+                    "ada",
+                    "eli"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "owner": "eli"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "owner": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {
+                "seat": "owners"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "owners",
+                  "subject": "eli",
+                  "seatedAt": 1002000,
+                  "seatedBy": "eli",
+                  "fromField": true
+                },
+                {
+                  "seat": "owners",
+                  "subject": "ada",
+                  "seatedAt": 1001000,
+                  "seatedBy": "ada",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "owner": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "ada",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "owner": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1003000,
+                      "seatedBy": "ada"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "eli",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "owner": "eli"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000003",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "ada",
+                      "seatedAt": 1003000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000004",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1004000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "agent": "ivy"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "owner": "eli",
+                "agent": "ivy"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000004",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1004000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 7
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "listSeats",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "seat": "responsible",
+                  "subject": "ivy",
+                  "seatedAt": null,
+                  "seatedBy": null,
+                  "fromField": true
+                },
+                {
+                  "seat": "responsible",
+                  "subject": "eli",
+                  "seatedAt": 1004000,
+                  "seatedBy": "eli",
+                  "fromField": false
+                }
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "owner": "eli",
+                "agent": "ivy"
+              },
+              "owned": {}
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "ada",
+                      "seatedAt": 1001000,
+                      "seatedBy": "ada"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "owners",
+                      "subject": "eli",
+                      "seatedAt": 1002000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000004",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1004000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 7
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Seats > a Workflow transition whose by names a seat is made by a subject seated there, through an occupant row or its field; another caller is not_principal naming the seat as by lists it, and overridePermission moves past it",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Problem",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "agent",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Problem",
+              "uses": [
+                {
+                  "behavior": "Seats",
+                  "config": {
+                    "seats": {
+                      "accountable": {
+                        "max": 1,
+                        "onFull": "displace",
+                        "take": "problems.own",
+                        "assign": "problems.assign"
+                      },
+                      "responsible": {
+                        "fromField": "agent",
+                        "take": "problems.work",
+                        "assign": "problems.assign"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "working",
+                      "review",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "working",
+                        "by": [
+                          "seat:responsible"
+                        ]
+                      },
+                      {
+                        "from": "working",
+                        "to": "review",
+                        "by": [
+                          "seat:responsible"
+                        ]
+                      },
+                      {
+                        "from": "review",
+                        "to": "done",
+                        "by": [
+                          "seat:accountable"
+                        ]
+                      },
+                      {
+                        "from": "review",
+                        "to": "working",
+                        "by": [
+                          "agent",
+                          "seat:accountable"
+                        ]
+                      }
+                    ],
+                    "overridePermission": "problems.override"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "working",
+                    "review",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "working",
+                      "by": [
+                        "seat:responsible"
+                      ]
+                    },
+                    {
+                      "from": "working",
+                      "to": "review",
+                      "by": [
+                        "seat:responsible"
+                      ]
+                    },
+                    {
+                      "from": "review",
+                      "to": "done",
+                      "by": [
+                        "seat:accountable"
+                      ]
+                    },
+                    {
+                      "from": "review",
+                      "to": "working",
+                      "by": [
+                        "agent",
+                        "seat:accountable"
+                      ]
+                    }
+                  ],
+                  "overridePermission": "problems.override"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "working",
+                    "review",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "working",
+                      "by": [
+                        "seat:responsible"
+                      ]
+                    },
+                    {
+                      "from": "working",
+                      "to": "review",
+                      "by": [
+                        "seat:responsible"
+                      ]
+                    },
+                    {
+                      "from": "review",
+                      "to": "done",
+                      "by": [
+                        "seat:accountable"
+                      ]
+                    },
+                    {
+                      "from": "review",
+                      "to": "working",
+                      "by": [
+                        "agent",
+                        "seat:accountable"
+                      ]
+                    }
+                  ],
+                  "overridePermission": "problems.override"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "working"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Problem p1: carol may not move Problem p1 from open to working: the transition is made by a subject seated in responsible",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "carol may not move Problem p1 from open to working: the transition is made by a subject seated in responsible",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "working",
+                  "by": [
+                    "seat:responsible"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "working"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "working"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "working",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "responsible"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "seat": "responsible",
+              "subject": "eli",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "working",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "eli",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "review"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "working",
+              "to": "review"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "ada",
+              "permissions": [
+                "problems.work"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Problem p1: ada may not move Problem p1 from review to done: the transition is made by a subject seated in accountable",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "ada may not move Problem p1 from review to done: the transition is made by a subject seated in accountable",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "review",
+                  "to": "done",
+                  "by": [
+                    "seat:accountable"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "seat": "accountable",
+              "subject": "bob",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1003000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1003000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "working"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Problem p1: carol may not move Problem p1 from review to working: the transition is made by the subject agent holds or a subject seated in accountable",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "carol may not move Problem p1 from review to working: the transition is made by the subject agent holds or a subject seated in accountable",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "review",
+                  "to": "working",
+                  "by": [
+                    "agent",
+                    "seat:accountable"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1002000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1003000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1004000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "from": "review",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "Flaky test",
+                "agent": "ada"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1004000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "responsible",
+                      "subject": "eli",
+                      "seatedAt": 1001000,
+                      "seatedBy": "eli"
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1003000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "create",
+              "id": "p2",
+              "own": {
+                "title": "Second"
+              },
+              "params": {}
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "key": "p2",
+            "row": {
+              "own": {
+                "title": "Second"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "mod",
+              "permissions": [
+                "problems.override"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "working"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "working"
+            },
+            "row": {
+              "own": {
+                "title": "Second"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "working",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "p2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "review"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Problem p2: alice may not move Problem p2 from working to review: the transition is made by a subject seated in responsible",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "alice may not move Problem p2 from working to review: the transition is made by a subject seated in responsible",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "working",
+                  "to": "review",
+                  "by": [
+                    "seat:responsible"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Second"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "working",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 13,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Seats > a StateRules state whose by names a seat lets a subject seated there, before the update, change a field it freezes, and no other caller, the refusal naming the seat",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Problem",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "agent",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Problem",
+              "uses": [
+                {
+                  "behavior": "Seats",
+                  "config": {
+                    "seats": {
+                      "accountable": {
+                        "max": 1,
+                        "take": "problems.own"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "StateRules",
+                  "config": {
+                    "states": {
+                      "review": {
+                        "frozen": [
+                          "title"
+                        ],
+                        "by": [
+                          "seat:accountable"
+                        ]
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "review"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "review"
+                      },
+                      {
+                        "from": "review",
+                        "to": "open"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "take": "problems.own"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "review": {
+                      "frozen": [
+                        "title"
+                      ],
+                      "by": [
+                        "seat:accountable"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "review"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "review"
+                    },
+                    {
+                      "from": "review",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "take": "problems.own"
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "review": {
+                      "frozen": [
+                        "title"
+                      ],
+                      "by": [
+                        "seat:accountable"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "review"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "review"
+                    },
+                    {
+                      "from": "review",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Draft"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Draft"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "review"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "review"
+            },
+            "row": {
+              "own": {
+                "title": "Draft"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "title": "Mine"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior StateRules vetoes update of Problem p1: Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+              "details": {
+                "behavior": "StateRules",
+                "action": "update",
+                "reason": "Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+                "vetoCode": "frozen_fields",
+                "vetoDetails": {
+                  "state": "review",
+                  "fields": [
+                    "title"
+                  ],
+                  "by": [
+                    "seat:accountable"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Draft"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "takeSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "seat": "accountable",
+              "subject": "bob",
+              "displaced": []
+            },
+            "row": {
+              "own": {
+                "title": "Draft"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "title": "Reviewed"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Reviewed"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "subRows": {
+              "Seats": {
+                "occupants": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "seat": "accountable",
+                      "subject": "bob",
+                      "seatedAt": 1002000,
+                      "seatedBy": "bob"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "operation",
+              "key": "p1",
+              "useId": "Seats",
+              "operation": "leaveSeat",
+              "params": {
+                "seat": "accountable"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "seat": "accountable",
+              "subject": "bob"
+            },
+            "row": {
+              "own": {
+                "title": "Reviewed"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Problem",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": [
+                "problems.own"
+              ]
+            },
+            "now": 1002000,
+            "action": {
+              "kind": "update",
+              "key": "p1",
+              "patch": {
+                "title": "Again"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior StateRules vetoes update of Problem p1: Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+              "details": {
+                "behavior": "StateRules",
+                "action": "update",
+                "reason": "Problem p1 is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it",
+                "vetoCode": "frozen_fields",
+                "vetoDetails": {
+                  "state": "review",
+                  "fields": [
+                    "title"
+                  ],
+                  "by": [
+                    "seat:accountable"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Reviewed"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "review",
+                  "enteredAt": 1001000
+                }
+              }
+            },
+            "version": 5
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 11,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Seats > define refuses a seat a by names that the type's Seats lacks, or on a type with no Seats, an onFull with no max, a fromField that is no field or holds no subject, and Seats' config shape",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "working"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "working",
+                      "by": [
+                        "seat:responsible"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:responsible\" in by, a seat of Seats, which Problem does not implement",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:responsible\" in by, a seat of Seats, which Problem does not implement"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "working"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "working",
+                      "by": [
+                        "seat:owners"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:owners\" in by, which is not a seat of Problem's Seats (its seats: accountable)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 1,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior Workflow config: the transition from \"open\" to \"working\" names \"seat:owners\" in by, which is not a seat of Problem's Seats (its seats: accountable)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "working": {
+                      "frozen": [
+                        "title"
+                      ],
+                      "by": [
+                        "seat:accountable"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "working"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "working"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior StateRules config: states.working.by names \"seat:accountable\", a seat of Seats, which Problem does not implement",
+              "details": {
+                "issues": [
+                  {
+                    "use": "StateRules",
+                    "index": 0,
+                    "behavior": "StateRules",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior StateRules config: states.working.by names \"seat:accountable\", a seat of Seats, which Problem does not implement"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "working": {
+                      "frozen": [
+                        "title"
+                      ],
+                      "by": [
+                        "seat:owners"
+                      ]
+                    }
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "working"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "working"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior StateRules config: states.working.by names \"seat:owners\", which is not a seat of Problem's Seats (its seats: accountable)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "StateRules",
+                    "index": 1,
+                    "behavior": "StateRules",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior StateRules config: states.working.by names \"seat:owners\", which is not a seat of Problem's Seats (its seats: accountable)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "handles": {
+                      "onFull": "refuse"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Seats config: seats.handles.onFull names what a full seat does, and handles has no max to fill",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Seats",
+                    "index": 0,
+                    "behavior": "Seats",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior Seats config: seats.handles.onFull names what a full seat does, and handles has no max to fill"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "responsible": {
+                      "fromField": "owner"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Seats config: seats.responsible.fromField: owner is not a field of Problem (its fields: title, agent, count)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Seats",
+                    "index": 0,
+                    "behavior": "Seats",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior Seats config: seats.responsible.fromField: owner is not a field of Problem (its fields: title, agent, count)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "responsible": {
+                      "fromField": "count"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Seats config: seats.responsible.fromField names count, a number field of Problem: fromField names a field that holds a subject (string, Identity.UUID or Identity.UserID)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Seats",
+                    "index": 0,
+                    "behavior": "Seats",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Problem: behavior Seats config: seats.responsible.fromField names count, a number field of Problem: fromField names a field that holds a subject (string, Identity.UUID or Identity.UserID)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {}
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Seats config: /seats: must NOT have fewer than 1 properties",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Seats",
+                    "index": 0,
+                    "behavior": "Seats",
+                    "kind": "schema",
+                    "path": "/config/seats",
+                    "message": "must NOT have fewer than 1 properties"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 0,
+                      "onFull": "evict"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Problem: behavior Seats config: /seats/accountable/max: must be >= 1; type Problem: behavior Seats config: /seats/accountable/onFull: must be one of \"refuse\", \"displace\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Seats",
+                    "index": 0,
+                    "behavior": "Seats",
+                    "kind": "schema",
+                    "path": "/config/seats/accountable/max",
+                    "message": "must be >= 1"
+                  },
+                  {
+                    "use": "Seats",
+                    "index": 0,
+                    "behavior": "Seats",
+                    "kind": "schema",
+                    "path": "/config/seats/accountable/onFull",
+                    "message": "must be one of \"refuse\", \"displace\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Problem",
+            "uses": [
+              {
+                "behavior": "Seats",
+                "config": {
+                  "seats": {
+                    "accountable": {
+                      "max": 1,
+                      "onFull": "displace",
+                      "take": "problems.own",
+                      "assign": "problems.assign"
+                    },
+                    "handles": {
+                      "max": 2,
+                      "onFull": "refuse",
+                      "assign": "problems.release"
+                    },
+                    "responsible": {
+                      "fromField": "agent",
+                      "take": "problems.work",
+                      "assign": "problems.assign"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "agent",
+                "type": "string"
+              },
+              {
+                "name": "count",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "problems.own",
+                "problems.assign"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    }
+  ]
+}

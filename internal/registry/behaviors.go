@@ -27,10 +27,12 @@ type BehaviorSpec struct {
 	// "<extension>.<Name>".
 	Extension string
 	// Package is the npm package whose implementation runs the behavior in
-	// an engine (the core's are "@superschematic/engine" and
-	// "@superschematic/engine-workqueue"), so the behaviors command can
-	// write each package's declarations into that package (--package).
-	// Optional; when set it is an npm package name.
+	// an engine (the core's are "@superschematic/engine",
+	// "@superschematic/engine-workqueue" and
+	// "@superschematic/engine-commerce"), or RulesPackage for a behavior the
+	// behaviors' core alone implements, which no engine registers (D104), so
+	// the behaviors command can write each package's declarations into that
+	// package (--package). Optional; when set it is an npm package name.
 	Package string
 	// Rust is the Rust crate whose implementation runs an extension's
 	// behavior in the Rust engine (D58): a crate implementing the engine's
@@ -196,6 +198,13 @@ type BehaviorField struct {
 	// for its caller, and no event patch, create event or reference move
 	// records it. Only a volatile field is per reader.
 	PerReader bool `json:"perReader,omitempty"`
+	// Optional is true for a declaration's value field the behavior does
+	// not set when a row is created (Reconcile's observed, D104): on a table
+	// its field is optional, its column takes NULL. Only the value field is:
+	// every other field a table takes is optional already. Only a behavior
+	// the behaviors' core alone implements (RulesPackage) declares it, since
+	// an engine's declaration parser refuses the key.
+	Optional bool `json:"optional,omitempty"`
 }
 
 // BehaviorFieldPath is a behavior field's qualified name: the behavior's
@@ -342,13 +351,17 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // other than "instance" or "schema"; a signal whose name is not camelCase
 // or repeats, whose paramsSchema is absent or does not compile, or whose
 // access is not "read", "write" or "operation"; a field name that is not an
-// identifier or repeats, a volatile field with a type, and a value that
-// names no field of the declaration; a preconditionSchema that does not compile, is
+// identifier or repeats, a volatile field with a type, an optional field
+// that is volatile, not the value field, or of a behavior an engine runs
+// (any Package but RulesPackage, which an engine's declaration parser
+// would refuse), and a value that names no field of the declaration; a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
 // sub-table whose name is not camelCase or repeats, whose key names no
 // string field of it, or whose field is untyped, volatile or named id
 // (checkBehaviorTables); a veto code that is not lowercase snake case of at
-// most 64 characters, or repeats; a Package that is not an npm package name; and a Rust crate on a
+// most 64 characters, or repeats; a Package that is not an npm package
+// name, or that is RulesPackage on an extension's behavior, which runs in
+// its engine; and a Rust crate on a
 // core behavior, or one whose crate is not a Cargo package name, whose
 // path is empty, absolute or not clean, or whose register expression is
 // not a path into the crate (checkBehaviorRust). Finalize checks what needs
@@ -378,6 +391,9 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if spec.Package != "" && (len(spec.Package) > 214 || !npmPackageName.MatchString(spec.Package)) {
 		return fmt.Errorf("registry: behavior %s package %q is not an npm package name", decl.Name, spec.Package)
 	}
+	if spec.Package == RulesPackage && spec.Extension != "" {
+		return fmt.Errorf("registry: behavior %s of extension %s names package %s, the behaviors' core, which implements the core's behaviors alone: an extension's behavior runs in its engine (D58)", decl.Name, spec.Extension, RulesPackage)
+	}
 	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rust); err != nil {
 		return err
 	}
@@ -400,6 +416,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	}
 	if err := checkBehaviorFields(decl); err != nil {
 		return err
+	}
+	if spec.Package != RulesPackage {
+		for _, field := range decl.Fields {
+			if field.Optional {
+				return fmt.Errorf("registry: behavior %s field %s is optional, which only a behavior the behaviors' core alone implements (package %s) declares: an engine's declaration parser refuses the key", decl.Name, field.Name, RulesPackage)
+			}
+		}
 	}
 	if err := checkBehaviorTables(decl); err != nil {
 		return err
@@ -521,6 +544,12 @@ func checkBehaviorFields(decl BehaviorDeclaration) error {
 		}
 		if field.Type != "" && field.Volatile {
 			return fmt.Errorf("registry: behavior %s field %s is volatile and has a type: a value computed at a read takes no column", decl.Name, field.Name)
+		}
+		if field.Optional && field.Volatile {
+			return fmt.Errorf("registry: behavior %s field %s is optional and volatile: only a value field the behavior keeps is optional", decl.Name, field.Name)
+		}
+		if field.Optional && field.Name != decl.Value {
+			return fmt.Errorf("registry: behavior %s field %s is optional, and only its value field may be: every other field a table takes is optional already", decl.Name, field.Name)
 		}
 	}
 	if decl.Value != "" && !seen[decl.Value] {

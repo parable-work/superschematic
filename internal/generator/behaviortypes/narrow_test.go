@@ -14,11 +14,14 @@ import (
 // Each core narrowing types only fields its behavior declares, so a field a
 // declaration renames fails here, whether or not a golden composes the
 // behavior. Variants is left out: its config names the type's own fields,
-// and it declares none.
+// and it declares none. Reconcile reads the Workflow its status names, so
+// its config names the item's.
 func TestCoreNarrowingsTypeDeclaredFields(t *testing.T) {
 	reg := registry.New(naming.Default())
 	document := ir.NewSchema("items", ir.SchemaKindGeneral)
-	target := Target{Schema: "items", Base: "Item", Document: document, Instance: &ir.TypeDef{Name: "Item"}}
+	item := &ir.TypeDef{Name: "Item", Behaviors: []ir.BehaviorRef{{Name: "Workflow", Field: "status", Config: json.RawMessage(`{"states": ["open"], "transitions": []}`)}}}
+	target := Target{Schema: "items", Base: "Item", Document: document, Instance: item}
+	configs := map[string]json.RawMessage{"Reconcile": json.RawMessage(`{"status": "status", "observePermission": "items.observe"}`)}
 	for _, name := range NarrowerNames() {
 		if name == "Variants" {
 			continue
@@ -28,7 +31,7 @@ func TestCoreNarrowingsTypeDeclaredFields(t *testing.T) {
 			t.Errorf("%s has a narrowing and no declaration", name)
 			continue
 		}
-		if _, err := Narrow(declaration, nil, target); err != nil {
+		if _, err := Narrow(declaration, configs[name], target); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -486,6 +489,99 @@ func TestNarrowBudgetOfATableAndOfAnEngineType(t *testing.T) {
 		}
 		if meter, _ := at(n.Params["reserve"], "properties", "meter"); meter[RefKey] != nil {
 			t.Errorf("instance %v: reserve's meter = %v, want the declaration's string", instance, meter)
+		}
+	}
+}
+
+// Seats (D104): its seats are the alias <Base>Seat, which every
+// operation's seat names, the take and leave results' and listSeats'
+// items' too; its seats' take and assign are the narrowing's Permissions,
+// sorted, each once; and it types no field, keeping none.
+func TestNarrowSeats(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Seats")
+	config := json.RawMessage(`{"seats": {"responsible": {"fromField": "agent", "take": "problems.work", "assign": "problems.assign"}, "accountable": {"max": 1, "onFull": "displace", "take": "problems.own", "assign": "problems.assign"}, "handles": {"max": 5}}}`)
+	table := &ir.TypeDef{Name: "Problem", Behaviors: []ir.BehaviorRef{{Name: "Seats", Implements: true}}}
+	n, err := Narrow(declaration, config, Target{Schema: "problems", Base: "ProblemSeats", Document: ir.NewSchema("problems", ir.SchemaKindDB), Instance: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "ProblemSeatsSeat" || n.Aliases[0].Doc != "A seat of a ProblemSeats's Seats." {
+		t.Fatalf("aliases = %+v, want ProblemSeatsSeat", n.Aliases)
+	}
+	if values := stringsOf(n.Aliases[0].Schema.(map[string]any)["enum"]); !slices.Equal(values, []string{"accountable", "handles", "responsible"}) {
+		t.Errorf("ProblemSeatsSeat = %v, want accountable, handles and responsible", values)
+	}
+	for _, op := range []string{"takeSeat", "leaveSeat", "listSeats"} {
+		if seat, err := at(n.Params[op], "properties", "seat"); err != nil || seat[RefKey] != "ProblemSeatsSeat" {
+			t.Errorf("%s's seat = %v (%v), want ProblemSeatsSeat", op, seat, err)
+		}
+	}
+	for op, path := range map[string][]string{"takeSeat": {"properties", "seat"}, "leaveSeat": {"properties", "seat"}, "listSeats": {"properties", "items", "items", "properties", "seat"}} {
+		if seat, err := at(n.Results[op], path...); err != nil || seat[RefKey] != "ProblemSeatsSeat" {
+			t.Errorf("%s's result's seat = %v (%v), want ProblemSeatsSeat", op, seat, err)
+		}
+	}
+	if want := []string{"problems.assign", "problems.own", "problems.work"}; !slices.Equal(n.Permissions, want) {
+		t.Errorf("permissions = %v, want %v", n.Permissions, want)
+	}
+	if len(n.Fields) != 0 || !slices.Equal(n.Vetoes, []string{"seat_full", "held_by_field"}) {
+		t.Errorf("fields = %v, vetoes = %v, want none and seat_full and held_by_field", n.Fields, n.Vetoes)
+	}
+}
+
+// Reconcile (D104): the states of the Workflow its status names are the
+// alias <Base>State, which the observed field names, absent before the
+// first observation, and observe's state, its result's observed, each
+// move's from and to and drift's status and observed; the result's status
+// names it or null. A status that names no Workflow of the table is
+// refused, naming the table and the field.
+func TestNarrowReconcile(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Reconcile")
+	config := json.RawMessage(`{"status": "status", "observePermission": "sandboxes.observe"}`)
+	table := &ir.TypeDef{Name: "Sandbox", Behaviors: []ir.BehaviorRef{
+		{Name: "Workflow", Field: "phase", Config: json.RawMessage(`{"states": ["new", "old"], "transitions": []}`)},
+		{Name: "Workflow", Field: "status", Config: json.RawMessage(`{"states": ["pending", "running", "lost"], "transitions": []}`)},
+		{Name: "Reconcile", Field: "observed", Config: config},
+	}}
+	target := Target{Schema: "sandboxes", Base: "SandboxObserved", Document: ir.NewSchema("sandboxes", ir.SchemaKindDB), Instance: table}
+	n, err := Narrow(declaration, config, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "SandboxObservedState" || n.Aliases[0].Doc != "A state a SandboxObserved's Reconcile reports, one of the states of Sandbox.status." {
+		t.Fatalf("aliases = %+v, want SandboxObservedState", n.Aliases)
+	}
+	if values := stringsOf(n.Aliases[0].Schema.(map[string]any)["enum"]); !slices.Equal(values, []string{"pending", "running", "lost"}) {
+		t.Errorf("SandboxObservedState = %v, want the states of status", values)
+	}
+	if field := n.Fields["observed"]; field.Present || field.Schema.(map[string]any)[RefKey] != "SandboxObservedState" {
+		t.Errorf("observed = %+v, want SandboxObservedState, absent before the first observation", field)
+	}
+	for name, kind := range map[string]string{"observedAt": "integer", "drift": "object", "reconciledAt": "integer"} {
+		if field, ok := n.Fields[name]; !ok || field.Present || field.Schema.(map[string]any)["type"] != kind {
+			t.Errorf("%s = %+v, want an optional %s", name, field, kind)
+		}
+	}
+	if state, err := at(n.Params["observe"], "properties", "state"); err != nil || state[RefKey] != "SandboxObservedState" {
+		t.Errorf("observe's state = %v (%v), want SandboxObservedState", state, err)
+	}
+	for _, path := range [][]string{{"properties", "observed"}, {"properties", "moves", "items", "properties", "from"}, {"properties", "moves", "items", "properties", "to"},
+		{"properties", "drift", "properties", "status"}, {"properties", "drift", "properties", "observed"}} {
+		if node, err := at(n.Results["observe"], path...); err != nil || node[RefKey] != "SandboxObservedState" || node["nullable"] != nil {
+			t.Errorf("observe's result at %v = %v (%v), want SandboxObservedState", path, node, err)
+		}
+	}
+	if status, err := at(n.Results["observe"], "properties", "status"); err != nil || status[RefKey] != "SandboxObservedState" || status["nullable"] != true {
+		t.Errorf("observe's result's status = %v (%v), want SandboxObservedState or null", status, err)
+	}
+	for _, test := range []struct{ config, want string }{
+		{`{"status": "phase2", "observePermission": "x"}`, `table Sandbox: status "phase2" is not a field of Sandbox that is a Workflow`},
+		{`{"status": "observed", "observePermission": "x"}`, `table Sandbox: status "observed" is not a field of Sandbox that is a Workflow`},
+	} {
+		if _, err := Narrow(declaration, json.RawMessage(test.config), target); err == nil || err.Error() != test.want {
+			t.Errorf("%s: err = %v, want %s", test.config, err, test.want)
 		}
 	}
 }

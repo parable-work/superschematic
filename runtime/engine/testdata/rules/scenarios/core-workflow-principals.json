@@ -3500,12 +3500,12 @@
           "error": {
             "class": "SchemaDocumentError",
             "code": "invalid_schema",
-            "message": "schema: /types/Question/behaviors/0/config: type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)",
+            "message": "schema: /types/Question/behaviors/0/config: type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which Question does not implement",
             "details": {
               "issues": [
                 {
                   "path": "/types/Question/behaviors/0/config",
-                  "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"
+                  "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which Question does not implement"
                 }
               ]
             }

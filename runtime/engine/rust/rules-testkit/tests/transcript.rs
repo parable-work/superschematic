@@ -13,7 +13,9 @@
 //! transcript` rewrites them; review the diff before keeping them. So are
 //! the transcripts of the hand-written scenario files
 //! (`runtime/engine/testdata/rules/scenarios`, D104), which hold each
-//! command's row version beside what it answers.
+//! command's row version beside what it answers, Seats' and Reconcile's
+//! (`core-seats`, `core-reconcile`) among them, the first of behaviors no
+//! engine implements.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -220,6 +222,28 @@ const RETRIES_WAITS_FLOOR: usize = 134;
 /// this one.
 const PERIODS_AND_PRESENCE_FLOOR: usize = 77;
 
+/// The steps `core-seats.transcript.json` holds, of the hand-written
+/// `core-seats.json`'s 97 (D104, step 3): 22 define and publish checks,
+/// nine of them refused, and 66 commands, creates, updates (one a
+/// fromField's refused seat_full), transitions and Seats' operations, four
+/// of them repeats answered unchanged, each holding its row's version after
+/// the step, with its occupants as its sub-rows, in its 7 scenarios. The 9
+/// left out are the opens and the reads of rows. An adapter's replay holds
+/// its own count to this one.
+const SEATS_FLOOR: usize = 88;
+
+/// The steps `core-reconcile.transcript.json` holds, of the hand-written
+/// `core-reconcile.json`'s 76 (D104, step 3): 22 define and publish checks,
+/// nine of them refused, and 36 commands, creates, an update, Lease's
+/// acquire, observations and the 2 deadlines the runner's runDue ran (a
+/// stale move to unreachable, and one a guard vetoed), two of them repeats
+/// answered unchanged, each holding its row's version after the step, with
+/// its stale deadline as its armed deadline, in its 7 scenarios, whose
+/// Workflow and Reconcile are anchored on fields. The 18 left out are the
+/// opens, the reads of rows and the runDues that ran nothing. An adapter's
+/// replay holds its own count to this one.
+const RECONCILE_FLOOR: usize = 58;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -286,6 +310,8 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
             PERIODS_AND_PRESENCE_FLOOR,
             false,
         ),
+        ("core-seats", SEATS_FLOOR, true),
+        ("core-reconcile", RECONCILE_FLOOR, true),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

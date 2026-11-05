@@ -86,6 +86,13 @@ func TestWriteTypesGolden(t *testing.T) {
 		// sub-tables and deadlines, Session's deadline, and Account's and
 		// Workspace's meters, holds and buckets, none with a repository.
 		{service: "fixture-agents-db", behaviors: true},
+		// A table that implements Seats beside its StateRules and its
+		// Workflow, whose by name seats, and a table whose Reconcile field
+		// follows its Workflow field (D104): Seats' operations under seats
+		// and its sub-table of occupants with no repository, no upserts,
+		// and Sandbox's observed, optional and typed as its Workflow's
+		// states, with its observe and its deadline queue.
+		{service: "fixture-seats-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

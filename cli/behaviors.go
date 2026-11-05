@@ -52,9 +52,11 @@ newline, whatever the source file's layout. Other *.behavior.json files in
 the directory are removed. With --package, only the behaviors that npm
 package ships are written: the core's behaviors ship in
 @superschematic/engine (the crate runtime/engine/rust/behaviors),
-@superschematic/engine-workqueue (runtime/engine-workqueue/rust) and
-@superschematic/engine-commerce (runtime/engine-commerce/rust), and each
-crate carries only its own. With --extension, only the behaviors that
+@superschematic/engine-workqueue (runtime/engine-workqueue/rust),
+@superschematic/engine-commerce (runtime/engine-commerce/rust) and
+@superschematic/rules (runtime/engine/rust/rules-behaviors/declarations,
+the behaviors the behaviors' core alone implements, on a table, D104), and
+each crate carries only its own. With --extension, only the behaviors that
 extension registered are written. Given both, a behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
@@ -65,6 +67,7 @@ copy.
 Examples:
   superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
   superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
+  superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
   acme-schematic behaviors --extension acme --out crates/behaviors/declarations
   acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check`,
 		Args: cobra.NoArgs,
@@ -75,7 +78,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "directory the <name>.behavior.json files go in (required)")
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
-	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package ships (@superschematic/engine, @superschematic/engine-workqueue)")
+	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package ships (@superschematic/engine, @superschematic/engine-workqueue, @superschematic/engine-commerce, @superschematic/rules)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

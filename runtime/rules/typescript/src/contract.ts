@@ -270,6 +270,8 @@ export interface DeclaredField {
   readonly type?: string;
   readonly volatile?: boolean;
   readonly perReader?: boolean;
+  /** True for a value field the behavior does not set when a row is created (Reconcile's observed, D104): on a table its column takes NULL. Only a declaration's value field says it. */
+  readonly optional?: boolean;
 }
 
 /** A sub-table a behavior declares, as its declaration file has it: its name, the field whose value keys a row within its row, and its typed fields, the key among them. */

@@ -1,0 +1,573 @@
+{
+  "name": "fixture-seats-db",
+  "kind": "DB",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "TemporalDateTime",
+        "json_schema": "string",
+        "python": "datetime.datetime",
+        "rust": "chrono::DateTime\u003cchrono::Utc\u003e",
+        "sql": "TIMESTAMPTZ",
+        "typescript": "JSDate"
+      },
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "Problem": {
+      "name": "Problem",
+      "owner": "src/problems.schema.ts",
+      "comment": "A record of work (D104). It has one accountable person, whom the next to\ntake the seat displaces; any number of responsible agents, the record's\nown agent always among them; and at most five handles, which any caller\nmay claim and only the agent that claimed one, or a person who may\nrelease another's, releases. Only a responsible subject starts and\nsubmits the record, only the accountable person closes it or sends it\nback, and in review only the accountable person edits its title.",
+      "role": "DBTable",
+      "behaviors": [
+        {
+          "name": "Seats",
+          "implements": true,
+          "config": {
+            "seats": {
+              "accountable": {
+                "assign": "problems.assign",
+                "max": 1,
+                "onFull": "displace",
+                "take": "problems.own"
+              },
+              "handles": {
+                "assign": "problems.release",
+                "max": 5
+              },
+              "responsible": {
+                "assign": "problems.assign",
+                "fromField": "agent",
+                "take": "problems.work"
+              }
+            }
+          }
+        },
+        {
+          "name": "StateRules",
+          "implements": true,
+          "config": {
+            "states": {
+              "review": {
+                "by": [
+                  "seat:accountable"
+                ],
+                "frozen": [
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "name": "Workflow",
+          "field": "status",
+          "config": {
+            "overridePermission": "problems.override",
+            "states": [
+              "open",
+              "working",
+              "review",
+              "done"
+            ],
+            "transitions": [
+              {
+                "by": [
+                  "seat:responsible"
+                ],
+                "from": "open",
+                "to": "working"
+              },
+              {
+                "by": [
+                  "seat:responsible"
+                ],
+                "from": "working",
+                "to": "review"
+              },
+              {
+                "by": [
+                  "seat:accountable"
+                ],
+                "from": "review",
+                "to": "done"
+              },
+              {
+                "by": [
+                  "seat:accountable"
+                ],
+                "from": "review",
+                "to": "working"
+              }
+            ]
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "agent",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "status",
+          "description": "The state the instance is in.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "status",
+            "value": true
+          }
+        },
+        {
+          "name": "statusEnteredAt",
+          "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "enteredAt"
+          }
+        }
+      ],
+      "optimistic": true
+    },
+    "ProblemSeatsOccupants": {
+      "name": "ProblemSeatsOccupants",
+      "owner": "src/problems.schema.ts",
+      "comment": "One row per subject seated on the row, keyed by its number, the order they were seated in: the seat, the subject, and when and by whom it was seated. A leave or a displacement deletes its row; the subject a seat's fromField holds needs none.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "problem",
+          "description": "The Problem row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Problem"
+          },
+          "required": true,
+          "relation": {
+            "type": "Problem",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "number",
+          "description": "The occupant's number on the row, one past the greatest when it was seated, in ten digits zero-padded so the key's order is theirs.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "seat",
+          "description": "The seat.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "subject",
+          "description": "The subject seated, a hyphenated UUID kept in base62.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "seatedAt",
+          "description": "When it was seated, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "seatedBy",
+          "description": "The subject of the caller who seated it: the subject itself, or the one who assigned it.",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "problem",
+            "number"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Problem",
+        "use": "Seats",
+        "behavior": "Seats",
+        "table": "occupants",
+        "key": "number",
+        "rowField": "problem"
+      }
+    },
+    "Sandbox": {
+      "name": "Sandbox",
+      "owner": "src/sandboxes.schema.ts",
+      "comment": "A sandbox a provider runs (D104). Its status follows the state the\nprovider reports, through observe, each step a transition its Workflow\nallows as the observer, so a stop needs sandboxes.stop of the observer\ntoo; when no report has reached it for five minutes its status moves to\nunreachable, and any report brings it back.",
+      "role": "DBTable",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "field": "status",
+          "config": {
+            "states": [
+              "pending",
+              "starting",
+              "running",
+              "stopping",
+              "stopped",
+              "failed",
+              "unreachable"
+            ],
+            "transitions": [
+              {
+                "from": "pending",
+                "to": "starting"
+              },
+              {
+                "from": "starting",
+                "to": "running"
+              },
+              {
+                "from": "running",
+                "permission": "sandboxes.stop",
+                "to": "stopping"
+              },
+              {
+                "from": "stopping",
+                "to": "stopped"
+              },
+              {
+                "from": "stopped",
+                "to": "starting"
+              },
+              {
+                "from": "pending",
+                "to": "failed"
+              },
+              {
+                "from": "starting",
+                "to": "failed"
+              },
+              {
+                "from": "running",
+                "to": "failed"
+              },
+              {
+                "from": "stopping",
+                "to": "failed"
+              },
+              {
+                "from": "pending",
+                "to": "unreachable"
+              },
+              {
+                "from": "starting",
+                "to": "unreachable"
+              },
+              {
+                "from": "running",
+                "to": "unreachable"
+              },
+              {
+                "from": "stopping",
+                "to": "unreachable"
+              },
+              {
+                "from": "stopped",
+                "to": "unreachable"
+              },
+              {
+                "from": "unreachable",
+                "to": "pending"
+              },
+              {
+                "from": "unreachable",
+                "to": "starting"
+              },
+              {
+                "from": "unreachable",
+                "to": "running"
+              },
+              {
+                "from": "unreachable",
+                "to": "stopping"
+              },
+              {
+                "from": "unreachable",
+                "to": "stopped"
+              },
+              {
+                "from": "unreachable",
+                "to": "failed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reconcile",
+          "field": "observed",
+          "config": {
+            "observePermission": "sandboxes.observe",
+            "staleAfterMs": 300000,
+            "status": "status",
+            "unreachable": "unreachable"
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "status",
+          "description": "The state the instance is in.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "status",
+            "value": true
+          }
+        },
+        {
+          "name": "statusEnteredAt",
+          "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "enteredAt"
+          }
+        },
+        {
+          "name": "observed",
+          "description": "The state of the Workflow the last observation reported, or the unreachable state once the stale deadline fell due; absent before the first observation.",
+          "typeRef": {
+            "name": "string"
+          },
+          "behavior": {
+            "use": "observed",
+            "behavior": "Reconcile",
+            "field": "observed",
+            "value": true
+          }
+        },
+        {
+          "name": "observedObservedAt",
+          "description": "When the last observation was made, its at, in epoch milliseconds; absent before the first.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "observed",
+            "behavior": "Reconcile",
+            "field": "observedAt"
+          }
+        },
+        {
+          "name": "observedDrift",
+          "description": "Why the status is not the observed state: { status, observed, code }, the status where the path stopped, the state it was moving to, and the veto code of the step refused, forbidden for a permission the observer lacks, or no_path when no transitions lead there; absent while the status is the observed state.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "behavior": {
+            "use": "observed",
+            "behavior": "Reconcile",
+            "field": "drift"
+          }
+        },
+        {
+          "name": "observedReconciledAt",
+          "description": "When an observation or the stale deadline last left the status at the observed state, in epoch milliseconds; absent before.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "observed",
+            "behavior": "Reconcile",
+            "field": "reconciledAt"
+          }
+        }
+      ],
+      "optimistic": true
+    },
+    "SandboxDeadline": {
+      "name": "SandboxDeadline",
+      "owner": "src/sandboxes.schema.ts",
+      "comment": "The deadlines Sandbox's behaviors arm, one message per row, use and deadline, due when it falls due (D103).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "rowKey",
+          "description": "The key of the Sandbox row the deadline is armed on.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "useId",
+          "description": "The id of the use that armed it: its anchor field, or the behavior's name for a use the table implements.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "description": "The deadline's name, the use's own.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "at",
+          "description": "When it was armed to fall due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "payload",
+          "description": "What the use armed it with, which its deadline hook reads.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "rowKey",
+            "useId",
+            "name"
+          ],
+          "unique": true,
+          "where": "state IN ('ready', 'claimed')",
+          "origin": "behavior"
+        },
+        {
+          "keys": [
+            "rowKey"
+          ],
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorQueue": {
+        "row": "Sandbox",
+        "kind": "deadlines",
+        "behaviors": [
+          "Reconcile"
+        ]
+      },
+      "queue": {
+        "retain": "0s"
+      }
+    }
+  }
+}

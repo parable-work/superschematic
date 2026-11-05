@@ -1,6 +1,6 @@
 //! What only a table's Workflow takes (D104), on an engine type: a
-//! transition's `by`, the config's `overridePermission` and `repeat`, and
-//! `transition`'s `from`. The engine shares Workflow's declaration with the
+//! transition's `by`, its seat entries (`seat:<name>`) among them, the
+//! config's `overridePermission` and `repeat`, and `transition`'s `from`. The engine shares Workflow's declaration with the
 //! core, so its describe advertises them; it refuses each, naming the table
 //! form, rather than ignoring a rule of who may move an instance. On SQLite
 //! and, with the variable set, on Postgres.
@@ -63,12 +63,17 @@ fn an_engine_type_refuses_what_only_a_tables_workflow_takes() {
         override_permission["overridePermission"] = json!("orders.moderate");
         let mut repeat = order_flow();
         repeat["repeat"] = json!("unchanged");
+        // A by that names a seat of Seats, which no engine implements, is
+        // a by as any other (D104, step 3).
+        let mut seat = order_flow();
+        seat["transitions"][2]["by"] = json!(["seat:owners"]);
         let table_form = "status: Workflow<{ ... }> on a DB table, D104";
         let by_reason = format!(
             "the transition from \"open\" to \"shipped\" names by, which a table's Workflow takes ({table_form}): an engine type's transition names who may make it by its permission alone"
         );
         let cases = [
             (by, by_reason.clone()),
+            (seat, by_reason.clone()),
             // The first member it names, in order: a transition's by first.
             (both, by_reason),
             (

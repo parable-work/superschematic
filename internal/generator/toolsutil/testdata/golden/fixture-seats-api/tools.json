@@ -1,0 +1,267 @@
+[
+  {
+    "name": "problem.seatsLeaveSeat",
+    "inputSchemaDigest": "sha256:1b99868010f57a5f7189d6294e4683f0bd1a3f0b12c04c01505b42de485c3065",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "seat": {
+          "type": "string",
+          "description": "A ProblemSeatsSeat value",
+          "enum": [
+            "accountable",
+            "handles",
+            "responsible"
+          ]
+        },
+        "subject": {
+          "description": "A string value",
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "seat"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSeatsLeaveSeatResult object"
+    }
+  },
+  {
+    "name": "problem.seatsListSeats",
+    "inputSchemaDigest": "sha256:9996b4b83088e8d55e3a50c72db1a57dcfc6eb71ce11466475c541b9df801f64",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "seat": {
+          "description": "A ProblemSeatsSeat value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "accountable",
+            "handles",
+            "responsible",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSeatsListSeatsResult object"
+    }
+  },
+  {
+    "name": "problem.seatsTakeSeat",
+    "inputSchemaDigest": "sha256:1b99868010f57a5f7189d6294e4683f0bd1a3f0b12c04c01505b42de485c3065",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "seat": {
+          "type": "string",
+          "description": "A ProblemSeatsSeat value",
+          "enum": [
+            "accountable",
+            "handles",
+            "responsible"
+          ]
+        },
+        "subject": {
+          "description": "A string value",
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "seat"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSeatsTakeSeatResult object"
+    }
+  },
+  {
+    "name": "problem.statusTransition",
+    "inputSchemaDigest": "sha256:bd6ef6fdd9bc98c579a49e664ab2a7bb05cb480cc476714debdc145647d5a635",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "A ProblemStatusState value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "open",
+            "working",
+            "review",
+            "done",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "to": {
+          "type": "string",
+          "description": "A ProblemStatusState value",
+          "enum": [
+            "open",
+            "working",
+            "review",
+            "done"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "to"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemStatusTransitionResult object"
+    }
+  },
+  {
+    "name": "sandbox.observedObserve",
+    "inputSchemaDigest": "sha256:5c58c3d7ec40c8eb95232ff3b293975447f5815fe55d7031c102d0d3f0e51388",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "at": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "state": {
+          "type": "string",
+          "description": "A SandboxObservedState value",
+          "enum": [
+            "pending",
+            "starting",
+            "running",
+            "stopping",
+            "stopped",
+            "failed",
+            "unreachable"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "id",
+        "state"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "SandboxObservedObserveResult object"
+    }
+  },
+  {
+    "name": "sandbox.statusTransition",
+    "inputSchemaDigest": "sha256:b2feb8f306541faa193a84617e394eb8a61f59ef6ac1c5deda2fad5d21327190",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "A SandboxStatusState value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "pending",
+            "starting",
+            "running",
+            "stopping",
+            "stopped",
+            "failed",
+            "unreachable",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "to": {
+          "type": "string",
+          "description": "A SandboxStatusState value",
+          "enum": [
+            "pending",
+            "starting",
+            "running",
+            "stopping",
+            "stopped",
+            "failed",
+            "unreachable"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "to"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "SandboxStatusTransitionResult object"
+    }
+  }
+]

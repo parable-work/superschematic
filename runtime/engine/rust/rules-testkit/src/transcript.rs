@@ -131,8 +131,11 @@
 //! 1. For each type, create its table in a database of the scenario's own:
 //!    a TEXT key column, a column for each own field (`fields`, by its JSON
 //!    type), each owned column the layout rule gives each use of any of its
-//!    versions (the uses are type-anchored in the corpus, so Workflow's are
-//!    `workflow_status` and `workflow_entered_at`), and `_version`. For
+//!    versions (the uses are type-anchored in the recordings, so Workflow's
+//!    are `workflow_status` and `workflow_entered_at`; a hand-written file's
+//!    may be anchored on fields, `"anchor": {"field": "observed"}`, whose
+//!    value is the field's own column and whose other owned columns it
+//!    prefixes: `observed`, `observed_observed_at`), and `_version`. For
 //!    each use of any version whose behavior declares sub-tables (the
 //!    core's `declarations`, `tables`), create a sub-table `<the type's
 //!    table>_<member in snake case>_<table in snake case>`, the member being

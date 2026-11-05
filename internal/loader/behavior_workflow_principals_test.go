@@ -195,7 +195,7 @@ func TestWorkflowByIsHeldToTheTable(t *testing.T) {
 		want string
 	}{
 		{"a seat", func(_, q map[string]any) { answeredBy(q, []any{"seat:reviewer"}) },
-			prefix + `"seat:reviewer" in by, a seat of Seats, which the core does not run yet (D104, step 3)`},
+			prefix + `"seat:reviewer" in by, a seat of Seats, which Question does not implement`},
 		{"a relation by its name", func(doc, q map[string]any) {
 			person(doc)
 			addField(q, questionField("owner", "Person", map[string]any{"relation": map[string]any{"type": "Person"}}))

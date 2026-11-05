@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureSeatsApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-seats-api API",
+  "tools": [
+    {
+      "name": "problem.seats.leaveSeat",
+      "operationId": "ProblemSeatsLeaveSeatHandler",
+      "title": "Problem seats: leave seat",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem seats: leave seat",
+        "handle": "problem_seats_leave_seat",
+        "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.seats.leave-seat",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+      "namespace": "problem",
+      "methodName": "seats.leave_seat",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/seats/leave-seat",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:1b99868010f57a5f7189d6294e4683f0bd1a3f0b12c04c01505b42de485c3065",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "seat": {"description":"A ProblemSeatsSeat value","enum":["accountable","handles","responsible"],"type":"string"},
+          "subject": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id", "seat"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSeatsLeaveSeatResult object"
+      }
+    },
+    {
+      "name": "problem.seats.listSeats",
+      "operationId": "ProblemSeatsListSeatsHandler",
+      "title": "Problem seats: list seats",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem seats: list seats",
+        "handle": "problem_seats_list_seats",
+        "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.seats.list-seats",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+      "namespace": "problem",
+      "methodName": "seats.list_seats",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/seats/list-seats",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:9996b4b83088e8d55e3a50c72db1a57dcfc6eb71ce11466475c541b9df801f64",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "seat": {"description":"A ProblemSeatsSeat value","enum":["accountable","handles","responsible",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSeatsListSeatsResult object"
+      }
+    },
+    {
+      "name": "problem.seats.takeSeat",
+      "operationId": "ProblemSeatsTakeSeatHandler",
+      "title": "Problem seats: take seat",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem seats: take seat",
+        "handle": "problem_seats_take_seat",
+        "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.seats.take-seat",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+      "namespace": "problem",
+      "methodName": "seats.take_seat",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/seats/take-seat",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:1b99868010f57a5f7189d6294e4683f0bd1a3f0b12c04c01505b42de485c3065",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "seat": {"description":"A ProblemSeatsSeat value","enum":["accountable","handles","responsible"],"type":"string"},
+          "subject": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id", "seat"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSeatsTakeSeatResult object"
+      }
+    },
+    {
+      "name": "problem.status.transition",
+      "operationId": "ProblemStatusTransitionHandler",
+      "title": "Problem status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem status: transition",
+        "handle": "problem_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "problem",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:bd6ef6fdd9bc98c579a49e664ab2a7bb05cb480cc476714debdc145647d5a635",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A ProblemStatusState value","enum":["open","working","review","done",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A ProblemStatusState value","enum":["open","working","review","done"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "sandbox.observed.observe",
+      "operationId": "SandboxObservedObserveHandler",
+      "title": "Sandbox observed: observe",
+      "mcp": {
+        "hidden": false,
+        "name": "Sandbox observed: observe",
+        "handle": "sandbox_observed_observe",
+        "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "sandbox.observed.observe",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+      "namespace": "sandbox",
+      "methodName": "observed.observe",
+      "httpMethod": "POST",
+      "httpPath": "/api/sandbox/{id}/observed/observe",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:5c58c3d7ec40c8eb95232ff3b293975447f5815fe55d7031c102d0d3f0e51388",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "at": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "state": {"description":"A SandboxObservedState value","enum":["pending","starting","running","stopping","stopped","failed","unreachable"],"type":"string"}
+        },
+        "required": ["at", "id", "state"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "SandboxObservedObserveResult object"
+      }
+    },
+    {
+      "name": "sandbox.status.transition",
+      "operationId": "SandboxStatusTransitionHandler",
+      "title": "Sandbox status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Sandbox status: transition",
+        "handle": "sandbox_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "sandbox.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "sandbox",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/sandbox/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:b2feb8f306541faa193a84617e394eb8a61f59ef6ac1c5deda2fad5d21327190",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A SandboxStatusState value","enum":["pending","starting","running","stopping","stopped","failed","unreachable",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A SandboxStatusState value","enum":["pending","starting","running","stopping","stopped","failed","unreachable"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "SandboxStatusTransitionResult object"
+      }
+    }
+  ]
+}

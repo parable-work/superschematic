@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "api": "fixture-seats-api",
+  "permissions": [
+    {
+      "name": "problems.assign",
+      "identity": false,
+      "operations": [
+        "ProblemSeatsLeaveSeatHandler",
+        "ProblemSeatsListSeatsHandler",
+        "ProblemSeatsTakeSeatHandler"
+      ]
+    },
+    {
+      "name": "problems.override",
+      "identity": false,
+      "operations": [
+        "ProblemStatusTransitionHandler"
+      ]
+    },
+    {
+      "name": "problems.own",
+      "identity": false,
+      "operations": [
+        "ProblemSeatsLeaveSeatHandler",
+        "ProblemSeatsListSeatsHandler",
+        "ProblemSeatsTakeSeatHandler"
+      ]
+    },
+    {
+      "name": "problems.release",
+      "identity": false,
+      "operations": [
+        "ProblemSeatsLeaveSeatHandler",
+        "ProblemSeatsListSeatsHandler",
+        "ProblemSeatsTakeSeatHandler"
+      ]
+    },
+    {
+      "name": "problems.work",
+      "identity": false,
+      "operations": [
+        "ProblemSeatsLeaveSeatHandler",
+        "ProblemSeatsListSeatsHandler",
+        "ProblemSeatsTakeSeatHandler"
+      ]
+    },
+    {
+      "name": "sandboxes.observe",
+      "identity": false,
+      "operations": [
+        "SandboxObservedObserveHandler"
+      ]
+    },
+    {
+      "name": "sandboxes.stop",
+      "identity": false,
+      "operations": [
+        "SandboxStatusTransitionHandler"
+      ]
+    }
+  ]
+}

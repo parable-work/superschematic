@@ -4,6 +4,12 @@
 //! one Workflow when it names none, as Timers resolves its own. A type with
 //! no Workflow, and one with several whose config names none, is refused at
 //! define. The engine read the instance's one `Workflow`.
+//!
+//! Reconcile reads a Workflow's transitions as paths (D104): the fewest
+//! transitions from a state to another ([`path`]) and every state a state
+//! reaches ([`reachable`]).
+
+use std::collections::VecDeque;
 
 use serde_json::Value;
 use superschematic_rules::{ConfigError, ConfigTarget, UseSpec};
@@ -45,6 +51,61 @@ pub(crate) fn leads(transitions: &[(String, String)], from: &str, to: &str) -> b
     transitions
         .iter()
         .any(|(source, target)| source == from && target == to)
+}
+
+/// The states after `from` along the fewest transitions that lead to `to`
+/// (D104): breadth first, each state's transitions in the config's order,
+/// so of two paths of one length the one whose first differing step the
+/// config lists first; `Some(vec![])` when `from` is `to`, `None` when no
+/// transitions lead there.
+pub(crate) fn path(transitions: &[(String, String)], from: &str, to: &str) -> Option<Vec<String>> {
+    if from == to {
+        return Some(Vec::new());
+    }
+    // Each state reached, with the index of the one it was reached from.
+    let mut reached: Vec<(&str, Option<usize>)> = vec![(from, None)];
+    let mut queue: VecDeque<usize> = VecDeque::from([0]);
+    while let Some(at) = queue.pop_front() {
+        let state = reached[at].0;
+        for (_, target) in transitions.iter().filter(|(source, _)| source == state) {
+            if reached.iter().any(|(known, _)| known == target) {
+                continue;
+            }
+            reached.push((target, Some(at)));
+            if target == to {
+                let mut steps = Vec::new();
+                let mut back = Some(reached.len() - 1);
+                while let Some(index) = back {
+                    let (state, parent) = reached[index];
+                    if parent.is_some() {
+                        steps.push(state.to_owned());
+                    }
+                    back = parent;
+                }
+                steps.reverse();
+                return Some(steps);
+            }
+            queue.push_back(reached.len() - 1);
+        }
+    }
+    None
+}
+
+/// Every state the transitions lead to from a state, itself included,
+/// breadth first from it.
+pub(crate) fn reachable(transitions: &[(String, String)], from: &str) -> Vec<String> {
+    let mut reached: Vec<String> = vec![from.to_owned()];
+    let mut next = 0;
+    while next < reached.len() {
+        let state = reached[next].clone();
+        next += 1;
+        for (_, target) in transitions.iter().filter(|(source, _)| *source == state) {
+            if !reached.contains(target) {
+                reached.push(target.clone());
+            }
+        }
+    }
+    reached
 }
 
 /// The Workflow the config's `status` names, or the type's one Workflow.
@@ -124,5 +185,67 @@ fn read(use_id: &str, raw: &Value) -> Flow {
         states,
         initial,
         transitions,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edges(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(from, to)| ((*from).to_owned(), (*to).to_owned()))
+            .collect()
+    }
+
+    fn states(names: &[&str]) -> Option<Vec<String>> {
+        Some(names.iter().map(|name| (*name).to_owned()).collect())
+    }
+
+    #[test]
+    fn a_path_is_the_fewest_transitions_its_tie_broken_by_the_configs_order() {
+        let diamond = edges(&[
+            ("draft", "left"),
+            ("draft", "right"),
+            ("left", "done"),
+            ("right", "done"),
+            ("done", "draft"),
+        ]);
+        assert_eq!(path(&diamond, "draft", "done"), states(&["left", "done"]));
+        assert_eq!(path(&diamond, "done", "right"), states(&["draft", "right"]));
+        assert_eq!(path(&diamond, "left", "left"), states(&[]));
+        // Listed the other way, the other path is the first.
+        let swapped = edges(&[
+            ("draft", "right"),
+            ("draft", "left"),
+            ("left", "done"),
+            ("right", "done"),
+        ]);
+        assert_eq!(path(&swapped, "draft", "done"), states(&["right", "done"]));
+        // A shorter path wins over one the config lists first.
+        let short = edges(&[("a", "b"), ("b", "c"), ("c", "d"), ("a", "d")]);
+        assert_eq!(path(&short, "a", "d"), states(&["d"]));
+    }
+
+    #[test]
+    fn no_path_leads_out_of_a_terminal_state_and_a_cycle_ends() {
+        let flow = edges(&[
+            ("pending", "running"),
+            ("running", "pending"),
+            ("running", "failed"),
+        ]);
+        assert_eq!(path(&flow, "failed", "running"), None);
+        assert_eq!(path(&flow, "pending", "lost"), None);
+        assert_eq!(
+            path(&flow, "pending", "failed"),
+            states(&["running", "failed"])
+        );
+        assert_eq!(
+            reachable(&flow, "pending"),
+            ["pending", "running", "failed"]
+        );
+        assert_eq!(reachable(&flow, "failed"), ["failed"]);
+        assert_eq!(reachable(&[], "lost"), ["lost"]);
     }
 }

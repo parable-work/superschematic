@@ -330,8 +330,15 @@ checks); and the hand-written `core-retries-waits.transcript.json` (D104),
 158 steps (118 commands, each compared with its row's `expect.version`,
 and 40 checks), and `core-periods-and-presence.transcript.json` (D104), 77 steps
 (52 commands, each compared with its row's `expect.version`, and 25
-checks); each held to a floor of its step count, its `expect.others`
-compared on every command step and its numbers by value, 0 mismatches each.
+checks); and, of the behaviors only the core implements (D104, step 3), the
+hand-written `core-seats.transcript.json`, 88 steps (66 commands, four of
+them repeats, each compared with its row's `expect.version`, and 22
+checks), and `core-reconcile.transcript.json`, 58 steps (36 commands, two
+of them repeats and two the stale deadline, each compared with its row's
+`expect.version`, and 22 checks), whose Workflow and Reconcile are
+anchored on fields; each held to a floor of its step count, its
+`expect.others` compared on every command step and its numbers by value,
+0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
 schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are

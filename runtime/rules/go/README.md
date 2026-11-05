@@ -325,7 +325,7 @@ the archive's core, a malformed precondition refused as
 `PreconditionsError` before the row is read, a stale token vetoed and the
 current one going through (`TestThePreconditionsReachTheCoresLease`), on
 SQLite and on Postgres. `transcript_test.go`
-replays the fifteen transcripts in `runtime/engine/testdata/rules` on SQLite
+replays the seventeen transcripts in `runtime/engine/testdata/rules` on SQLite
 and on Postgres, as the TypeScript adapter does:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, one raw
 write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
@@ -352,7 +352,14 @@ of them deadlines and 24 presenting a precondition, each compared with its
 row's `expect.version`, and 40 checks), and
 `core-periods-and-presence.transcript.json` (D104), 77 steps (52
 commands, one a deadline, each compared with its row's `expect.version`,
-and 25 checks); each held to a floor of its step count, its `expect.others`
+and 25 checks); and those of the behaviors only the core implements,
+`core-seats.transcript.json` (D104), 88 steps (66 commands, Seats'
+takes, leaves and lists among them and four repeats answered unchanged,
+each compared with its row's `expect.version`, and 22 checks), and
+`core-reconcile.transcript.json` (D104), 58 steps (36 commands, two of
+them the stale deadline, each compared with its row's `expect.version`,
+and 22 checks), whose Workflow and Reconcile are anchored on fields; each
+held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every
 type live in its database, each at the version the scenario last made
 live, since a step names its own type's version alone. The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`,

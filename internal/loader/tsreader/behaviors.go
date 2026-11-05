@@ -72,6 +72,11 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 		return fieldUse{}, true, errorAtNode(prop.Type, "%s: behavior %s names no value field in its declaration, so it is not anchored on a field; compose it on the type (D103)", where, behavior.Name)
 	}
 	if prop.PostfixToken != nil && prop.PostfixToken.Kind == kindQuestionToken {
+		if valueOptional(behavior) {
+			// The behavior keeps its value field absent until it sets it
+			// (Reconcile's observed, D104): the field is optional already.
+			return fieldUse{}, true, errorAtNode(member, "%s is a %s, whose field takes no ?: the behavior keeps it, absent until it sets it; write %s: %s<...> (D103, D104)", where, behavior.Name, field, id.name)
+		}
 		return fieldUse{}, true, errorAtNode(member, "%s is a %s, which is never optional: the behavior sets it when a row is created; write %s: %s<...> (D103)", where, behavior.Name, field, id.name)
 	}
 	if decorators := member.Decorators(); len(decorators) > 0 {
@@ -103,6 +108,17 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 		return fieldUse{}, true, errorAtNode(at, "%s: %s", where, err)
 	}
 	return fieldUse{ref: refs[0], node: member}, true, nil
+}
+
+// valueOptional reports whether behavior's declaration says its value
+// field is optional (registry.BehaviorField.Optional, D104).
+func valueOptional(behavior registry.Behavior) bool {
+	for _, declared := range behavior.Fields {
+		if declared.Name == behavior.Value {
+			return declared.Optional
+		}
+	}
+	return false
 }
 
 // implementsCarrier reports the registered behavior an implements-clause

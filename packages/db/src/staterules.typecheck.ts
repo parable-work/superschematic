@@ -29,6 +29,8 @@ export abstract class Task implements StateRules<Task, {
 // status names the field whose Workflow the states are of.
 const reviewRules: StateRulesOn<Task> = { states: { pending: { frozen: ["plan"] } }, status: "review" };
 const byReviewer: StateRuleOn<Task> = { frozen: ["plan", "proof"], by: ["reviewer"] };
+// by names a seat of the table's Seats as seat:<name> (D104), beside its fields.
+const bySeat: StateRuleOn<Task> = { frozen: ["plan"], by: ["reviewer", "seat:accountable"] };
 
 // The fields are the table's, by is a list, and status names a field.
 // @ts-expect-error a required field is the table's
@@ -53,5 +55,5 @@ export abstract class EngineNote {}
 @behavior("StateRules", { states: { a: { required: ["x"], frozen: "all" } }, permission: "notes.admin" })
 export abstract class EngineMemo {}
 
-export const checked: readonly unknown[] = [reviewRules, byReviewer];
+export const checked: readonly unknown[] = [reviewRules, byReviewer, bySeat];
 export type Refused = NoSuchRequired | NoSuchBy | OneBy | NoSuchStatus | FrozenSome;

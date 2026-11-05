@@ -10,6 +10,10 @@
 //! may give a hyphenated UUID, so the same UUID in either form names the
 //! same subject, in every language, without any adapter normalizing the
 //! caller. A `string` field compares its text exactly.
+//!
+//! A subject a behavior keeps as text of its own, Seats' occupants (D104),
+//! is kept in its canonical form ([`canonical_subject`]): a hyphenated UUID
+//! in base62, any other text as it is.
 
 use serde_json::Value;
 
@@ -79,6 +83,19 @@ pub fn subject_forms(type_name: &str, value: &str) -> Vec<String> {
     forms
 }
 
+/// A subject's text as Seats keeps and compares it (D104): a hyphenated
+/// UUID (36 characters, its hexadecimal digits of either case) as its
+/// base62 form, the adapters' wire form and the identity runtime's
+/// principal subject, and any other text as it is, so no two texts that
+/// are not the same UUID compare equal: `7` and `07` stay two subjects,
+/// where reading every text as a UUID by value would make them one.
+pub fn canonical_subject(subject: &str) -> String {
+    match hyphenated_value(subject) {
+        Some(uuid) => base62(uuid),
+        None => subject.to_owned(),
+    }
+}
+
 // base62 is a UUID's value in base62, its fewest digits.
 fn base62(mut n: u128) -> String {
     let mut digits = Vec::new();
@@ -112,14 +129,7 @@ fn hyphenated(n: u128) -> String {
 /// UUID; `None` for any other text.
 fn uuid_value(text: &str) -> Option<u128> {
     if text.len() == 36 {
-        let hyphenated = text.bytes().enumerate().all(|(i, byte)| match i {
-            8 | 13 | 18 | 23 => byte == b'-',
-            _ => byte.is_ascii_hexdigit(),
-        });
-        if !hyphenated {
-            return None;
-        }
-        return u128::from_str_radix(&text.replace('-', ""), 16).ok();
+        return hyphenated_value(text);
     }
     if text.is_empty() || text.len() > 22 {
         return None;
@@ -128,6 +138,23 @@ fn uuid_value(text: &str) -> Option<u128> {
         let digit = BASE62.iter().position(|c| *c == byte)?;
         n.checked_mul(62)?.checked_add(digit as u128)
     })
+}
+
+// hyphenated_value is a UUID's value from its hyphenated form alone (36
+// characters, `8-4-4-4-12` hexadecimal digits of either case); `None` for
+// any other text.
+fn hyphenated_value(text: &str) -> Option<u128> {
+    if text.len() != 36 {
+        return None;
+    }
+    let hyphenated = text.bytes().enumerate().all(|(i, byte)| match i {
+        8 | 13 | 18 | 23 => byte == b'-',
+        _ => byte.is_ascii_hexdigit(),
+    });
+    if !hyphenated {
+        return None;
+    }
+    u128::from_str_radix(&text.replace('-', ""), 16).ok()
 }
 
 #[cfg(test)]
@@ -259,6 +286,23 @@ mod tests {
         // A string field's text is itself alone.
         assert_eq!(subject_forms("string", BASE62_FORM), [BASE62_FORM]);
         assert_eq!(subject_forms("string", "bob"), ["bob"]);
+    }
+
+    #[test]
+    fn a_hyphenated_uuid_is_kept_in_base62_and_any_other_text_as_it_is() {
+        assert_eq!(canonical_subject(HYPHENATED), BASE62_FORM);
+        assert_eq!(canonical_subject(&HYPHENATED.to_uppercase()), BASE62_FORM);
+        // Base62 is kept, and so is a text that only looks like one.
+        assert_eq!(canonical_subject(BASE62_FORM), BASE62_FORM);
+        assert_eq!(canonical_subject("bob"), "bob");
+        // 7 and 07 stay apart, as they would not by value.
+        assert_eq!(canonical_subject("7"), "7");
+        assert_eq!(canonical_subject("07"), "07");
+        assert_ne!(canonical_subject("7"), canonical_subject("07"));
+        // A hyphenated form with a letter out of place is no UUID.
+        let broken = "0f8fad5b-d9cb-469f-a165-70867728950g";
+        assert_eq!(canonical_subject(broken), broken);
+        assert_eq!(canonical_subject(""), "");
     }
 
     #[test]

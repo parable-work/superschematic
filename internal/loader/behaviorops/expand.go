@@ -259,7 +259,15 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 			alias.Doc = strings.ReplaceAll(alias.Doc, behaviortypes.An(base)+"'s", owner)
 			b.aliases[alias.Name] = alias
 		}
+		// The permissions the config names, under members that say so and
+		// those its narrowing reads (Seats' take and assign, D104).
 		permissions := ConfigPermissions(ref.Config)
+		for _, permission := range narrowed.Permissions {
+			if !slices.Contains(permissions, permission) {
+				permissions = append(permissions, permission)
+			}
+		}
+		slices.Sort(permissions)
 		for _, op := range declaration.Operations {
 			if !RunsOnARow(op) || !narrowed.Offers(op.Name) {
 				// The build warns of the first (verify.CheckBehaviorOperations).

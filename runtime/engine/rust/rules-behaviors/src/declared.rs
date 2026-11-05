@@ -12,7 +12,8 @@
 //! (`scope` `schema` or `namespace`, Lease's expireHolder) is left out: a
 //! row's core runs the operations of a row (D104). The file stays the one declaration; the core reads
 //! only what it holds a behavior to, and the rest (descriptions, schemas,
-//! each field's column type, which a table's layout reads) is the file's.
+//! each field's column type and whether a value field is `optional`, which
+//! a table's layout reads) is the file's.
 
 use serde_json::Value;
 use superschematic_rules::{Declaration, TableDecl};
@@ -134,6 +135,13 @@ mod tests {
         );
         assert_eq!(valued, Declaration::new("Tally").value("count"));
         assert_eq!(valued.fields, ["count"]);
+        // A value field the behavior does not set at a create says it is
+        // optional (D104), which a table's layout reads and the core does
+        // not: it is a field like any other.
+        let optional = declaration(
+            r#"{"name": "Tally", "fields": [{"name": "count", "type": "string", "optional": true}], "value": "count"}"#,
+        );
+        assert_eq!(optional, valued);
         // A file that declares sub-tables and arms deadlines says so.
         let timed = declaration(
             r#"{"name": "Tally",

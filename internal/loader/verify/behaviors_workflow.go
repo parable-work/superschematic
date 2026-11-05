@@ -70,9 +70,12 @@ func checkEngineWorkflowConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 // a field of the table td to the table (D104): each entry names an own
 // field of td that holds one subject (string, Identity.UUID or
 // Identity.UserID), or createdBy, the audit field the repositories stamp
-// with an operation's caller (D87). These are the rules of Workflow's
-// config that read the IR, which the build can check before any command;
-// the seat, the missing field and the type are the core's define issues
+// with an operation's caller (D87), or a seat of td's Seats as
+// seat:<name>. A seat that names no take permission is warned of, once per
+// entry at its first transition: any caller may take it and so make the
+// move. These are the rules of Workflow's config that read the IR, which
+// the build can check before any command; the seat, the missing field and
+// the type are the core's define issues
 // (superschematic_rules_behaviors::workflow) word for word, and the
 // relation, the other audit fields, the list and the encrypted field are
 // what only the IR shows. Each is `type <T>: field <f>: behavior Workflow
@@ -110,14 +113,25 @@ func checkWorkflowConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, 
 			}
 		}
 	}
+	warned := map[string]bool{}
+	for _, transition := range config.Transitions {
+		for _, entry := range transition.By {
+			if seat, takeless := takelessSeat(td, entry); takeless && !warned[entry] {
+				warned[entry] = true
+				r.warnf(td.Owner, "type %s: field %s: behavior Workflow config: the transition from %q to %q names %q in by, and Seats' %s names no take permission: any caller may take it and so make the move; name a take permission for %s (D104)", td.Name, ref.Field, transition.From, transition.To, entry, seat, seat)
+			}
+		}
+	}
 }
 
 // byProblem is why entry, an entry of a Workflow transition's by on td,
-// names no field of td that holds a subject, or "" when it names one.
-// fields are td's own and audit fields as the layout holds them.
+// names no field of td that holds a subject, or no seat of td's Seats, or
+// "" when it names one. fields are td's own and audit fields as the layout
+// holds them. A seat entry, seat:<name>, is held to td's Seats
+// (seatProblem) and never looked up as a field (D104).
 func byProblem(schema *ir.Schema, td *ir.TypeDef, fields []behaviorlayout.Column, entry string) string {
-	if strings.HasPrefix(entry, "seat:") {
-		return "a seat of Seats, which the core does not run yet (D104, step 3)"
+	if seat, ok := seatOfEntry(entry); ok {
+		return seatProblem(td, seat)
 	}
 	fd := sqlutil.FieldNamed(td, entry)
 	if fd != nil && sqlutil.AuditField(entry) && entry != sqlutil.AuditCreatedBy {
@@ -158,9 +172,11 @@ func byProblem(schema *ir.Schema, td *ir.TypeDef, fields []behaviorlayout.Column
 // checkWritableBy warns when an operation of the API updates a field of a
 // table that a by on the table names (D104): a Workflow transition's by,
 // which names who may make the move, or a StateRules state's by, which
-// names who may change the fields the state freezes. A by is only as strong
-// as its field, and a caller who may write the field may name itself and
-// then make the move or change what the state freezes. What the build sees
+// names who may change the fields the state freezes, or the fromField of a
+// seat such a by names as seat:<name>, which seats whom it holds. A by is
+// only as strong as its field, and a caller who may write the field may
+// name itself, or seat itself, and then make the move or change what the
+// state freezes. What the build sees
 // of such an update is an operation, in any set but a @behaviorOperations
 // one, that updates a row of the table (behaviorops.UpdatesARow), with an
 // argument of a type of the API that is @source of the table and carries
@@ -204,25 +220,33 @@ func checkWritableBy(schema *ir.Schema, in Input, r *Result) {
 					uses[td] = byUses
 				}
 				for _, use := range byUses {
-					for _, field := range use.fields {
+					for _, entry := range use.fields {
+						field := entry.field
 						fd := sqlutil.FieldNamed(view, field)
-						at := td.Name + "." + use.id + "." + field
+						at := td.Name + "." + use.id + "." + entry.key()
 						if fd == nil || fd.Virtual || warned[at] {
 							continue
 						}
 						warned[at] = true
+						moves := use.moves[entry.key()]
+						named, seats := field, ""
+						if entry.seat != "" {
+							// A seat's fromField seats whom it holds (D104):
+							// setting it to oneself takes the seat.
+							named = seatPrefix + entry.seat
+							seats = fmt.Sprintf(", whose fromField is %s", field)
+						}
 						if use.behavior == stateRulesBehavior {
-							states := use.moves[field]
 							verb := "freezes"
-							if len(states) > 1 {
+							if len(moves) > 1 {
 								verb = "freeze"
 							}
-							r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and %s's StateRules names %s in by for %s: a caller who may call %s can set %s to itself and then change the fields %s %s. Keep %s out of the operation's input, or freeze it: list it in the fields of %s's Constants (D104)",
-								schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, field, joinAnd(states), op.Name, field, joinAnd(states), verb, field, td.Name)
+							r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and %s's StateRules names %s in by for %s%s: a caller who may call %s can set %s to itself%s and then change the fields %s %s. Keep %s out of the operation's input, or freeze it: list it in the fields of %s's Constants (D104)",
+								schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, named, joinAnd(moves), seats, op.Name, field, entry.seated(), joinAnd(moves), verb, field, td.Name)
 							continue
 						}
-						r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and the Workflow on %s.%s names %s in by for %s: a caller who may call %s can set %s to itself and then make that move. Keep %s out of the operation's input, or freeze it: list it in the fields of %s's Constants (D104)",
-							schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, use.id, field, joinAnd(use.moves[field]), op.Name, field, field, td.Name)
+						r.warnf("", "%s: %s.%s takes %s.%s (%s is @source(%s)), and the Workflow on %s.%s names %s in by for %s%s: a caller who may call %s can set %s to itself%s and then make that move. Keep %s out of the operation's input, or freeze it: list it in the fields of %s's Constants (D104)",
+							schema.Name, set.Name, op.Name, td.Name, field, view.Name, td.Name, td.Name, use.id, named, joinAnd(moves), seats, op.Name, field, entry.seated(), field, td.Name)
 					}
 				}
 			}
@@ -231,32 +255,60 @@ func checkWritableBy(schema *ir.Schema, in Input, r *Result) {
 }
 
 // byUse is a use of a table whose by names own fields (D104): a Workflow
-// on a field, whose id is the field and whose moves are each field's
+// on a field, whose id is the field and whose moves are each entry's
 // transitions, "<from> to <to>" in transition order; or a StateRules,
-// whose moves are each field's states, in config order. fields are the
-// fields in config order.
+// whose moves are each entry's states, in config order. fields are the
+// entries in config order: a field by names, or the fromField of a seat by
+// names.
 type byUse struct {
 	id       string
 	behavior string
-	fields   []string
+	fields   []byField
 	moves    map[string][]string
 }
 
+// byField is a field an input may carry that a by entry names: the field
+// itself, or the fromField of the seat the entry names (seat), which seats
+// whom it holds (D104).
+type byField struct {
+	field, seat string
+}
+
+// key is the entry's key among its use's: the field, or seat:<seat> for a
+// seat's fromField.
+func (f byField) key() string {
+	if f.seat != "" {
+		return seatPrefix + f.seat
+	}
+	return f.field
+}
+
+// seated is what setting the field to oneself does beside naming oneself:
+// for a seat's fromField, it seats one in the seat.
+func (f byField) seated() string {
+	if f.seat == "" {
+		return ""
+	}
+	return ", which seats it in " + f.seat + ","
+}
+
 // add records that the use's by names entry for the move or state what.
-func (u *byUse) add(entry, what string) {
+func (u *byUse) add(entry byField, what string) {
 	if !slices.Contains(u.fields, entry) {
 		u.fields = append(u.fields, entry)
 	}
-	if !slices.Contains(u.moves[entry], what) {
-		u.moves[entry] = append(u.moves[entry], what)
+	if !slices.Contains(u.moves[entry.key()], what) {
+		u.moves[entry.key()] = append(u.moves[entry.key()], what)
 	}
 }
 
 // writableByUses are td's uses whose by name a field an input may carry, in
 // the table's list order (D104): each Workflow use on a field, by its
 // transitions' by, and each StateRules use, by its states' by; every field
-// a by names but createdBy, which the repositories stamp, and a field the
-// table's Constants lists in fields, which no update changes.
+// a by names, and the fromField of every seat a by names (a seat's
+// fromField is only as strong as its writes), but createdBy, which the
+// repositories stamp, and a field the table's Constants lists in fields,
+// which no update changes. A seat entry is never looked up as a field.
 func writableByUses(td *ir.TypeDef) []byUse {
 	constant := map[string]bool{}
 	for _, ref := range td.ImplementsBehaviors() {
@@ -272,7 +324,17 @@ func writableByUses(td *ir.TypeDef) []byUse {
 			}
 		}
 	}
-	writable := func(entry string) bool { return entry != sqlutil.AuditCreatedBy && !constant[entry] }
+	writable := func(field string) bool { return field != sqlutil.AuditCreatedBy && !constant[field] }
+	// The field an entry names an input may carry: the entry itself, or
+	// the fromField of the seat it names; none for a seat with no
+	// fromField, which a by entry names directly and no input carries.
+	entryField := func(entry string) (byField, bool) {
+		if _, ok := seatOfEntry(entry); ok {
+			seat, field := seatFromField(td, entry)
+			return byField{field: field, seat: seat}, field != "" && writable(field)
+		}
+		return byField{field: entry}, writable(entry)
+	}
 	var uses []byUse
 	for _, ref := range td.TableBehaviors() {
 		if len(ref.Config) == 0 {
@@ -293,8 +355,8 @@ func writableByUses(td *ir.TypeDef) []byUse {
 			}
 			for _, transition := range config.Transitions {
 				for _, entry := range transition.By {
-					if writable(entry) {
-						use.add(entry, transition.From+" to "+transition.To)
+					if field, ok := entryField(entry); ok {
+						use.add(field, transition.From+" to "+transition.To)
 					}
 				}
 			}
@@ -309,8 +371,8 @@ func writableByUses(td *ir.TypeDef) []byUse {
 			}
 			for _, state := range slices.Sorted(maps.Keys(config.States)) {
 				for _, entry := range config.States[state].By {
-					if writable(entry) {
-						use.add(entry, state)
+					if field, ok := entryField(entry); ok {
+						use.add(field, state)
 					}
 				}
 			}

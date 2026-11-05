@@ -513,6 +513,11 @@ pub enum GuardRequest<'a> {
         /// caller, as the engine's runner made one; false for a caller's
         /// request and for a call another operation's handler makes.
         fired: bool,
+        /// Whether the calling use made the call as the command's caller's
+        /// own request ([`crate::Cx::call_as_caller`], D104): Reconcile's
+        /// moves toward an observed state, each the observer's; false for
+        /// a caller's request and every other call.
+        as_caller: bool,
     },
 }
 
@@ -976,6 +981,7 @@ mod tests {
             caller: Some("Dispatch"),
             caller_type: None,
             fired: false,
+            as_caller: false,
         };
         assert_eq!(request.action(), "transition");
         assert_eq!(request.operation_of("status", "transition"), Some(&params));

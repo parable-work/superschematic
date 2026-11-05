@@ -292,6 +292,23 @@ The member is named `Lease`, the use's id, in every language's wire form
 TypeScript and Go SDKs check the token before they send it, so a negative
 one is their validation error rather than the route's 400.
 
+A table that implements Seats puts its operations under `seats`, and a
+field that is a Reconcile under the field's name, as a Workflow field's
+`transition` sits under its own (D104,
+[A table's seats and observations](/superschematic/guides/api-routes/#a-tables-seats-and-observations)).
+A seat is an enum of the config's seats (`ProblemSeatsSeat`), and an
+observation's `state` an enum of the Workflow's states
+(`SandboxObservedState`), so each SDK refuses a seat or a state the config
+lacks before it sends the call:
+
+| Language | Call |
+| --- | --- |
+| Go | `sdk.ProblemNamespace.Seats.TakeSeat(ctx, id, types.ProblemSeatsTakeSeatInput{Seat: "accountable"})`, `sdk.SandboxNamespace.Observed.Observe(ctx, id, types.SandboxObservedObserveInput{State: "running", At: types.GenericInt64(at)})` |
+| TypeScript | `await sdk.problem.seats.takeSeat(id, { seat: "accountable" })`, `await sdk.sandbox.observed.observe(id, { state: "running", at })` |
+
+`takeSeat`'s and `leaveSeat`'s `subject` is optional: without it the call
+seats or unseats its caller.
+
 ## Timeouts, retries and hooks
 
 | | Go | TypeScript | Python | Rust |

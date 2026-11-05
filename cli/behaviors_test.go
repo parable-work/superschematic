@@ -60,7 +60,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 	assert.Contains(t, string(behaviorsTS), "export interface ItemBehaviors {")
 
 	_, err = runCommandWith(t, nil, "build", service, "--emit-ir", "--out", t.TempDir())
-	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)`)
+	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Search, Seats, StateRules, Stock, Timers, Variants, Workflow)`)
 
 	yamlOut, err := runCommandWith(t, acme, "format", "--to=yaml", "--stdout", filepath.Join(service, "src/item.schema.json"))
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 		} `json:"$defs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
-	assert.Equal(t, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Presence", "Provenance", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Audited", "acme.Stock"}, def.Defs.BehaviorRef.Properties.Name.Enum)
+	assert.Equal(t, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Audited", "acme.Stock"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 	compileSchema(t, []byte(schemaOut), "superschematic://schema-file.json")
 }
 
@@ -175,7 +175,7 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	assert.Len(t, files, 2)
 
 	_, err = runCommandWith(t, acme, "behaviors", "--out", out, "--extension", "shop", "--check")
-	require.EqualError(t, err, `behaviors: extension "shop" registers no behavior in this binary (registered: Approvals (core), Assignment (core), Blueprint (core), Branches (core), Budget (core), Calendar (core), Comments (core), Constants (core), Dependencies (core), Derived (core), Holds (core), Lease (core), Links (core), Numbering (core), Payments (core), Presence (core), Provenance (core), Queue (core), Reactions (core), Retries (core), Revisions (core), Rollups (core), Search (core), StateRules (core), Stock (core), Timers (core), Variants (core), Workflow (core), acme.Audited (extension acme), acme.Stock (extension acme))`)
+	require.EqualError(t, err, `behaviors: extension "shop" registers no behavior in this binary (registered: Approvals (core), Assignment (core), Blueprint (core), Branches (core), Budget (core), Calendar (core), Comments (core), Constants (core), Dependencies (core), Derived (core), Holds (core), Lease (core), Links (core), Numbering (core), Payments (core), Presence (core), Provenance (core), Queue (core), Reactions (core), Reconcile (core), Retries (core), Revisions (core), Rollups (core), Search (core), Seats (core), StateRules (core), Stock (core), Timers (core), Variants (core), Workflow (core), acme.Audited (extension acme), acme.Stock (extension acme))`)
 
 	_, err = runCommandWith(t, acme, "behaviors", "--out", out, "--extension", "acme", "--check")
 	require.NoError(t, err)
@@ -183,12 +183,12 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	core := filepath.Join(t.TempDir(), "core")
 	log, err := runCommandWith(t, nil, "behaviors", "--out", core)
 	require.NoError(t, err)
-	assert.Equal(t, "behaviors: 28 declaration(s) in "+core+"\n", log)
+	assert.Equal(t, "behaviors: 30 declaration(s) in "+core+"\n", log)
 	written, err := behaviorFiles(core)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"Approvals.behavior.json", "Assignment.behavior.json", "Blueprint.behavior.json", "Branches.behavior.json", "Budget.behavior.json", "Calendar.behavior.json", "Comments.behavior.json", "Constants.behavior.json", "Dependencies.behavior.json", "Derived.behavior.json", "Holds.behavior.json", "Lease.behavior.json",
-		"Links.behavior.json", "Numbering.behavior.json", "Payments.behavior.json", "Presence.behavior.json", "Provenance.behavior.json", "Queue.behavior.json", "Reactions.behavior.json", "Retries.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json",
-		"Search.behavior.json", "StateRules.behavior.json", "Stock.behavior.json", "Timers.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
+		"Links.behavior.json", "Numbering.behavior.json", "Payments.behavior.json", "Presence.behavior.json", "Provenance.behavior.json", "Queue.behavior.json", "Reactions.behavior.json", "Reconcile.behavior.json", "Retries.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json",
+		"Search.behavior.json", "Seats.behavior.json", "StateRules.behavior.json", "Stock.behavior.json", "Timers.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
 	_, err = runCommandWith(t, nil, "behaviors", "--out", out, "--check")
 	require.ErrorContains(t, err, "acme.Audited.behavior.json is no registered behavior's declaration")
 
@@ -197,8 +197,8 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 }
 
 // --package keeps the behaviors one npm package implements: the core's
-// split between the engine, the work-queue package and the commerce
-// package, each of which gets only its own, and --check holds each
+// split between the engine, the work-queue package, the commerce package
+// and the behaviors' core's, each of which gets only its own, and --check holds each
 // directory to its package. With
 // --extension too, a behavior must match both. A package that implements
 // nothing the binary registers is refused, naming the packages there are.
@@ -230,6 +230,18 @@ func TestBehaviorsCommand_Package(t *testing.T) {
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-commerce", "--out", commerce, "--check")
 	require.NoError(t, err)
 
+	// The behaviors no engine implements ship in the behaviors' core's
+	// package, whose crate (rules-behaviors) carries their copies (D104).
+	rules := filepath.Join(t.TempDir(), "rules")
+	log, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/rules", "--out", rules)
+	require.NoError(t, err)
+	assert.Equal(t, "behaviors: 2 declaration(s) in "+rules+"\n", log)
+	files, err = behaviorFiles(rules)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Reconcile.behavior.json", "Seats.behavior.json"}, sortedKeys(files))
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/rules", "--out", rules, "--check")
+	require.NoError(t, err)
+
 	// Each directory is current for its own package and stale for the other.
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue", "--out", workqueue, "--check")
 	require.NoError(t, err)
@@ -242,10 +254,10 @@ func TestBehaviorsCommand_Package(t *testing.T) {
 		"Retries.behavior.json is no registered behavior's declaration; run: superschematic behaviors --out "+workqueue+" --package @superschematic/engine")
 
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@acme/behaviors", "--out", t.TempDir())
-	require.EqualError(t, err, `behaviors: no behavior this binary registers is implemented by package "@acme/behaviors" (packages: @superschematic/engine, @superschematic/engine-commerce, @superschematic/engine-workqueue)`)
+	require.EqualError(t, err, `behaviors: no behavior this binary registers is implemented by package "@acme/behaviors" (packages: @superschematic/engine, @superschematic/engine-commerce, @superschematic/engine-workqueue, @superschematic/rules)`)
 	acme := []registry.Extension{registrytest.Acme{}}
 	_, err = runCommandWith(t, acme, "behaviors", "--extension", "acme", "--package", "@superschematic/engine", "--out", t.TempDir())
-	require.EqualError(t, err, `behaviors: no behavior this binary registers for extension acme is implemented by package "@superschematic/engine" (packages: @superschematic/engine, @superschematic/engine-commerce, @superschematic/engine-workqueue)`)
+	require.EqualError(t, err, `behaviors: no behavior this binary registers for extension acme is implemented by package "@superschematic/engine" (packages: @superschematic/engine, @superschematic/engine-commerce, @superschematic/engine-workqueue, @superschematic/rules)`)
 }
 
 // D10 for behaviors: the binary with no extension linked loads a schema
@@ -315,7 +327,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		} `json:"$defs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
-	assert.Equal(t, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Presence", "Provenance", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
+	assert.Equal(t, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 
 	// Dependencies and Links, whose configs name other schemas, load in both
 	// forms to the same IR; the loader resolves none of those names.
@@ -498,6 +510,9 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-commerce",
 		"--out", filepath.Join("..", "runtime", "engine-commerce", "rust", "declarations"), "--check")
 	require.NoError(t, err, "the commerce crate's copies of the core declarations are stale; run make behaviors")
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/rules",
+		"--out", filepath.Join("..", "runtime", "engine", "rust", "rules-behaviors", "declarations"), "--check")
+	require.NoError(t, err, "the behaviors' core's copies of the declarations only it implements are stale; run make behaviors")
 }
 
 // Stock and Payments read a currency from a Finance.Currency own field

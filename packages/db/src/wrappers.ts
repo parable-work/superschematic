@@ -56,10 +56,13 @@ export interface WorkflowConfig extends Omit<BehaviorConfigs["Workflow"], "trans
 export interface WorkflowTransitionOn extends WorkflowTransition {
   /**
    * The row's own fields that hold a subject (string, Identity.UUID or
-   * Identity.UserID), createdBy among them: only a caller who is the
-   * subject one of them holds makes the transition, with its permission too
-   * when it names one. A field is only as strong as its writes: keep it out
-   * of any input a caller who should not make the move may write.
+   * Identity.UserID), createdBy among them, and seats of the table's Seats,
+   * each as "seat:<name>" (D104): only a caller who is the subject one of
+   * the fields holds, or who is seated in one of the seats, makes the
+   * transition, with its permission too when it names one. A field is only
+   * as strong as its writes, and a seat as its take permission: keep the
+   * field out of any input a caller who should not make the move may write,
+   * and name a take permission for the seat.
    */
   readonly by?: readonly string[];
 }
@@ -182,12 +185,15 @@ export interface StateRuleOn<T> {
   readonly frozen?: readonly Extract<keyof T, string>[] | "all";
   /**
    * The row's own fields that hold a subject (string, Identity.UUID or
-   * Identity.UserID), createdBy among them: the subject one holds changes a
-   * field the state freezes. A field is only as strong as its writes: keep
-   * it out of any input a caller who should not change what it frees may
-   * write, or list it in Constants' fields.
+   * Identity.UserID), createdBy among them, and seats of the table's Seats,
+   * each as "seat:<name>" (D104): the subject one of the fields holds, or a
+   * subject seated in one of the seats, changes a field the state freezes. A
+   * field is only as strong as its writes, and a seat as its take
+   * permission: keep the field out of any input a caller who should not
+   * change what it frees may write, or list it in Constants' fields, and
+   * name a take permission for the seat.
    */
-  readonly by?: readonly Extract<keyof T, string>[];
+  readonly by?: readonly (Extract<keyof T, string> | `seat:${string}`)[];
 }
 
 /**
@@ -400,3 +406,71 @@ export interface BudgetMeterOn<T> extends Omit<BudgetMeter, "limitField" | "rese
  * first type argument is the table itself.
  */
 export type Budget<T, C extends BudgetOn<T>> = NonNullable<unknown>;
+
+/** One seat of SeatsOn<T> (D104): how many it seats, what a take of a full seat does, the permissions that take and assign it, and the field whose subject it always seats. */
+export interface SeatsSeatOn<T> {
+  /** How many subjects the seat holds at most, the subject its fromField holds among them; no cap when absent. */
+  readonly max?: number;
+  /** What a take of a full seat does: "refuse", the veto seat_full (the default), or "displace", which unseats the subject seated longest. Needs max. */
+  readonly onFull?: "refuse" | "displace";
+  /** The permission a caller needs to seat itself; any caller may when absent. */
+  readonly take?: string;
+  /** The permission a caller needs to seat or unseat another subject; no caller may when absent. */
+  readonly assign?: string;
+  /**
+   * An own field that holds a subject (string, Identity.UUID or
+   * Identity.UserID): the subject it holds is seated, counts toward max, is
+   * never displaced and cannot leave while the field holds them. An update
+   * that gives it a subject not seated takes the seat past no permission,
+   * held to max: seat_full under "refuse", and under "displace" the subject
+   * seated longest leaves. A field is only as strong as its writes: keep it
+   * out of any input a caller who should not sit in the seat may write, or
+   * list it in Constants' fields.
+   */
+  readonly fromField?: Extract<keyof T, string>;
+}
+
+/** Seats' config on a table (D104): its seats, by name. */
+export interface SeatsOn<T> {
+  readonly seats: Readonly<Record<string, SeatsSeatOn<T>>>;
+}
+
+/**
+ * Named seats on a table's rows, each holding the subjects seated in it
+ * (D104): `export abstract class Problem implements Seats<Problem, { seats: { ... } }>`.
+ * The type stays a table. Seats keeps its occupants in a sub-table of the
+ * row (problem_seats_occupants); its operations (seats.takeSeat, leaveSeat,
+ * listSeats) change and read them, and a Workflow transition's or a
+ * StateRules state's by names a seat as "seat:<name>". The behaviors' core
+ * alone implements it: no engine type composes it. Like Timers, it resolves
+ * to the empty object type; the first type argument is the table itself.
+ */
+export type Seats<T, C extends SeatsOn<T>> = NonNullable<unknown>;
+
+/** Reconcile's config on a field (D104). */
+export interface ReconcileConfig {
+  /** The field whose Workflow an observation moves, along the fewest transitions it allows. */
+  readonly status: string;
+  /** The state of that Workflow the stale deadline moves a row to: every state but a terminal one reaches it, and it reaches every state. Needs staleAfterMs. */
+  readonly unreachable?: string;
+  /** How long after an observation's at a row goes stale, in milliseconds, at least 1000. Needs unreachable. */
+  readonly staleAfterMs?: number;
+  /** The permission a caller needs to observe. */
+  readonly observePermission: string;
+}
+
+/**
+ * The state a row's provider last reported, beside the Workflow field it
+ * moves (D104):
+ * `observed: Reconcile<{ status: "status"; unreachable: "unreachable"; staleAfterMs: 300000; observePermission: "sandboxes.observe" }>`.
+ * The type stays a table: the field's column holds the observed state,
+ * null before the first observation, and Reconcile's other fields take
+ * columns named for the field (observed_observed_at, observed_drift,
+ * observed_reconciled_at). Only its operation (observed.observe) and its
+ * stale deadline, which the API's @behaviorWorker runs, change them. A
+ * repository's row types the field string | null, as it types the
+ * Workflow's status string; observe's input and result, in the API and the
+ * SDKs, type it by the Workflow's states (<Table>ObservedState). The
+ * behaviors' core alone implements it: no engine type composes it.
+ */
+export type Reconcile<C extends ReconcileConfig> = string | null;
