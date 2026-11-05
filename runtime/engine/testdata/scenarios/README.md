@@ -297,7 +297,7 @@ recorded value took, or inside a string that held it:
 | `{{id:N:62}}` | The same id in the version graph's base62 form (Branches' refs and commits). |
 | `{{dir:N}}` | The N-th temporary directory to appear. |
 | `{{opaque:N}}` | An opaque cursor (base64url) that encodes an id or a time of this run: the N-th distinct one. |
-| `{{time:N}}` | In a scenario that read the wall clock: the N-th distinct instant of that clock to appear, read from it or computed from it (a deadline, a retry, a schedule's next run). As a JSON string in place of a number it is that instant in epoch milliseconds; inside a string or in place of one, an RFC 3339 date-time of it. A fixed clock's times are never symbols. |
+| `{{time:N}}` | In a scenario that read the wall clock: the N-th distinct instant of that clock to appear (of an engine's database, when its engines opened more than one), read from it or computed from it (a deadline, a retry, a schedule's next run). As a JSON string in place of a number it is that instant in epoch milliseconds; inside a string or in place of one, an RFC 3339 date-time of it. A fixed clock's times are never symbols. |
 | `{{time:N:us}}` | The same instant in epoch microseconds. |
 
 A replayer binds a symbol at its first appearance in an `expect` or an
@@ -322,8 +322,11 @@ symbols, but a hash computed over an id it drew differently will differ.
 the same millisecond twice: the recorder opens it on the engine's strict
 clock, each reading `max(now, last + 1)`, every write reading its own, as a
 replayer opens one. Across a scenario's engines the recorder keeps the
-readings apart as one clock would: a step on another engine than the last
-waits until the wall clock is past every instant the scenario has shown.
+readings apart as one clock would: engines on different databases number
+their instants apart, so two engines that read one millisecond have two
+symbols for it, and a step on another engine than the last waits until the
+wall clock is past every instant the scenario has shown, which keeps apart
+the readings of engines on one database (one reopened on another's file).
 So two readings are two instants, and an instant that appears twice in a
 scenario is one reading, which the symbols keep. In a scenario that read the
 wall clock, a number is written `{{time:N}}` when it is an integer in the

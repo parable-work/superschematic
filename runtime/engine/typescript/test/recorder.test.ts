@@ -1,10 +1,12 @@
 // The scenario recorder (recorder.ts) held to the scenarios README's rules
-// for times and hooks (D58): it records recorder-clocks.ts and
-// recorder-hooks.ts under Node.js with ENGINE_RECORD set. A test's fixed
-// clock is written as it read it, and so is every number of its engine's
-// steps, though a seq equals the clock's reading; only the wall clock's
-// times are symbols; and a fixed clock that reads near the wall clock fails
-// the test that opened it. A behavior that runs a closure the test set, or
+// for times and hooks (D58): it records recorder-clocks.ts,
+// recorder-apart.ts and recorder-hooks.ts under Node.js with ENGINE_RECORD
+// set. A test's fixed clock is written as it read it, and so is every
+// number of its engine's steps, though a seq equals the clock's reading;
+// only the wall clock's times are symbols; a fixed clock that reads near
+// the wall clock fails the test that opened it; and two engines that read
+// one millisecond have two symbols for it, so a recording does not depend
+// on how fast its steps ran. A behavior that runs a closure the test set, or
 // reads a value the test changed, marks its scenario js, and the step it
 // ran in; one with nothing set, or whose closure nothing runs, does not.
 import assert from 'node:assert/strict';
@@ -22,9 +24,10 @@ type Step = Record<string, unknown>;
 type Scenario = { name: string; js?: string[]; testBehaviors?: string[]; steps: Step[] };
 
 // record runs the tests of a recorder fixture (recorder-clocks,
-// recorder-hooks) whose names match pattern under Node.js, recording to a
-// fresh directory, and returns the runner's exit code and output and the
-// scenarios written.
+// recorder-apart, recorder-hooks) whose names match pattern under Node.js,
+// recording to a fresh directory, and returns the runner's exit code and
+// output and the scenarios written, or the cases of a fixture that served
+// HTTP.
 async function record(fixture: string, pattern: string): Promise<{ code: number | null; output: string; scenarios: Scenario[] }> {
   const out = mkdtempSync(join(tmpdir(), 'superschematic-engine-recorder-'));
   try {
@@ -46,7 +49,11 @@ async function record(fixture: string, pattern: string): Promise<{ code: number 
     try {
       scenarios = (JSON.parse(readFileSync(join(out, 'scenarios', `${fixture}.json`), 'utf8')) as { scenarios: typeof scenarios }).scenarios;
     } catch {
-      // Nothing recorded.
+      try {
+        scenarios = (JSON.parse(readFileSync(join(out, 'http', `${fixture}.json`), 'utf8')) as { cases: typeof scenarios }).cases;
+      } catch {
+        // Nothing recorded.
+      }
     }
     return { code, output: output.join(''), scenarios };
   } finally {
@@ -83,6 +90,20 @@ test('a fixed clock that reads near the wall clock fails the test, which the rec
   assert.notEqual(code, 0, output);
   assert.match(output, /the recorder cannot tell the times of "a fixed clock that reads today beside the wall clock" apart/u);
   assert.deepEqual(scenarios, []);
+});
+
+test('two engines that read one millisecond have two time symbols for it, however close their steps ran', { timeout: 60_000 }, async () => {
+  const { code, output, scenarios } = await record('recorder-apart', 'two engines on the wall clock');
+  assert.equal(code, 0, output);
+  assert.equal(scenarios.length, 1, output);
+  type Exchange = { app?: string; request?: { path: string }; response?: { body: { data: { createdAt: unknown } } } };
+  const creates = (scenarios[0]!.steps as Exchange[]).filter((step) => step.request?.path.endsWith('/instances'));
+  assert.deepEqual(new Set(creates.map((step) => step.app)), new Set(['a1', 'a2']));
+  // Each create read its own engine's clock once, each pair from the start
+  // of one millisecond: every one is an instant of its own.
+  const times = creates.map((step) => step.response?.body.data.createdAt);
+  assert.ok(times.every((time) => typeof time === 'string' && /^\{\{time:\d+\}\}$/u.test(time)), JSON.stringify(times));
+  assert.equal(new Set(times).size, times.length, JSON.stringify(times));
 });
 
 // hooks records recorder-hooks.ts once, for the tests below.

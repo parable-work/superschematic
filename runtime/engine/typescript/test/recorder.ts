@@ -106,6 +106,9 @@ const generated = new Set<string>();
 const generated62 = new Map<string, string>();
 const directories: string[] = [];
 const raws = new WeakMap<object, Engine>();
+// The engine each step ran on, an exchange's and a stream's its app's,
+// whose database symbolize numbers the instants the step shows by.
+const stepEngines = new WeakMap<JSONObject, EngineRecord>();
 
 // The ids drawn in the current test, and the wall clock's last reading.
 let drawn = 0;
@@ -382,7 +385,7 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
   }
   const proxy = engineProxy(raw, engine);
   raws.set(proxy, raw);
-  engineLabels.set(proxy, label);
+  engineRecords.set(proxy, engine);
   return proxy;
 }
 
@@ -646,6 +649,7 @@ function run<T>(engine: EngineRecord, step: JSONObject, invoke: () => T): T {
     active = previous;
     settle(record, here);
     noteWallShown(record, engine, step);
+    stepEngines.set(step, engine);
     record.steps.push(step);
   }
 }
@@ -656,7 +660,14 @@ function run<T>(engine: EngineRecord, step: JSONObject, invoke: () => T): T {
 // together would: a step on another engine than the last such step waits
 // until the wall clock is past every instant the case has shown and every
 // step has ended at. A replayer's engines, each with a strict clock of its
-// own, then read the times the recording holds apart apart too.
+// own, then read the times the recording holds apart apart too. The wait
+// sees only what the steps showed, and a strict clock reads ahead of the
+// wall clock by as many readings as it took in one millisecond (an open
+// takes about ten, a test that writes in a loop hundreds), so an engine
+// can read, without showing it, an instant another reads after the wait:
+// symbolize numbers the instants of engines on different databases apart,
+// which leaves this wait to engines on one database (one reopened on
+// another's file), whose instants are one clock's.
 function holdWallApart(record: Case, engine: EngineRecord | undefined): void {
   if (engine === undefined || !engineHasWallClock(engine)) {
     return;
@@ -669,10 +680,12 @@ function holdWallApart(record: Case, engine: EngineRecord | undefined): void {
   record.wallEngine = engine;
 }
 
-// How far past the wall clock an engine's strict clock reads, at most,
-// after reading more than once in a millisecond: an instant a step shows
-// further ahead is one the engine computed (a deadline, a lease's
-// expiry), not one it read.
+// How far past the wall clock noteWallShown takes an instant a step shows
+// for one its engine read: a strict clock reads ahead by as many readings
+// as it took in one millisecond, a few for most steps, though a test that
+// writes in a loop takes it hundreds ahead; an instant further ahead than
+// this is taken for one the engine computed (a deadline, a lease's
+// expiry), which the wait must not run to.
 const STRICT_RUNAHEAD_MS = 50;
 
 // noteWallShown moves the case's latest wall instant past what a step on
@@ -998,9 +1011,13 @@ export function recordedApp<A extends Fetching>(app: A, describe: AppDescription
   record.apps += 1;
   const label = `a${record.apps}`;
   const step: JSONObject = { app: label, kind: describe.kind };
-  const engineLabel = describe.engine === undefined ? undefined : engineLabels.get(describe.engine);
-  if (engineLabel !== undefined) {
-    step.engine = engineLabel;
+  const opened = describe.engine === undefined ? undefined : engineRecords.get(describe.engine);
+  // The engine the app's exchanges run on: the one it serves, or, for an
+  // app that names none, the case's last.
+  const engine = opened?.case === record ? opened : undefined;
+  if (engine !== undefined) {
+    step.engine = engine.label;
+    stepEngines.set(step, engine);
   }
   if (describe.options !== undefined) {
     step.options = appOptions(describe.options, record);
@@ -1010,7 +1027,7 @@ export function recordedApp<A extends Fetching>(app: A, describe: AppDescription
   }
   record.steps.push(step);
   const fetch = app.fetch.bind(app);
-  const recorded = (request: Request, ...rest: unknown[]) => exchange(label, request, () => fetch(request, ...rest));
+  const recorded = (request: Request, ...rest: unknown[]) => exchange(label, engine, request, () => fetch(request, ...rest));
   Object.defineProperty(app, 'fetch', { value: recorded, configurable: true, writable: true });
   return app;
 }
@@ -1034,8 +1051,8 @@ export function servedApp<O, A extends Fetching>(
   return recordedApp(appFor(build, engine, options), { kind, engine, options: options as object });
 }
 
-// The labels of the engines the recorder opened, by proxy.
-const engineLabels = new WeakMap<object, string>();
+// The engines the recorder opened, by proxy.
+const engineRecords = new WeakMap<object, EngineRecord>();
 
 function appOptions(options: object, record: Case): JSONValue {
   const out: JSONObject = {};
@@ -1062,7 +1079,7 @@ function appOptions(options: object, record: Case): JSONValue {
   return out;
 }
 
-async function exchange(app: string, request: Request, serve: () => Response | Promise<Response>): Promise<Response> {
+async function exchange(app: string, engine: EngineRecord | undefined, request: Request, serve: () => Response | Promise<Response>): Promise<Response> {
   const record = caseNow();
   const url = new URL(request.url);
   const recordedRequest: JSONObject = { method: request.method, path: url.pathname };
@@ -1093,13 +1110,17 @@ async function exchange(app: string, request: Request, serve: () => Response | P
   // The step takes its place when the request comes in, so what the
   // request sets off (an event a stream sends) comes after it.
   record.steps.push(step);
-  const here: Active = { step, engine: record.engines[record.engines.length - 1], readings: [], ids: [] };
+  const here: Active = { step, engine: engine ?? record.engines[record.engines.length - 1], readings: [], ids: [] };
+  if (here.engine !== undefined) {
+    stepEngines.set(step, here.engine);
+  }
   holdWallApart(record, here.engine);
   let response: Response;
   try {
     response = await exchanges.run(here, async () => serve());
   } catch (error) {
     step.error = encodeError(error, record);
+    noteWallShown(record, here.engine, step);
     throw error;
   }
   const recordedResponse: JSONObject = { status: response.status };
@@ -1117,13 +1138,19 @@ async function exchange(app: string, request: Request, serve: () => Response | P
   settle(record, here);
   const type = response.headers.get('content-type') ?? '';
   if (response.body === null) {
+    noteWallShown(record, here.engine, step);
     return response;
   }
   if (type.startsWith('text/event-stream')) {
     record.streams += 1;
     const label = `s${record.streams}`;
     step.stream = label;
-    return new Response(streamBody(label, response.body, record, request.signal), { status: response.status, statusText: response.statusText, headers: response.headers });
+    noteWallShown(record, here.engine, step);
+    return new Response(streamBody(label, here.engine, response.body, record, request.signal), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   }
   const body = await response.text();
   if (body !== '') {
@@ -1150,11 +1177,18 @@ function bodyOf(text: string, type: string | null): JSONValue {
 // client is still there, is `{"stream", "end": true}`. A client's
 // disconnect is not a step: when the server learns of it races with the
 // test's next step, and it changes nothing a step reads.
-function streamBody(label: string, body: ReadableStream<Uint8Array>, record: Case, signal: AbortSignal): ReadableStream<Uint8Array> {
+function streamBody(label: string, engine: EngineRecord | undefined, body: ReadableStream<Uint8Array>, record: Case, signal: AbortSignal): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let cancelled = false;
+  // A stream's steps show what its app's engine read.
+  const add = (step: JSONObject): void => {
+    if (engine !== undefined) {
+      stepEngines.set(step, engine);
+    }
+    record.steps.push(step);
+  };
   const push = (frames: JSONValue[]): void => {
     if (frames.length === 0) {
       return;
@@ -1163,7 +1197,7 @@ function streamBody(label: string, body: ReadableStream<Uint8Array>, record: Cas
     if (last !== undefined && last.stream === label && Array.isArray(last.frames) && last.request === undefined) {
       (last.frames as JSONValue[]).push(...frames);
     } else {
-      record.steps.push({ stream: label, frames });
+      add({ stream: label, frames });
     }
   };
   return new ReadableStream<Uint8Array>({
@@ -1171,7 +1205,7 @@ function streamBody(label: string, body: ReadableStream<Uint8Array>, record: Cas
       const { done, value } = await reader.read();
       if (done) {
         if (!signal.aborted && !cancelled) {
-          record.steps.push({ stream: label, end: true });
+          add({ stream: label, end: true });
         }
         controller.close();
         return;
@@ -1494,7 +1528,7 @@ function finish(name: string, record: Case): JSONObject {
     scenario.principals = principals;
   }
   scenario.steps = steps;
-  return symbolize(scenario, record) as JSONObject;
+  return symbolize(scenario, record);
 }
 
 // The calls that read which behaviors the engine has registered.
@@ -1551,8 +1585,13 @@ function isMessageSearch(step: JSONObject): boolean {
 // clock's span, which its readings alone make: a fixed clock's never widen
 // it, so it starts a day before today and holds no small integer (a seq, a
 // count, a fixed clock's 7), and endCase refuses a case whose fixed clock
-// reads near it.
-function symbolize(scenario: JSONValue, record: Case): JSONValue {
+// reads near it. In a case whose engines on the wall clock opened more than
+// one database, an instant is numbered by the database of the engine whose
+// step shows it too: two engines that read one millisecond read two
+// instants, as the one clock a replayer's engines read together gives
+// them, however close their steps ran; engines on one database share its
+// instants, which holdWallApart keeps apart.
+function symbolize(scenario: JSONObject, record: Case): JSONObject {
   const window = record.wallReadings.length > 0 ? windowOf(record.wallReadings) : undefined;
   const given = givenValues(scenario);
   const numbering = (): ((key: string | number) => number) => {
@@ -1568,8 +1607,12 @@ function symbolize(scenario: JSONValue, record: Case): JSONValue {
   };
   const idOf = numbering();
   const dirOf = numbering();
-  const timeOf = numbering();
+  const instantOf = numbering();
   const opaqueOf = numbering();
+  const databases = new Set(record.engines.filter(engineHasWallClock).map(databaseOf));
+  // The database of the step being written, when the case has more than one.
+  let database = '';
+  const timeOf = (instant: number): number => instantOf(`${database} ${instant}`);
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
   const BASE62 = /(?<![0-9A-Za-z])[0-9A-Za-z]{18,22}(?![0-9A-Za-z])/gu;
   const DATE_TIME = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/gu;
@@ -1637,7 +1680,21 @@ function symbolize(scenario: JSONValue, record: Case): JSONValue {
     }
     return value;
   };
-  return visit(scenario);
+  const { steps, ...rest } = scenario;
+  const out = visit(rest) as JSONObject;
+  out.steps = (steps as JSONObject[]).map((step) => {
+    const engine = stepEngines.get(step);
+    database = databases.size > 1 && engine !== undefined ? databaseOf(engine) : '';
+    return visit(step);
+  });
+  return out;
+}
+
+// databaseOf names the database an engine opened: its file, or, for one in
+// memory or opened without a path, the engine itself.
+function databaseOf(engine: EngineRecord): string {
+  const path = (engine.open.args as JSONObject[] | undefined)?.[0]?.path;
+  return typeof path === 'string' && path !== '' && path !== ':memory:' ? `file:${resolve(path)}` : `engine:${engine.label}`;
 }
 
 interface Window {
