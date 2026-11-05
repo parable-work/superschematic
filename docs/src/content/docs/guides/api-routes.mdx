@@ -1385,6 +1385,79 @@ that also implements Lease) is released and falls due a minute later, as
 every vetoed fire is; list the operation in Lease's `exempt`
 (`"Timers.fireTimer"`, `"Presence.miss"`) to let it through. Budget arms nothing and needs no worker.
 
+## A table's seats and observations
+
+A table that implements Seats, or types a field as a Reconcile
+([A row's seats, and a field that follows observations](/superschematic/guides/database-tables/#a-rows-seats-and-a-field-that-follows-observations)),
+has their operations, which a `@behaviorOperations` set serves beside its
+Workflow field's `transition`; Reconcile's stale deadline needs a
+`@behaviorWorker` (D104):
+
+```ts
+// seats-api
+import { auth, behaviorOperations, behaviorWorker } from "@superschematic/api";
+import { Problem, Sandbox } from "@acme/seats-db";
+
+@behaviorOperations(Problem)
+@auth
+export abstract class ProblemActions {}
+
+@behaviorOperations(Sandbox)
+@auth
+export abstract class SandboxActions {}
+
+@behaviorWorker(Sandbox)
+export abstract class SandboxDeadlines {}
+```
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /api/problem/{id}/seats/take-seat` | `{ "seat": "accountable", "subject"?: "..." }` | `{ seat, subject, displaced, unchanged? }` |
+| `POST /api/problem/{id}/seats/leave-seat` | `{ "seat": "handles", "subject"?: "..." }` | `{ seat, subject, unchanged? }` |
+| `POST /api/problem/{id}/seats/list-seats` | `{ "seat"?: "responsible" }` | `{ items: [{ seat, subject, seatedAt, seatedBy, fromField }] }`; it writes nothing |
+| `POST /api/sandbox/{id}/observed/observe` | `{ "state": "running", "at": 1790790700324 }` | `{ observed, observedAt, status, moves: [{ from, to }], drift?, unchanged? }` |
+
+The types are typed by the config: every Seats operation's `seat` is
+`ProblemSeatsSeat`, the enum of the config's seats, and `observe`'s
+`state`, its result's states and `moves` are `SandboxObservedState`, the
+states of the Workflow `status` names. The SDK methods and MCP tools
+follow the use, as Workflow's do: `sdk.problem.seats.takeSeat(id, { seat:
+"accountable" })`, `problem_seats_take_seat`;
+`sdk.sandbox.observed.observe(id, { state: "running", at })`,
+`sandbox_observed_observe`. The core checks the seat's `take` and
+`assign` and Reconcile's `observePermission` against the caller's, so an
+`@auth` set admits any signed-in caller and the config decides the rest;
+the permission catalog lists a seat's `take` and `assign` under each Seats
+operation and `observePermission` under `observe`.
+
+| Call | Answer |
+| --- | --- |
+| a take of `accountable` by a caller holding `problems.own` | 200 `{ "seat": "accountable", "subject": "<caller>", "displaced": [] }`; the next caller's take answers `displaced: ["<caller>"]` |
+| the same take again | 200, `unchanged: true`, nothing written |
+| a take without the seat's `take`, or another's seat without `assign` | 403 `forbidden` |
+| a sixth `handles` | 409 `vetoed`, `seat_full`, `details.vetoDetails` `{ "seat": "handles", "max": 5, "seated": [...] }` |
+| a leave of `responsible` by the row's `agent` | 409 `vetoed`, `held_by_field`, `{ "seat": "responsible", "subject": "<agent>", "field": "agent" }` |
+| a `seat` the table's Seats lacks | 400: the route's `bad_request`, since the input types `seat` by the table's seats; the core's own `invalid_argument` answers a repository's or the adapter's call |
+| `{ "to": "working" }` by a caller seated in no seat the transition's `by` names | 409 `vetoed`, `not_principal`, `{ "from": "open", "to": "working", "by": ["seat:responsible"] }` |
+| an observation of `running` on a pending sandbox | 200, `moves` `[{ "from": "pending", "to": "starting" }, { "from": "starting", "to": "running" }]`, the stale deadline armed five minutes after `at` |
+| an observation of `stopped` by an observer without `sandboxes.stop` | 200, `status` `running`, `drift` `{ "status": "running", "observed": "stopped", "code": "forbidden" }` |
+| an observation no newer than the last | 200, `unchanged: true`, nothing written |
+| `observe` without `observePermission` | 403 `forbidden` |
+| a `state` the Workflow lacks | 400: the route's `bad_request`, since the input types `state` by the Workflow's states; the core's own `invalid_argument` answers a repository's or the adapter's call |
+
+A refused step of an observation is no refusal of the call: the
+observation is recorded, the steps before it are made, and the result's
+`drift` says where the path stopped. Each step is a `transition` made as
+the caller, so its `by`, its permission and every other behavior's rule
+hold it as they hold the caller's own move.
+
+The worker runs the stale deadline as itself, the subject
+`seats-api/SandboxDeadlines`, holding the permissions its decorator lists:
+when no observation has reached a sandbox for `staleAfterMs`, it moves the
+row to `unreachable`, and a step its permissions or a rule refuse records
+drift. A table whose Reconcile gives no `staleAfterMs` still gets a
+deadline queue, which nothing arms, and Seats arms nothing.
+
 ## OpenAPI
 
 The build writes `api/<service>/openapi.json`, and every server serves it

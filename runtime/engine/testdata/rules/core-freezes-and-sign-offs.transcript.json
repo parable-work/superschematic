@@ -11,7 +11,9 @@
     "Lease",
     "Presence",
     "Budget",
-    "Retries"
+    "Retries",
+    "Seats",
+    "Reconcile"
   ],
   "scenarios": [
     {
@@ -3920,7 +3922,7 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which the core does not run yet (D104, step 3)",
+              "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which Plan does not implement",
               "details": {
                 "issues": [
                   {
@@ -3929,7 +3931,7 @@
                     "behavior": "StateRules",
                     "kind": "rule",
                     "path": "/config",
-                    "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which the core does not run yet (D104, step 3)"
+                    "message": "type Plan: behavior StateRules config: states.planned.by names \"seat:owner\", a seat of Seats, which Plan does not implement"
                   }
                 ]
               }

@@ -1,5 +1,6 @@
 //! What only a table's StateRules takes (D104), on an engine type: a
-//! state's `by`, who may change a field it freezes, and `status`, the
+//! state's `by`, who may change a field it freezes, its seat entries
+//! (`seat:<name>`) among them, and `status`, the
 //! Workflow field the rules are of. The engine shares StateRules'
 //! declaration with the core, so its describe advertises them; it refuses
 //! each at define, naming the table form, rather than ignoring a rule of who
@@ -57,6 +58,12 @@ fn an_engine_type_refuses_what_only_a_tables_staterules_takes() {
         let cases = [
             (
                 json!({"states": {"sent": {"frozen": ["amount"], "by": ["owner"]}}}),
+                by("sent"),
+            ),
+            // A by that names a seat of Seats, which no engine implements,
+            // is a by as any other (D104, step 3).
+            (
+                json!({"states": {"sent": {"frozen": ["amount"], "by": ["seat:owners"]}}}),
                 by("sent"),
             ),
             // The first member it names, in order: the first state, in the

@@ -1,0 +1,48 @@
+{
+  "name": "fixture-seats-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-seats-db",
+      "types": [
+        "Problem",
+        "Sandbox"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-seats-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "ProblemActions",
+      "comment": "A problem's seats and status operations (D104), for any signed-in\ncaller: the core decides who sits in each seat and who moves the problem.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Problem"
+      },
+      "auth": true
+    },
+    {
+      "name": "SandboxActions",
+      "comment": "A sandbox's status and observation operations (D104), for any signed-in\ncaller: the core decides how an observation moves the sandbox.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Sandbox"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "SandboxDeadlines",
+      "comment": "Runs Sandbox's stale deadlines as they fall due (D104): a sandbox no\nobservation has reached for five minutes moves to unreachable. The\nworker fixture-seats-api-sandbox-deadlines.",
+      "behaviorWorker": {
+        "type": "Sandbox"
+      }
+    }
+  ]
+}

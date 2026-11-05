@@ -268,8 +268,9 @@ Most are load errors; knowing them saves a build round-trip:
   your own: `{ from: "open"; to: "answered"; by: ["askedOf"] }`, with
   `createdBy` for the row's creator (D104). A `by` field is an own field of
   type `string`, `Identity.UUID` or `Identity.UserID`, a to-one relation's
-  `<relation>Id`, or `createdBy`; never a relation by its name,
-  `updatedBy`, a list or a `seat:` entry (Seats is not built). Add
+  `<relation>Id`, or `createdBy`, or a seat of the table's Seats as
+  `seat:<name>` (below); never a relation by its name, `updatedBy` or a
+  list. Add
   `overridePermission: "<perm>"` for moderators, who still need a
   transition's own `permission`; it is matched as any permission, so a
   parent grant (`questions` for `questions.moderate`) overrides `by` too,
@@ -450,6 +451,52 @@ Most are load errors; knowing them saves a build round-trip:
   `budget.setLimit`) where you can. These members are a table's alone: an
   engine type's `@behavior` refuses `status`, Retries' waits, `ttlByState`
   and Budget's new resets, `window`, `observePermission` and `observe`.
+- When a row has named roles that subjects take and leave (an accountable
+  person and responsible agents, a document's owner and editors, a
+  ticket's assignees, handles an agent claims), implement Seats on the
+  table rather than a column per role or an assignee table of your own:
+  `implements Seats<Problem, { seats: { accountable: { max: 1; onFull:
+  "displace"; take: "problems.own"; assign: "problems.assign" };
+  responsible: { fromField: "agent"; take: "problems.work" }; handles: {
+  max: 5; assign: "problems.release" } } }>` (D104). `take` is what a
+  caller needs to seat itself (give every seat a `by` names one, or any
+  caller takes it and makes the move; the build warns), `assign` what it
+  needs to seat or unseat another; a caller leaves its own seat freely.
+  `fromField` seats the subject an own field holds, who cannot leave
+  (`held_by_field`) and is never displaced: it is read from the field, so
+  freeze the field with Constants or keep it out of every update input a
+  caller who should not sit there can write. An update that gives the
+  field a new subject takes the seat past no permission, but is held to
+  `max` (`seat_full` under `refuse`; `displace` unseats the longest
+  seated). Name a seat in a Workflow
+  transition's or a StateRules state's `by` as `seat:<name>`:
+  `{ from: "review"; to: "done"; by: ["seat:accountable"] }`. Calls are
+  `seats.takeSeat({ seat, subject? })`, `leaveSeat` and the read
+  `listSeats`; a repeat answers `unchanged: true`.
+- When a row's status should follow what an outside system reports (a
+  sandbox at its provider, a deployment at its platform, a payment at its
+  processor), type a field as a Reconcile beside the Workflow field rather
+  than setting the status from your poller:
+  `observed: Reconcile<{ status: "status"; unreachable: "unreachable";
+  staleAfterMs: 300000; observePermission: "sandboxes.observe" }>` (D104).
+  Your poller calls `observed.observe({ state, at })` with `at` the time it
+  saw the state, in epoch milliseconds in the server's clock (a later one
+  is refused); an older or equal one changes nothing. The core moves the
+  status along the fewest transitions, each as the poller, so give the
+  poller the transitions' permissions and seats, or a step it may not make
+  stops the path and records `drift` (`{ status, observed, code }`)
+  rather than failing the call. With `staleAfterMs`, a `@behaviorWorker`
+  moves a row no report has reached to `unreachable`, which every state but
+  a terminal one must reach and which must reach every state (the build
+  refuses otherwise). On a table with Lease, list `"Reconcile.observe"`
+  (and `"Seats.takeSeat"`, `"Seats.leaveSeat"` for Seats) in Lease's
+  `exempt` to let them through another principal's lease. Both are the
+  behaviors' core's alone: no engine type composes them, and
+  `@behavior("Seats", ...)` does not compile. A raw SQL write of a
+  `*_seats_occupants` row, of an `observed_*` column or of the status is
+  never refused but runs none of their rules and re-arms nothing until the
+  stale deadline falls due: repair with `seats.leaveSeat` by a caller
+  holding `assign`, or a newer observation, where you can.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

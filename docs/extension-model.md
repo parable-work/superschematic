@@ -822,7 +822,13 @@ type BehaviorRust struct {
 
 `Package` is optional: the npm package whose implementation runs the
 behavior in an engine, which the `behaviors` command's `--package` keeps
-(below). When set it must be an npm package name.
+(below). When set it must be an npm package name. A core behavior that no
+engine implements, which the behaviors' core alone runs on a table (D104:
+`Seats`, `Reconcile`), names `registry.RulesPackage`,
+`@superschematic/rules`, the npm package that ships the core;
+`registry.EngineImplements` is false for it alone. An extension's
+behavior runs in its engine, so `RegisterBehavior` refuses
+`RulesPackage` on an extension's spec.
 
 `Rust` is optional too: the Rust crate that implements an extension's
 behavior for the Rust engine (D58), a crate implementing the engine's
@@ -896,7 +902,7 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, `perReader`, true for a volatile one whose value is the caller's, and `type`, the column it takes on a table (below) |
+| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, `perReader`, true for a volatile one whose value is the caller's, `type`, the column it takes on a table (below), and `optional`, true for the value field of a behavior that does not set it when a row is created (Reconcile's `observed`, D104), whose anchor field the loader then adds not required, its column taking NULL; `RegisterBehavior` refuses `optional` on any other field, every one of which is optional on a table already, on a volatile one, and on a behavior whose package is not `registry.RulesPackage`, an extension's among them, since an engine's declaration parser refuses the key |
 | `value` | the field that holds the behavior's value when a type carries it on a field (D103): one of `fields`, which takes the anchor field's name and column; absent, the behavior cannot be anchored on a field |
 | `tables` | the sub-tables it keeps per row on a table that composes it (D103): each `name` (camelCase, unique among its tables), `description`, `key`, the field whose value keys a row within its row, of type `string`, and `fields`, each typed, the key among them and none named `id`; the loader adds each as a child table of the row, deleted with it, which only the behavior's operations write |
 | `armsDeadlines` | true for a behavior that arms deadlines: a table that composes it gets a deadline queue, `<Type>Deadline`, which an API's `@behaviorWorker` runs (D103) |
@@ -1037,6 +1043,8 @@ declared name the binary does not register fails the load. `format
 
 A behavior whose declaration names a `value` is also a field's type on a
 DB table (D103): `status: Workflow<{ states: ["draft", "paid"]; ... }>`,
+and, since D104, `observed: Reconcile<{ status: "status"; ... }>` beside a
+Workflow field,
 where `@superschematic/db` exports the field type under the behavior's
 name and the walker knows it by the symbol's package, as it knows
 `Relation`. The use's entry names the field (`{ name, field, config }`),
@@ -1058,6 +1066,9 @@ types in field order. The walker refuses, at the field, a field type on a
 type that is not a DB table, one for a behavior that names no `value`, an
 optional or decorated one, one inside a wrapper or a list, one a class
 inherits from a base class or a trait, and a config its schema rejects;
+for a behavior whose value field is `optional`, its `?` is refused in
+words of its own (`whose field takes no ?: the behavior keeps it, absent
+until it sets it`);
 verify refuses a type that composes behaviors both ways. `format --to=ts`
 writes each field-anchored use back as its field's type, after the class's
 own fields, and leaves out the fields the loader added and the
@@ -1065,7 +1076,7 @@ own fields, and leaves out the fields the loader added and the
 
 A behavior the behaviors' core runs and whose declaration names no `value`
 (Timers, Reactions, Constants, StateRules, Approvals, Lease, Presence,
-Budget, Retries) is implemented by a DB table as a whole (D103, D104):
+Budget, Retries, Seats) is implemented by a DB table as a whole (D103, D104):
 `export abstract
 class Ticket implements Timers<Ticket, { ... }>`, where `@superschematic/db`
 exports the carrier, which resolves to the empty object type as `User`
@@ -1199,18 +1210,24 @@ registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`,
 and the commerce behaviors the optional `@superschematic/engine-commerce`
 package implements (D70): `Stock`, `Calendar`, `Holds` and `Payments`.
-Each spec names its package (`registry.EnginePackage`,
-`registry.WorkQueuePackage` or `registry.CommercePackage`). Every binary
+It declares the two behaviors the behaviors' core alone implements, on a
+table, which no engine registers (D104): `Seats`, which a table implements,
+and `Reconcile`, the second behavior a field anchors. Each spec names its
+package (`registry.EnginePackage`, `registry.WorkQueuePackage`,
+`registry.CommercePackage` or `registry.RulesPackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
-types their configs. None names an invocation policy, since a
-distribution's policy need not have the core's values; each operation
-takes the policy's default. Every
+types the configs of every one an engine implements; it names neither
+`Seats` nor `Reconcile`, so an engine type's `@behavior("Seats", ...)`
+does not type-check, and the agent's behaviors catalog, which lists what
+an engine type composes, leaves them out. None names an invocation
+policy, since a distribution's policy need not have the core's values;
+each operation takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. `Links` and
 `Dependencies` declare a `createParamsSchema`: a create's links by name
 and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
 `Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches`, `Timers`,
-`StateRules`, `Approvals`
+`StateRules`, `Approvals`, `Seats`
 and every work-queue behavior list the codes of their
 vetoes. `Constants` and `Variants` declare no field, operation,
 parameter, precondition or code: what they refuse is an issue at a field
@@ -1335,6 +1352,18 @@ Presence's `ttlByState`, Budget's resets but `daily`, its `window` and
 the engine's runner reads (`sweepMs`), Lease's `directOn` and Retries'
 `resultField` are refused on a table.
 
+`Seats` and `Reconcile` (D104) are checked by the loader alone, in the
+core's words (`verify/behaviors_seats.go`, `behaviors_reconcile.go`): a
+seat's `fromField` is an own field that holds a subject, an `onFull`
+needs a `max`, a Workflow transition's or a StateRules state's `by`
+entry `seat:<name>` names a seat of the table's Seats, and Reconcile's
+`status` names a Workflow of the table, whose states hold its
+`unreachable` as the core's define check does. An engine type, of a DB or
+a General schema, that composes either is refused, naming the table form
+(`write implements Seats<T, { ... }> on a DB table`), since no engine
+implements them; enginedoc, projectengine and engineclientgen read engine
+types alone, so they never meet one.
+
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
 `internal/registry/registrytest` declares two, `acme.Stock` and
@@ -1369,11 +1398,14 @@ from `acme-schematic behaviors --extension acme`, which acme's smoke runs
 with `--check` (section 10). The core's copies come from
 the core binary, each into the Rust crate that implements it (D58): `make
 behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
-with `--package @superschematic/engine` and the work queue's
+with `--package @superschematic/engine`, the work queue's
 `runtime/engine-workqueue/rust/declarations` with `--package
-@superschematic/engine-workqueue` and the commerce crate's
+@superschematic/engine-workqueue`, the commerce crate's
 `runtime/engine-commerce/rust/declarations` with `--package
-@superschematic/engine-commerce`, so each crate carries only the
+@superschematic/engine-commerce` and the behaviors' core's
+`runtime/engine/rust/rules-behaviors/declarations` with `--package
+@superschematic/rules` (the behaviors no engine implements, which
+`rules-behaviors` reads in place), so each crate carries only the
 declarations it implements, and `make behaviors-check`, part of `make
 test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
@@ -1845,7 +1877,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`; the commerce package's `Stock`, `Calendar`, `Holds`, `Payments` (D70) (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`; the commerce package's `Stock`, `Calendar`, `Holds`, `Payments` (D70); and `Seats` and `Reconcile`, which the behaviors' core alone implements, on a table (D104) (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

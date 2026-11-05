@@ -15,8 +15,13 @@
 //! upgrades' scenarios written by hand, `core-retries-waits.json` (Retries'
 //! waits and Lease's fencing token, presented as a command's
 //! `preconditions`) and `core-periods-and-presence.json` (Budget's periods
-//! and observe, and Presence's `ttlByState`), whose hand-written
-//! transcripts hold each command's row version too
+//! and observe, and Presence's `ttlByState`); and from the scenarios
+//! written by hand of the behaviors only the core implements,
+//! `core-seats.json` (D104: Seats' seats, kept in a sub-table, and a `by`
+//! naming a seat) and `core-reconcile.json` (D104: Reconcile's
+//! observations on a field beside a Workflow field, and its stale
+//! deadline), whose hand-written transcripts hold each command's row
+//! version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
 //! and on Postgres, as the HTTP runtime's `src/rules-transcript.test.ts`
@@ -45,10 +50,13 @@
 //! `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
 //!
 //! The tables here follow the layout rule as the core's README states it,
-//! restated by this test (the corpus's uses are type-anchored: Workflow's
-//! `workflow_status` and `workflow_entered_at`, Timers' sub-table
-//! `<table>_timers_deadlines`). The layout the generator writes is held by
-//! the generated packages' own end-to-end tests.
+//! restated by this test: a type-anchored use's columns are named for its
+//! behavior (Workflow's `workflow_status` and `workflow_entered_at`, Timers'
+//! sub-table `<table>_timers_deadlines`), and a field-anchored use's for
+//! its field, its value field the field's own column (core-reconcile's
+//! `status` and `status_entered_at`, `observed` and `observed_observed_at`).
+//! The layout the generator writes is held by the generated packages' own
+//! end-to-end tests.
 
 #![cfg(any(feature = "sqlite", feature = "postgres"))]
 
@@ -71,7 +79,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 15] = [
+const TRANSCRIPTS: [(&str, usize); 17] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -87,6 +95,8 @@ const TRANSCRIPTS: [(&str, usize); 15] = [
     ("core-retries", RETRIES_FLOOR),
     ("core-retries-waits", RETRIES_WAITS_FLOOR),
     ("core-periods-and-presence", PERIODS_AND_PRESENCE_FLOOR),
+    ("core-seats", SEATS_FLOOR),
+    ("core-reconcile", RECONCILE_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -174,6 +184,23 @@ const RETRIES_WAITS_FLOOR: usize = 158;
 /// window across a boundary, observe and its permission, and ttlByState on
 /// a beat and on a transition.
 const PERIODS_AND_PRESENCE_FLOOR: usize = 77;
+
+/// core-seats' floor, as the core's milestone states it, raised by the
+/// update of a fromField held to its seat's max: 88 steps of the scenarios
+/// written by hand (D104), 22 define and publish checks, nine of them
+/// refused, and 66 commands, each holding its row's version: creates,
+/// updates (one refused seat_full, one displacing in its after-change
+/// hook), transitions whose `by` names a seat and Seats' operations, its
+/// occupants held as sub-table rows, four of the commands repeats answered
+/// unchanged.
+const SEATS_FLOOR: usize = 88;
+
+/// core-reconcile's floor, as the core's milestone states it: 58 steps of
+/// the scenarios written by hand (D104), 22 checks, nine of them refused,
+/// and 36 commands, each holding its row's version: creates, an update,
+/// Lease's acquire, observations on a field beside a Workflow field, two of
+/// them repeats answered unchanged, and 2 stale deadlines the runner ran.
+const RECONCILE_FLOOR: usize = 58;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

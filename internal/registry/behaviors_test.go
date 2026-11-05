@@ -72,7 +72,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Presence", "Provenance", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -329,6 +329,11 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"per reader not volatile", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "perReader": true}}}), `behavior acme.Chat field unseen is perReader but not volatile: a value each reader reads its own of is computed at a read`},
 		{"value not a field", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number"}}, "value": "reading"}), `behavior acme.Gauge value "reading" is not one of its fields`},
 		{"volatile typed", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "volatile": true, "type": "number"}}}), `behavior acme.Gauge field level is volatile and has a type: a value computed at a read takes no column`},
+		{"optional not the value", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number"}, map[string]any{"name": "at", "type": "Temporal.DateTime", "optional": true}}, "value": "level"}), `behavior acme.Gauge field at is optional, and only its value field may be: every other field a table takes is optional already`},
+		{"optional with no value", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}}), `behavior acme.Gauge field level is optional, and only its value field may be: every other field a table takes is optional already`},
+		{"optional volatile", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "volatile": true, "optional": true}}, "value": "level"}), `behavior acme.Gauge field level is optional and volatile: only a value field the behavior keeps is optional`},
+		{"optional on an engine's behavior", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}, "value": "level"}), `registry: behavior acme.Gauge field level is optional, which only a behavior the behaviors' core alone implements (package @superschematic/rules) declares: an engine's declaration parser refuses the key`},
+		{"optional on a core behavior an engine runs", "", declaration("Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}, "value": "level"}), `registry: behavior Gauge field level is optional, which only a behavior the behaviors' core alone implements`},
 		{"type not a string", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": 1}}}), "behavior declaration of extension acme: "},
 		{"per reader not a boolean", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "volatile": true, "perReader": "yes"}}}), "behavior declaration of extension acme: "},
 		{"unlogged not beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"writes": true, "log": false})}}), `behavior acme.Chat operation mark sets "log": false and is not beside the instance: only a beside operation appends no event`},
@@ -386,6 +391,17 @@ func TestRegisterBehaviorPackage(t *testing.T) {
 		if want := fmt.Sprintf("registry: behavior acme.Rating package %q is not an npm package name", pkg); err == nil || err.Error() != want {
 			t.Errorf("package %q: err = %v, want %q", pkg, err, want)
 		}
+	}
+	// The behaviors' core implements the core's behaviors alone: an
+	// extension's runs in its engine, which would refuse an optional field.
+	err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: "acme", Package: RulesPackage, Declaration: ratingDeclaration()})
+	if want := "registry: behavior acme.Rating of extension acme names package @superschematic/rules, the behaviors' core, which implements the core's behaviors alone: an extension's behavior runs in its engine (D58)"; err == nil || err.Error() != want {
+		t.Errorf("an extension's behavior in the core's package: err = %v, want %q", err, want)
+	}
+	// A core behavior of the core's package may make its value optional.
+	gauge := declaration("Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}, "value": "level"})
+	if err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Package: RulesPackage, Declaration: gauge}); err != nil {
+		t.Errorf("an optional value of a behavior of the core's package: %v", err)
 	}
 }
 
@@ -599,7 +615,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},

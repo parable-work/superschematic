@@ -5,7 +5,10 @@
 //! frozen field (D104): the subject a `by` field holds, on a string field,
 //! on a UUID field in either form and on createdBy, read from the row
 //! before the update, required held for them all the same, `frozen: "all"`
-//! with by; a move Workflow's config refuses let through to Workflow, the
+//! with by; a seat of Seats in by (D104, step 3), through an occupant row
+//! and a fromField, read before the update, the refusal naming it, and the
+//! seat a define holds to the type's Seats; a move Workflow's config
+//! refuses let through to Workflow, the
 //! Workflow a config reads (implied, named among two, refused), a Timers
 //! fire whose move it vetoes recorded vetoed; and the config held to the
 //! declaration file's schema, to the Workflow's states and to the type's
@@ -222,7 +225,7 @@ fn the_config_checks_are_the_config_schema() {
 
 /// Each state is one of the Workflow's and each field one of the type's
 /// own, in the engine's words; by names an own field that holds a subject,
-/// in a state that freezes one, and no seat.
+/// in a state that freezes one, or a seat of the type's Seats.
 #[test]
 fn its_states_are_the_workflows_and_its_fields_the_types_own() {
     let ruled = |config: Value| rule(&core(), &plan(config), "StateRules");
@@ -245,7 +248,24 @@ fn its_states_are_the_workflows_and_its_fields_the_types_own() {
     );
     assert_eq!(
         ruled(json!({"states": {"working": {"frozen": ["plan"], "by": ["seat:reviewer"]}}})),
-        "states.working.by names \"seat:reviewer\", a seat of Seats, which the core does not run yet (D104, step 3)"
+        "states.working.by names \"seat:reviewer\", a seat of Seats, which Plan does not implement"
+    );
+    let seated = |config: Value| {
+        let spec = TypeSpec {
+            uses: [UseSpec::on_type(
+                "Seats",
+                json!({"seats": {"lead": {"max": 1}, "editors": {}}}),
+            )]
+            .into_iter()
+            .chain(plan(config).uses)
+            .collect(),
+            ..plan(json!({}))
+        };
+        rule(&core(), &spec, "StateRules")
+    };
+    assert_eq!(
+        seated(json!({"states": {"working": {"frozen": ["plan"], "by": ["owner", "seat:reviewer"]}}})),
+        "states.working.by names \"seat:reviewer\", which is not a seat of Plan's Seats (its seats: editors, lead)"
     );
     assert_eq!(
         ruled(json!({"states": {"working": {"frozen": ["plan"], "by": ["missing"]}}})),
@@ -425,6 +445,62 @@ fn the_subject_a_by_field_holds_changes_a_frozen_field() {
     assert_eq!(
         refused(host.update(&dana(), "p1", json!({"plan": "Dana's"})))["details"]["vetoDetails"],
         json!({"state": "working", "fields": ["plan"], "by": ["reviewer", "owner"]})
+    );
+}
+
+/// A seat of the type's Seats in a state's by (D104): a subject seated
+/// there, through an occupant row or the seat's fromField, before the
+/// update, changes a frozen field; a caller who takes the seat in the
+/// command's patch of the fromField does not count, and another caller is
+/// frozen_fields naming the seat as by lists it, fields first.
+#[test]
+fn a_subject_seated_in_a_by_seat_changes_a_frozen_field() {
+    let seats = json!({"seats": {"lead": {"max": 1}, "editors": {"fromField": "owner"}}});
+    let rules = json!({"states": {"working": {"frozen": ["plan"], "by": ["reviewer", "seat:lead", "seat:editors"]}}});
+    let spec = TypeSpec {
+        uses: [UseSpec::on_type("Seats", seats)]
+            .into_iter()
+            .chain(plan(rules).uses)
+            .collect(),
+        ..plan(json!({}))
+    };
+    let mut host = Host::new(core(), spec);
+    changed(host.create(
+        &dana(),
+        "p1",
+        json!({"title": "Launch", "plan": "Draft", "owner": "bob", "createdBy": DANA}),
+    ));
+    changed(transition(&mut host, &bob(), "working"));
+    // bob is seated in editors through owner.
+    changed(host.update(&bob(), "p1", json!({"plan": "Bob's"})));
+    // carol is seated nowhere, until she takes lead.
+    let error = refused(host.update(&carol(), "p1", json!({"plan": "Carol's"})));
+    assert_eq!(
+        error["details"]["reason"],
+        "Plan p1 is working, which freezes plan: it does not change while it is working; only the subject reviewer holds or a subject seated in lead or editors may change it"
+    );
+    assert_eq!(
+        error["details"]["vetoDetails"],
+        json!({"state": "working", "fields": ["plan"], "by": ["reviewer", "seat:lead", "seat:editors"]})
+    );
+    changed(host.invoke(&carol(), "p1", "Seats", "takeSeat", json!({"seat": "lead"})));
+    changed(host.update(&carol(), "p1", json!({"plan": "Carol's"})));
+    // A patch that names the caller in the fromField does not seat it first.
+    assert_eq!(
+        veto_of(host.update(
+            &caller("eve", &[]),
+            "p1",
+            json!({"owner": "eve", "plan": "Eve's"})
+        ))
+        .0,
+        "frozen_fields"
+    );
+    // Once owner names eve, she is seated in editors.
+    changed(host.update(&caller("eve", &[]), "p1", json!({"owner": "eve"})));
+    changed(host.update(&caller("eve", &[]), "p1", json!({"plan": "Eve's"})));
+    assert_eq!(
+        veto_of(host.update(&bob(), "p1", json!({"plan": "Bob's again"}))).0,
+        "frozen_fields"
     );
 }
 

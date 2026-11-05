@@ -49,8 +49,16 @@
 //! `overridePermission` passes every transition's `by`, and still needs its
 //! permission. `by` and `overridePermission` hold a `call()` and a
 //! `call_on()` as the permission does: the command's caller is the one
-//! checked. A `seat:` entry names a seat of Seats, which the core does not
-//! run yet (D104, step 3), and is refused at define.
+//! checked. A `seat:<name>` entry names a seat of the type's Seats (D104): a
+//! caller seated there, through an occupant row or the seat's fromField,
+//! makes the transition, read through Seats' own rule
+//! (`seats::holds_seat`). The field entries are read first, so a field that
+//! names the caller ends the check before any seat's occupants are read; a
+//! refusal names who the transition is made by, its fields and then its
+//! seats (`the subject agent holds or a subject seated in accountable`),
+//! and its details' `by` lists the entries as the config does. At define,
+//! a seat entry names a seat of the type's Seats, and a type with none is
+//! refused for it.
 //!
 //! A move to the state the row is in is the veto `already_in_state` (D16's
 //! amendment), unless the config sets `repeat: "unchanged"`: it then
@@ -106,6 +114,7 @@ use superschematic_rules::{
 
 use crate::declared;
 use crate::schema::{self, Issues};
+use crate::seats::{self, SeatRef};
 use crate::subjects::{holds_subject, names_subject};
 
 /// The behavior's name, as its declaration has it.
@@ -145,9 +154,6 @@ const TRANSITION_KEYS: [&str; 4] = ["by", "from", "permission", "to"];
 
 // The members transition's closed paramsSchema takes.
 const PARAMS_KEYS: [&str; 2] = ["from", "to"];
-
-// What a by entry that names a seat of Seats starts with (D104, step 3).
-const SEAT_PREFIX: &str = "seat:";
 
 // The value of repeat the configSchema's enum takes.
 const REPEAT_UNCHANGED: &str = "unchanged";
@@ -227,6 +233,10 @@ pub struct WorkflowConfig {
     /// first names it, with its IR type as the type's spec gives it: what
     /// decides how its value names a subject.
     pub subject_types: Vec<(String, String)>,
+    /// Each seat a transition's by names (`seat:<name>`, D104), once, in the
+    /// order the config first names it: what the guard asks Seats' rule
+    /// whether the caller is seated in.
+    pub seats: Vec<SeatRef>,
 }
 
 // What the configSchema lets through.
@@ -303,6 +313,7 @@ impl WorkflowConfig {
                 _ => WorkflowRepeat::Veto,
             },
             subject_types: Vec::new(),
+            seats: Vec::new(),
         };
         let declared = raw.outcomes.unwrap_or_default();
         for state in declared.keys() {
@@ -331,7 +342,7 @@ impl WorkflowConfig {
                 (state.clone(), named.unwrap_or(WorkflowOutcome::Success))
             })
             .collect();
-        config.subject_types = subject_types(&config.transitions, target)?;
+        (config.subject_types, config.seats) = by_entries(&config.transitions, target)?;
         Ok(config)
     }
 
@@ -342,6 +353,12 @@ impl WorkflowConfig {
             .iter()
             .find(|(name, _)| name == field)
             .map(|(_, type_name)| type_name.as_str())
+    }
+
+    /// The seat a transition's by names, by its name; `None` for a seat no
+    /// by names.
+    pub fn seat(&self, name: &str) -> Option<&SeatRef> {
+        self.seats.iter().find(|seat| seat.seat == name)
     }
 
     /// Whether a state is one of the config's.
@@ -384,27 +401,35 @@ impl WorkflowConfig {
     }
 }
 
-// subject_types holds each transition's by to the type's fields, in
-// config order, each entry in order, refusing the first that breaks: a seat
-// of Seats, which the core does not run yet, a field the type lacks, and a
-// field of a type that holds no subject. It is each field a by names, once,
-// in the order the config first names it, with its IR type.
-fn subject_types(
+// What a config's by entries come to: each field with its IR type, and each
+// seat.
+type ByEntries = (Vec<(String, String)>, Vec<SeatRef>);
+
+// by_entries holds each transition's by to the type, in config order, each
+// entry in order, refusing the first that breaks: a seat the type's Seats
+// lacks, or of a type that implements none (D104), a field the type lacks,
+// and a field of a type that holds no subject. It is each field a by names,
+// once, in the order the config first names it, with its IR type, and each
+// seat so.
+fn by_entries(
     transitions: &[WorkflowTransition],
     target: &ConfigTarget<'_>,
-) -> Result<Vec<(String, String)>, ConfigError> {
+) -> Result<ByEntries, ConfigError> {
     let fields = target.fields();
     let type_name = target.type_name();
     let mut found: Vec<(String, String)> = Vec::new();
+    let mut seated: Vec<SeatRef> = Vec::new();
     for WorkflowTransition { from, to, by, .. } in transitions {
         for entry in by {
             let named =
                 format!("the transition from \"{from}\" to \"{to}\" names \"{entry}\" in by");
-            if entry.starts_with(SEAT_PREFIX) {
-                return Err(format!(
-                    "{named}, a seat of Seats, which the core does not run yet (D104, step 3)"
-                )
-                .into());
+            if let Some(seat) = seats::seat_name(entry) {
+                let found = seats::seat_of(target, seat)
+                    .map_err(|missing| seats::missing_reason(&named, type_name, &missing))?;
+                if !seated.iter().any(|known| known.seat == found.seat) {
+                    seated.push(found);
+                }
+                continue;
             }
             let Some(field) = fields.iter().find(|field| field.name == *entry) else {
                 let names: Vec<&str> = fields.iter().map(|field| field.name.as_str()).collect();
@@ -430,7 +455,7 @@ fn subject_types(
             }
         }
     }
-    Ok(found)
+    Ok((found, seated))
 }
 
 // The states and transitions of a config as a type holds it.
@@ -674,9 +699,9 @@ impl Behavior for Workflow {
             );
             return Ok(Some(
                 Veto::new(format!(
-                    "{who} may not move {} from {from} to {to}: the transition is made by the subject {} holds",
+                    "{who} may not move {} from {from} to {to}: the transition is made by {}",
                     target(view),
-                    either(&found.by)
+                    seats::by_named(&found.by)
                 ))
                 .with_code("not_principal")
                 .with_details(details),
@@ -717,31 +742,32 @@ impl Behavior for Workflow {
 }
 
 // is_principal says whether the caller may make a transition whose by names
-// fields: it is the subject one of them holds, or it holds the config's
-// overridePermission (D104).
+// fields and seats: it is the subject one of its fields holds, read first,
+// or a subject seated in one of its seats, through Seats' own rule, or it
+// holds the config's overridePermission (D104).
 fn is_principal(view: &View<'_, WorkflowConfig>, by: &[String]) -> Hook<bool> {
     let config = view.config();
     let subject = view.caller().subject.as_str();
-    let named = by.iter().any(|field| {
-        let type_name = config.subject_type(field).unwrap_or("string");
-        names_subject(type_name, view.own_field(field).as_ref(), subject)
-    });
+    let named = by
+        .iter()
+        .filter(|entry| seats::seat_name(entry).is_none())
+        .any(|field| {
+            let type_name = config.subject_type(field).unwrap_or("string");
+            names_subject(type_name, view.own_field(field).as_ref(), subject)
+        });
     if named {
         return Ok(true);
+    }
+    for seat in by.iter().filter_map(|entry| seats::seat_name(entry)) {
+        if let Some(seat) = config.seat(seat) {
+            if seats::holds_seat(view, seat, subject)? {
+                return Ok(true);
+            }
+        }
     }
     match &config.override_permission {
         Some(permission) => view.can(permission),
         None => Ok(false),
-    }
-}
-
-// either lists the fields a by names as a refusal says them: `askedOf`,
-// `askedOf or createdBy`, `a, b or c`.
-fn either(fields: &[String]) -> String {
-    match fields {
-        [] => String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
     }
 }
 
@@ -1370,12 +1396,14 @@ mod tests {
             serde_json::to_value(&config.transitions[1]).expect("a transition"),
             json!({"from": "done", "to": "closed", "permission": "close", "by": ["assignee"]})
         );
-        assert_eq!(either(&["a".to_owned()]), "a");
-        assert_eq!(either(&["a".to_owned(), "b".to_owned()]), "a or b");
-        assert_eq!(
-            either(&["a".to_owned(), "b".to_owned(), "c".to_owned()]),
-            "a, b or c"
-        );
+        // A refusal names a by of fields alone as it did before seats.
+        let by = |entries: &[&str]| -> String {
+            seats::by_named(&entries.iter().map(|e| (*e).to_owned()).collect::<Vec<_>>())
+        };
+        assert_eq!(by(&["a"]), "the subject a holds");
+        assert_eq!(by(&["a", "b"]), "the subject a or b holds");
+        assert_eq!(by(&["a", "b", "c"]), "the subject a, b or c holds");
+        assert!(config.seats.is_empty());
     }
 
     #[test]

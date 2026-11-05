@@ -1,0 +1,130 @@
+{
+  "name": "Seats",
+  "description": "Named seats on the row, each holding the subjects seated in it. A caller takes a seat for itself, or seats and unseats another, and leaves a seat it holds without a permission. A seat may cap how many it holds (max), and a take of a full seat is refused, or unseats the subject seated longest (onFull). A seat may seat the subject an own field holds (fromField), who counts in it and cannot leave it while the field holds them. A Workflow transition's by and a StateRules state's by name a seat as seat:<name>, which a caller seated in it passes. The behaviors' core alone implements it, on a table; no engine type composes it.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["seats"],
+    "properties": {
+      "seats": {
+        "description": "The seats, by name.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 },
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max": { "description": "How many subjects the seat holds at most, the subject its fromField holds among them; no cap when absent.", "type": "integer", "minimum": 1 },
+            "onFull": { "description": "What a take of a full seat does: refuse, the veto seat_full, or displace, which unseats the subject seated longest that the seat's fromField does not hold; refuse when absent. Needs max.", "enum": ["refuse", "displace"] },
+            "take": { "description": "The permission a caller needs to seat itself; any caller may when absent.", "type": "string", "minLength": 1 },
+            "assign": { "description": "The permission a caller needs to seat or unseat another subject; no caller may when absent. A caller leaves a seat it holds without it.", "type": "string", "minLength": 1 },
+            "fromField": { "description": "An own field that holds a subject (string, Identity.UUID or Identity.UserID): the subject it holds is seated, counts toward max, is never displaced, and cannot leave the seat while the field holds them.", "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  },
+  "tables": [
+    {
+      "name": "occupants",
+      "description": "One row per subject seated on the row, keyed by its number, the order they were seated in: the seat, the subject, and when and by whom it was seated. A leave or a displacement deletes its row; the subject a seat's fromField holds needs none.",
+      "key": "number",
+      "fields": [
+        { "name": "number", "description": "The occupant's number on the row, one past the greatest when it was seated, in ten digits zero-padded so the key's order is theirs.", "type": "string" },
+        { "name": "seat", "description": "The seat.", "type": "string" },
+        { "name": "subject", "description": "The subject seated, a hyphenated UUID kept in base62.", "type": "string" },
+        { "name": "seatedAt", "description": "When it was seated, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "seatedBy", "description": "The subject of the caller who seated it: the subject itself, or the one who assigned it.", "type": "string" }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "name": "takeSeat",
+      "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seat"],
+        "properties": {
+          "seat": { "description": "The seat to take.", "type": "string", "minLength": 1 },
+          "subject": { "description": "The subject to seat; the caller's own when absent. Seating another needs the seat's assign permission.", "type": "string", "minLength": 1 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seat", "subject", "displaced"],
+        "properties": {
+          "seat": { "description": "The seat.", "type": "string" },
+          "subject": { "description": "The subject seated, a hyphenated UUID in base62.", "type": "string" },
+          "displaced": { "description": "The subjects the take unseated to make room, longest seated first; [] for none.", "type": "array", "items": { "type": "string" } },
+          "unchanged": { "description": "True when the subject was seated already, so nothing was written; absent otherwise.", "type": "boolean" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "leaveSeat",
+      "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seat"],
+        "properties": {
+          "seat": { "description": "The seat to leave.", "type": "string", "minLength": 1 },
+          "subject": { "description": "The subject to unseat; the caller's own when absent. Unseating another needs the seat's assign permission.", "type": "string", "minLength": 1 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seat", "subject"],
+        "properties": {
+          "seat": { "description": "The seat.", "type": "string" },
+          "subject": { "description": "The subject unseated, a hyphenated UUID in base62.", "type": "string" },
+          "unchanged": { "description": "True when the subject was not seated, so nothing was written; absent otherwise.", "type": "boolean" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "listSeats",
+      "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "seat": { "description": "Only this seat's subjects.", "type": "string", "minLength": 1 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["seat", "subject", "seatedAt", "seatedBy", "fromField"],
+              "properties": {
+                "seat": { "description": "The seat.", "type": "string" },
+                "subject": { "description": "The subject seated.", "type": "string" },
+                "seatedAt": { "description": "When it was seated, in epoch milliseconds; null for the subject the seat's fromField holds with no row of its own.", "type": ["integer", "null"] },
+                "seatedBy": { "description": "The subject of the caller who seated it; null as seatedAt is.", "type": ["string", "null"] },
+                "fromField": { "description": "Whether the seat's fromField holds the subject.", "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "vetoes": [
+    { "code": "seat_full", "description": "takeSeat of a seat that holds its max, whose onFull is refuse or whose every occupant its fromField holds, or an update that gives the fromField of a seat whose onFull is refuse a subject not seated there, past its max; details give the seat, its max and the subjects seated." },
+    { "code": "held_by_field", "description": "leaveSeat of the subject the seat's fromField holds, who leaves only when the field holds another; details give the seat, the subject and the field." }
+  ]
+}

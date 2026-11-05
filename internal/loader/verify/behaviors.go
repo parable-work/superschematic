@@ -25,7 +25,9 @@ import (
 // behavior's fields sit under its name). A table's uses, the behaviors it
 // implements and those anchored on its fields (D103), are held to
 // checkTableUses as well, and a behavior it implements is one the
-// behaviors' core runs and that names no value field. A declaration's own
+// behaviors' core runs and that names no value field. A behavior no engine
+// implements (registry.EngineImplements: Seats and Reconcile, D104) is
+// refused on an engine type, naming the table form. A declaration's own
 // field and operation names are checked when it registers.
 func checkBehaviors(schema *ir.Schema, reg *registry.Registry, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
@@ -80,6 +82,13 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			continue
 		}
 		if ref.Implements && !implementable(behavior, reg, td, r) {
+			continue
+		}
+		if !ref.Implements && !ref.FieldAnchored() && !registry.EngineImplements(behavior) {
+			// Seats and Reconcile are the behaviors' core's alone (D104):
+			// no engine registers them, so an engine type cannot compose
+			// either, and the build names the table form.
+			r.errorf(td.Owner, "%s", engineRefusal(td, behavior))
 			continue
 		}
 		if err := behavior.ValidateConfig(ref.Config); err != nil {
@@ -226,13 +235,15 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // column may take. A Timers use's config is held to the table
 // (checkTimersConfig), a Reactions use's to the table and the tables of
 // its database (checkReactionsConfig), a Workflow use's by to the table's
-// fields (checkWorkflowConfig), a Constants, StateRules or Approvals use's
-// fields, states, by, gates and resetOn to the table and its Workflow
-// (checkConstantsConfig, checkStateRulesConfig, checkApprovalsConfig,
-// D104), and a Lease, Retries, Presence or Budget use's fields, moves,
-// waits and the tables it reads to the table, its Workflow and its
-// database (checkLeaseConfig, checkRetriesConfig, checkPresenceConfig,
-// checkBudgetConfig, D104).
+// fields and seats (checkWorkflowConfig), a Constants, StateRules or
+// Approvals use's fields, states, by, gates and resetOn to the table and
+// its Workflow (checkConstantsConfig, checkStateRulesConfig,
+// checkApprovalsConfig, D104), a Lease, Retries, Presence or Budget use's
+// fields, moves, waits and the tables it reads to the table, its Workflow
+// and its database (checkLeaseConfig, checkRetriesConfig,
+// checkPresenceConfig, checkBudgetConfig, D104), a Seats use's seats to
+// the table's fields (checkSeatsConfig, D104), and a Reconcile use's status
+// and unreachable to the table's Workflow (checkReconcileConfig, D104).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -309,6 +320,9 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			if ref.Name == workflowBehavior && behavior.ValidateConfig(ref.Config) == nil {
 				checkWorkflowConfig(schema, td, ref, r)
 			}
+			if ref.Name == reconcileBehavior && behavior.ValidateConfig(ref.Config) == nil {
+				checkReconcileConfig(td, ref, r)
+			}
 		} else {
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)
 			adder = "implements " + ref.Name + "'s"
@@ -319,11 +333,13 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
 				}
-			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior:
+			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {
 					break
 				}
 				switch ref.Name {
+				case seatsBehavior:
+					checkSeatsConfig(schema, td, ref, uses, r)
 				case constantsBehavior:
 					checkConstantsConfig(schema, td, ref, uses, r)
 				case stateRulesBehavior:

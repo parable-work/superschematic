@@ -16,9 +16,13 @@ const behaviorConfigs = "BehaviorConfigs"
 // configMember is one `Name: ConfigType;` member of BehaviorConfigs.
 var configMember = regexp.MustCompile(`(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)\??:\s*([A-Za-z_$][\w$]*)`)
 
-// renderBehaviors is the behavior catalog: each core behavior as the
-// registry declares it, what it adds to a type and the name of its config
-// type, then every config type, from @superschematic/schema.
+// renderBehaviors is the behavior catalog: each core behavior an engine
+// implements as the registry declares it, what it adds to a type and the
+// name of its config type, then every config type, from
+// @superschematic/schema. A behavior the behaviors' core alone implements
+// (registry.RulesPackage: Seats, Reconcile, D104) is left out: no engine
+// type composes it, so BehaviorConfigs names no type for it, and the guide
+// to tables (database-tables) describes it.
 func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	configTypes := map[string]string{}
 	for _, d := range typeDecls(exports) {
@@ -49,6 +53,9 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	b.WriteString("the JSON Schema the declaration checks them against.\n")
 
 	for _, beh := range reg.Behaviors() {
+		if !registry.EngineImplements(beh) {
+			continue
+		}
 		fmt.Fprintf(&b, "\n## `%s`\n\n", beh.Name)
 		if beh.Description != "" {
 			b.WriteString(cell(beh.Description) + "\n\n")

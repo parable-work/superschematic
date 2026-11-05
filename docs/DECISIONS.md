@@ -13694,8 +13694,18 @@ each with D104's upgrade (its step 2's second batch), and each passes the
 test with state of its own: Lease's holder, token and directives,
 Retries' counts and attempts, Presence's deadline and misses, and
 Budget's meters, holds and buckets, each rule over time a deadline in
-place of the engine runner's sweep. The rest of step 4, and steps 5 to 7,
-are not built. The names and rules are reversible until the first release.
+place of the engine runner's sweep. Seats and Reconcile, which D104 adds
+(its step 3's first part), are the first behaviors only the core
+implements: the registry marks them with the package
+`@superschematic/rules` (`registry.RulesPackage`), their declarations'
+copies are the core's crate's (`rules-behaviors/declarations`, which
+`make behaviors` writes), no engine registers them, and the build refuses
+them on an engine type. Reconcile is the second behavior a field anchors,
+beside Workflow, and its value field is the first a declaration marks
+`optional`, so its column takes NULL. Both pass the test with state of
+their own: a row's seats, and what its provider last reported. The rest of
+step 4, and steps 5 to 7, are not built. The names and rules are
+reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -13744,9 +13754,10 @@ are not built. The names and rules are reversible until the first release.
   (`internal/loader/behaviorfields`), marked with its use
   (`ir.FieldDef.Behavior`). So an index, a uniqueness, a display field, a
   projection's column and `@enqueueOnChange` name one as they name the
-  table's own. The value field takes the anchor's own column, NOT NULL;
-  every other takes `<anchor>_<declared field>` in snake case
-  (`status_entered_at`, `payment_status_entered_at`). The table gets
+  table's own. The value field takes the anchor's own column, NOT NULL
+  unless the declaration marks it `optional` (Reconcile's `observed`, which
+  no create sets, D104); every other takes `<anchor>_<declared field>` in
+  snake case (`status_entered_at`, `payment_status_entered_at`). The table gets
   `@optimistic`'s `_version`, the version each change set holds a row to.
   sqlgen writes the columns and D27 plans them. On SQLite `@optimistic`'s
   bump is an `AFTER UPDATE` trigger, which D1 needs (D27 amended: SQLite
@@ -14985,7 +14996,7 @@ person. `Assignment` has one assignee.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Seats` is a capability a table implements: `implements Seats<Problem, { seats: { <name>: { max?, onFull?, take?, assign?, fromField? } } }>`. Its sub-table holds a row per subject in a seat: the seat, the subject, and when and by whom it was seated. | One assignee (`Assignment`), or a column per seat, which caps every seat at one |
+| `Seats` is a capability a table implements: `implements Seats<Problem, { seats: { <name>: { max?, onFull?, take?, assign?, fromField? } } }>`. Its sub-table holds a row per subject in a seat: the seat, the subject, and when and by whom it was seated. (Amended when step 3 was built: the subject a seat's `fromField` holds is read from the field at each decision and needs no row, since a row the core wrote when the field changed would go stale under any write around the core.) | One assignee (`Assignment`), or a column per seat, which caps every seat at one |
 | `max` caps a seat (no cap when absent), and `onFull` is `refuse` (`seat_full`) or `displace` (the longest seated leaves). `take` is the permission a caller needs to seat itself, `assign` the one it needs to seat or unseat another; a caller leaves a seat it holds without either. `fromField` seats the subject an own field holds, who cannot leave while the field holds it. | |
 | Its operations are `takeSeat({ seat, subject? })`, `leaveSeat({ seat, subject? })` and the read `listSeats`; `by` names a seat as `seat:<name>`. | |
 | `Assignment` becomes a bundle of one seat with `max: 1` and `onFull: refuse` (step 5), and its guard on another principal's `acquire` reads that seat. | Two behaviors that say who a row is for |
@@ -15001,8 +15012,8 @@ Deployments, devices and a payment's status at its processor repeat it.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | `Reconcile` is a field behavior beside a Workflow field: `observed: Reconcile<{ status, unreachable?, staleAfterMs?, observePermission }>`. Its owned fields are `observed`, `observedAt`, `drift` and `reconciledAt`. | Derived (D73), whose model fills own fields and moves no status; a Reactions rule per observed state |
-| `observe({ state, at })` records an observation newer than `observedAt`, and changes nothing for an older one. It then moves the Workflow to the observed state along the fewest transitions the config allows, each through Workflow's `transition` as the observer, so every guard and permission runs. A step a guard vetoes stops there and records `drift` (`{ status, observed, code }`). | Setting the status to the observed one, which skips the transitions' guards |
-| `staleAfterMs` arms a deadline from each observation, whose fire moves the row to `unreachable`. The define check refuses an `unreachable` that a state other than a terminal one cannot reach, or from which some state cannot be reached. | |
+| `observe({ state, at })` records an observation newer than `observedAt`, and changes nothing for an older one. It then moves the Workflow to the observed state along the fewest transitions the config allows, each through Workflow's `transition` as the observer, so every guard and permission runs. A step a guard vetoes stops there and records `drift` (`{ status, observed, code }`). (Amended when step 3 was built: an observation at `observedAt` itself changes nothing too, and a step the observer lacks the permission for stops the path as a veto does, its code `forbidden`.) | Setting the status to the observed one, which skips the transitions' guards |
+| `staleAfterMs` arms a deadline from each observation, whose fire moves the row to `unreachable`. The define check refuses an `unreachable` that a state other than a terminal one cannot reach, or from which some state cannot be reached. (Amended when step 3 was built: the fire leaves a row in a terminal state as it is, since the define check asks no terminal state to reach `unreachable`.) | |
 
 ### Two bundles
 
@@ -15069,8 +15080,16 @@ command's precondition, Retries with a backoff, a window of attempts and
 keyField, Presence with ttlByState, and Budget with its periods, its
 rolling window and observe, ported onto the core with their recordings
 replayed, their upgrades' cases written by hand, and a table implementing
-each in each language. Steps 3 and 4 are not built. The names and
-configs are reversible until the first release.
+each in each language. Step 3's first part built: Seats and Reconcile,
+the first behaviors only the core implements, on the core, their cases
+written by hand and replayed by every adapter, and a table implementing
+Seats and a field that is a Reconcile in each language. Reconcile was
+built before Schedules, against the order above: Schedules needs a
+behavior's own outbox events to reach the app's code, which every adapter
+refuses today, and cron lines and time zones in the core; Pool needs a
+read across a table and the Capacity contract with Budget. Schedules and
+Pool, the rest of step 3, and step 4 are not built. The names and configs
+are reversible until the first release.
 - **The core addition.** `Behavior::settle(view, operation, params)` is a
   hook a use answers about an operation of its own before any use's guard
   is asked. The core asks it after the parameter check, for a caller's
@@ -15926,10 +15945,295 @@ configs are reversible until the first release.
   `TestRustAgentsBehaviorWorkerEntrypoint`). No existing fixture's golden
   changes, and the engine clients do not change; the IR's schema file and
   its parity meta-schema change by the declarations' new members.
+- **Step 3, first part: the core addition.** `Cx::call_as_caller(use_id,
+  operation, params)` calls an operation of a use of the row as
+  `Cx::call` does, as the command's caller's own request: each guard is
+  told so (`GuardRequest::Operation`'s new `as_caller`, beside `fired`) and
+  handed its use's entry of the command's preconditions, as for the
+  command's own operation, and a deadline's handler's such call is `fired`
+  as well. Lease's guard holds an `as_caller` call as the caller's request,
+  as it holds `fired`, where it lets every other behavior's call through
+  (D16): a table that lets observations land while another principal holds
+  the lease lists `Reconcile.observe` in Lease's `exempt`, and the moves
+  that observation makes must still be held on their own, or an exempt
+  observer would move a leased row past its holder. The helpers
+  `subjects::canonical_subject` (a hyphenated UUID, of either case, as its
+  base62 form; any other text as it is), `flow::path` (the fewest
+  transitions from one state to another, breadth first, each state's
+  transitions in the config's order) and `flow::reachable` serve the two
+  behaviors. `rules-testkit`'s shape reader takes a behaviors entry's
+  `field` (`UseSpec::on_field`), so a scenario anchors a use on a field.
+  `tests/core.rs` has 55 cases.
+- **Seats.** `rules-behaviors/src/seats.rs`: a table says `implements
+  Seats<Problem, { seats: { <name>: { max?, onFull?, take?, assign?,
+  fromField? } } }>`, and its module doc holds it to D103's test, which it
+  passes: its state is the sub-table `occupants` (`problem_seats_occupants`,
+  keyed by the occupant's number on the row, one past the greatest a take
+  read, in ten digits, with `seat`, `subject`, `seatedAt` and `seatedBy`),
+  it keeps no owned field, arms no deadline and hears no change. A caller
+  seats itself with the seat's `take` permission (any caller when it names
+  none) and seats or unseats another with its `assign` (none when it names
+  none), each `forbidden` otherwise, before the seat's own rules; it
+  leaves a seat it holds with none. A take of a full seat is the veto
+  `seat_full` (`{ seat, max, seated }`) under `onFull: "refuse"`, the
+  default, and under `displace` unseats the longest seated (the least
+  key, the order they were seated in: a take's number is one past every
+  number it read, where `seatedAt` is the command's clock, which two
+  servers may disagree on), listed in the result's `displaced`.
+  `fromField` is read from the field at each decision, never written as a
+  row, since the field is the truth: its subject counts toward `max`, is
+  listed first by `listSeats`, is never displaced (`seat_full` when every
+  subject seated is the field's), and its leave is the veto `held_by_field`
+  (`{ seat, subject, field }`); a new value seats the new subject at once.
+  An update that gives the field a subject not seated there takes the seat
+  as a take would, past no permission: into a seat it would put over its
+  `max` the update is `seat_full` under `refuse`, its reason naming the
+  field and the subject (`Problem p1's owners seats at most 2, and it is
+  full (ada, eli): owner cannot seat ivy in it`), and under `displace`
+  Seats' after-change hook unseats the longest seated down to `max`.
+  A take of a seat the subject holds and a leave of one it does not answer
+  `unchanged: true` and write nothing, in `settle`, before any guard and
+  any permission, as Workflow's repeat does; an unknown seat, and a caller
+  with no subject that names none, are `invalid_argument` there too. A
+  subject is kept and compared as its canonical text, a hyphenated UUID
+  in base62 (the adapters' wire form), every other text exactly; a
+  fromField's value is compared by `names_subject` on the field's type, and
+  a take by a caller with no subject records `seatedBy` as no value. Any
+  config change is allowed: a dropped seat's occupants stay, read by no
+  rule, until the row's next `takeSeat` or `leaveSeat` deletes them, and a
+  lowered `max` unseats no one. The config's checks are the schema's, a
+  seat name's pattern reported at `/seats` as Approvals' gates' are, then
+  an `onFull` with no `max` and a `fromField` that is no field of the
+  type or holds no subject. `tests/seats.rs` has 20 cases.
+- **A seat in `by`.** A Workflow transition's and a StateRules state's
+  `by` may list `seat:<name>`, a seat of the table's Seats use, beside its
+  fields. Their config checks resolve each to a `seats::SeatRef` (the use,
+  the seat and its fromField with the field's type) and refuse one the
+  type has no Seats for, or whose Seats has no such seat, in a message
+  naming both (`the transition from "open" to "working" names
+  "seat:owners" in by, which is not a seat of Problem's Seats (its seats:
+  accountable)`; `states.working.by names "seat:accountable", a seat of
+  Seats, which Problem does not implement`). Their guards read a seat
+  through Seats' own rule, `seats::holds_seat`, over the occupants as the
+  run has them and the seat's fromField, as Budget reads whether a lease is
+  active through Lease's (step 2's precedent); no general contract between
+  behaviors was built, which is Pool's. The field entries are read first,
+  and a seat only while no field names the caller. `not_principal`'s
+  reason names who `by` lists, fields first (`the transition is made by
+  the subject agent holds or a subject seated in accountable`), and its
+  details', and `frozen_fields`', `by` the entries as listed
+  (`["seat:responsible"]`); a `by` of fields alone reads as before, and
+  `overridePermission` still moves past it. The build refuses the same in
+  the core's words, after its existing prefix, warns once per entry of a
+  seat a `by` names that names no `take` (any caller may take it and so
+  make the move), and its writable-by warning counts a seat's fromField as
+  a `by` field of the moves and states that name the seat (the field is
+  only as strong as its writes). An engine type's `by` is refused whatever
+  its entries, so the engine refuses a `seat:` entry as it refused every
+  `by`: `testkit/tests/core_workflow_table_members.rs` and
+  `core_staterules_table_members.rs` each hold a `by` of `["seat:owners"]`
+  refused on SQLite and Postgres, with no engine code changed.
+- **Reconcile.** `rules-behaviors/src/reconcile.rs`: a field of a table,
+  `observed: Reconcile<{ status, unreachable?, staleAfterMs?,
+  observePermission }>`, beside the Workflow field `status` names (a field
+  of the type, or `Workflow` for one anchored on the type). Its module doc
+  holds it to D103's test, which it passes, and says why it is not Derived
+  (D73). Its owned fields are `observed`, the field's own column and the
+  observed state, `observedAt`, `drift` (a `Generic.JSON`) and
+  `reconciledAt` (`observed_observed_at` and the like), each absent until
+  set, and one deadline, `stale`. `observe({ state, at })`, `at` in epoch
+  milliseconds as the core reads a date-time, refuses in `settle` an `at`
+  later than the command's time and a state the Workflow lacks
+  (`invalid_argument`, in Workflow's words for `to`), then a caller
+  without `observePermission` (`forbidden`), then answers `unchanged:
+  true` for an `at` no newer than `observedAt`, so a caller who may not
+  observe learns nothing of the row from it. A newer one sets `observed`
+  and `observedAt` and moves the status along `flow::path`, each step a
+  `Cx::call_as_caller` of Workflow's `transition`, so Workflow's `by`,
+  permission and `overridePermission` check the observer and every other
+  guard holds the step as the observer's own move (StateRules'
+  `missing_fields`, Approvals' `approvals_missing`, Retries' `backing_off`,
+  Lease's `held_by_another`); `repeat` and `from` never arise, since a path
+  never names the row's state and no step names `from`. A step refused
+  `vetoed` or `forbidden` stops the path and records `drift` `{ status,
+  observed, code }`, the code the veto's, `forbidden`, `no_path` when no
+  transitions lead there, or `no_status`; any other refusal fails the
+  observe. When the status ends at the observed state `drift` clears and
+  `reconciledAt` is the command's time; the result is `{ observed,
+  observedAt, status, moves, drift?, unchanged? }`. With `staleAfterMs` an
+  observation arms `stale` at `observedAt + staleAfterMs` while the status
+  it leaves is neither terminal nor `unreachable`, and clears it
+  otherwise; the fire re-arms when `observedAt` has moved past it (a raw
+  write), leaves a terminal or unreachable row as it is, and otherwise
+  sets `observed` to `unreachable`, keeps `observedAt`, and moves the row
+  there along the fewest transitions, each a `Cx::call` (`fired`, the
+  worker's request), a refused step recording drift; it is spent, so a
+  drifted stale move waits for the next observation. The define check
+  refuses a `status` that names no Workflow, `unreachable` and
+  `staleAfterMs` each without the other, an `unreachable` that is no state,
+  one some state other than a terminal one cannot reach along transitions,
+  and one from which some state cannot be reached. Any config change is
+  allowed. `ReconcileConfig` keeps the field the Workflow is anchored on,
+  so a refusal names `Sandbox.status`, or `Sandbox` for a type's.
+  `tests/reconcile.rs` has 12 cases.
+- **Behaviors no engine implements.** Seats and Reconcile are the first:
+  the registry's new package constant `RulesPackage`
+  (`@superschematic/rules`, the npm package that ships the behaviors'
+  core) is their `Package`, and `registry.EngineImplements(b)` is false
+  for them alone. Their declarations are `internal/registry/behaviors`'
+  `seats.behavior.json` and `reconcile.behavior.json`, and their copies
+  `runtime/engine/rust/rules-behaviors/declarations`, which `make
+  behaviors` writes with `--package @superschematic/rules` and `make
+  behaviors-check` checks, and which `seats.rs` and `reconcile.rs` read in
+  place. `registry.RulesBehaviors` and the core's `NAMES`, `core()` and
+  `DECLARATIONS` gain them after Retries, the twelve every transcript's
+  `behaviors` lists. The engine's declaration directories do not hold
+  them, so it never registers, describes or records them, and enginedoc,
+  engineclientgen and the engine's tool documents read engine types alone;
+  the build refuses an engine type (a DB schema's `@behavior` or a General
+  schema's type) that names either, naming the table form (`type Note:
+  behavior Seats is implemented by the behaviors' core alone, which runs it
+  on a table, and no engine implements it: write implements Seats<Note, {
+  ... }> on a DB table (D104)`), and `@superschematic/schema`'s
+  `BehaviorConfigs` names neither, so `@behavior("Seats", ...)` is a
+  TypeScript error. The agent's engine behaviors catalog (`superschematic
+  catalog behaviors`) leaves them out. The IR's schema file lists both, as
+  a data form names them on a table, so the engine corpus's
+  `registry.json` metaSchema gains their branches and names.
+- **The field form, made generic.** Reconcile is the second behavior a
+  field anchors. A declared field may say `"optional": true`, only on its
+  declaration's value field (`registry.BehaviorField.Optional`, which
+  `RegisterBehavior` refuses on any other field, on a volatile one, and on
+  a behavior of any package but `@superschematic/rules`, an extension's
+  among them, since an engine's declaration parser refuses the key; it
+  refuses that package on an extension's behavior, which runs in its
+  engine): the loader then adds the anchor's field not required, so its
+  column takes NULL, where Workflow's status is NOT NULL. The TypeScript reader's `?`
+  refusal says so for such a behavior (`whose field takes no ?: the
+  behavior keeps it, absent until it sets it`), the declarations' readers
+  of `@superschematic/rules` and the Go binding carry `optional`, and the
+  core's `declared.rs` reads it as any field. Every other place was
+  generic already: the layout (`observed`, the value, on the field's own
+  column, the rest `observed_<field>`), the ORMs, the API generators
+  (`sandbox/{id}/observed/observe`, `sandbox_observed_observe`), the SDKs,
+  toolsutil, the IR, the core and the adapters, which key on the anchor and
+  the value field. `@superschematic/db`'s carrier `Reconcile<C>` resolves to
+  `string | null`, which a repository's row keeps, as it keeps a Workflow's
+  status `string`; `behaviortypes` types `observe`'s state and its result's
+  states, in OpenAPI and the SDKs, by the states of the Workflow `status`
+  names (`SandboxObservedState`, `A state Sandbox's observed Reconcile
+  reports, one of the states of Sandbox.status.`).
+- **The surface.** `@superschematic/db` exports `Seats`, `SeatsOn`,
+  `SeatsSeatOn`, `Reconcile` and `ReconcileConfig`, its `StateRuleOn.by`
+  takes `` `seat:${string}` `` beside the table's keys, and
+  `seats.typecheck.ts` and `reconcile.typecheck.ts` hold what fails to
+  compile. The build holds each config to the table in the core's words and
+  order (`verify/behaviors_seats.go`, `behaviors_reconcile.go`): a
+  fromField that is no field of the table or holds no subject is refused in
+  the core's words, and one a behavior owns, a relation by its name, an
+  audit field, a list or a field encrypted at rest in the words Presence's
+  `principalField` gets; Reconcile's Workflow
+  is read by `flowFor`, and `implements Reconcile` is refused as a field
+  behavior's is. `behaviortypes` narrows Seats' seat names
+  (`ProblemSeatsSeat`) and Reconcile's states (`SandboxObservedState`, its
+  `drift`, `observedAt` and `reconciledAt` typed too), and its
+  `Narrowing.Permissions` lists the permissions a config names under
+  members that do not say so (a seat's `take` and `assign`), which
+  behaviorops lists beside the configs' others, so the permission catalog
+  lists the four seat permissions under each Seats operation and
+  `sandboxes.observe` under `observe`. The writer writes both back in every
+  format (`TestSeatsRoundTrip`). OpenAPI, the four SDKs and the MCP tools
+  carry the five operations, `listSeats` a POST that reads.
+- **The adapters.** None names a behavior, and none changed but to carry
+  a declaration's `optional` (`DeclaredField.optional` in
+  `@superschematic/rules`, `rules.DeclaredField.Optional` in Go): a
+  sub-table with a date-time field and a read-only operation over it, a
+  JSON owned column, a deadline whose handler calls an operation, a
+  nullable value column and a field anchor other than a Workflow's all
+  went through as they were, held by both transcripts on both dialects and
+  by the end-to-end tests. Each generated route types `observe`'s `state`
+  by the Workflow's states, so a state the Workflow lacks is the route's
+  400 `bad_request` before the core runs, and the core's own 400
+  `invalid_argument` (`operation observe of behavior Reconcile on field
+  observed: /state: "hibernating" is not a state of Sandbox.status (...)`)
+  is answered through the repository or the adapter.
+- **The specification.** The engine recorded none of this, so
+  `rules/scenarios/core-seats.json` (7 scenarios, 97 steps: takes, a
+  repeat, displacement, `seat_full`, leaves, assign, a fromField's subject
+  and an update of the field held to its seat's `max`, refused and
+  displacing, a seat in a Workflow transition's and a StateRules state's
+  `by` with `overridePermission`, and each one's define refusals) and
+  `core-reconcile.json` (7 scenarios, 76 steps: an observation's path, a
+  repeat, an older observation and the parameters, drift on a forbidden
+  step and with no path, StateRules and another principal's lease holding
+  a step with `observe` in Lease's `exempt`, the stale deadline to
+  unreachable and back, a stale move vetoed and spent, the path's tie
+  broken by the config's order, and each one's define refusals, its
+  Workflow and Reconcile anchored on fields) were written first, by hand in
+  the recorded format, and replayed whole on the reference host, floors 97
+  and 76. Their transcripts: `core-seats.transcript.json` 88 steps (66
+  commands, four of them repeats, and 22 checks) and
+  `core-reconcile.transcript.json` 58 (36 commands, two of them repeats and
+  two the stale deadline, and 22 checks), each command with its row's
+  `expect.version`, each one's floor its count. The fifteen existing ones
+  change by their `behaviors` header, and `core-workflow-principals` and
+  `core-freezes-and-sign-offs` (with their scenario files) by the one
+  define each refused for a `seat:` entry, whose message now names the
+  missing Seats; their steps and floors stay. TypeScript replays the
+  seventeen on bun:sqlite and Postgres, Go on SQLite and Postgres and Rust
+  on rusqlite and Postgres, each at its step count with 0 mismatches. The
+  engine's recordings change by Workflow's `by` description alone
+  (`core-behaviors.json`, `core-rollups.json`, `core-workflow.json`), and
+  `registry.json` by its metaSchema, as the IR's schema file changed, and
+  the name enum's message, which the engine's TypeScript registry test
+  holds too.
+- **Fixtures and end-to-end tests.** `fixture-seats-db`'s `Problem` has
+  one accountable person (`max: 1`, `onFull: "displace"`, `take:
+  "problems.own"`), any number of responsible agents with the row's own
+  `agent` among them (`fromField: "agent"`), and at most five handles,
+  released only by the agent that claimed one or a caller holding
+  `problems.release`; its transitions are made by `seat:responsible` and
+  `seat:accountable`, past which `problems.override` moves, and in review
+  only `seat:accountable` edits the title StateRules freezes. Its
+  `Sandbox`'s status follows its provider through `observed: Reconcile<{
+  status: "status", unreachable: "unreachable", staleAfterMs: 300000,
+  observePermission: "sandboxes.observe" }>`, a stop needing
+  `sandboxes.stop` of the observer. `fixture-seats-api` serves them
+  (`ProblemActions`, `SandboxActions`, each `@behaviorOperations @auth`)
+  and runs the stale deadline (`SandboxDeadlines`), with no warning
+  (`TestSeatsFixturesLoad`). Each language's test runs, on Postgres, the
+  generated server through its SDK, the repositories (Rust's adapter) for
+  creates and updates, and the worker's queue in process, a deadline made
+  due by moving its message's `due_at`, through 16 cases in one wording: a
+  take and the displacement; a repeated take unchanged; a take without
+  `take` forbidden; the agent seated through its field, listed first and
+  `held_by_field`; a sixth handle `seat_full`; a handle released by its
+  claimer or by `assign`, and another's release forbidden; a leave of a
+  seat not held unchanged; a `seat:responsible` move by the seated agent
+  and `not_principal` naming the seat; `overridePermission`; the title
+  edited in review by the accountable person and `frozen_fields` naming
+  `seat:accountable` for another; an observation's path with its deadline
+  armed; an older one unchanged; drift as `forbidden` and its clearing by
+  an observer who may stop; `observePermission` and a state the Workflow
+  lacks; the stale deadline to unreachable; and a newer observation back
+  (`TestSeatsGoServerOnPostgres`, `TestGeneratedSeatsEndToEnd`, which also
+  calls the MCP tools `problem_seats_take_seat` and
+  `sandbox_observed_observe`, and `TestRustSeatsOnPostgres`). Each
+  refusal is checked whole and to leave the row's `_version` where it was.
+  Each language's servergen test plans `SandboxDeadlines`' main, holds it
+  to a golden and compiles it
+  (`TestGoBehaviorWorkerEntrypointOfSandboxDeadlines`,
+  `TestTypeScriptSeatsBehaviorWorkerEntrypoint`,
+  `TestRustSeatsBehaviorWorkerEntrypoint`). No existing fixture's golden
+  changes; the IR's schema file and its parity corpus change by the two
+  declarations and the `by` descriptions.
 - **Left for later steps.**
-  - `seat:<name>` entries in `by`, a Workflow transition's and a StateRules
-    state's, refused at define and by the build until Seats (step 3).
-  - The `caller` operand (step 4).
+  - Schedules and Pool, the rest of step 3: Schedules needs a behavior's
+    own outbox events to reach the app's code, which every adapter refuses
+    today, and cron lines and time zones in the core; Pool needs a read
+    across a table (its `pick`) and the `Capacity` contract with Budget.
+  - The `caller` operand, and Assignment as a bundle of one seat (step 4,
+    with D103's bundles).
   - A `by` naming a to-one relation by its name (the build points at
     `<relation>Id`), `updatedBy`, `deletedBy` or an audit time, and a
     `createdBy` that is a relation or a list: the layout's `audit` holds a
@@ -16204,4 +16508,67 @@ configs are reversible until the first release.
     through Workflow's transition, and Comments' own steps wait for it on
     the core. The replayer skips the event log's reads with a `limit`,
     three of Presence's, which the reference host does not take.
-  - Pool's `Capacity` contract over Budget is step 3's.
+  - A Seats subject is canonical text (a hyphenated UUID kept in base62),
+    where a sign-off's subject and a lease's holder are kept as given, so
+    the two rules differ until one is chosen.
+  - `listSeats` reads a row's whole sub-table, with no paging.
+  - A dropped seat's occupants stay until the row's next take or leave,
+    and come back with a seat of that name added before then; a lowered
+    `max` unseats no one.
+  - A fromField is read at each decision, so an update or a raw write of
+    the field reseats at once and runs none of Seats' permission rules;
+    freeze it with Constants, or keep it out of the inputs a caller who
+    should not sit in the seat may write. An update through the core is
+    held to the seat's `max` and `onFull`; a raw write is not, and may leave
+    a seat over its `max` until its next take, as a lowered `max` does.
+    Displacement and `listSeats` read the occupants' keys, which a raw
+    write of a key reorders, and not `seatedAt`, so servers whose clocks
+    disagree reorder nothing.
+  - A seat name's pattern and length are refused at `/seats`, as Approvals'
+    gates' are, not at the seat's own path.
+  - Seats' operations and `observe` are writes of the row, which Lease's
+    guard holds for a caller who does not hold an active lease, so a table
+    that composes them lists them in Lease's `exempt`; no fixture composes
+    Seats with Lease.
+  - A `by` naming a seat holds a deadline's and a change's calls with their
+    worker as the caller, as a `by` naming a field does. A seat a `by`
+    names that names no `take` is warned of, not refused.
+  - The permission catalog lists Reconcile's `observePermission` under
+    `observe`, and not the transitions' permissions its steps need (a stop's
+    `sandboxes.stop`), which the core checks of the observer.
+  - A path's intermediate states run no hook of their own: Timers'
+    `enters`, Approvals' consumption and Presence's `ttlByState` read the
+    row as the command leaves it. A stale move a guard vetoes is not tried
+    again.
+  - `drift` and `reconciledAt` move through `observe` and the stale
+    deadline alone, so a person's move to the observed state leaves drift
+    until the next observation.
+  - An `at` later than the command's time is refused, so an observer
+    stamps it in the server's clock, not the provider's.
+  - A table whose Reconcile has no `staleAfterMs` still gets a deadline
+    queue (`armsDeadlines` is the declaration's).
+  - A raw write of `observedAt` or of the status re-arms nothing until the
+    fire, which re-arms when `observedAt + staleAfterMs` is ahead and leaves
+    a terminal row as it is; a shortened `staleAfterMs` applies from each
+    next observation. No trigger or check refuses a raw write of an
+    `observed_*` column or a `*_seats_occupants` row; the docs and the
+    agent skill say what it skips.
+  - Reconcile calls no provider: the app's poller calls `observe`.
+  - `optional` is a value field's alone, and a behavior's of
+    `@superschematic/rules` alone: the engine's declaration parser refuses
+    the key, so `RegisterBehavior` refuses it on any other package's
+    declaration, an extension's among them, and refuses that package on an
+    extension's behavior. An engine reads it when a behavior it runs needs
+    it.
+  - Over HTTP a state the Workflow lacks, and a seat the table's Seats
+    lacks, are the route's 400 `bad_request`, since the generated input
+    types `state` by the Workflow's states and `seat` by the seats; the
+    core's `invalid_argument` answers through the repositories and the
+    adapters.
+  - A repository's row types Reconcile's `observed` `string | null`, as it
+    types a Workflow's status `string`: only `observe`'s input and result,
+    in the API and the SDKs, are typed by the Workflow's states. Narrowing
+    an ORM row's field-anchored values to their states is left.
+  - The engine advertises `by`'s seat entries through the shared
+    declarations and refuses every `by` on an engine type, until engine
+    types go (D103, step 7).

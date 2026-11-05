@@ -1,0 +1,1331 @@
+{
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProblemSeatsLeaveSeatInput": {
+        "description": "The parameters of Problem's seats leaveSeat.",
+        "properties": {
+          "seat": {
+            "$ref": "#/components/schemas/ProblemSeatsSeat",
+            "description": "The seat to leave."
+          },
+          "subject": {
+            "description": "The subject to unseat; the caller's own when absent. Unseating another needs the seat's assign permission.",
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "seat"
+        ],
+        "type": "object"
+      },
+      "ProblemSeatsLeaveSeatResult": {
+        "description": "What Problem's seats leaveSeat returns.",
+        "properties": {
+          "seat": {
+            "$ref": "#/components/schemas/ProblemSeatsSeat",
+            "description": "The seat."
+          },
+          "subject": {
+            "description": "The subject unseated, a hyphenated UUID in base62.",
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when the subject was not seated, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "seat",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "ProblemSeatsListSeatsInput": {
+        "description": "The parameters of Problem's seats listSeats.",
+        "properties": {
+          "seat": {
+            "description": "Only this seat's subjects.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemSeatsSeat"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProblemSeatsListSeatsResult": {
+        "description": "What Problem's seats listSeats returns.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemSeatsListSeatsResultItems"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProblemSeatsListSeatsResultItems": {
+        "properties": {
+          "fromField": {
+            "description": "Whether the seat's fromField holds the subject.",
+            "type": "boolean"
+          },
+          "seat": {
+            "$ref": "#/components/schemas/ProblemSeatsSeat",
+            "description": "The seat."
+          },
+          "seatedAt": {
+            "description": "When it was seated, in epoch milliseconds; null for the subject the seat's fromField holds with no row of its own.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "seatedBy": {
+            "description": "The subject of the caller who seated it; null as seatedAt is.",
+            "nullable": true,
+            "type": "string"
+          },
+          "subject": {
+            "description": "The subject seated.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromField",
+          "seat",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "ProblemSeatsSeat": {
+        "description": "A seat of Problem's Seats.",
+        "enum": [
+          "accountable",
+          "handles",
+          "responsible"
+        ],
+        "type": "string"
+      },
+      "ProblemSeatsTakeSeatInput": {
+        "description": "The parameters of Problem's seats takeSeat.",
+        "properties": {
+          "seat": {
+            "$ref": "#/components/schemas/ProblemSeatsSeat",
+            "description": "The seat to take."
+          },
+          "subject": {
+            "description": "The subject to seat; the caller's own when absent. Seating another needs the seat's assign permission.",
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "seat"
+        ],
+        "type": "object"
+      },
+      "ProblemSeatsTakeSeatResult": {
+        "description": "What Problem's seats takeSeat returns.",
+        "properties": {
+          "displaced": {
+            "description": "The subjects the take unseated to make room, longest seated first; [] for none.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "seat": {
+            "$ref": "#/components/schemas/ProblemSeatsSeat",
+            "description": "The seat."
+          },
+          "subject": {
+            "description": "The subject seated, a hyphenated UUID in base62.",
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when the subject was seated already, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "displaced",
+          "seat",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "ProblemStatusState": {
+        "description": "A state of Problem's status Workflow.",
+        "enum": [
+          "open",
+          "working",
+          "review",
+          "done"
+        ],
+        "type": "string"
+      },
+      "ProblemStatusTransitionInput": {
+        "description": "The parameters of Problem's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/ProblemStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "ProblemStatusTransitionResult": {
+        "description": "What Problem's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/ProblemStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/ProblemStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "SandboxObservedObserveInput": {
+        "description": "The parameters of Sandbox's observed observe.",
+        "properties": {
+          "at": {
+            "description": "When the provider was observed in it, in epoch milliseconds, no later than the call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SandboxObservedState",
+            "description": "The state the provider reports, a state of the Workflow status names."
+          }
+        },
+        "required": [
+          "at",
+          "state"
+        ],
+        "type": "object"
+      },
+      "SandboxObservedObserveResult": {
+        "description": "What Sandbox's observed observe returns.",
+        "properties": {
+          "drift": {
+            "description": "Why the status is not the observed state; absent while it is.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SandboxObservedObserveResultDrift"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "moves": {
+            "description": "The transitions made, in order; [] for none.",
+            "items": {
+              "$ref": "#/components/schemas/SandboxObservedObserveResultMoves"
+            },
+            "type": "array"
+          },
+          "observed": {
+            "$ref": "#/components/schemas/SandboxObservedState",
+            "description": "The observed state after the call."
+          },
+          "observedAt": {
+            "description": "When it was observed, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "status": {
+            "description": "The Workflow's status after the call; null for a row with no status, which only a raw write leaves.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SandboxObservedState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "unchanged": {
+            "description": "True when the observation was no newer than the last one, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "moves",
+          "observed",
+          "observedAt"
+        ],
+        "type": "object"
+      },
+      "SandboxObservedObserveResultDrift": {
+        "description": "Why the status is not the observed state; absent while it is.",
+        "properties": {
+          "code": {
+            "description": "The veto code of the step refused, forbidden for a permission the observer lacks, no_path when no transitions lead there, or no_status.",
+            "type": "string"
+          },
+          "observed": {
+            "$ref": "#/components/schemas/SandboxObservedState",
+            "description": "The state it was moving to."
+          },
+          "status": {
+            "description": "The status where the path stopped; absent for a row with no status.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SandboxObservedState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "observed"
+        ],
+        "type": "object"
+      },
+      "SandboxObservedObserveResultMoves": {
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/SandboxObservedState",
+            "description": "The state the row was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/SandboxObservedState",
+            "description": "The state it moved to."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "SandboxObservedState": {
+        "description": "A state Sandbox's observed Reconcile reports, one of the states of Sandbox.status.",
+        "enum": [
+          "pending",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "failed",
+          "unreachable"
+        ],
+        "type": "string"
+      },
+      "SandboxStatusState": {
+        "description": "A state of Sandbox's status Workflow.",
+        "enum": [
+          "pending",
+          "starting",
+          "running",
+          "stopping",
+          "stopped",
+          "failed",
+          "unreachable"
+        ],
+        "type": "string"
+      },
+      "SandboxStatusTransitionInput": {
+        "description": "The parameters of Sandbox's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SandboxStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/SandboxStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "SandboxStatusTransitionResult": {
+        "description": "What Sandbox's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/SandboxStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/SandboxStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-seats-api schema",
+    "title": "Fixture-Seats-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/problem/{id}/seats/leave-seat": {
+      "post": {
+        "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+        "operationId": "ProblemSeatsLeaveSeatHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSeatsLeaveSeatInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSeatsLeaveSeatResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem seats: leave seat",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.seats.leave-seat",
+          "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem seats: leave seat",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/seats/list-seats": {
+      "post": {
+        "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+        "operationId": "ProblemSeatsListSeatsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSeatsListSeatsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSeatsListSeatsResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem seats: list seats",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.seats.list-seats",
+          "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Problem seats: list seats",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/seats/take-seat": {
+      "post": {
+        "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+        "operationId": "ProblemSeatsTakeSeatHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSeatsTakeSeatInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSeatsTakeSeatResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem seats: take seat",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.seats.take-seat",
+          "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem seats: take seat",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "ProblemStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem status: transition",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/sandbox/{id}/observed/observe": {
+      "post": {
+        "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+        "operationId": "SandboxObservedObserveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxObservedObserveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SandboxObservedObserveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Sandbox observed: observe",
+        "tags": [
+          "sandbox"
+        ],
+        "x-superschematic-docs": {
+          "capability": "sandbox.observed.observe",
+          "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Sandbox observed: observe",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/sandbox/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "SandboxStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SandboxStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Sandbox status: transition",
+        "tags": [
+          "sandbox"
+        ],
+        "x-superschematic-docs": {
+          "capability": "sandbox.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Sandbox status: transition",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

@@ -11,7 +11,9 @@
     "Lease",
     "Presence",
     "Budget",
-    "Retries"
+    "Retries",
+    "Seats",
+    "Reconcile"
   ],
   "scenarios": [
     {

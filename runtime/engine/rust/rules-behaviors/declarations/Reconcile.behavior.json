@@ -1,0 +1,165 @@
+{
+  "name": "Reconcile",
+  "description": "The state a row's provider last reported, beside the Workflow field it moves. observe records an observation newer than the last, then moves the Workflow to the observed state along the fewest transitions its config allows, each through Workflow's transition as the observer, so every guard and permission holds each step; a step refused stops the path and records drift. With staleAfterMs, a row no observation has reached for that long moves to unreachable when its deadline falls due. The behaviors' core alone implements it, on a field of a table; no engine type composes it.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "observePermission": {
+        "description": "The permission a caller needs to observe.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "staleAfterMs": {
+        "description": "How long after an observation's at a row goes stale, in milliseconds: its deadline then moves the row to unreachable. Needs unreachable.",
+        "minimum": 1000,
+        "type": "integer"
+      },
+      "status": {
+        "description": "The field of the type whose Workflow an observation moves; a Workflow anchored on the type is named Workflow.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "unreachable": {
+        "description": "The state of that Workflow the stale deadline moves a row to: every state but a terminal one reaches it, and it reaches every state. Needs staleAfterMs.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "status",
+      "observePermission"
+    ],
+    "type": "object"
+  },
+  "requires": [
+    "Workflow"
+  ],
+  "fields": [
+    {
+      "name": "observed",
+      "description": "The state of the Workflow the last observation reported, or the unreachable state once the stale deadline fell due; absent before the first observation.",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "observedAt",
+      "description": "When the last observation was made, its at, in epoch milliseconds; absent before the first.",
+      "type": "Temporal.DateTime"
+    },
+    {
+      "name": "drift",
+      "description": "Why the status is not the observed state: { status, observed, code }, the status where the path stopped, the state it was moving to, and the veto code of the step refused, forbidden for a permission the observer lacks, or no_path when no transitions lead there; absent while the status is the observed state.",
+      "type": "Generic.JSON"
+    },
+    {
+      "name": "reconciledAt",
+      "description": "When an observation or the stale deadline last left the status at the observed state, in epoch milliseconds; absent before.",
+      "type": "Temporal.DateTime"
+    }
+  ],
+  "value": "observed",
+  "armsDeadlines": true,
+  "operations": [
+    {
+      "name": "observe",
+      "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "When the provider was observed in it, in epoch milliseconds, no later than the call.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "description": "The state the provider reports, a state of the Workflow status names.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "at"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "drift": {
+            "additionalProperties": false,
+            "description": "Why the status is not the observed state; absent while it is.",
+            "properties": {
+              "code": {
+                "description": "The veto code of the step refused, forbidden for a permission the observer lacks, no_path when no transitions lead there, or no_status.",
+                "type": "string"
+              },
+              "observed": {
+                "description": "The state it was moving to.",
+                "type": "string"
+              },
+              "status": {
+                "description": "The status where the path stopped; absent for a row with no status.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "observed",
+              "code"
+            ],
+            "type": "object"
+          },
+          "moves": {
+            "description": "The transitions made, in order; [] for none.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "description": "The state the row was in.",
+                  "type": "string"
+                },
+                "to": {
+                  "description": "The state it moved to.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "observed": {
+            "description": "The observed state after the call.",
+            "type": "string"
+          },
+          "observedAt": {
+            "description": "When it was observed, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "status": {
+            "description": "The Workflow's status after the call; null for a row with no status, which only a raw write leaves.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unchanged": {
+            "description": "True when the observation was no newer than the last one, so nothing was written; absent otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed",
+          "observedAt",
+          "status",
+          "moves"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ]
+}

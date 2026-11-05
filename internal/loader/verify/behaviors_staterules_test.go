@@ -70,7 +70,7 @@ func TestStateRulesConfigIsHeldToTheTable(t *testing.T) {
 		{"by in a state that freezes nothing", rule("proving", map[string]any{"required": []any{"proof"}, "by": []any{"reviewer"}}),
 			prefix + "states.proving.by lists who may change a field proving freezes, and proving freezes none"},
 		{"a seat", rule("planned", map[string]any{"frozen": []any{"plan"}, "by": []any{"seat:owner"}}),
-			prefix + `states.planned.by names "seat:owner", a seat of Seats, which the core does not run yet (D104, step 3)`},
+			prefix + `states.planned.by names "seat:owner", a seat of Seats, which Task does not implement`},
 		{"a by field the table lacks", rule("planned", map[string]any{"frozen": []any{"plan"}, "by": []any{"assignee"}}),
 			prefix + `states.planned.by names "assignee", which is not a field of Task (its fields: ` + taskFields + ")"},
 		{"a by field that holds no subject", rule("planned", map[string]any{"frozen": []any{"plan"}, "by": []any{"urgent"}}),

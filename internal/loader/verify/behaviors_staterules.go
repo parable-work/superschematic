@@ -90,8 +90,10 @@ func (f flow) has(state string) bool {
 // it reads is the one its status names, or the table's one Workflow; each
 // state is one of that Workflow's; each field a state requires or freezes
 // is an own field of the table; and a state's by, in a state that freezes
-// a field, names own fields that hold a subject, as a Workflow
-// transition's by does (byProblem). What only the IR shows is the build's:
+// a field, names own fields that hold a subject and seats of the table's
+// Seats, as a Workflow transition's by does (byProblem), a seat that names
+// no take permission warned of once per entry. What only the IR shows is
+// the build's:
 // a field a behavior owns, a relation named by its field, an audit field
 // but createdBy, which a state may require, and a field the core reads no
 // value of (unread). Each problem is `type <T>: behavior StateRules config:
@@ -178,6 +180,15 @@ func checkStateRulesConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef
 			if why := byProblem(schema, td, fields.spec, entry); why != "" {
 				fail("states.%s.by names %q, %s", state, entry, why)
 				return
+			}
+		}
+	}
+	warned := map[string]bool{}
+	for _, state := range slices.Sorted(maps.Keys(config.States)) {
+		for _, entry := range config.States[state].By {
+			if seat, takeless := takelessSeat(td, entry); takeless && !warned[entry] {
+				warned[entry] = true
+				r.warnf(td.Owner, "type %s: behavior StateRules config: states.%s.by names %q, and Seats' %s names no take permission: any caller may take it and so change what %s freezes; name a take permission for %s (D104)", td.Name, state, entry, seat, state, seat)
 			}
 		}
 	}

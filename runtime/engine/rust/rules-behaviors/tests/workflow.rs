@@ -1772,7 +1772,7 @@ fn the_config_checks_refuse_a_seat_a_missing_field_and_a_field_that_holds_no_sub
     let rules = [
         (
             by(json!(["seat:reviewer"])),
-            format!("{named} \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"),
+            format!("{named} \"seat:reviewer\" in by, a seat of Seats, which Question does not implement"),
         ),
         (
             by(json!(["askee"])),
@@ -1789,7 +1789,7 @@ fn the_config_checks_refuse_a_seat_a_missing_field_and_a_field_that_holds_no_sub
         // The first entry that breaks, in config order.
         (
             by(json!(["askedOf", "seat:reviewer", "askee"])),
-            format!("{named} \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"),
+            format!("{named} \"seat:reviewer\" in by, a seat of Seats, which Question does not implement"),
         ),
     ];
     for (config, reason) in rules {
@@ -1820,7 +1820,67 @@ fn the_config_checks_refuse_a_seat_a_missing_field_and_a_field_that_holds_no_sub
         .with_field(FieldSpec::new("askedOf", "string"));
     assert_eq!(
         define_issues(anchored)[0].2,
-        format!("type Question: field status: behavior Workflow config: {named} \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)")
+        format!("type Question: field status: behavior Workflow config: {named} \"seat:reviewer\" in by, a seat of Seats, which Question does not implement")
+    );
+    // With Seats on the type, a seat entry names one of its seats, which
+    // the refusal lists by code point; a seat it has resolves, fromField
+    // and all, and is never looked up as a field.
+    let seated = |entries: Value| {
+        question(&[
+            UseSpec::on_type(
+                "Seats",
+                json!({"seats": {"reviewers": {"fromField": "askedOf"}, "leads": {"max": 1}}}),
+            ),
+            workflow(by(entries)),
+        ])
+    };
+    assert_eq!(
+        define_issues(seated(json!(["seat:owners"])))[0].2,
+        format!("{prefix}{named} \"seat:owners\" in by, which is not a seat of Question's Seats (its seats: leads, reviewers)")
+    );
+    let spec = seated(json!([
+        "askedOf",
+        "seat:reviewers",
+        "seat:leads",
+        "seat:reviewers"
+    ]));
+    assert!(define_issues(spec.clone())
+        .iter()
+        .all(|(kind, _, _)| kind == "schema"));
+    let spec = seated(json!(["seat:reviewers", "askedOf", "seat:leads"]));
+    let define = Command::new(alice(), START, Action::Define);
+    assert_eq!(
+        changed(core().drive(&spec, &define, &mut Memory::default())),
+        ChangeSet::default()
+    );
+    let config = superschematic_rules_behaviors::WorkflowConfig::parse(
+        &spec.uses[1].config_or_empty(),
+        &ConfigTarget::new(&spec, 1),
+    )
+    .expect("a state machine");
+    assert_eq!(
+        config.seats,
+        vec![
+            superschematic_rules_behaviors::SeatRef {
+                use_id: "Seats".into(),
+                seat: "reviewers".into(),
+                from_field: Some(("askedOf".into(), "string".into())),
+            },
+            superschematic_rules_behaviors::SeatRef {
+                use_id: "Seats".into(),
+                seat: "leads".into(),
+                from_field: None,
+            },
+        ]
+    );
+    // The fields alone are subject types; the other transitions name
+    // createdBy.
+    assert_eq!(
+        config.subject_types,
+        vec![
+            ("askedOf".to_owned(), "string".to_owned()),
+            ("createdBy".to_owned(), "string".to_owned())
+        ]
     );
     // What the configSchema refuses, in the schema loader's words.
     let shapes: Vec<(Value, Vec<(&str, &str)>)> = vec![

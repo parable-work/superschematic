@@ -1,0 +1,21 @@
+# fixture-seats-api in TypeScript on the local target (D104): its default
+# server serves the operations of fixture-seats-db's Problem and Sandbox,
+# and its behavior worker SandboxDeadlines, the deployable
+# fixture-seats-api-sandbox-deadlines, runs each sandbox's stale deadline,
+# which moves a sandbox no observation has reached to unreachable, through
+# the database's repositories.
+kind: Stack
+types:
+  Seats:
+    name: Seats
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-seats-api, kind: API }
+      expose:
+        - service: { name: fixture-seats-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

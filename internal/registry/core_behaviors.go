@@ -12,8 +12,11 @@ import (
 // names: every behavior @superschematic/engine ships, every one the
 // optional @superschematic/engine-workqueue package does, and the commerce
 // behaviors the optional @superschematic/engine-commerce package does
-// (D70). Each package's Rust crate (D58: runtime/engine/rust/behaviors,
-// runtime/engine-workqueue/rust, runtime/engine-commerce/rust)
+// (D70), and the behaviors the behaviors' core alone implements
+// (RulesPackage, D104). Each package's Rust crate (D58:
+// runtime/engine/rust/behaviors, runtime/engine-workqueue/rust,
+// runtime/engine-commerce/rust, and the core's
+// runtime/engine/rust/rules-behaviors, which reads its copy in place)
 // carries a copy of the declarations it implements, which `superschematic
 // behaviors --package <name> --out` writes and CI checks
 // (docs/extension-model.md section 3.16).
@@ -35,6 +38,10 @@ const (
 	// (D70: Stock, Calendar, Holds and Payments) a deployment registers
 	// with the engine to run them, as it registers the work queue's.
 	CommercePackage = "@superschematic/engine-commerce"
+	// RulesPackage is @superschematic/rules, the npm package that ships the
+	// behaviors' core (runtime/rules/typescript): the package of a behavior
+	// the core alone implements, which no engine registers (D104).
+	RulesPackage = "@superschematic/rules"
 )
 
 // coreBehaviors are the core's behavior declarations, by file name, with
@@ -68,6 +75,15 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"calendar", CommercePackage},
 	{"holds", CommercePackage},
 	{"payments", CommercePackage},
+	{"seats", RulesPackage},
+	{"reconcile", RulesPackage},
+}
+
+// EngineImplements reports whether an engine implements the behavior:
+// every behavior but one whose package is RulesPackage, which the
+// behaviors' core alone runs, on a table (D104).
+func EngineImplements(b Behavior) bool {
+	return b.Package != RulesPackage
 }
 
 // coreBehaviorSpecs returns the core's BehaviorSpecs. A declaration that
@@ -87,15 +103,18 @@ func coreBehaviorSpecs() []BehaviorSpec {
 
 // RulesBehaviors are the behaviors the behaviors' core runs (D103): those
 // superschematic-rules-behaviors registers (its NAMES), in its order, the
-// engine's order of the first six and then the work queue's order of the
+// engine's order of the first six, then the work queue's order of the
 // four D104's step 2 ported in its second batch (Lease, Presence, Budget,
-// Retries), so a build-time table may compose them. Of these, a table
-// implements one that names no value field (implements Timers<T, C>, and
-// Constants, StateRules and Approvals since D104's step 2, and Lease,
-// Presence, Budget and Retries since its second batch) and carries one that
-// does on a field (status: Workflow<C>). A test holds the list to the
-// behaviors each transcript of runtime/engine/testdata/rules records.
-var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries"}
+// Retries), then Seats and Reconcile, which D104's step 3 built on the core
+// alone (RulesPackage), so a build-time table may compose them. Of these, a
+// table implements one that names no value field (implements Timers<T, C>,
+// and Constants, StateRules and Approvals since D104's step 2, Lease,
+// Presence, Budget and Retries since its second batch, and Seats since its
+// step 3) and carries one that does on a field (status: Workflow<C>, and
+// observed: Reconcile<C> beside it since D104's step 3). A test holds the
+// list to the behaviors each transcript of runtime/engine/testdata/rules
+// records.
+var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile"}
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name
 // (RulesBehaviors).

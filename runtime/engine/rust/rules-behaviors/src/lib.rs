@@ -7,7 +7,9 @@
 //! Each behavior reads its declaration from the file the compiler registers
 //! and the engine embeds (`../behaviors/declarations`, and the work queue's
 //! `../../engine-workqueue/rust/declarations`), in place, so the engine and
-//! the core read one declaration while both exist. The core
+//! the core read one declaration while both exist; a behavior no engine
+//! implements (Seats, Reconcile) reads the copy `make behaviors` writes into
+//! this crate (`declarations`). The core
 //! runs no JSON Schema, so a behavior holds its config and its operations'
 //! parameters to the declaration's schemas in its own code, in the words
 //! the engine gave, which its tests hold to the file.
@@ -33,6 +35,13 @@
 //! that expires the principal's leases through Lease's own expire; and
 //! budgets that keep periods, count a rolling window and take the usage a
 //! provider reports.
+//! [`Seats`] and [`Reconcile`], in step 3 of D104's order of the work, the
+//! first behaviors only the core implements (their declarations are
+//! `rules-behaviors/declarations`', which `make behaviors` writes for the
+//! package `@superschematic/rules`): named seats on a row, which a Workflow
+//! transition's and a StateRules state's `by` name as `seat:<name>`; and the
+//! state a row's provider last reported, which moves its Workflow there along
+//! the transitions it allows.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -68,8 +77,10 @@ mod paging;
 mod periods;
 pub mod presence;
 pub mod reactions;
+pub mod reconcile;
 pub mod retries;
 mod schema;
+pub mod seats;
 pub mod staterules;
 pub mod subjects;
 pub mod timers;
@@ -89,9 +100,11 @@ pub use reactions::{
     Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule, ReactionsTerminal,
     ReactionsThen, ReactionsWhen,
 };
+pub use reconcile::{Reconcile, ReconcileConfig};
 pub use retries::{
     Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
+pub use seats::{SeatRef, Seats, SeatsConfig, SeatsOnFull, SeatsSeat};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use timers::{
     deadlines_field, parse_date_time, Timers, TimersConfig, TimersDeadline, TimersStart,
@@ -105,8 +118,9 @@ pub use workflow::{
 use superschematic_rules::Core;
 
 /// The behaviors [`core`] registers, in its order: the engine's order
-/// (`behaviors::NAMES`) of the ones ported so far.
-pub const NAMES: [&str; 10] = [
+/// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
+/// core implements (D104).
+pub const NAMES: [&str; 12] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -117,6 +131,8 @@ pub const NAMES: [&str; 10] = [
     presence::NAME,
     budget::NAME,
     retries::NAME,
+    seats::NAME,
+    reconcile::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -124,7 +140,7 @@ pub const NAMES: [&str; 10] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 10] = [
+pub const DECLARATIONS: [&str; 12] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -135,6 +151,8 @@ pub const DECLARATIONS: [&str; 10] = [
     presence::DECLARATION,
     budget::DECLARATION,
     retries::DECLARATION,
+    seats::DECLARATION,
+    reconcile::DECLARATION,
 ];
 
 /// A core with every behavior ported so far, in the engine's order, and
@@ -152,6 +170,8 @@ pub fn core() -> Core {
         .with(Presence)
         .with(Budget)
         .with(Retries)
+        .with(Seats)
+        .with(Reconcile)
 }
 
 #[cfg(test)]

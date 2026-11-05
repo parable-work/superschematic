@@ -16,15 +16,16 @@ import (
 
 // coreBehaviorNames are the behaviors New registers, sorted.
 var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering",
-	"Payments", "Presence", "Provenance", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
+	"Payments", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
-// implements, and commerceBehaviorNames the ones
-// @superschematic/engine-commerce does (D70); the engine implements the
-// rest.
+// implements, commerceBehaviorNames the ones @superschematic/engine-commerce
+// does (D70), and rulesOnlyBehaviorNames the ones the behaviors' core alone
+// does (RulesPackage, D104); the engine implements the rest.
 var (
 	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
 	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
+	rulesOnlyBehaviorNames = []string{"Reconcile", "Seats"}
 )
 
 // A registry with no extension declares the behaviors the engine, the
@@ -48,9 +49,14 @@ func TestCoreBehaviors(t *testing.T) {
 			want = WorkQueuePackage
 		case slices.Contains(commerceBehaviorNames, name):
 			want = CommercePackage
+		case slices.Contains(rulesOnlyBehaviorNames, name):
+			want = RulesPackage
 		}
 		if b.Package != want {
 			t.Errorf("%s is implemented by %q, want %q", name, b.Package, want)
+		}
+		if got := EngineImplements(b); got != (want != RulesPackage) {
+			t.Errorf("EngineImplements(%s) = %v, want %v", name, got, want != RulesPackage)
 		}
 	}
 	workflow, _ := reg.Behavior("Workflow")
@@ -1002,6 +1008,46 @@ func TestCommentsBlockParams(t *testing.T) {
 		if err := compiled.Validate(decoded); (err == nil) != c.ok {
 			t.Errorf("Comments.%s %s: error %v, want ok %v", c.operation, c.params, err, c.ok)
 		}
+	}
+}
+
+// Seats and Reconcile are the behaviors the behaviors' core alone
+// implements (D104): their package is RulesPackage, no engine implements
+// them, and the core runs both. Seats keeps one sub-table and no field, and
+// names two vetoes; Reconcile requires Workflow, anchors on its value field
+// observed, the one optional field a declaration gives, and arms deadlines.
+func TestSeatsAndReconcileAreTheCoresAlone(t *testing.T) {
+	reg := New(naming.Default())
+	finalizeWithCoreGenerators(t, reg)
+	seats, _ := reg.Behavior("Seats")
+	reconcile, _ := reg.Behavior("Reconcile")
+	for _, b := range []Behavior{seats, reconcile} {
+		if b.Package != RulesPackage || EngineImplements(b) || !RunsOnTheCore(b.Name) || !b.ConfigRequired() {
+			t.Errorf("%s: package %q, engine implements %v, runs on the core %v, config required %v; want %s, false, true and true",
+				b.Name, b.Package, EngineImplements(b), RunsOnTheCore(b.Name), b.ConfigRequired(), RulesPackage)
+		}
+	}
+	occupants, ok := seats.Table("occupants")
+	if len(seats.Fields) != 0 || seats.Value != "" || !ok || occupants.Key != "number" || len(occupants.Fields) != 5 || seats.ArmsDeadlines || seats.HearsChanges {
+		t.Errorf("Seats: fields %v, value %q, occupants %+v; want none, none, and the sub-table occupants keyed by number with five fields", seats.Fields, seats.Value, occupants)
+	}
+	var seatsOps, vetoes []string
+	for _, op := range seats.Operations {
+		seatsOps = append(seatsOps, fmt.Sprintf("%s:%v", op.Name, op.Writes))
+	}
+	for _, veto := range seats.Vetoes {
+		vetoes = append(vetoes, veto.Code)
+	}
+	if !slices.Equal(seatsOps, []string{"takeSeat:true", "leaveSeat:true", "listSeats:false"}) || !slices.Equal(vetoes, []string{"seat_full", "held_by_field"}) {
+		t.Errorf("Seats operations %v, vetoes %v", seatsOps, vetoes)
+	}
+	var fields []string
+	for _, field := range reconcile.Fields {
+		fields = append(fields, fmt.Sprintf("%s:%s:%v", field.Name, field.Type, field.Optional))
+	}
+	if !slices.Equal(fields, []string{"observed:string:true", "observedAt:Temporal.DateTime:false", "drift:Generic.JSON:false", "reconciledAt:Temporal.DateTime:false"}) ||
+		reconcile.Value != "observed" || !reconcile.ArmsDeadlines || !slices.Equal(reconcile.Requires, []string{"Workflow"}) || len(reconcile.Operations) != 1 || reconcile.Operations[0].Name != "observe" {
+		t.Errorf("Reconcile: fields %v, value %q, arms deadlines %v, requires %v, operations %v", fields, reconcile.Value, reconcile.ArmsDeadlines, reconcile.Requires, reconcile.Operations)
 	}
 }
 

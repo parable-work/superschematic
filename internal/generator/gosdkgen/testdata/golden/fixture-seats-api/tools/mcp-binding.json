@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-seats-api",
+  "sdkClassName": "FixtureSeatsApiSDK",
+  "tools": [
+    {
+      "toolName": "problem.seats.leaveSeat",
+      "apiId": "fixture-seats-api",
+      "namespace": "problem",
+      "methodName": "leaveSeat",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "seat",
+          "required": true,
+          "kind": "input",
+          "target": "input.seat"
+        },
+        {
+          "toolParameter": "subject",
+          "required": false,
+          "kind": "input",
+          "target": "input.subject"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["seat", "subject"]
+        }
+      ]
+    },
+    {
+      "toolName": "problem.seats.listSeats",
+      "apiId": "fixture-seats-api",
+      "namespace": "problem",
+      "methodName": "listSeats",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "seat",
+          "required": false,
+          "kind": "input",
+          "target": "input.seat"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["seat"]
+        }
+      ]
+    },
+    {
+      "toolName": "problem.seats.takeSeat",
+      "apiId": "fixture-seats-api",
+      "namespace": "problem",
+      "methodName": "takeSeat",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "seat",
+          "required": true,
+          "kind": "input",
+          "target": "input.seat"
+        },
+        {
+          "toolParameter": "subject",
+          "required": false,
+          "kind": "input",
+          "target": "input.subject"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["seat", "subject"]
+        }
+      ]
+    },
+    {
+      "toolName": "problem.status.transition",
+      "apiId": "fixture-seats-api",
+      "namespace": "problem",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["from", "to"]
+        }
+      ]
+    },
+    {
+      "toolName": "sandbox.observed.observe",
+      "apiId": "fixture-seats-api",
+      "namespace": "sandbox",
+      "methodName": "observe",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "at",
+          "required": true,
+          "kind": "input",
+          "target": "input.at"
+        },
+        {
+          "toolParameter": "state",
+          "required": true,
+          "kind": "input",
+          "target": "input.state"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["at", "state"]
+        }
+      ]
+    },
+    {
+      "toolName": "sandbox.status.transition",
+      "apiId": "fixture-seats-api",
+      "namespace": "sandbox",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["from", "to"]
+        }
+      ]
+    }
+  ]
+}

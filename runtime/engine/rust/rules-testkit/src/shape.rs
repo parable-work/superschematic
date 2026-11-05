@@ -69,9 +69,10 @@ pub struct Defined {
 pub const UNMAPPED_LINKS: &str = "a link that holds a list of targets, or pins a revision or a release, which a to-one relation cannot hold";
 
 /// Reads a schema document: its instance type (the type named as the
-/// schema, else its first), its behaviors in list order, each a use on the
-/// type with its config as the document gives it (none where it gives
-/// none), and its own fields, which the type's spec lists too, each by its
+/// schema, else its first), its behaviors in list order, each a use with its
+/// config as the document gives it (none where it gives none), on the field
+/// an entry's `field` names (the IR's `BehaviorRef.field`: Reconcile on
+/// `observed`, D104) or else on the type, and its own fields, which the type's spec lists too, each by its
 /// `typeRef`'s name and whether its values are instants. Links is no use:
 /// each link with one target is an own field `<link>Id`, a string, that
 /// holds the target's key, after the document's own fields.
@@ -128,8 +129,13 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
             continue;
         }
         // A config left out is none: the core checks it as {} and refuses
-        // it for a behavior that needs one, as the meta-schema did.
-        spec = spec.with(UseSpec::on_type(behavior, entry.get("config").cloned()));
+        // it for a behavior that needs one, as the meta-schema did. An entry
+        // that names a field is anchored on it.
+        let config = entry.get("config").cloned();
+        spec = spec.with(match entry.get("field").and_then(Value::as_str) {
+            Some(field) => UseSpec::on_field(field, behavior, config),
+            None => UseSpec::on_type(behavior, config),
+        });
     }
     let mut fields: Vec<FieldDef> = shape
         .get("fields")
@@ -907,6 +913,43 @@ mod tests {
             false
         )
         .is_empty());
+    }
+
+    #[test]
+    fn a_behavior_entry_that_names_a_field_is_anchored_on_it() {
+        let defined = read_document(&json!({
+            "name": "Sandbox",
+            "types": {"Sandbox": {
+                "name": "Sandbox",
+                "fields": [{"name": "name", "typeRef": {"name": "string"}, "required": true}],
+                "behaviors": [
+                    {"name": "Lease", "config": {}},
+                    {"name": "Workflow", "field": "status", "config": {"states": ["a"], "transitions": []}},
+                    {"name": "Reconcile", "field": "observed", "config": {"status": "status"}}
+                ]
+            }}
+        }))
+        .unwrap();
+        let ids: Vec<(&str, Option<&str>)> = defined
+            .spec
+            .uses
+            .iter()
+            .map(|entry| (entry.id(), entry.field()))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("Lease", None),
+                ("status", Some("status")),
+                ("observed", Some("observed"))
+            ]
+        );
+        assert_eq!(
+            defined.spec.uses[2],
+            UseSpec::on_field("observed", "Reconcile", json!({"status": "status"}))
+        );
+        // The anchored fields are the uses', not own fields of the type.
+        assert_eq!(defined.fields.len(), 1);
     }
 
     #[test]

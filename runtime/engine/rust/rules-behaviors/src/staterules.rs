@@ -42,13 +42,17 @@
 //!   first, since no permission and no `by` lifts it; one that changes a
 //!   field the state freezes is vetoed (`frozen_fields`) unless the caller
 //!   holds the config's permission or, for a state with `by`, is the
-//!   subject one of its `by` fields holds in the row before the update, so
-//!   a patch that names the caller in a `by` field does not count. A `by`
+//!   subject one of its `by` fields holds in the row before the update, or
+//!   a subject seated in one of its `by` seats before the update, so a
+//!   patch that names the caller in a `by` field does not count. A `by`
 //!   field is an own field that holds a subject, the audit field
 //!   `createdBy` among them, read as Workflow's `by` reads one
-//!   ([`crate::subjects`]); a `seat:` entry names a seat of Seats, which the
-//!   core does not run yet (D104, step 3), and is refused at define, and so
-//!   is a `by` in a state that freezes nothing.
+//!   ([`crate::subjects`]); a `seat:<name>` entry names a seat of the
+//!   type's Seats (D104), read through Seats' own rule
+//!   (`seats::holds_seat`) over the occupants as the command reads them,
+//!   the field entries first. A seat the type's Seats lacks, or a type with
+//!   no Seats, is refused at define, and so is a `by` in a state that
+//!   freezes nothing.
 //!
 //! Each veto names the state and the fields in its details, in the order
 //! the type lists its fields for `"all"` and the config's otherwise, and a
@@ -95,6 +99,7 @@ use superschematic_rules::{
 use crate::declared;
 use crate::flow::{self, flow_of, Flow};
 use crate::schema::{self, Issues};
+use crate::seats::{self, SeatRef};
 use crate::subjects::{holds_subject, names_subject};
 use crate::values::{equal, held};
 use crate::workflow;
@@ -113,9 +118,6 @@ const RULE_KEYS: [&str; 3] = ["by", "frozen", "required"];
 // The bound the configSchema holds a rule's lists to.
 const MAX_FIELDS: usize = 64;
 
-// What a by entry that names a seat of Seats starts with (D104, step 3).
-const SEAT_PREFIX: &str = "seat:";
-
 /// One state's rules, parsed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StateRule {
@@ -127,8 +129,9 @@ pub struct StateRule {
     pub frozen: Vec<String>,
     /// Whether the config freezes every own field (`"all"`).
     pub frozen_all: bool,
-    /// The own fields that hold a subject who may change a frozen field
-    /// (D104).
+    /// The own fields that hold a subject, and the seats of the type's
+    /// Seats as `seat:<name>`, who may change a frozen field (D104), as the
+    /// config lists them.
     pub by: Vec<String>,
 }
 
@@ -147,6 +150,9 @@ pub struct StateRulesConfig {
     pub transitions: Vec<(String, String)>,
     /// Each field a by names, once, with its IR type.
     pub subject_types: Vec<(String, String)>,
+    /// Each seat a by names, once, in the order the config first names it
+    /// (D104).
+    pub seats: Vec<SeatRef>,
 }
 
 impl StateRulesConfig {
@@ -188,6 +194,7 @@ impl StateRulesConfig {
             .into())
         };
         let mut subject_types: Vec<(String, String)> = Vec::new();
+        let mut seated: Vec<SeatRef> = Vec::new();
         for (state, rule) in rules {
             if flow.lacks(state) {
                 return Err(format!(
@@ -215,11 +222,13 @@ impl StateRulesConfig {
             }
             for entry in strings(Some(by)) {
                 let named = format!("states.{state}.by names \"{entry}\"");
-                if entry.starts_with(SEAT_PREFIX) {
-                    return Err(format!(
-                        "{named}, a seat of Seats, which the core does not run yet (D104, step 3)"
-                    )
-                    .into());
+                if let Some(seat) = seats::seat_name(&entry) {
+                    let found = seats::seat_of(target, seat)
+                        .map_err(|missing| seats::missing_reason(&named, type_name, &missing))?;
+                    if !seated.iter().any(|known| known.seat == found.seat) {
+                        seated.push(found);
+                    }
+                    continue;
                 }
                 let Some(found) = fields.iter().find(|known| known.name == entry) else {
                     return Err(format!(
@@ -285,6 +294,7 @@ impl StateRulesConfig {
             initial,
             transitions,
             subject_types,
+            seats: seated,
         })
     }
 
@@ -303,6 +313,11 @@ impl StateRulesConfig {
             .iter()
             .find(|(name, _)| name == field)
             .map(|(_, type_name)| type_name.as_str())
+    }
+
+    /// The seat a by names, by its name; `None` for a seat no by names.
+    pub fn seat(&self, name: &str) -> Option<&SeatRef> {
+        self.seats.iter().find(|seat| seat.seat == name)
     }
 
     // leads says whether a transition of the Workflow leads from one state
@@ -487,14 +502,26 @@ fn update_guard(
         return Ok(None);
     }
     // The subject a by field holds before the update changes what the
-    // state freezes (D104); a patch that names the caller does not count.
+    // state freezes (D104), and so does a subject seated in a by seat
+    // before it; a patch that names the caller does not count.
     let subject = view.caller().subject.as_str();
-    let named_by = rule.by.iter().any(|field| {
-        let type_name = config.subject_type(field).unwrap_or("string");
-        names_subject(type_name, before.get(field), subject)
-    });
+    let named_by = rule
+        .by
+        .iter()
+        .filter(|entry| seats::seat_name(entry).is_none())
+        .any(|field| {
+            let type_name = config.subject_type(field).unwrap_or("string");
+            names_subject(type_name, before.get(field), subject)
+        });
     if named_by {
         return Ok(None);
+    }
+    for seat in rule.by.iter().filter_map(|entry| seats::seat_name(entry)) {
+        if let Some(seat) = config.seat(seat) {
+            if seats::holds_seat(view, seat, subject)? {
+                return Ok(None);
+            }
+        }
     }
     if let Some(permission) = &config.permission {
         if view.can(permission)? {
@@ -506,13 +533,10 @@ fn update_guard(
     let unless = match (rule.by.is_empty(), &config.permission) {
         (true, None) => String::new(),
         (true, Some(permission)) => format!("; only a caller with {permission} may change {them}"),
-        (false, None) => format!(
-            "; only the subject {} holds may change {them}",
-            either(&rule.by)
-        ),
+        (false, None) => format!("; only {} may change {them}", seats::by_named(&rule.by)),
         (false, Some(permission)) => format!(
-            "; only the subject {} holds, or a caller with {permission}, may change {them}",
-            either(&rule.by)
+            "; only {}, or a caller with {permission}, may change {them}",
+            seats::by_named(&rule.by)
         ),
     };
     Ok(Some(veto(
@@ -558,16 +582,6 @@ fn list(names: &[&str], conjunction: &str) -> String {
         [] => String::new(),
         [one] => (*one).to_owned(),
         [rest @ .., last] => format!("{} {conjunction} {last}", rest.join(", ")),
-    }
-}
-
-// either lists the fields a by names as a refusal says them: `reviewer`,
-// `reviewer or createdBy`, `a, b or c`.
-fn either(fields: &[String]) -> String {
-    match fields {
-        [] => String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
     }
 }
 

@@ -19,7 +19,8 @@ as JSON.
 
 `superschematic-rules-behaviors` (`../rules-behaviors`) holds the behaviors
 ported onto it, in the engine's order: Workflow, Reactions, Constants,
-StateRules, Approvals, Timers, Lease, Presence, Budget and Retries;
+StateRules, Approvals, Timers, Lease, Presence, Budget and Retries, then
+Seats and Reconcile, which no engine implements (D104);
 `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
@@ -193,9 +194,11 @@ be >= 0`), refuse the command together as `PreconditionsError`, in the
 command's order. Any other action that carries them is refused so (`a create
 takes no preconditions: an update, a delete or an operation of a row
 presents them`). A guard asked about the command's own update, delete or
-operation reads its use's entry (`view.precondition()`); one asked about a
-create, a `call()` or a `call_on()` reads none, so a request a behavior's
-code makes presents nothing.
+operation reads its use's entry (`view.precondition()`), and so does one
+asked about a call a behavior makes as the caller's own request
+(`cx.call_as_caller(..)`); one asked about a create, any other `call()` or
+a `call_on()` reads none, so a request a behavior's code makes for itself
+presents nothing.
 
 A command on a row reads it first (`ReadRequest::Row`); a key the type has
 none of is `not_found`. Then the uses compose in list order:
@@ -463,9 +466,12 @@ and the hooks it needs, each with a default:
 - `guard(view, request)`: `Some(Veto)` refuses a `GuardRequest` (`Create`,
   `Update`, `Delete`, or any use's `Operation`, a caller's or a call's,
   `caller` naming the calling use, `caller_type` its type for a call from
-  another row, and `fired` a call a deadline's handler makes on its row,
+  another row, `fired` a call a deadline's handler makes on its row,
   the request of the worker that runs the deadline, as the engine's runner
-  made one: Lease holds it to an active lease as a caller's, D104);
+  made one: Lease holds it to an active lease as a caller's, D104, and
+  `as_caller` a call a behavior makes as the command's caller's own request,
+  `cx.call_as_caller(..)`: Reconcile's steps toward an observed state, which
+  Lease holds so too);
   `request.operation_of(use_id, name)` matches the use's own operation. A
   guard refuses otherwise through its error (`view.forbidden(..)`,
   `Refusal::operation_params(..)`).
@@ -515,8 +521,8 @@ reads as a view and writes, on its row: `set(field, value)?`, `insert_row`,
 `update_row`, `delete_row`, `emit(kind, payload)?`, `arm(name, at,
 payload)?`, `clear(name)?`; makes keys, `new_key(label)?`; and reaches other
 state through operations, `call(use_id, operation, params)?`,
-`call_on(type, key, use_id, operation, params)?` and `create_row(type, key,
-own, params)?`. A read-only operation's context refuses every write as a
+`call_as_caller(use_id, operation, params)?`, `call_on(type, key, use_id,
+operation, params)?` and `create_row(type, key, own, params)?`. A read-only operation's context refuses every write as a
 defect. `unchanged()?` says the command's operation writes nothing: its
 change set holds no write, the row's version stays and no after-change hook
 runs, as the engine's `unchanged()` kept an idempotent call out of the log
@@ -555,7 +561,12 @@ A use writes only its own state. It changes another use's state only
 through that use's operations: `cx.call(use_id, operation, params)` runs the
 operation's parameter check, its use's `settle`, every use's guard in list
 order (each told the call is the calling use's) and its handler, and merges
-its effects into the run's change set. `cx.call_on(type, key, use_id, operation, params)` does the
+its effects into the run's change set. `cx.call_as_caller(use_id,
+operation, params)` is a `call` made as the command's caller's own request
+(D104): each guard is told so (`as_caller`) and handed its use's entry of
+the command's preconditions, as for the command's own operation, so a rule
+that lets a behavior's request through holds this one as the caller's
+(Lease's); a deadline's handler's is `fired` as well. `cx.call_on(type, key, use_id, operation, params)` does the
 same on another row of any type, as a Holds use calls Supply on a stock row:
 the core binds that row's type (`ReadRequest::Spec`, unless it is the
 command's), reads the row, runs that type's parameter check, settle, guards
@@ -849,9 +860,14 @@ them changes, in 4 scenarios; `core-constants` to 39 steps, 19 checks and
 `core-workflow-principals` to 92 steps,
 34 define and publish checks, twelve of them refused, and 58 commands, five
 of them repeats answered unchanged, in 9 scenarios (its tenth, test.Gate's,
-runs on the reference host alone); and `core-freezes-and-sign-offs` to 115
-steps, 40 checks and 75 commands, in 12 scenarios. Every transcript's
-`behaviors` lists the six behaviors the core runs, in its order. A hand-written file's transcript holds
+runs on the reference host alone); `core-freezes-and-sign-offs` to 115
+steps, 40 checks and 75 commands, in 12 scenarios; and, of the behaviors
+only the core implements (D104, step 3), `core-seats` to 88 steps, 22
+checks and 66 commands, four of them repeats, in 7 scenarios, and
+`core-reconcile` to 58 steps, 22 checks and 36 commands, two of them
+repeats and two the stale deadline, in 7 scenarios whose Workflow and
+Reconcile are anchored on fields. Every transcript's `behaviors` lists the
+behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to
 writing nothing; a recording's holds none. A change a runner's sweep ran is a command
@@ -1052,12 +1068,14 @@ guard, and a settled `call_on` writing nothing on the other row; and a
 command's preconditions (held to the uses before the row is read, refused
 on any other action, read by a guard of the command's own write and by no
 call), a holding read, `read_fields_at`, and another row's sub-table rows as
-the run has them (D104).
+the run has them (D104); and a call made as the caller's own request, told
+so and presented the command's preconditions, from a handler and from a
+deadline's (D104, step 3).
 `rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18),
 `tests/reactions.rs` (16), `tests/constants.rs` (11), `tests/staterules.rs`
 (11), `tests/approvals.rs` (14), `tests/lease.rs` (16) and
-`tests/retries.rs` (14) hold each behavior to its declaration's
-schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
+`tests/retries.rs` (14), and `tests/seats.rs` (19) and `tests/reconcile.rs`
+(12), hold each behavior to its declaration's schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
 field with no value, `by` with a permission, `overridePermission`, a call
 held to `by`, `repeat` and `from`, and its config checks; Timers'
 starts, its `then`'s four outcomes, `until` in both forms, reset, snooze,
@@ -1090,7 +1108,18 @@ retryInto and on Lease's acquire, then's deadline (armed again at a
 status's entry, a veto falling due again, another principal's lease, the
 window), giveUpAfterMs, the window and its until, keyField read lazily and
 reset by an update, the Workflow among two, and its composition with
-Lease.
+Lease; Seats' take and assign, a full seat refused and displaced (ties by
+key, never the fromField's subject), a repeat and a leave of a seat not
+held settled before any guard, held_by_field, a subject kept in base62, a
+UUID fromField in either form, listSeats' order, a dropped seat and a
+lowered max, a leased row, and a Workflow transition's and a StateRules
+state's `by` naming a seat; and Reconcile's config along transitions, the
+fewest transitions and their tie, an older and an equal observation
+settled before any guard, drift on each use's veto and on `forbidden`,
+each step the observer's own request, `no_path` and `no_status`, the stale
+deadline armed, moved, cleared, fired, armed again past a raw write and
+vetoed, the worker's stale moves, a Workflow on the type and one of two
+fields.
 
 `superschematic-rules-testkit`'s `tests/workflow_scenarios.rs`,
 `tests/timers_scenarios.rs`, `tests/reactions_scenarios.rs`,

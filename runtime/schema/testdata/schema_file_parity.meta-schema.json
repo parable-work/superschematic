@@ -2542,6 +2542,52 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Reconcile"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "observePermission": {
+                    "description": "The permission a caller needs to observe.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "staleAfterMs": {
+                    "description": "How long after an observation's at a row goes stale, in milliseconds: its deadline then moves the row to unreachable. Needs unreachable.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "status": {
+                    "description": "The field of the type whose Workflow an observation moves; a Workflow anchored on the type is named Workflow.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "unreachable": {
+                    "description": "The state of that Workflow the stale deadline moves a row to: every state but a terminal one reaches it, and it reaches every state. Needs staleAfterMs.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status",
+                  "observePermission"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Retries"
               }
             }
@@ -3040,6 +3086,73 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Seats"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "seats": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "assign": {
+                          "description": "The permission a caller needs to seat or unseat another subject; no caller may when absent. A caller leaves a seat it holds without it.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "fromField": {
+                          "description": "An own field that holds a subject (string, Identity.UUID or Identity.UserID): the subject it holds is seated, counts toward max, is never displaced, and cannot leave the seat while the field holds them.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "max": {
+                          "description": "How many subjects the seat holds at most, the subject its fromField holds among them; no cap when absent.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "onFull": {
+                          "description": "What a take of a full seat does: refuse, the veto seat_full, or displace, which unseats the subject seated longest that the seat's fromField does not hold; refuse when absent. Needs max.",
+                          "enum": [
+                            "refuse",
+                            "displace"
+                          ]
+                        },
+                        "take": {
+                          "description": "The permission a caller needs to seat itself; any caller may when absent.",
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "The seats, by name.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "seats"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "StateRules"
               }
             }
@@ -3060,7 +3173,7 @@
                       "minProperties": 1,
                       "properties": {
                         "by": {
-                          "description": "Who may change a field the state freezes: own fields that hold a subject, createdBy among them. A caller who is the subject one of them holds, before the update, changes a frozen field as a caller with the config's permission does; a field with no value names no one, and what the state requires holds for every caller. Refused in a state that freezes nothing. A table's alone: an engine type refuses it.",
+                          "description": "Who may change a field the state freezes: own fields that hold a subject, createdBy among them, and seats of the table's Seats, each as seat:\u003cname\u003e. A caller who is the subject one of the fields holds, or who is seated in one of the seats, before the update, changes a frozen field as a caller with the config's permission does; a field with no value names no one, and what the state requires holds for every caller. Refused in a state that freezes nothing. A table's alone: an engine type refuses it.",
                           "items": {
                             "minLength": 1,
                             "type": "string"
@@ -3512,7 +3625,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "by": {
-                          "description": "Who may make this transition: fields of the instance that hold a subject, createdBy among them. Only a caller who is the subject one of them holds may, and it needs the transition's permission too when it names one; a field with no value names no one. A caller holding the config's overridePermission may whatever the fields hold. A table's alone: an engine type refuses it.",
+                          "description": "Who may make this transition: fields of the instance that hold a subject, createdBy among them, and seats of the table's Seats, each as seat:\u003cname\u003e. Only a caller who is the subject one of the fields holds, or who is seated in one of the seats, may, and it needs the transition's permission too when it names one; a field with no value names no one. A caller holding the config's overridePermission may whatever the fields and the seats hold. A table's alone: an engine type refuses it.",
                           "items": {
                             "minLength": 1,
                             "type": "string"
@@ -3639,10 +3752,12 @@
             "Provenance",
             "Queue",
             "Reactions",
+            "Reconcile",
             "Retries",
             "Revisions",
             "Rollups",
             "Search",
+            "Seats",
             "StateRules",
             "Stock",
             "Timers",

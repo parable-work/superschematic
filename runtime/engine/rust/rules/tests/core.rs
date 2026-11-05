@@ -12,8 +12,9 @@
 //! listeners a relation reaches, a row found gone and the linked read; a
 //! command's preconditions and the guard that reads its use's entry, the
 //! read of the rows whose owned field holds a value, the fields a read
-//! computes at a time, and another row's sub-table rows as the run has
-//! them (D104).
+//! computes at a time, another row's sub-table rows as the run has them,
+//! and a call a behavior makes as the caller's own request, from a handler
+//! and from a deadline's (D104).
 
 use std::collections::BTreeMap;
 
@@ -947,6 +948,96 @@ impl Behavior for Fence {
     }
 }
 
+// Witness: a probe its guard answers with what it was told of the request
+// (D104): a veto whose details are `as_caller`, `fired`, the calling use and
+// the use's entry of the command's preconditions, which the caller reads
+// off the refusal.
+struct Witness;
+
+impl Behavior for Witness {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Witness")
+            .operation("probe", true)
+            .veto("seen")
+            .preconditions()
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn guard(&self, view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        if request.operation_of("Witness", "probe").is_none() {
+            return Ok(None);
+        }
+        let GuardRequest::Operation {
+            caller,
+            fired,
+            as_caller,
+            ..
+        } = request
+        else {
+            return Ok(None);
+        };
+        Ok(Some(Veto::new("seen").with_code("seen").with_details(
+            object(json!({
+                "asCaller": as_caller,
+                "fired": fired,
+                "caller": caller,
+                "precondition": view.precondition(),
+            })),
+        )))
+    }
+}
+
+// Proxy: calls Witness's probe as the caller's own request (asCaller) or as
+// its own (plain), from a handler and from its deadline `later`, and
+// answers, or keeps in its field `seen`, what the probe's guard was told.
+struct Proxy;
+
+// told is what Witness's guard was told, off its veto.
+fn told(outcome: Hook<Value>) -> Hook<Value> {
+    match outcome {
+        Err(stop) if stop.is_refusal() => Ok(stop
+            .refusal()
+            .and_then(|refusal| refusal.details.as_deref())
+            .and_then(|details| details.get("vetoDetails"))
+            .cloned()
+            .unwrap_or(Value::Null)),
+        other => other,
+    }
+}
+
+impl Behavior for Proxy {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Proxy")
+            .field("seen")
+            .operation("asCaller", true)
+            .operation("plain", true)
+            .arms_deadlines()
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, name: &str, _params: &Value) -> Hook<Value> {
+        match name {
+            "asCaller" => told(cx.call_as_caller("Witness", "probe", &json!({}))),
+            _ => told(cx.call("Witness", "probe", &json!({}))),
+        }
+    }
+
+    fn deadline(&self, cx: &Cx<'_, ()>, _name: &str, _payload: &Value) -> Hook<()> {
+        let seen = told(cx.call_as_caller("Witness", "probe", &json!({})))?;
+        cx.set("seen", seen)
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -964,6 +1055,8 @@ fn core() -> superschematic_rules::Core {
         .with(Latch)
         .with(Nudge)
         .with(Fence)
+        .with(Witness)
+        .with(Proxy)
 }
 
 fn alice() -> Caller {
@@ -2194,13 +2287,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -3561,4 +3654,73 @@ fn another_rows_sub_table_rows_read_as_the_run_has_them() {
     let changes = changed(core.drive(&spec, &delete, &mut memory));
     assert_eq!(changes.events[0].kind, "deleted");
     assert_eq!(changes.events[0].payload, json!([]));
+}
+
+fn witnessed() -> (TypeSpec, Memory) {
+    let spec = TypeSpec::new("Order")
+        .with(UseSpec::on_type("Proxy", None))
+        .with(UseSpec::on_type("Witness", None));
+    let memory = Memory::default().with("Order", "o1", row(json!({"title": "Desk"}), json!({}), 3));
+    (spec, memory)
+}
+
+/// A call a behavior makes as the caller's own request (D104,
+/// `Cx::call_as_caller`) is one each guard is told is so, and is presented
+/// the use's entry of the command's preconditions, as the command's own
+/// operation is; a plain call of the same operation is told neither and
+/// presented nothing.
+#[test]
+fn a_call_as_the_caller_is_told_so_and_presented_the_commands_preconditions() {
+    let core = core();
+    let (spec, mut memory) = witnessed();
+    let entry = json!({"Witness": {"token": 7}});
+    let as_caller = presenting(invoke("o1", "Proxy", "asCaller", json!({})), entry.clone());
+    assert_eq!(
+        changed(core.drive(&spec, &as_caller, &mut memory)).result,
+        json!({"asCaller": true, "fired": false, "caller": "Proxy", "precondition": {"token": 7}})
+    );
+    let plain = presenting(invoke("o1", "Proxy", "plain", json!({})), entry);
+    assert_eq!(
+        changed(core.drive(&spec, &plain, &mut memory)).result,
+        json!({"asCaller": false, "fired": false, "caller": "Proxy", "precondition": null})
+    );
+    // A caller's own probe is a caller's request, presented its entry.
+    let probe = presenting(
+        invoke("o1", "Witness", "probe", json!({})),
+        json!({"Witness": {"token": 7}}),
+    );
+    let refusal = refused(core.drive(&spec, &probe, &mut memory));
+    assert_eq!(
+        refusal
+            .details
+            .as_deref()
+            .and_then(|d| d.get("vetoDetails")),
+        Some(
+            &json!({"asCaller": false, "fired": false, "caller": null, "precondition": {"token": 7}})
+        )
+    );
+}
+
+/// A deadline's handler's call as the caller's own request is the
+/// worker's (`fired`) as every call a deadline's handler makes, and is told
+/// it is the caller's too; a deadline presents no preconditions.
+#[test]
+fn a_deadlines_call_as_the_caller_is_fired_too() {
+    let core = core();
+    let (spec, mut memory) = witnessed();
+    let due = command(
+        alice(),
+        Action::Deadline {
+            key: "o1".into(),
+            use_id: "Proxy".into(),
+            name: "later".into(),
+            at: NOW,
+            payload: Value::Null,
+        },
+    );
+    let changes = changed(core.drive(&spec, &due, &mut memory));
+    assert_eq!(
+        changes.owned("Proxy", "seen"),
+        Some(&json!({"asCaller": true, "fired": true, "caller": "Proxy", "precondition": null}))
+    );
 }

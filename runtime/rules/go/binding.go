@@ -243,11 +243,14 @@ type DeclaredTable struct {
 }
 
 // DeclaredField is a field a behavior declares: its declared name, and its
-// IR type when the field is a column of the type's table (D103).
+// IR type when the field is a column of the type's table (D103). Optional
+// is a value field the behavior does not set when a row is created, whose
+// column takes NULL (D104); every other owned column takes NULL already.
 type DeclaredField struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Type        string `json:"type,omitempty"`
+	Optional    bool   `json:"optional,omitempty"`
 	Volatile    bool   `json:"volatile,omitempty"`
 	PerReader   bool   `json:"perReader,omitempty"`
 }

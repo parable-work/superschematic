@@ -1,0 +1,1035 @@
+{
+  "name": "fixture-seats-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-seats-db",
+      "types": [
+        "Problem",
+        "Sandbox"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-seats-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "ProblemSeatsLeaveSeatInput": {
+      "name": "ProblemSeatsLeaveSeatInput",
+      "owner": "fixture-seats-api",
+      "comment": "The parameters of Problem's seats leaveSeat.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "seat",
+          "comment": "The seat to leave.",
+          "typeRef": {
+            "name": "ProblemSeatsSeat"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject to unseat; the caller's own when absent. Unseating another needs the seat's assign permission.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSeatsLeaveSeatResult": {
+      "name": "ProblemSeatsLeaveSeatResult",
+      "owner": "fixture-seats-api",
+      "comment": "What Problem's seats leaveSeat returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "seat",
+          "comment": "The seat.",
+          "typeRef": {
+            "name": "ProblemSeatsSeat"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject unseated, a hyphenated UUID in base62.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the subject was not seated, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSeatsListSeatsInput": {
+      "name": "ProblemSeatsListSeatsInput",
+      "owner": "fixture-seats-api",
+      "comment": "The parameters of Problem's seats listSeats.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "seat",
+          "comment": "Only this seat's subjects.",
+          "typeRef": {
+            "name": "ProblemSeatsSeat"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSeatsListSeatsResult": {
+      "name": "ProblemSeatsListSeatsResult",
+      "owner": "fixture-seats-api",
+      "comment": "What Problem's seats listSeats returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "typeRef": {
+            "name": "ProblemSeatsListSeatsResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSeatsListSeatsResultItems": {
+      "name": "ProblemSeatsListSeatsResultItems",
+      "owner": "fixture-seats-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "fromField",
+          "comment": "Whether the seat's fromField holds the subject.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "seat",
+          "comment": "The seat.",
+          "typeRef": {
+            "name": "ProblemSeatsSeat"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "seatedAt",
+          "comment": "When it was seated, in epoch milliseconds; null for the subject the seat's fromField holds with no row of its own.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "seatedBy",
+          "comment": "The subject of the caller who seated it; null as seatedAt is.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject seated.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSeatsTakeSeatInput": {
+      "name": "ProblemSeatsTakeSeatInput",
+      "owner": "fixture-seats-api",
+      "comment": "The parameters of Problem's seats takeSeat.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "seat",
+          "comment": "The seat to take.",
+          "typeRef": {
+            "name": "ProblemSeatsSeat"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject to seat; the caller's own when absent. Seating another needs the seat's assign permission.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSeatsTakeSeatResult": {
+      "name": "ProblemSeatsTakeSeatResult",
+      "owner": "fixture-seats-api",
+      "comment": "What Problem's seats takeSeat returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "displaced",
+          "comment": "The subjects the take unseated to make room, longest seated first; [] for none.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "seat",
+          "comment": "The seat.",
+          "typeRef": {
+            "name": "ProblemSeatsSeat"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "subject",
+          "comment": "The subject seated, a hyphenated UUID in base62.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the subject was seated already, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemStatusTransitionInput": {
+      "name": "ProblemStatusTransitionInput",
+      "owner": "fixture-seats-api",
+      "comment": "The parameters of Problem's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemStatusTransitionResult": {
+      "name": "ProblemStatusTransitionResult",
+      "owner": "fixture-seats-api",
+      "comment": "What Problem's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxObservedObserveInput": {
+      "name": "SandboxObservedObserveInput",
+      "owner": "fixture-seats-api",
+      "comment": "The parameters of Sandbox's observed observe.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "at",
+          "comment": "When the provider was observed in it, in epoch milliseconds, no later than the call.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "The state the provider reports, a state of the Workflow status names.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxObservedObserveResult": {
+      "name": "SandboxObservedObserveResult",
+      "owner": "fixture-seats-api",
+      "comment": "What Sandbox's observed observe returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "drift",
+          "comment": "Why the status is not the observed state; absent while it is.",
+          "typeRef": {
+            "name": "SandboxObservedObserveResultDrift"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "moves",
+          "comment": "The transitions made, in order; [] for none.",
+          "typeRef": {
+            "name": "SandboxObservedObserveResultMoves",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "observed",
+          "comment": "The observed state after the call.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "observedAt",
+          "comment": "When it was observed, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "status",
+          "comment": "The Workflow's status after the call; null for a row with no status, which only a raw write leaves.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the observation was no newer than the last one, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxObservedObserveResultDrift": {
+      "name": "SandboxObservedObserveResultDrift",
+      "owner": "fixture-seats-api",
+      "comment": "Why the status is not the observed state; absent while it is.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "code",
+          "comment": "The veto code of the step refused, forbidden for a permission the observer lacks, no_path when no transitions lead there, or no_status.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "observed",
+          "comment": "The state it was moving to.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "status",
+          "comment": "The status where the path stopped; absent for a row with no status.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxObservedObserveResultMoves": {
+      "name": "SandboxObservedObserveResultMoves",
+      "owner": "fixture-seats-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the row was in.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it moved to.",
+          "typeRef": {
+            "name": "SandboxObservedState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxStatusTransitionInput": {
+      "name": "SandboxStatusTransitionInput",
+      "owner": "fixture-seats-api",
+      "comment": "The parameters of Sandbox's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "SandboxStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "SandboxStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxStatusTransitionResult": {
+      "name": "SandboxStatusTransitionResult",
+      "owner": "fixture-seats-api",
+      "comment": "What Sandbox's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "SandboxStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "SandboxStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "ProblemSeatsSeat": {
+      "name": "ProblemSeatsSeat",
+      "owner": "fixture-seats-api",
+      "comment": "A seat of Problem's Seats.",
+      "values": [
+        {
+          "name": "Accountable",
+          "serializedAs": "accountable"
+        },
+        {
+          "name": "Handles",
+          "serializedAs": "handles"
+        },
+        {
+          "name": "Responsible",
+          "serializedAs": "responsible"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemStatusState": {
+      "name": "ProblemStatusState",
+      "owner": "fixture-seats-api",
+      "comment": "A state of Problem's status Workflow.",
+      "values": [
+        {
+          "name": "Open",
+          "serializedAs": "open"
+        },
+        {
+          "name": "Working",
+          "serializedAs": "working"
+        },
+        {
+          "name": "Review",
+          "serializedAs": "review"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxObservedState": {
+      "name": "SandboxObservedState",
+      "owner": "fixture-seats-api",
+      "comment": "A state Sandbox's observed Reconcile reports, one of the states of Sandbox.status.",
+      "values": [
+        {
+          "name": "Pending",
+          "serializedAs": "pending"
+        },
+        {
+          "name": "Starting",
+          "serializedAs": "starting"
+        },
+        {
+          "name": "Running",
+          "serializedAs": "running"
+        },
+        {
+          "name": "Stopping",
+          "serializedAs": "stopping"
+        },
+        {
+          "name": "Stopped",
+          "serializedAs": "stopped"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        },
+        {
+          "name": "Unreachable",
+          "serializedAs": "unreachable"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "SandboxStatusState": {
+      "name": "SandboxStatusState",
+      "owner": "fixture-seats-api",
+      "comment": "A state of Sandbox's status Workflow.",
+      "values": [
+        {
+          "name": "Pending",
+          "serializedAs": "pending"
+        },
+        {
+          "name": "Starting",
+          "serializedAs": "starting"
+        },
+        {
+          "name": "Running",
+          "serializedAs": "running"
+        },
+        {
+          "name": "Stopping",
+          "serializedAs": "stopping"
+        },
+        {
+          "name": "Stopped",
+          "serializedAs": "stopped"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        },
+        {
+          "name": "Unreachable",
+          "serializedAs": "unreachable"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "ProblemActions",
+      "comment": "A problem's seats and status operations (D104), for any signed-in\ncaller: the core decides who sits in each seat and who moves the problem.",
+      "operations": [
+        {
+          "name": "seatsTakeSeat",
+          "comment": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+          "docs": {
+            "title": "Problem seats: take seat",
+            "description": "Seats a subject in a seat: the caller, with the seat's take permission when it names one, or another, with its assign permission. A full seat refuses it, or unseats the subject seated longest when its onFull is displace. A subject seated already is answered unchanged.",
+            "capability": "problem.seats.take-seat",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_seats_take_seat",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSeatsTakeSeatResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSeatsTakeSeatInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-seats-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Seats",
+            "behavior": "Seats",
+            "operation": "takeSeat",
+            "writes": true,
+            "permissions": [
+              "problems.assign",
+              "problems.own",
+              "problems.release",
+              "problems.work"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/seats/take-seat",
+          "origin": "behavior"
+        },
+        {
+          "name": "seatsLeaveSeat",
+          "comment": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+          "docs": {
+            "title": "Problem seats: leave seat",
+            "description": "Unseats a subject from a seat: the caller, which needs no permission, or another, with the seat's assign permission. The subject the seat's fromField holds cannot leave while it holds them. A subject not seated is answered unchanged.",
+            "capability": "problem.seats.leave-seat",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_seats_leave_seat",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSeatsLeaveSeatResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSeatsLeaveSeatInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-seats-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Seats",
+            "behavior": "Seats",
+            "operation": "leaveSeat",
+            "writes": true,
+            "permissions": [
+              "problems.assign",
+              "problems.own",
+              "problems.release",
+              "problems.work"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/seats/leave-seat",
+          "origin": "behavior"
+        },
+        {
+          "name": "seatsListSeats",
+          "comment": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+          "docs": {
+            "title": "Problem seats: list seats",
+            "description": "Lists the subjects seated on the row, by seat in code point order, each seat's fromField subject first and then the others in the order they were seated; with seat, only its subjects.",
+            "capability": "problem.seats.list-seats",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "problem_seats_list_seats",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSeatsListSeatsResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSeatsListSeatsInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-seats-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Seats",
+            "behavior": "Seats",
+            "operation": "listSeats",
+            "permissions": [
+              "problems.assign",
+              "problems.own",
+              "problems.release",
+              "problems.work"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/seats/list-seats",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Problem status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "problem.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-seats-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true,
+            "permissions": [
+              "problems.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Problem"
+      },
+      "auth": true
+    },
+    {
+      "name": "SandboxActions",
+      "comment": "A sandbox's status and observation operations (D104), for any signed-in\ncaller: the core decides how an observation moves the sandbox.",
+      "operations": [
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Sandbox status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "sandbox.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "sandbox_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "SandboxStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Sandbox row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "SandboxStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-seats-db",
+            "type": "Sandbox",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true,
+            "permissions": [
+              "sandboxes.stop"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "sandbox/{id}/status/transition",
+          "origin": "behavior"
+        },
+        {
+          "name": "observedObserve",
+          "comment": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+          "docs": {
+            "title": "Sandbox observed: observe",
+            "description": "Records the state the provider reports, when at is newer than the last observation's, and moves the Workflow there along the fewest transitions its config allows, each as the caller, so every guard and permission holds each step; a step refused stops there and records drift. An observation no newer is answered unchanged. Needs observePermission.",
+            "capability": "sandbox.observed.observe",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "sandbox_observed_observe",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "SandboxObservedObserveResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Sandbox row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "SandboxObservedObserveInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-seats-db",
+            "type": "Sandbox",
+            "key": "id",
+            "use": "observed",
+            "behavior": "Reconcile",
+            "operation": "observe",
+            "writes": true,
+            "permissions": [
+              "sandboxes.observe"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "sandbox/{id}/observed/observe",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Sandbox"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "SandboxDeadlines",
+      "comment": "Runs Sandbox's stale deadlines as they fall due (D104): a sandbox no\nobservation has reached for five minutes moves to unreachable. The\nworker fixture-seats-api-sandbox-deadlines.",
+      "queue": "SandboxDeadline",
+      "queues": [
+        "SandboxDeadline"
+      ],
+      "behaviorWorker": {
+        "type": "Sandbox"
+      },
+      "origin": "behavior"
+    }
+  ]
+}

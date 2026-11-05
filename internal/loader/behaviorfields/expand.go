@@ -183,7 +183,11 @@ func expandType(td *ir.TypeDef, reg *registry.Registry) ([]string, error) {
 				Name:        name,
 				Description: declared.Description,
 				TypeRef:     ir.TypeRef{Name: declared.Type},
-				Required:    value,
+				// The value field is required, as the behavior sets it when
+				// a row is created, unless its declaration says it is
+				// optional (Reconcile's observed, absent before the first
+				// observation, D104).
+				Required: value && !declared.Optional,
 				Behavior: &ir.FieldBehavior{
 					Use:      use.UseID(),
 					Behavior: use.Name,

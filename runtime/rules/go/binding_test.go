@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 
@@ -88,6 +89,25 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 	}
 	if transition == nil || !transition.Writes || len(transition.ParamsSchema) == 0 {
 		t.Fatalf("Workflow's transition = %+v, want an operation that writes, with its parameters' schema", transition)
+	}
+	// The core registers its behaviors in one order (D104), the two only it
+	// implements last; the second's value field is optional, its column
+	// NULL before the behavior sets it.
+	var names []string
+	for _, declaration := range declarations {
+		names = append(names, declaration.Name)
+	}
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile"}; !slices.Equal(names, want) {
+		t.Fatalf("the core declares %q, want %q", names, want)
+	}
+	reconcile := declarations[len(declarations)-1]
+	if reconcile.Value != "observed" || len(reconcile.Fields) == 0 || reconcile.Fields[0].Name != "observed" || !reconcile.Fields[0].Optional {
+		t.Fatalf("Reconcile's declaration = %+v, want its value field observed, optional", reconcile)
+	}
+	for _, field := range declarations[0].Fields {
+		if field.Optional {
+			t.Fatalf("Workflow's field %s is optional, and the behavior sets each when a row is created", field.Name)
+		}
 	}
 }
 

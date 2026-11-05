@@ -740,6 +740,7 @@ It changes only when the declaration does.
 ```
 superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
 superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
+superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
 acme-schematic behaviors --extension acme --out crates/behaviors/declarations
 acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
 ```
@@ -756,7 +757,7 @@ It is a command of the binary, not a tool in the core module, because an
 extension's declarations are registered only in its own binary: acme's
 copy comes from `acme-schematic`, into its `acme-behaviors` crate, and
 its smoke runs `--check`. The core binary writes the behaviors the core
-declares into the three Rust crates that implement them: `Workflow`,
+declares into the four Rust crates that implement them: `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
 `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
 `StateRules`, `Numbering` and `Approvals` with `--package
@@ -764,11 +765,13 @@ declares into the three Rust crates that implement them: `Workflow`,
 (`runtime/engine/rust/behaviors/declarations`), and `Lease`,
 `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
 with `--package @superschematic/engine-workqueue` into the work queue's
-(`runtime/engine-workqueue/rust/declarations`), and `Stock`, `Calendar`,
+(`runtime/engine-workqueue/rust/declarations`), `Stock`, `Calendar`,
 `Holds` and `Payments` with `--package @superschematic/engine-commerce`
 into the commerce crate's (`runtime/engine-commerce/rust/declarations`,
-D70) (`make behaviors`; `make
-behaviors-check` in CI). Without `--extension`, an extension's binary
+D70), and `Seats` and `Reconcile`, which no engine implements, with
+`--package @superschematic/rules` into the behaviors' core's
+(`runtime/engine/rust/rules-behaviors/declarations`, D104) (`make
+behaviors`; `make behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
 
 ## `engine-client --out <file.ts> <schema file>...`

@@ -1046,6 +1046,8 @@ Reactions<Project, { ... }>`, Constants, StateRules and Approvals
 ([Fields a table keeps, freezes and signs off](#fields-a-table-keeps-freezes-and-signs-off)),
 or Lease, Retries, Presence and Budget
 ([Rows a worker leases, retries, beats and meters](#rows-a-worker-leases-retries-beats-and-meters)),
+or Seats, or types a field as a Reconcile
+([A row's seats, and a field that follows observations](#a-rows-seats-and-a-field-that-follows-observations)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue and its change queue are
 tables beside it, and its operations change them through the behaviors'
@@ -1092,7 +1094,9 @@ export abstract class Question {
 }
 ```
 
-- `by` lists the row's fields that hold a subject: an own field of type
+- `by` lists the row's fields that hold a subject, and seats of the
+  table's Seats as `seat:<name>`
+  ([below](#a-rows-seats-and-a-field-that-follows-observations)): an own field of type
   `string`, `Identity.UUID` or `Identity.UserID`, a to-one relation's key
   field of such a type (`ownerId` for a relation `owner`, not `owner`
   itself), and
@@ -1126,7 +1130,9 @@ export abstract class Question {
 The build refuses a `by` that names a field the table lacks, one that
 holds no subject (a number, a date-time, a list), one encrypted at rest,
 whose value the core never reads, a relation by its name, an audit field other than `createdBy`, or a
-`seat:<name>` entry, a seat of the Seats behavior, which is not built yet.
+`seat:<name>` entry that names no seat of the table's Seats
+([A row's seats](#a-rows-seats-and-a-field-that-follows-observations)),
+which a `by` names beside its fields.
 A type that composes Workflow with `@behavior("Workflow", ...)` is an
 engine type: its config has none of `by`, `overridePermission` and
 `repeat`, its `transition` takes no `from`, and the build and the engine
@@ -1253,7 +1259,9 @@ does.
 field to its caller does not let that caller change what the state
 freezes in the same write. What a state requires holds for every caller,
 `by` or permission. The build refuses `by` in a state that freezes
-nothing, an entry that holds no subject and a `seat:` entry, and a
+nothing, an entry that holds no subject and a `seat:` entry that names no
+seat of the table's Seats
+([below](#a-rows-seats-and-a-field-that-follows-observations)), and a
 required or frozen field the core reads no value of (encrypted at rest, a
 list or a map of date-times); it warns of `frozen: "all"` on a table with
 such a field, which the state leaves unfrozen. `status` names the Workflow
@@ -1596,3 +1604,215 @@ an engine type: its configs have no `status`, Retries' new members,
 `ttlByState` or Budget's new resets, `window` and `observePermission`, it
 has no `observe`, and the build and the engine refuse each, naming the
 table form.
+
+### A row's seats, and a field that follows observations
+
+A table implements `Seats` as it implements Timers, with the table itself
+as its first type argument, and types a field as a `Reconcile` beside its
+Workflow field, as it types one as a Workflow (D104). The behaviors' core
+alone implements both: no engine does, so neither composes on an engine
+type, and the build refuses `@behavior("Seats", ...)` and
+`@behavior("Reconcile", ...)` naming the table form.
+
+```ts
+// seats-db
+export abstract class Problem
+  implements
+    Seats<Problem, {
+      seats: {
+        accountable: { max: 1; onFull: "displace"; take: "problems.own"; assign: "problems.assign" };
+        responsible: { fromField: "agent"; take: "problems.work"; assign: "problems.assign" };
+        handles: { max: 5; assign: "problems.release" };
+      };
+    }>,
+    StateRules<Problem, {
+      states: { review: { frozen: ["title"]; by: ["seat:accountable"] } };
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  agent?: Identity.UUID;
+  status: Workflow<{
+    states: ["open", "working", "review", "done"];
+    transitions: [
+      { from: "open"; to: "working"; by: ["seat:responsible"] },
+      { from: "working"; to: "review"; by: ["seat:responsible"] },
+      { from: "review"; to: "done"; by: ["seat:accountable"] },
+      { from: "review"; to: "working"; by: ["seat:accountable"] }
+    ];
+    overridePermission: "problems.override";
+  }>;
+}
+
+export abstract class Sandbox {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: string;
+  status: Workflow<{
+    states: ["pending", "starting", "running", "stopping", "stopped", "failed", "unreachable"];
+    transitions: [ /* pending to starting, starting to running, running to stopping (sandboxes.stop), ..., each state to unreachable and back */ ];
+  }>;
+  observed: Reconcile<{ status: "status"; unreachable: "unreachable"; staleAfterMs: 300000; observePermission: "sandboxes.observe" }>;
+}
+```
+
+**Seats.** Named seats on the row, each holding the subjects seated in
+it: above, one accountable person, whom the next to take the seat
+displaces; any number of responsible agents, the row's own `agent` always
+among them; and at most five handles, which any caller may claim and only
+the claimer, or a caller holding `problems.release`, releases.
+
+| Member | What it does |
+| --- | --- |
+| `max` | how many subjects the seat holds at most, a `fromField`'s among them; no cap when absent |
+| `onFull` | `"refuse"`, the default: a take of a full seat is 409 `vetoed`, `seat_full`, `{ seat, max, seated }`; `"displace"`: the take unseats the subject seated longest. Needs `max` |
+| `take` | the permission a caller needs to seat itself; any caller may when absent |
+| `assign` | the permission a caller needs to seat or unseat another subject; no caller may when absent. A caller leaves a seat it holds with no permission |
+| `fromField` | an own field that holds a subject (`string`, `Identity.UUID` or `Identity.UserID`): the subject it holds sits in the seat, counts toward `max`, is never displaced, and cannot leave while the field holds it (409 `held_by_field`, `{ seat, subject, field }`) |
+
+The build adds the sub-table `problem_seats_occupants`
+(`ProblemSeatsOccupants`), one row per subject seated, keyed by its
+`number` on the row, the order they were seated in, with `seat`,
+`subject`, `seated_at` and `seated_by`, deleted with the row; it adds no
+column and no queue. Its operations are `seats.takeSeat({ seat, subject?
+})`, which answers `{ seat, subject, displaced }`, the subjects it
+unseated to make room, longest seated first; `leaveSeat({ seat, subject?
+})`; and the read-only `listSeats({ seat? })`, which answers `{ items: [{
+seat, subject, seatedAt, seatedBy, fromField }] }`, the seats in code point
+order, each one's `fromField` subject first and then the rest in the
+order they were seated.
+
+- **Who.** A caller seating itself (no `subject`, or its own) without the
+  seat's `take` is 403 `forbidden` (`<caller> may not take a seat in
+  Problem <id>'s accountable: it needs permission problems.own`), and one
+  seating or unseating another without `assign` too; the permission is
+  asked before the seat's rules. A caller with no subject that names
+  none is 400 `invalid_argument`. Over HTTP an unknown seat is the
+  route's 400 `bad_request`, since the generated input types `seat` by
+  the table's seats (`ProblemSeatsSeat`); the core's `invalid_argument`
+  (`operation takeSeat of behavior Seats: /seat: "owners" is not a seat of
+  Problem's Seats (accountable, handles, responsible)`) answers a
+  repository's or the adapter's call.
+- **Repeats.** A take of a seat the subject holds, and a leave of one it
+  does not, answer `unchanged: true` and write nothing: the row's
+  `_version` stays. They are answered before any rule or permission, so
+  any caller the route admits learns the row's seats from them, as from
+  `listSeats`.
+- **Subjects.** A subject is kept as its text, a hyphenated UUID in its
+  base62 form, the form a caller's subject has on the wire, so the two
+  forms of one UUID are one subject. A UUID `fromField` names its subject
+  in either form.
+- **Displacement.** Under `"displace"` the take unseats the subject seated
+  longest (the least `number`, which records the order they were seated
+  in whatever clock each server read into `seated_at`) that the
+  `fromField` does not hold; when every subject seated is the field's, the
+  take is `seat_full`.
+- **The field's subject.** A `fromField` is read from the field at each
+  decision and keeps no row: `listSeats` lists it with `fromField: true`
+  and `seatedAt` null, unless it also took the seat, and a new value of the
+  field seats the new subject at once. An update that gives the field a
+  subject not seated there takes the seat as a take would, past no
+  permission: into a seat it would put over its `max` it is 409 `vetoed`,
+  `seat_full` (`Problem <id>'s <seat> seats at most <max>, and it is
+  full (...): <field> cannot seat <subject> in it`) under `"refuse"`, and under
+  `"displace"` the subjects seated longest leave, down to `max`. A raw SQL
+  write of the field is held to none of this, and may leave a seat over
+  its `max` until its next take. It is only as strong as its writes:
+  a caller who may write `agent` may set it to itself and sit in
+  `responsible`. Keep it out of every input such a caller can write, or
+  list it in Constants' `fields`. When a `by` names the seat, the build
+  warns of an API operation that updates the row and takes the field, as
+  it warns of a `by` field.
+- **Config changes.** Any change of the config is allowed. A seat the
+  config drops keeps its occupants, which no rule reads, until the row's
+  next `takeSeat` or `leaveSeat` deletes them; a lowered `max` unseats no
+  one, and the next take of a seat over it refuses or displaces down to
+  the new `max`.
+
+**A seat in `by`.** A Workflow transition's `by` and a StateRules state's
+`by` may name a seat of the table's Seats as `seat:<name>`, beside fields
+([above](#who-may-move-a-workflow-fields-row)): a caller seated there,
+through a row of the sub-table or the seat's `fromField`, makes the move or
+changes the field the state freezes. Above, the agent moves its problem
+from open to working through its field, and in review only the
+accountable person edits the title. The refusals name the seat as `by`
+lists it, fields first:
+
+```
+<subject> may not move Problem <id>'s status from open to working: the transition is made by a subject seated in responsible
+Problem <id> is review, which freezes title: it does not change while it is review; only a subject seated in accountable may change it
+```
+
+with `details.vetoDetails.by` `["seat:responsible"]` (`not_principal`)
+and `["seat:accountable"]` (`frozen_fields`). `overridePermission` still
+moves a caller past it. The build refuses a `seat:` entry that names no
+seat of the table's Seats, or on a table that implements none, naming
+both, and warns of a seat a `by` names that names no `take`, since any
+caller may then take it and so make the move.
+
+**Reconcile.** The state a row's provider last reported, beside the
+Workflow field `status` names (`"Workflow"` for one anchored on the
+table): a sandbox's state at its provider, a deployment's at its
+platform. The field's own column, `observed`, holds the observed state,
+NULL before the first observation; the build adds `observed_observed_at`,
+`observed_drift` and `observed_reconciled_at`, the repositories read them
+as `observedObservedAt` and the rest, and the deadline `stale` on
+`sandbox_deadline_queue`. A repository's row types `observed` as
+`string | null`, as it types the status `string`; `observe`'s input and
+result, in the API and the SDKs, type it by the Workflow's states
+(`SandboxObservedState`). No create or update sets them: its operation
+`observed.observe({ state, at })` and its deadline do.
+
+- **An observation.** `at` is when the provider was seen in `state`, in
+  epoch milliseconds, no later than the call (a later one is 400
+  `invalid_argument`, so the poller stamps it in the server's clock). One
+  no newer than `observed_observed_at` answers `unchanged: true` and
+  writes nothing. A newer one records `observed` and `observedAt`, then
+  moves the status to `state` along the fewest transitions the Workflow
+  allows, breadth first in the config's order, each step a `transition`
+  made as the observer: the transition's `by` and `permission`, and every
+  other behavior's rule (StateRules, Approvals, Retries, Lease), hold each
+  step as they hold the observer's own move. It answers `{ observed,
+  observedAt, status, moves, drift? }`, `moves` the steps made.
+- **Drift.** A step refused stops the path and records
+  `observed_drift`, `{ status, observed, code }`: the veto's code
+  (`missing_fields`, `held_by_another`, ...), `forbidden` for a permission
+  the observer lacks (a stop that needs `sandboxes.stop`), or `no_path`
+  when no transitions lead from the status to the state (a failed sandbox
+  reported running). An observation whose path reaches the state clears
+  it and sets `observed_reconciled_at`. A move another caller makes to the
+  observed state leaves the drift until the next observation.
+- **Silence.** With `staleAfterMs`, each observation arms `stale` at its
+  `at` plus `staleAfterMs`, unless it leaves the status terminal or
+  unreachable. When it falls due on the API's
+  [behavior worker](/superschematic/guides/api-routes/#the-worker), the
+  worker sets `observed` to the `unreachable` state and moves the row
+  there along the fewest transitions, as itself; a row in a terminal state
+  is left as it is, and a step a rule vetoes records drift and waits for
+  the next observation, which moves the row back. `observedAt` stays, so
+  any observation since is newer.
+- **The config.** The build and the core refuse a `status` that names no
+  Workflow, `unreachable` without `staleAfterMs` or the reverse, an
+  `unreachable` that is no state, one that a state other than a terminal
+  one cannot reach along the transitions, and one from which some state
+  cannot be reached, since an observation moves a row from it to any
+  state.
+- **observePermission.** A caller without it is 403 `forbidden` before
+  anything else of the row is read. On a table that also implements
+  Lease, `observe` is a write that another principal's active lease
+  holds: list `"Reconcile.observe"` in Lease's `exempt` to let
+  observations land, and each step is still held as the observer's move.
+
+Both hold every write through the core: the table's behavior operations
+and its deadlines, the repositories' creates, updates and deletes of one
+row by its key. Each keeps a sub-table or arms a deadline, so the table
+has no upserts. A write around the core runs none of their rules, and no
+trigger or check refuses one, so an operator can repair a row: a raw
+write of a `problem_seats_occupants` row seats or unseats with no
+permission asked and reorders displacement by its `seated_at`, an update
+of a `fromField` reseats at once, and a raw write of `observed_*` or of
+the status re-arms nothing until the stale deadline falls due, which arms
+itself again when `observed_observed_at` has moved past it. Prefer the
+operations: `seats.leaveSeat` by a caller holding `assign`, an observation
+newer than the last.

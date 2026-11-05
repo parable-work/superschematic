@@ -178,26 +178,30 @@ generic-schemas:
 generic-schemas-check:
 	go run ./internal/tools/providerschemas -check
 
-# The engine's behaviors crate, the work queue's crate (D58) and the
-# commerce crate (D70) implement the core's behaviors over a copy of each
-# declaration (internal/registry/behaviors), which the core with no
-# extension linked
+# The engine's behaviors crate, the work queue's crate (D58), the
+# commerce crate (D70) and the behaviors' core (rules-behaviors, for the
+# behaviors no engine implements, D104) implement the core's behaviors over
+# a copy of each declaration (internal/registry/behaviors), which the core
+# with no extension linked
 # writes into the crate that implements it, by the npm package that ships
 # it (--package): each behavior embeds its copy with include_str!. CI fails
 # when a committed copy differs.
 ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
 WORKQUEUE_RUST_DECLARATIONS := runtime/engine-workqueue/rust/declarations
 COMMERCE_RUST_DECLARATIONS := runtime/engine-commerce/rust/declarations
+RULES_RUST_DECLARATIONS := runtime/engine/rust/rules-behaviors/declarations
 
 behaviors:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/rules --out $(RULES_RUST_DECLARATIONS)
 
 behaviors-check:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/rules --out $(RULES_RUST_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -493,9 +497,10 @@ docs:
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
-# fixture-timers-json, fixture-workqueue-json, fixture-commerce-json and
-# fixture-derived-json, whose types compose the core's behaviors (D10):
-# --emit-ir carries all twenty-eight and json-schema admits them; fixture-commerce-currency-json
+# fixture-timers-json, fixture-workqueue-json, fixture-commerce-json,
+# fixture-derived-json and the TypeScript fixture-seats-db, whose types and
+# tables compose the core's behaviors (D10, D104): --emit-ir carries all
+# thirty, Seats and Reconcile on its tables, and json-schema admits them; fixture-commerce-currency-json
 # holds a commerce currency in a Finance.Currency own field (D70). The
 # engine runs the first eleven documents with its own behaviors in
 # runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
@@ -544,13 +549,15 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-derived-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/tsreader/testdata/services/fixture-seats-db --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-currency-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/commerce-currency-ir.json
 	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
 		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
 	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Derived Provenance \
-		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments; do \
+		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments Seats Reconcile; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

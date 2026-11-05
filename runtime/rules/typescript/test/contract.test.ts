@@ -252,7 +252,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -316,6 +316,33 @@ test('declarations are the registered files, each field typed and the value fiel
   expect([byName('Presence').armsDeadlines, byName('Presence').tables]).toEqual([true, undefined]);
   expect(byName('Budget').tables?.map(t => `${t.name} by ${t.key}`)).toEqual(['meters by meter', 'holds by hold', 'buckets by bucket']);
   expect(declarations.filter(d => d.preconditionSchema !== undefined).map(d => d.name)).toEqual(['Lease']);
+  // Seats, which only the core implements, keeps its occupants in a
+  // sub-table of the row, keyed by their number, and owns no field; its
+  // listSeats reads (D104).
+  const seats = byName('Seats');
+  expect([seats.fields, seats.value, seats.armsDeadlines, seats.hearsChanges]).toEqual([undefined, undefined, undefined, undefined]);
+  expect(seats.tables?.map(t => ({ name: t.name, key: t.key, fields: t.fields.map(f => `${f.name}: ${f.type}`) }))).toEqual([
+    { name: 'occupants', key: 'number', fields: ['number: string', 'seat: string', 'subject: string', 'seatedAt: Temporal.DateTime', 'seatedBy: string'] },
+  ]);
+  expect(seats.operations?.map(o => [o.name, o.writes === true])).toEqual([
+    ['takeSeat', true],
+    ['leaveSeat', true],
+    ['listSeats', false],
+  ]);
+  expect(seats.vetoes?.map(v => v.code)).toEqual(['seat_full', 'held_by_field']);
+  // Reconcile is the second behavior a field anchors: its value field,
+  // observed, is optional, absent before the first observation, and its
+  // stale deadline is armed (D104).
+  const reconcile = byName('Reconcile');
+  expect([reconcile.value, reconcile.armsDeadlines, reconcile.tables, reconcile.requires]).toEqual(['observed', true, undefined, ['Workflow']]);
+  expect(reconcile.fields?.map(f => ({ name: f.name, type: f.type, optional: f.optional === true }))).toEqual([
+    { name: 'observed', type: 'string', optional: true },
+    { name: 'observedAt', type: 'Temporal.DateTime', optional: false },
+    { name: 'drift', type: 'Generic.JSON', optional: false },
+    { name: 'reconciledAt', type: 'Temporal.DateTime', optional: false },
+  ]);
+  expect(reconcile.operations?.map(o => [o.name, o.writes === true])).toEqual([['observe', true]]);
+  expect(declarations.filter(d => d.fields?.some(f => f.optional === true)).map(d => d.name)).toEqual(['Reconcile']);
 });
 
 test('check is each spec define check: null for one the core takes, its refusal for one it refuses', () => {

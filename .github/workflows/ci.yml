@@ -382,12 +382,13 @@ jobs:
           # queues in process (the Workflow end-to-end tests, D104's who
           # may move a row among them, the Timers and Reactions ones, raw
           # SQL writes heard among them, the Constants, StateRules and
-          # Approvals ones, D104's step 2, and the Lease, Retries, Presence
-          # and Budget ones, its second batch, a lease's fencing token
-          # presented as a precondition among them): the Go one over the rules
-          # archive staged above, the TypeScript one over the rules package
-          # built above, and the Rust one over the engine workspace's
-          # rules-adapter crate.
+          # Approvals ones, D104's step 2, the Lease, Retries, Presence and
+          # Budget ones, its second batch, a lease's fencing token presented
+          # as a precondition among them, and the Seats ones, its step 3, a
+          # row's seats named in by and a field that follows observations
+          # among them): the Go one over the rules archive staged above, the
+          # TypeScript one over the rules package built above, and the Rust
+          # one over the engine workspace's rules-adapter crate.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # The tests of vector columns run on the pgvector container
           # (D84); the database is there, so a skip is a broken gate.
@@ -456,7 +457,7 @@ jobs:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: go run ./internal/tools/providerschemas -check
 
-      - name: Core behavior declarations drift (the engine's and the work queue's Rust crates' copies match the core registry)
+      - name: Core behavior declarations drift (the engine's, the work queue's, commerce's and the behaviors' core's Rust crates' copies match the core registry)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -851,7 +852,7 @@ jobs:
           SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
           # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
           # Postgres above too, each in a schema of its own, deadlines and
-          # change queues among them, and the core's fifteen transcripts
+          # change queues among them, and the core's seventeen transcripts
           # replayed there as on bun:sqlite.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
@@ -1393,9 +1394,10 @@ jobs:
         # core-reactions-changes, 39 for core-constants, 76 for
         # core-staterules, 122 for core-approvals, 436 for core-lease, 141
         # for core-presence, 495 for core-budget, 250 for core-retries, and
-        # 92, 115, 158 and 77 for the hand-written core-workflow-principals,
-        # core-freezes-and-sign-offs, core-retries-waits and
-        # core-periods-and-presence (D104).
+        # 92, 115, 158, 77, 88 and 58 for the hand-written
+        # core-workflow-principals, core-freezes-and-sign-offs,
+        # core-retries-waits, core-periods-and-presence, core-seats and
+        # core-reconcile (D104).
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"

@@ -73,6 +73,10 @@ type Narrowing struct {
 	// every call of, in declaration order: an engine type's Budget refuses
 	// observe (D104). A client of the type offers none of them.
 	Refused []string
+	// Permissions are the permissions the config names under members whose
+	// names do not say so (Seats' take and assign), sorted, each once, which
+	// behaviorops lists beside ConfigPermissions' (D104).
+	Permissions []string
 }
 
 // Offers reports whether a client of the type offers the operation: one
@@ -122,6 +126,8 @@ var coreNarrowers = map[string]narrower{
 	"Blueprint":    narrowBlueprint,
 	"Budget":       narrowBudget,
 	"Retries":      narrowRetries,
+	"Seats":        narrowSeats,
+	"Reconcile":    narrowReconcile,
 	"Stock":        narrowStock,
 	"Calendar":     narrowCalendar,
 	"Holds":        narrowHolds,
@@ -1108,6 +1114,121 @@ func narrowRetries(n *Narrowing, config map[string]any, target Target) error {
 		typedField{"failingSince", integer(), false},
 		typedField{"keyedBy", map[string]any{"type": "string"}, false},
 	)
+}
+
+// Seats (D104): the config's seats are the alias <Base>Seat, which every
+// operation's seat names, takeSeat's, leaveSeat's and listSeats' items'
+// results among them; the permissions its seats name, take and assign,
+// are its Permissions. Seats keeps no field: its occupants are a
+// sub-table, which listSeats reads.
+func narrowSeats(n *Narrowing, config map[string]any, target Target) error {
+	seats, _ := config["seats"].(map[string]any)
+	names := SortedKeys(seats)
+	seat := target.Base + "Seat"
+	n.Aliases = append(n.Aliases, Alias{Name: seat, Doc: fmt.Sprintf("A seat of %s's Seats.", An(target.Base)), Schema: EnumOf(names)})
+	for _, op := range []string{"takeSeat", "leaveSeat", "listSeats"} {
+		if err := setOperationProperty(n.Params, op, nil, "seat", ref(seat, "")); err != nil {
+			return err
+		}
+	}
+	for _, op := range []string{"takeSeat", "leaveSeat"} {
+		if err := setOperationProperty(n.Results, op, nil, "seat", ref(seat, "")); err != nil {
+			return err
+		}
+	}
+	if err := setOperationProperty(n.Results, "listSeats", []string{"properties", "items", "items"}, "seat", ref(seat, "")); err != nil {
+		return err
+	}
+	for _, name := range names {
+		each, _ := seats[name].(map[string]any)
+		for _, member := range []string{"take", "assign"} {
+			if permission, _ := each[member].(string); permission != "" && !slices.Contains(n.Permissions, permission) {
+				n.Permissions = append(n.Permissions, permission)
+			}
+		}
+	}
+	slices.Sort(n.Permissions)
+	return nil
+}
+
+// Reconcile (D104): the states of the Workflow its status names, among the
+// table's uses, are the alias <Base>State, which the observed field names,
+// absent before the first observation, as do observe's state, its result's
+// observed, each move's from and to, and its drift's status and observed;
+// the result's status names it or null, for a row with no status. When an
+// observation was made and when the status last agreed with it are epoch
+// milliseconds, each absent until set, and drift is absent while the
+// status is the observed state.
+func narrowReconcile(n *Narrowing, config map[string]any, target Target) error {
+	status, _ := config["status"].(string)
+	states, err := reconcileStates(target, status)
+	if err != nil {
+		return err
+	}
+	state := target.Base + "State"
+	// The doc names the Reconcile by its base, which behaviorops reads as
+	// the field (Sandbox's observed), and the Workflow by its field.
+	workflow := target.Instance.Name + "." + status
+	if status == "Workflow" {
+		workflow = target.Instance.Name + "'s Workflow"
+	}
+	n.Aliases = append(n.Aliases, Alias{Name: state, Doc: fmt.Sprintf("A state %s's Reconcile reports, one of the states of %s.", An(target.Base), workflow), Schema: EnumOf(states)})
+	drift := func() map[string]any {
+		return map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"observed", "code"},
+			"properties": map[string]any{"status": ref(state, ""), "observed": ref(state, ""), "code": map[string]any{"type": "string"}},
+		}
+	}
+	if err := setFields(n,
+		typedField{"observed", ref(state, ""), false},
+		typedField{"observedAt", integer(), false},
+		typedField{"drift", drift(), false},
+		typedField{"reconciledAt", integer(), false},
+	); err != nil {
+		return err
+	}
+	if err := setOperationProperty(n.Params, "observe", nil, "state", ref(state, "")); err != nil {
+		return err
+	}
+	nullable := ref(state, "")
+	nullable["nullable"] = true
+	for name, replacement := range map[string]map[string]any{"observed": ref(state, ""), "status": nullable} {
+		if err := setOperationProperty(n.Results, "observe", nil, name, replacement); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{"from", "to"} {
+		if err := setOperationProperty(n.Results, "observe", []string{"properties", "moves", "items"}, name, ref(state, "")); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{"status", "observed"} {
+		if err := setOperationProperty(n.Results, "observe", []string{"properties", "drift"}, name, ref(state, "")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileStates are the states of the Workflow use of the target's table
+// whose id is status, as its config lists them.
+func reconcileStates(target Target, status string) ([]string, error) {
+	if target.Instance == nil {
+		return nil, fmt.Errorf("status %q names the Workflow of a table, and the target is none", status)
+	}
+	for _, use := range target.Instance.TableBehaviors() {
+		if use.Name != "Workflow" || use.UseID() != status {
+			continue
+		}
+		var config struct {
+			States []string `json:"states"`
+		}
+		if err := json.Unmarshal(use.Config, &config); err != nil {
+			return nil, fmt.Errorf("table %s: the Workflow on field %s, which status names: %w", target.Instance.Name, status, err)
+		}
+		return config.States, nil
+	}
+	return nil, fmt.Errorf("table %s: status %q is not a field of %s that is a Workflow", target.Instance.Name, status, target.Instance.Name)
 }
 
 // Blueprint: the children, each step's key and its child's id, are absent

@@ -371,9 +371,10 @@ func TestABehaviorConfigRefusesWhatIsNoLiteral(t *testing.T) {
 // TestABehaviorFieldIsRefusedWhereItCannotBe (D103): a behavior's field
 // type is refused, located and naming the type and the field, on a type
 // that is not a DB table (an API schema's, a trait); for a behavior that
-// names no value field; when optional or decorated; inside a wrapper or a
-// list; when a base class carries it; and with a config its config schema
-// refuses.
+// names no value field; when optional (in words of their own for a
+// behavior whose value field is optional, D104) or decorated; inside a
+// wrapper or a list; when a base class carries it; and with a config its
+// config schema refuses.
 func TestABehaviorFieldIsRefusedWhereItCannotBe(t *testing.T) {
 	const flow = `{ states: ["draft", "paid"]; transitions: [{ from: "draft"; to: "paid" }] }`
 	for _, tc := range []struct {
@@ -410,6 +411,17 @@ export abstract class Order {
 }
 `,
 			want: "a.schema.ts:3:3: type Order: field status is a Workflow, which is never optional: the behavior sets it when a row is created; write status: Workflow<...> (D103)",
+		},
+		{
+			name: "an optional field of a behavior whose value field is optional",
+			kind: "DB",
+			source: `import { Reconcile, Workflow } from "@superschematic/db";
+export abstract class Sandbox {
+  status: Workflow<` + flow + `>;
+  observed?: Reconcile<{ status: "status"; observePermission: "sandboxes.observe" }>;
+}
+`,
+			want: "a.schema.ts:4:3: type Sandbox: field observed is a Reconcile, whose field takes no ?: the behavior keeps it, absent until it sets it; write observed: Reconcile<...> (D103, D104)",
 		},
 		{
 			name: "a decorated field",

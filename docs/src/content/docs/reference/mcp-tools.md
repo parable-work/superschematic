@@ -152,6 +152,13 @@ token, every one of the table's tools takes `preconditions` too, by use,
 `{ "Lease": { "token": 3 } }`, as the route's body does: `job_lease_heartbeat`
 with `{ id, preconditions: { Lease: { token: 3 } } }` (D104,
 [A precondition](/superschematic/guides/api-routes/#a-precondition-the-leases-token)).
+Seats' operations on `Problem` are `problem_seats_take_seat`,
+`problem_seats_leave_seat` and the read-only `problem_seats_list_seats`,
+each taking `seat`, an enum of the config's seats, and a field that is a
+Reconcile names its tool by the field, as a Workflow field does:
+`sandbox_observed_observe`, with `state`, an enum of the Workflow's
+states, and `at` (D104,
+[A table's seats and observations](/superschematic/guides/api-routes/#a-tables-seats-and-observations)).
 
 A TypeScript API's endpoint lists the tool and runs it through its route,
 so the set's `@requirePermission` and the core's own permission checks

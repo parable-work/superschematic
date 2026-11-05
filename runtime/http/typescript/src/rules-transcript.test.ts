@@ -52,8 +52,12 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // and whose meters are sub-table rows of a row and of its scope; and
 // core-retries-waits' and core-periods-and-presence', written by hand for
 // D104's upgrades (a backoff, a window, a key, a precondition refused,
-// reset periods, a rolling window, an observed usage, a ttl by state).
-// Each
+// reset periods, a rolling window, an observed usage, a ttl by state); and
+// core-seats' and core-reconcile', written by hand for the first behaviors
+// only the core implements (D104), whose occupants are a sub-table of the
+// row keyed by their number, whose by names a seat, and whose Workflow and
+// Reconcile are anchored on fields, Reconcile's value column NULL before
+// the first observation and its stale deadline in the row's queue. Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
 // and _version, and, for a use whose behavior declares tables, each
@@ -73,9 +77,13 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // is skipped without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
-// restated by this test (the corpus's uses are type-anchored: Workflow's
-// workflow_status and workflow_entered_at, Timers' sub-table
-// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs), an
+// restated by this test (a type-anchored use's columns are named for its
+// behavior: Workflow's workflow_status and workflow_entered_at, Timers'
+// sub-table <table>_timers_deadlines, Approvals'
+// <table>_approvals_sign_offs, Seats' <table>_seats_occupants; a
+// field-anchored use's for its field, its value field the field's own
+// column: core-reconcile's status and status_entered_at, observed and
+// observed_observed_at), an
 // own field of a JSON type other than a string, a number or a boolean (an
 // object, a list) is a Generic.JSON column, JSONB on Postgres and its text
 // on SQLite, and a declared field of Generic.Int64 is a BIGINT, which pg
@@ -104,6 +112,8 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-retries', floor: 250 },
   { file: 'core-retries-waits', floor: 158 },
   { file: 'core-periods-and-presence', floor: 77 },
+  { file: 'core-seats', floor: 88 },
+  { file: 'core-reconcile', floor: 58 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
