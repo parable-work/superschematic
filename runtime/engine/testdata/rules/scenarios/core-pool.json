@@ -1,0 +1,2585 @@
+{
+  "name": "core-pool",
+  "description": "Pool on a table, D104: the members of a pool, the table's rows, each open, near its limit or out until a time; pick, a read of the table as a whole run as a command without a row, answers the first of the open members prefer keeps, then of its near ones, then of the other open and near ones, by the order field and then the key, leaving out the keys exclude names and keeping the members match names, and with none the soonest time one may be back; markOut puts a member out until a time, keeping the later, a repeat answered unchanged; reportRoom records a check, and an out member opens only through a check with room made at or after its outUntil; an out member past its outUntil is rechecked at its outUntil and every recheckAfterMs after until a check comes, each recheck a deadline whose fire emits the event recheck; a member whose Budget meter has no room counts as out at a pick until the clock gives it room, through the contract Capacity; with each one's define refusals. Cases written by hand in the recorded format, since no engine implements Pool; a call of the table as a whole is the engine's instances.invokeSchema. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, a refusal whole, in the core's words, and the events each step's commands wrote (events); what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D104): runtime/engine/testdata/rules/scenarios/core-pool.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Pool > pick answers the lowest-ranked open member; prefer tries its open members, then its near ones, then the others by rank; exclude leaves out the keys tried; match keeps the members it names, a null member absent; pick needs no permission",
+      "behaviors": [
+        "Pool"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "accounts.pool",
+            "accounts.observe"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "accounts.pool"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "permission": "accounts.pool"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": null,
+            "instanceType": "Account"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Account"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            {
+              "id": "a1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a1",
+            "data": {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a2",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 2
+            },
+            {
+              "id": "a2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a2",
+            "data": {
+              "name": "a2",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 2
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a3",
+              "vendor": "openai",
+              "kind": "account",
+              "rank": 3
+            },
+            {
+              "id": "a3"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a3",
+            "data": {
+              "name": "a3",
+              "vendor": "openai",
+              "kind": "account",
+              "rank": 3
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "k1",
+              "vendor": "anthropic",
+              "kind": "key",
+              "rank": 9
+            },
+            {
+              "id": "k1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "k1",
+            "data": {
+              "name": "k1",
+              "vendor": "anthropic",
+              "kind": "key",
+              "rank": 9
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a4",
+              "vendor": "openai",
+              "kind": "account"
+            },
+            {
+              "id": "a4"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a4",
+            "data": {
+              "name": "a4",
+              "vendor": "openai",
+              "kind": "account"
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": {
+              "key": "a1",
+              "availability": "open",
+              "order": 1,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "reportRoom",
+            {
+              "room": true,
+              "near": true
+            }
+          ],
+          "expect": {
+            "availability": "near",
+            "checkedAt": 1772323200000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "prefer": {
+                "vendor": "anthropic",
+                "kind": "account"
+              },
+              "exclude": [
+                "a1"
+              ]
+            }
+          ],
+          "expect": {
+            "member": {
+              "key": "a2",
+              "availability": "near",
+              "order": 2,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "prefer": {
+                "vendor": "anthropic",
+                "kind": "account"
+              },
+              "exclude": [
+                "a1",
+                "a2"
+              ]
+            }
+          ],
+          "expect": {
+            "member": {
+              "key": "a3",
+              "availability": "open",
+              "order": 3,
+              "preferred": false
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "prefer": {
+                "vendor": "openai"
+              },
+              "exclude": [
+                "a3"
+              ]
+            }
+          ],
+          "expect": {
+            "member": {
+              "key": "a4",
+              "availability": "open",
+              "order": null,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "match": {
+                "kind": "key"
+              }
+            }
+          ],
+          "expect": {
+            "member": {
+              "key": "k1",
+              "availability": "open",
+              "order": 9,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "match": {
+                "vendor": "nobody"
+              }
+            }
+          ],
+          "expect": {
+            "member": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "match": {
+                "kind": "account"
+              },
+              "prefer": {
+                "vendor": "openai"
+              },
+              "exclude": [
+                "a3",
+                "a4"
+              ]
+            }
+          ],
+          "expect": {
+            "member": {
+              "key": "a1",
+              "availability": "open",
+              "order": 1,
+              "preferred": false
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "guest",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": {
+              "key": "a1",
+              "availability": "open",
+              "order": 1,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "match": {
+                "rank": null,
+                "vendor": "openai"
+              }
+            }
+          ],
+          "expect": {
+            "member": {
+              "key": "a3",
+              "availability": "open",
+              "order": 3,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "match": {
+                "owner": "x"
+              }
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation pick of behavior Pool: /match/owner: Account has no own field owner (its own fields: name, vendor, kind, rank)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/match/owner",
+                  "message": "Account has no own field owner (its own fields: name, vendor, kind, rank)"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pool > markOut and reportRoom: an out member keeps the later until; it opens only through a check with room at or after its outUntil; near and back; a check without room puts it out until resetsAt or outForMs on; the permission after the parameters, and the row before both",
+      "behaviors": [
+        "Pool"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "accounts.pool",
+            "accounts.observe"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "accounts.pool"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "permission": "accounts.pool"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": null,
+            "instanceType": "Account"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Account"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            {
+              "id": "a1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a1",
+            "data": {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a2",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 2
+            },
+            {
+              "id": "a2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a2",
+            "data": {
+              "name": "a2",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 2
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "markOut",
+            {
+              "reason": "rate limited"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772325000000,
+            "outReason": "rate limited"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "markOut",
+            {
+              "until": 1772323800000,
+              "reason": "rate limited"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772325000000,
+            "outReason": "rate limited",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "markOut",
+            {
+              "until": 1772326800000,
+              "reason": "quota"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772326800000,
+            "outReason": "quota"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a1",
+            "data": {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "out",
+                "outUntil": 1772326800000,
+                "outReason": "quota"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": {
+              "key": "a2",
+              "availability": "open",
+              "order": 2,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "reportRoom",
+            {
+              "room": true
+            }
+          ],
+          "now": 1772323260000,
+          "expect": {
+            "availability": "out",
+            "checkedAt": 1772323260000,
+            "outUntil": 1772326800000,
+            "outReason": "quota"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": {
+              "key": "a2",
+              "availability": "open",
+              "order": 2,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "markOut",
+            {
+              "until": 1772324400000,
+              "reason": "overloaded"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772324400000,
+            "outReason": "overloaded"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": null,
+            "until": 1772324400000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "reportRoom",
+            {
+              "room": true
+            }
+          ],
+          "now": 1772324400000,
+          "expect": {
+            "availability": "open",
+            "checkedAt": 1772324400000,
+            "opened": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": {
+              "key": "a2",
+              "availability": "open",
+              "order": 2,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "reportRoom",
+            {
+              "room": false,
+              "resetsAt": 1772330400000
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "checkedAt": 1772324400000,
+            "outUntil": 1772330400000,
+            "outReason": "quota"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "reportRoom",
+            {
+              "room": true,
+              "near": true
+            }
+          ],
+          "expect": {
+            "availability": "near",
+            "checkedAt": 1772324400000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "reportRoom",
+            {
+              "room": true
+            }
+          ],
+          "expect": {
+            "availability": "open",
+            "checkedAt": 1772324400000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "reportRoom",
+            {
+              "room": false
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "checkedAt": 1772324400000,
+            "outUntil": 1772326200000,
+            "outReason": "no room"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": null,
+            "until": 1772326200000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "markOut",
+            {
+              "reason": ""
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation markOut of behavior Pool: /reason: must NOT have fewer than 1 characters",
+            "details": {
+              "issues": [
+                {
+                  "path": "/reason",
+                  "message": "must NOT have fewer than 1 characters"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "reportRoom",
+            {}
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation reportRoom of behavior Pool: must have required property 'room'",
+            "details": {
+              "issues": [
+                {
+                  "path": "",
+                  "message": "must have required property 'room'"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "guest",
+          "args": [
+            "Account",
+            "a1",
+            "markOut",
+            {
+              "reason": "x"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "guest may not mark Account a1 out: it needs permission accounts.pool"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "guest",
+          "args": [
+            "Account",
+            "a1",
+            "reportRoom",
+            {
+              "room": true
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "guest may not report a check of Account a1: it needs permission accounts.pool"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a9",
+            "markOut",
+            {
+              "reason": "x"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "not_found",
+            "message": "Account a9 does not exist in namespace default"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pool > the recheck: an out member is rechecked at its outUntil and every recheckAfterMs after until a check comes, each recheck the event recheck; a check without room moves it; one with room clears it; a later markOut moves it before it falls due",
+      "behaviors": [
+        "Pool"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "accounts.pool",
+            "accounts.observe"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "accounts.pool"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "recheckAfterMs": 120000,
+                        "permission": "accounts.pool"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": null,
+            "instanceType": "Account"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Account"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            {
+              "id": "a1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a1",
+            "data": {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "markOut",
+            {
+              "until": 1772323500000,
+              "reason": "rate limited"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772323500000,
+            "outReason": "rate limited"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772323500000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Account",
+              "id": "a1",
+              "use": "Pool",
+              "kind": "recheck",
+              "at": 1772323500000,
+              "payload": {
+                "outUntil": 1772323500000,
+                "outReason": "rate limited",
+                "dueAt": 1772323500000,
+                "firedAt": 1772323500000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "now": 1772323500000,
+          "expect": {
+            "member": null,
+            "until": 1772323620000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772323620000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Account",
+              "id": "a1",
+              "use": "Pool",
+              "kind": "recheck",
+              "at": 1772323620000,
+              "payload": {
+                "outUntil": 1772323500000,
+                "outReason": "rate limited",
+                "dueAt": 1772323620000,
+                "firedAt": 1772323620000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "reportRoom",
+            {
+              "room": false,
+              "resetsAt": 1772324100000
+            }
+          ],
+          "now": 1772323630000,
+          "expect": {
+            "availability": "out",
+            "checkedAt": 1772323630000,
+            "outUntil": 1772324100000,
+            "outReason": "rate limited"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772323740000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772324100000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Account",
+              "id": "a1",
+              "use": "Pool",
+              "kind": "recheck",
+              "at": 1772324100000,
+              "payload": {
+                "outUntil": 1772324100000,
+                "outReason": "rate limited",
+                "checkedAt": 1772323630000,
+                "dueAt": 1772324100000,
+                "firedAt": 1772324100000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "reportRoom",
+            {
+              "room": true
+            }
+          ],
+          "now": 1772324105000,
+          "expect": {
+            "availability": "open",
+            "checkedAt": 1772324105000,
+            "opened": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772324220000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a2",
+              "vendor": "openai",
+              "kind": "account",
+              "rank": 2
+            },
+            {
+              "id": "a2"
+            }
+          ],
+          "now": 1772324220000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a2",
+            "data": {
+              "name": "a2",
+              "vendor": "openai",
+              "kind": "account",
+              "rank": 2
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "markOut",
+            {
+              "until": 1772324300000,
+              "reason": "busy"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772324300000,
+            "outReason": "busy"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "markOut",
+            {
+              "until": 1772324700000,
+              "reason": "busy"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772324700000,
+            "outReason": "busy"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772324300000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772324700000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Account",
+              "id": "a2",
+              "use": "Pool",
+              "kind": "recheck",
+              "at": 1772324700000,
+              "payload": {
+                "outUntil": 1772324700000,
+                "outReason": "busy",
+                "dueAt": 1772324700000,
+                "firedAt": 1772324700000
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pool > Capacity: a member whose Budget meter has no room counts as out until the clock gives it room, its period's rollover or a provider's figure's lapse; an excluded open member counts toward no until",
+      "behaviors": [
+        "Pool",
+        "Budget"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "accounts.pool",
+            "accounts.observe"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "accounts.pool"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772325000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "permission": "accounts.pool"
+                      }
+                    },
+                    {
+                      "name": "Budget",
+                      "config": {
+                        "meters": {
+                          "tokens": {
+                            "limit": 100,
+                            "reset": "hourly"
+                          }
+                        },
+                        "observePermission": "accounts.observe"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": null,
+            "instanceType": "Account"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Account"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            {
+              "id": "a1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a1",
+            "data": {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              },
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 100,
+                    "remaining": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a2",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 2
+            },
+            {
+              "id": "a2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a2",
+            "data": {
+              "name": "a2",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 2
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              },
+              "Budget": {
+                "meters": {
+                  "tokens": {
+                    "used": 0,
+                    "reserved": 0,
+                    "limit": 100,
+                    "remaining": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "recordUsage",
+            {
+              "meter": "tokens",
+              "amount": 100
+            }
+          ],
+          "expect": {
+            "meter": "tokens",
+            "used": 100,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": {
+              "key": "a2",
+              "availability": "open",
+              "order": 2,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "recordUsage",
+            {
+              "meter": "tokens",
+              "amount": 100
+            }
+          ],
+          "expect": {
+            "meter": "tokens",
+            "used": 100,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": null,
+            "until": 1772326800000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "now": 1772326800000,
+          "expect": {
+            "member": {
+              "key": "a1",
+              "availability": "open",
+              "order": 1,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a1",
+            "observe",
+            {
+              "meter": "tokens",
+              "used": 100,
+              "resetsAt": 1772327400000
+            }
+          ],
+          "now": 1772326800000,
+          "expect": {
+            "meter": "tokens",
+            "used": 100,
+            "limit": 100,
+            "resetsAt": 1772327400000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "markOut",
+            {
+              "until": 1772328600000,
+              "reason": "quota"
+            }
+          ],
+          "expect": {
+            "availability": "out",
+            "outUntil": 1772328600000,
+            "outReason": "quota"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "expect": {
+            "member": null,
+            "until": 1772327400000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {}
+          ],
+          "now": 1772327400000,
+          "expect": {
+            "member": {
+              "key": "a1",
+              "availability": "open",
+              "order": 1,
+              "preferred": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "recordUsage",
+            {
+              "meter": "tokens",
+              "amount": 100
+            }
+          ],
+          "now": 1772327400000,
+          "expect": {
+            "meter": "tokens",
+            "used": 100,
+            "released": 0,
+            "overruns": [],
+            "directed": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "a2",
+            "reportRoom",
+            {
+              "room": true
+            }
+          ],
+          "now": 1772328600000,
+          "expect": {
+            "availability": "open",
+            "checkedAt": 1772328600000,
+            "opened": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Account",
+            "pick",
+            {
+              "exclude": [
+                "a1"
+              ]
+            }
+          ],
+          "now": 1772328600000,
+          "expect": {
+            "member": null,
+            "until": 1772330400000
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pool > its define and publish refusals: order required and held to a number field of the type, the bounds of outForMs and recheckAfterMs, and Pool removed from a type that has rows",
+      "behaviors": [
+        "Pool"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": [
+            "accounts.pool",
+            "accounts.observe"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "accounts.pool"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {}
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Account/behaviors/0: must match \"then\" schema; /types/Account/behaviors/0/config: must have required property 'order'",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Account/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Account/behaviors/0/config",
+                  "message": "must have required property 'order'"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "outForMs": 10
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Account/behaviors/0: must match \"then\" schema; /types/Account/behaviors/0/config/outForMs: must be >= 1000",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Account/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Account/behaviors/0/config/outForMs",
+                  "message": "must be >= 1000"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "recheckAfterMs": 0
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Account/behaviors/0: must match \"then\" schema; /types/Account/behaviors/0/config/recheckAfterMs: must be >= 1000",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Account/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Account/behaviors/0/config/recheckAfterMs",
+                  "message": "must be >= 1000"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "permission": ""
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Account/behaviors/0: must match \"then\" schema; /types/Account/behaviors/0/config/permission: must NOT have fewer than 1 characters",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Account/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Account/behaviors/0/config/permission",
+                  "message": "must NOT have fewer than 1 characters"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "score"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Account/behaviors/0/config: type Account: behavior Pool config: order \"score\" is not a field of Account (its fields: name, vendor, kind, rank)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Account/behaviors/0/config",
+                  "message": "type Account: behavior Pool config: order \"score\" is not a field of Account (its fields: name, vendor, kind, rank)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "name"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Account/behaviors/0/config: type Account: behavior Pool config: order \"name\" is not a number field of Account: it ranks the members by a number (number, Generic.Int64 or Generic.Float64)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Account/behaviors/0/config",
+                  "message": "type Account: behavior Pool config: order \"name\" is not a number field of Account: it ranks the members by a number (number, Generic.Int64 or Generic.Float64)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Pool",
+                      "config": {
+                        "order": "rank",
+                        "permission": "accounts.pool"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": null,
+            "instanceType": "Account"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Account"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Account",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Account",
+            {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            {
+              "id": "a1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Account",
+            "id": "a1",
+            "data": {
+              "name": "a1",
+              "vendor": "anthropic",
+              "kind": "account",
+              "rank": 1
+            },
+            "behaviors": {
+              "Pool": {
+                "availability": "open"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Account",
+              "types": {
+                "Account": {
+                  "name": "Account",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "vendor",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "kind",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "rank",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": []
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "IncompatibleChangeError",
+            "code": "incompatible_change",
+            "message": "schema Account in namespace default: a new version cannot replace version 1: behavior Pool cannot be removed from type Account, which has instances: the members' availability and their rechecks would stay behind. A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name",
+            "details": {
+              "changes": [
+                {
+                  "path": "Account.behaviors.Pool",
+                  "message": "behavior Pool cannot be removed from type Account, which has instances: the members' availability and their rechecks would stay behind"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

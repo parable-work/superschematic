@@ -4683,7 +4683,11 @@ type {{ .Name }} struct {
 type {{ .Interface }} interface {
 	{{- range .Operations }}
 {{ docComment "\t" .MethodDoc }}
+	{{- if .Table }}
+	{{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error)
+	{{- else }}
 	{{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error)
+	{{- end }}
 	{{- end }}
 }
 
@@ -4693,6 +4697,36 @@ func (r *{{ $repo.Name }}) {{ .GoName }}() {{ .Interface }} { return {{ .Value }
 {{ docComment "" (printf "%s runs %s through the behaviors' core on the repository's connection." .Value .Interface) }}
 type {{ .Value }} struct{ r *{{ $repo.Name }} }
 {{- range .Operations }}
+{{- if .Table }}
+
+{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions. It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name) }}
+func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if eq .Params "json.RawMessage" }}
+	var given any = params
+	if len(params) == 0 {
+		given = nil
+	}
+	{{- end }}
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) ({{ .ResultReturn }}, error) {
+		var out {{ .ResultReturn }}
+		raw, err := rules.RunTableOperation(ctx, rulesHost(tx), {{ printf "%q" $repo.TypeName }}, {{ printf "%q" $use.ID }}, {{ printf "%q" .Name }}, {{ if eq .Params "json.RawMessage" }}given{{ else }}params{{ end }}, behaviorCaller(ctx), nil)
+		if err != nil {
+			return out, err
+		}
+		{{- if .ResultIsStruct }}
+		out = &{{ .Result }}{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return nil, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.Member }} {{ .Name }}, %s: %w", raw, err)
+		}
+		{{- else }}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return out, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.Member }} {{ .Name }}, %s: %w", raw, err)
+		}
+		{{- end }}
+		return out, nil
+	})
+}
+{{- else }}
 
 {{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
@@ -4721,6 +4755,7 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.Primary
 		return out, nil
 	})
 }
+{{- end }}
 {{- end }}
 {{- end }}
 {{- with .Deadline }}

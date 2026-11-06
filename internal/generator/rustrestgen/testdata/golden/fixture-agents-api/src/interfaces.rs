@@ -118,6 +118,15 @@ pub struct AccountStatusTransitionArgs {
     pub input: types::AccountStatusTransitionInput,
 }
 
+/// The arguments of job.leaseExpireHolder (`POST /api/job/lease/expire-holder`),
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
+#[derive(Debug, Clone)]
+pub struct JobLeaseExpireHolderArgs {
+    /// The request body.
+    pub input: types::JobLeaseExpireHolderInput,
+}
+
 /// The arguments of job.leaseAcknowledge (`POST /api/job/{id}/lease/acknowledge`),
 /// decoded and checked by the router. `check` makes the same checks on
 /// arguments a caller builds.

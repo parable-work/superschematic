@@ -455,6 +455,38 @@
     }
   },
   {
+    "name": "job.leaseExpireHolder",
+    "inputSchemaDigest": "sha256:1b2b3dc9635589ad50cc7163330f0de778f4f2bb4bc06e8700b4f97541b7d2f3",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "holder": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "notRenewedAfter": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "holder"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobLeaseExpireHolderResult object"
+    }
+  },
+  {
     "name": "job.leaseAcknowledge",
     "inputSchemaDigest": "sha256:49329f61d165535749be7002fd110817254f6a5d82e924012a451e5d32f0b7b4",
     "parameters": {

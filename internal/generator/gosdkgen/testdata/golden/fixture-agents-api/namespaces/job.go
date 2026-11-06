@@ -33,6 +33,7 @@ func NewJobNamespace(
 // JobLeaseOperations holds the operations of the Lease Job implements (D103).
 //
 // Endpoints:
+// - ExpireHolder: Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none. Requires authentication.
 // - Acknowledge: Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition. Requires authentication.
 // - Acquire: Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first. Requires authentication.
 // - Direct: Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either. Requires authentication.
@@ -42,6 +43,37 @@ func NewJobNamespace(
 // - ResetExpiries: Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none. Requires authentication.
 type JobLeaseOperations struct {
 	client jsonClient
+}
+
+// ExpireHolder Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.
+// Requires authentication.
+func (n *JobLeaseOperations) ExpireHolder(
+	ctx context.Context,
+	input types.JobLeaseExpireHolderInput,
+) (types.JobLeaseExpireHolderResult, error) {
+	path := "/api/job/lease/expire-holder"
+	validationErrors := types.NewValidationErrors()
+	appendInputValidationErrors(validationErrors, any(&input))
+	if validationErrors.HasErrors() {
+		var zero types.JobLeaseExpireHolderResult
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out types.JobLeaseExpireHolderResult
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero types.JobLeaseExpireHolderResult
+		return zero, err
+	}
+	return out, nil
 }
 
 // Acknowledge Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.

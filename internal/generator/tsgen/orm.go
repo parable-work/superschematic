@@ -861,8 +861,13 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		if len(t.VectorFields) > 0 {
 			used["VectorRepository"] = true
 		}
-		if len(t.Uses) > 0 {
-			used["UseOperations"] = true
+		for _, use := range t.Uses {
+			if len(use.Operations) > 0 {
+				used["UseOperations"] = true
+			}
+			if len(use.TableOperations) > 0 {
+				used["TableOperations"] = true
+			}
 		}
 		if t.Deadlines {
 			used["BehaviorDeadlines"] = true
@@ -909,6 +914,18 @@ func (o *ORMInfo) HasPreconditions() bool {
 	return false
 }
 
+// HasTableOperations reports whether a table's use has an operation of
+// the table as a whole (D104), which its repository's member takes with no
+// key.
+func (o *ORMInfo) HasTableOperations() bool {
+	for _, t := range o.Tables {
+		if t.TableOperations() {
+			return true
+		}
+	}
+	return false
+}
+
 // UsesTypes reports whether a declaration of orm.ts refers to the
 // package's ./types entry.
 func (o *ORMInfo) UsesTypes() bool {
@@ -949,6 +966,18 @@ func (c ORMColumn) InputType() string {
 // HasORM reports whether the package writes orm.ts.
 func (o *ModuleOutput) HasORM() bool {
 	return o.ORM != nil
+}
+
+// TableOperations reports whether a use of the table has an operation of
+// the table as a whole (D104), which its repository's member takes with
+// no key.
+func (t ORMTable) TableOperations() bool {
+	for _, use := range t.Uses {
+		if len(use.TableOperations) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateColumns are the columns a create may set: every column but the

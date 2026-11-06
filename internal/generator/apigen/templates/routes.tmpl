@@ -596,9 +596,16 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 {{- end }}
 {{- with .BehaviorOperation }}
 //
+{{- if .Table }}
+// It runs {{ .Type }}'s {{ .Use }} {{ .Operation }}, {{ behaviorArticle .Behavior }} (D103), an operation of the
+// table as a whole (D104), through the ORM of {{ .Database }}, which runs it
+// through the behaviors' core as a command without a row in a transaction:
+// no implementation method serves it.
+{{- else }}
 // It runs {{ .Type }}'s {{ .Use }} {{ .Operation }}, {{ behaviorArticle .Behavior }} (D103), through the
 // ORM of {{ .Database }}, which runs it through the behaviors' core in a
 // transaction: no implementation method serves it.
+{{- end }}
 {{- end }}
 {{- if .BehaviorOperation }}
 func create{{ .HandlerName }}(db orm.DatabaseInterface) gohttp.HandlerFunc {

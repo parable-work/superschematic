@@ -9,6 +9,8 @@ import type {
   JobLeaseAcquireResult,
   JobLeaseDirectInput,
   JobLeaseDirectResult,
+  JobLeaseExpireHolderInput,
+  JobLeaseExpireHolderResult,
   JobLeaseExpireInput,
   JobLeaseExpireResult,
   JobLeaseHeartbeatInput,
@@ -25,6 +27,7 @@ import type {
 import {
   parseJobLeaseAcquireResultFromJSON,
   parseJobLeaseDirectResultFromJSON,
+  parseJobLeaseExpireHolderResultFromJSON,
   parseJobLeaseExpireResultFromJSON,
   parseJobLeaseHeartbeatResultFromJSON,
   parseJobLeaseResetExpiriesResultFromJSON,
@@ -33,6 +36,7 @@ import {
   validateJobLeaseAcknowledgeInput,
   validateJobLeaseAcquireInput,
   validateJobLeaseDirectInput,
+  validateJobLeaseExpireHolderInput,
   validateJobLeaseExpireInput,
   validateJobLeaseHeartbeatInput,
   validateJobLeaseReleaseInput,
@@ -66,6 +70,37 @@ export class JobNamespace {
  */
 export class JobLeaseOperations {
   constructor(private readonly client: HttpClient) {}
+
+  /**
+   * Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.
+   * @requires Authentication
+   * @param input - Request payload
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns JobLeaseExpireHolderResult
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async expireHolder(
+    input: JobLeaseExpireHolderInput,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<JobLeaseExpireHolderResult> {
+    if (input === null || input === undefined) {
+      throw new ValidationError({ '': [{ validator: 'required', message: 'input is required' }] });
+    }
+    // Validate input before sending request
+    const validationErrors: ValidationResult = validateJobLeaseExpireHolderInput(input);
+    if (validationErrors !== true) {
+      throw new ValidationError(validationErrors);
+    }
+    // Make POST request
+    const result = await this.client.post<JobLeaseExpireHolderResult>(
+      `/api/job/lease/expire-holder`,
+      input,
+      { ...toRequestOptions(signal) }
+    );
+    return parseJobLeaseExpireHolderResultFromJSON(result);
+  }
 
   /**
    * Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.

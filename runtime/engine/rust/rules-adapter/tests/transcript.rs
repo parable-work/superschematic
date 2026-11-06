@@ -20,9 +20,12 @@
 //! `core-seats.json` (D104: Seats' seats, kept in a sub-table, and a `by`
 //! naming a seat), `core-reconcile.json` (D104: Reconcile's
 //! observations on a field beside a Workflow field, and its stale
-//! deadline) and `core-schedules.json` (D104: Schedules' named schedules
+//! deadline), `core-schedules.json` (D104: Schedules' named schedules
 //! after a delay, at an interval and on a cron line in a time zone, their
-//! fires, retries and endOn, and the event each fire emits), whose
+//! fires, retries and endOn, and the event each fire emits) and
+//! `core-pool.json` (D104: Pool's members out and back, their rechecks and
+//! the event each emits, and its pick, a command without a row over a read
+//! across the table, Budget's meters read through Capacity), whose
 //! hand-written transcripts hold each command's row version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
@@ -41,10 +44,11 @@
 //! (D104), the
 //! command's type at the version live at it and each other at the version
 //! the scenario last made live (a deadline the runner ran among them, run
-//! only while it is armed at its time and its message spent with it, and a
-//! write a type's change trigger queued, run as written), its refusal
-//! compared whole and the row it names read back after it and compared,
-//! numbers by value,
+//! only while it is armed at its time and its message spent with it, a
+//! write a type's change trigger queued, run as written, and an operation
+//! of the table as a whole, `tableOperation`, which names no row, D104),
+//! its refusal or its result compared whole and the row it names, when it
+//! names one, read back after it and compared, numbers by value,
 //! with its version when the transcript holds one (so a repeat answered
 //! unchanged is held to writing nothing), that row's sub-table rows and its
 //! armed deadlines, the other rows its change set wrote, and the events it
@@ -85,7 +89,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 18] = [
+const TRANSCRIPTS: [(&str, usize); 19] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -104,6 +108,7 @@ const TRANSCRIPTS: [(&str, usize); 18] = [
     ("core-seats", SEATS_FLOOR),
     ("core-reconcile", RECONCILE_FLOOR),
     ("core-schedules", SCHEDULES_FLOOR),
+    ("core-pool", POOL_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -147,14 +152,15 @@ const APPROVALS_FLOOR: usize = 122;
 /// date-times, and 40 checks.
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
-/// core-lease's floor, as the core's milestone states it: 436 steps, 323
-/// commands (233 operations, 84 of them presenting Lease's token as its
-/// precondition, and 3 deadlines the runner ran: a lease's expiry) and 113
-/// checks (D104); its directives held as sub-table rows and its expiry as
-/// an armed deadline. What the recording composed beside Lease that the
-/// core does not run (Comments, Queue, the runner's sweep cadence) the
-/// transcript leaves out with its reasons.
-const LEASE_FLOOR: usize = 436;
+/// core-lease's floor, as the core's milestone states it: 449 steps, 334
+/// commands (235 operations of a row, 84 of the commands presenting Lease's
+/// token as its precondition, 3 deadlines the runner ran: a lease's expiry,
+/// and 8 calls of expireHolder, each a command without a row, 2 of them
+/// refused, D104) and 115 checks (D104); its directives held as sub-table
+/// rows and its expiry as an armed deadline. What the recording composed
+/// beside Lease that the core does not run (Comments, Queue, the runner's
+/// sweep cadence) the transcript leaves out with its reasons.
+const LEASE_FLOOR: usize = 449;
 
 /// core-presence's floor, as the core's milestone states it: 141 steps, 89
 /// commands (8 of them deadlines the runner ran: a miss, 3 of which wrote
@@ -217,6 +223,14 @@ const RECONCILE_FLOOR: usize = 58;
 /// events each command wrote held to its table's event queue.
 const SCHEDULES_FLOOR: usize = 161;
 
+/// core-pool's floor, as the core's milestone states it: 82 steps of the
+/// scenarios written by hand (D104), 17 checks, 7 of them refused, and 65
+/// commands: 12 creates, 27 operations of a row, each holding its row's
+/// version, one of them a repeat answered unchanged, 4 rechecks the runner
+/// ran, each emitting its event, and 22 picks, each a command without a row
+/// whose result and events the replay compares.
+const POOL_FLOOR: usize = 82;
+
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
 
@@ -278,11 +292,18 @@ fn declarations() -> Vec<Declared> {
                 name: file["name"].as_str().unwrap_or_default().to_owned(),
                 value: file.get("value").and_then(Value::as_str).map(str::to_owned),
                 fields: typed(&list("fields")),
+                // Each operation of a row and of the table as a whole
+                // (D104), the layout's; one of a namespace is left out.
                 operations: list("operations")
                     .iter()
-                    .map(|operation| Operation {
-                        name: operation["name"].as_str().unwrap_or_default().to_owned(),
-                        writes: operation.get("writes") == Some(&Value::Bool(true)),
+                    .filter_map(|operation| {
+                        let name = operation["name"].as_str().unwrap_or_default();
+                        let writes = operation.get("writes") == Some(&Value::Bool(true));
+                        match operation.get("scope").and_then(Value::as_str) {
+                            Some("namespace") => None,
+                            Some("schema") => Some(Operation::of_table(name, writes)),
+                            _ => Some(Operation::new(name, writes)),
+                        }
                     })
                     .collect(),
                 tables: list("tables")
@@ -1020,6 +1041,9 @@ impl<'s> Scenario<'s> {
         if let Some(expected) = &expect.key {
             self.compare(*at, call, "key", json!(expected), json!(key));
         }
+        // An operation of the table as a whole names no row (D104): its
+        // step holds none to read back, and every row its change set wrote
+        // is among its others.
         let row_key = match &command.action {
             Action::Create { id, .. } => id.clone(),
             action => action.key().map(str::to_owned),

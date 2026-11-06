@@ -1,5 +1,30 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { MAX_ATTEMPTS, RulesRefusal, execute, readArmedDeadlines, readRow, readSubRows, runCreate, runDelete, runOperation, runUpdate, type CoreAnswers, type CoreCaller, type CoreCommand, type CoreStep, type CoreTypeSpec, type RulesCore, type RulesHost, type RulesLayout, type RulesStore } from './rules';
+import {
+  MAX_ATTEMPTS,
+  RulesRefusal,
+  execute,
+  readArmedDeadlines,
+  readRow,
+  readRows,
+  readSubRows,
+  runCreate,
+  runDelete,
+  runOperation,
+  runTableOperation,
+  runUpdate,
+  type CoreAnswers,
+  type CoreCaller,
+  type CoreCommand,
+  type CoreLinkedRows,
+  type CoreReadRequest,
+  type CoreRowWrite,
+  type CoreStep,
+  type CoreTypeSpec,
+  type RulesCore,
+  type RulesHost,
+  type RulesLayout,
+  type RulesStore,
+} from './rules';
 import { bumpVersion, columnTypes, core, postgresDatabase, rulesCore, rulesDsn, sqliteDatabase, type TestDatabase } from './rules.testing';
 
 // The adapter over a real database of each dialect, bun:sqlite through
@@ -13,8 +38,13 @@ import { bumpVersion, columnTypes, core, postgresDatabase, rulesCore, rulesDsn, 
 // implements Lease, whose owned columns hold a BIGINT token and JSON, whose
 // directives are a sub-table and whose expiry a message of its deadline
 // queue, and whose writes present the token as Lease's precondition (D16,
-// D104). The Postgres cases are skipped without
-// SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
+// D104); and a soft-deletable table of members whose own columns hold a
+// UUID, a string, a number and a boolean, and whose use keeps two
+// sub-tables, which the read across a table reads page by page with the
+// sub-tables' rows of each, and over which an operation of the table as a
+// whole runs as a command without a row (D104), on a core of the test's own
+// that asks for the rows and writes each. The Postgres cases are skipped
+// without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 
 const flow = {
   states: ['draft', 'paid', 'shipped'],
@@ -238,6 +268,92 @@ const jobLayout: RulesLayout = {
 /** A UUID's two forms, its column's hyphenated text and its base62 wire form: dana's, and erin's. */
 const DANA = { column: '0f8fad5b-d9cb-469f-a165-70867728950e', wire: 'TMXp8QPR6yGvKuV2GZQ10' };
 const ERIN = { column: '7c9e6679-7425-40de-944b-e07fc1f90ae7', wire: '3n9R8RlRyqVJBUQUv6toL1' };
+
+/**
+ * A soft-deletable table of members (D104), whose own columns hold an
+ * owner's UUID, a vendor, a rank and whether it is a key, whose use Tally
+ * owns its state column and keeps two sub-tables, counts and notes, each a
+ * child table of the row keyed by its name; its spec is no core's, since
+ * the core here is the test's own (sweeper).
+ */
+const memberLayout: RulesLayout = {
+  types: {
+    Member: {
+      type: 'Member',
+      table: 'member',
+      key: { field: 'id', column: 'id', type: 'string' },
+      version: '_version',
+      live: { column: 'deleted_at' },
+      own: [
+        { field: 'owner', column: 'owner', type: 'Identity.UUID' },
+        { field: 'vendor', column: 'vendor', type: 'string' },
+        { field: 'rank', column: 'rank', type: 'Generic.Int64' },
+        { field: 'paid', column: 'paid', type: 'boolean' },
+      ],
+      uses: [
+        {
+          id: 'Tally',
+          behavior: 'Tally',
+          member: 'tally',
+          fields: [{ name: 'state', field: 'tallyState', column: 'tally_state', type: 'string' }],
+          operations: [{ name: 'sweep', writes: true, table: true }],
+          tables: [
+            {
+              name: 'counts',
+              table: 'member_tally_counts',
+              row: 'member_id',
+              key: { name: 'name', field: 'name', column: 'name', type: 'string' },
+              fields: [
+                { name: 'used', field: 'used', column: 'used', type: 'Generic.Int64' },
+                { name: 'resetAt', field: 'resetAt', column: 'reset_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+              ],
+            },
+            {
+              name: 'notes',
+              table: 'member_tally_notes',
+              row: 'member_id',
+              key: { name: 'name', field: 'name', column: 'name', type: 'string' },
+              fields: [{ name: 'text', field: 'text', column: 'text', type: 'string' }],
+            },
+          ],
+        },
+      ],
+      spec: { name: 'Member', uses: [] },
+    },
+  },
+};
+
+/**
+ * A core of an operation of Member's table as a whole (D104), as the core
+ * runs Pool's pick and Lease's expireHolder: it takes the lock params.lock
+ * names first when it names one, then pages Member's live rows whose vendor
+ * is params.vendor two at a time, and with every page read either answers
+ * how many it read and writes nothing (params.read), or writes each row's
+ * state as params.state, each held to the version it read, and answers how
+ * many it wrote. Any other command it refuses as internal.
+ */
+const sweeper: RulesCore = {
+  run(_spec: CoreTypeSpec, command: CoreCommand, answers: CoreAnswers = {}): CoreStep {
+    const action = command.action;
+    if (action.kind !== 'tableOperation') return { done: { refused: { code: 'internal', status: 500, class: 'Error', message: `sweeper runs no ${action.kind}` } } };
+    const params = (action.params ?? {}) as { vendor: string; state?: string; read?: boolean; lock?: string };
+    if (params.lock !== undefined && (answers.locks ?? []).length === 0) return { lock: [params.lock] };
+    const rows: CoreLinkedRows['rows'][number][] = [];
+    let after: string | undefined;
+    for (;;) {
+      const request: CoreReadRequest = { kind: 'rows', type: 'Member', equal: { vendor: params.vendor }, ...(after !== undefined ? { after } : {}), limit: 2 };
+      const answered = (answers.reads ?? []).find(known => JSON.stringify(known.request) === JSON.stringify(request));
+      if (answered === undefined) return { read: [request] };
+      if (!('linked' in answered.answer)) throw new Error('sweeper: a rows read answered with no linked rows');
+      rows.push(...answered.answer.linked.rows);
+      if (!answered.answer.linked.more) break;
+      after = rows[rows.length - 1]!.key;
+    }
+    if (params.read) return { done: { changed: { rows: [], subRows: [], events: [], deadlines: [], result: { read: rows.length } } } };
+    const writes: CoreRowWrite[] = rows.map(({ key, row }) => ({ kind: 'update', type: 'Member', key, expectedVersion: row.version, own: {}, owned: { Tally: { state: params.state ?? 'swept' } } }));
+    return { done: { changed: { rows: writes, subRows: [], events: [], deadlines: [], result: { swept: rows.length } } } };
+  },
+};
 
 /** A table a rule across rows writes, which composes no behavior. */
 const bookingLayout: RulesLayout = {
@@ -702,6 +818,190 @@ for (const dialect of dialects) {
       await expect(db.transaction(store => runCreate(onJobs(store), 'Job', { title: 'New' }, otto, { id: 'j3', ...fenced(0) }))).rejects.toMatchObject({ code: 'invalid_argument', class: 'PreconditionsError' });
       expect(await db.transaction(store => readRow(onJobs(store), 'Job', 'j3'))).toBeNull();
       expect((await db.transaction(store => readRow(onJobs(store), 'Job', 'j2')))?.version).toBe(1);
+    });
+
+    /** Member's table and its two sub-tables, as sqlgen lays them out, made once; and its rows, written past the adapter. */
+    let members: Promise<void> | undefined;
+    const memberTables = (): Promise<void> =>
+      (members ??= (async () => {
+        const t = columnTypes(db.dialect);
+        const uuid = db.dialect === 'postgres' ? 'UUID' : 'TEXT';
+        const surrogate = db.dialect === 'postgres' ? 'UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY' : 'INTEGER PRIMARY KEY';
+        await db.exec(`CREATE TABLE member (
+  id ${t.key},
+  owner ${uuid},
+  vendor ${t.text},
+  rank ${t.integer},
+  paid ${t.boolean},
+  tally_state ${t.text},
+  deleted_at ${t.timestamp},
+  _version ${t.version}
+)`);
+        if (db.dialect === 'postgres') for (const ddl of bumpVersion('member')) await db.exec(ddl);
+        for (const name of ['counts', 'notes']) {
+          const fields = name === 'counts' ? `used ${t.integer}, reset_at ${t.timestamp}` : `text ${t.text}`;
+          await db.exec(`CREATE TABLE member_tally_${name} (id ${surrogate}, member_id ${t.text} NOT NULL REFERENCES member (id) ON DELETE CASCADE, name ${t.text} NOT NULL, ${fields}, UNIQUE (member_id, name))`);
+        }
+        const insert = `INSERT INTO member (id, owner, vendor, rank, paid, deleted_at) VALUES (${p(1)}, ${p(2)}, ${p(3)}, ${p(4)}, ${p(5)}, ${p(6)})`;
+        const bool = (value: boolean) => (db.dialect === 'postgres' ? value : value ? 1 : 0);
+        const deleted = db.dialect === 'postgres' ? new Date(1_000) : new Date(1_000).toISOString();
+        // m1 to m5 in key order: m4 is deleted, m5 has no owner, no rank and
+        // no vendor, and m3 is another owner's.
+        await db.exec(insert, ['m1', DANA.column, 'a', 2, bool(false), null]);
+        await db.exec(insert, ['m2', DANA.column, 'a', 1, bool(true), null]);
+        await db.exec(insert, ['m3', ERIN.column, 'b', 3, bool(false), null]);
+        await db.exec(insert, ['m4', DANA.column, 'a', 4, bool(false), deleted]);
+        await db.exec(insert, ['m5', null, null, null, null, null]);
+        const reset = db.dialect === 'postgres' ? new Date(5_000) : new Date(5_000).toISOString();
+        // The sub-tables' rows, inserted out of key order: m2's counts tokens
+        // and calls, m1's note, none of m3's.
+        await db.exec(`INSERT INTO member_tally_counts (member_id, name, used, reset_at) VALUES (${p(1)}, ${p(2)}, ${p(3)}, ${p(4)})`, ['m2', 'tokens', 10, reset]);
+        await db.exec(`INSERT INTO member_tally_counts (member_id, name, used) VALUES (${p(1)}, ${p(2)}, ${p(3)})`, ['m2', 'calls', 3]);
+        await db.exec(`INSERT INTO member_tally_counts (member_id, name, used) VALUES (${p(1)}, ${p(2)}, ${p(3)})`, ['m4', 'calls', 1]);
+        await db.exec(`INSERT INTO member_tally_notes (member_id, name, text) VALUES (${p(1)}, ${p(2)}, ${p(3)})`, ['m1', 'why', 'spare']);
+      })());
+    /** A host over a transaction of the database with memberLayout and core, at the test's clock. */
+    const onMembers = (store: RulesStore, rules: RulesCore = sweeper): RulesHost => ({ core: rules, layout: memberLayout, store, now: () => (clock += 1000) });
+    const rowsOf = (equal: Readonly<Record<string, unknown>> | undefined, after?: string, limit = 500, tables?: { useId: string; table: string }[]) =>
+      db.transaction(store => readRows(onMembers(store), 'Member', equal, tables, after, limit));
+    const keys = (read: CoreLinkedRows) => read.rows.map(row => row.key);
+
+    test("a read across a table answers the type's live rows in key order, each own field equal names held to its value: a string, a number, a boolean, a UUID in either form, and null for none (D104)", async () => {
+      await memberTables();
+      // Every live row, m4 deleted left out, each read as a row read reads it.
+      const all = await rowsOf(undefined);
+      expect(keys(all)).toEqual(['m1', 'm2', 'm3', 'm5']);
+      expect(all.more).toBe(false);
+      expect(all.rows[0]).toEqual({ key: 'm1', row: { own: { owner: DANA.wire, vendor: 'a', rank: 2, paid: false }, owned: {}, version: 1 } });
+      expect(all.rows[3]).toEqual({ key: 'm5', row: { own: {}, owned: {}, version: 1 } });
+      expect(keys(await rowsOf({ vendor: 'a' }))).toEqual(['m1', 'm2']);
+      expect(keys(await rowsOf({ rank: 3 }))).toEqual(['m3']);
+      expect(keys(await rowsOf({ paid: true }))).toEqual(['m2']);
+      expect(keys(await rowsOf({ owner: DANA.wire, vendor: 'a' }))).toEqual(['m1', 'm2']);
+      expect(keys(await rowsOf({ owner: ERIN.column }))).toEqual(['m3']);
+      // A value of a UUID field that is no UUID: no column holds it.
+      expect(keys(await rowsOf({ owner: 'x' }))).toEqual([]);
+      expect(keys(await rowsOf({ owner: null }))).toEqual(['m5']);
+      expect(keys(await rowsOf({ vendor: null, rank: null }))).toEqual(['m5']);
+      expect(keys(await rowsOf({ vendor: 'nobody' }))).toEqual([]);
+    });
+
+    test('a read across a table pages: at most limit rows after the key after, and whether more follow', async () => {
+      await memberTables();
+      const first = await rowsOf(undefined, undefined, 2);
+      expect([keys(first), first.more]).toEqual([['m1', 'm2'], true]);
+      const second = await rowsOf(undefined, 'm2', 2);
+      expect([keys(second), second.more]).toEqual([['m3', 'm5'], false]);
+      expect(await rowsOf(undefined, 'm5', 2)).toEqual({ rows: [], more: false });
+      const exact = await rowsOf({ vendor: 'a' }, undefined, 2);
+      expect([keys(exact), exact.more]).toEqual([['m1', 'm2'], false]);
+    });
+
+    test("a read across a table takes each named sub-table's rows of every row of the page, each table's in key order and converted, an empty list for a row that has none", async () => {
+      await memberTables();
+      const read = await rowsOf({ owner: DANA.wire }, undefined, 500, [
+        { useId: 'Tally', table: 'counts' },
+        { useId: 'Tally', table: 'notes' },
+      ]);
+      expect(read.rows.map(row => [row.key, row.tables])).toEqual([
+        ['m1', { Tally: { counts: [], notes: [{ key: 'why', values: { text: 'spare' } }] } }],
+        [
+          'm2',
+          {
+            Tally: {
+              counts: [
+                { key: 'calls', values: { used: 3 } },
+                { key: 'tokens', values: { used: 10, resetAt: 5_000 } },
+              ],
+              notes: [],
+            },
+          },
+        ],
+      ]);
+      // A page with no rows reads no sub-table and answers none.
+      expect(await rowsOf({ vendor: 'nobody' }, undefined, 500, [{ useId: 'Tally', table: 'counts' }])).toEqual({ rows: [], more: false });
+    });
+
+    test("a read across a table of more rows than D1 binds values reads each named sub-table's rows of the page in statements of at most 100 bound values on SQLite", async () => {
+      await memberTables();
+      // 150 rows of their own vendor, each with a note: on SQLite a store
+      // that refuses a statement of more than 100 bound values, as D1 does.
+      const keysOf = Array.from({ length: 150 }, (_, i) => `z${String(i).padStart(3, '0')}`);
+      for (const key of keysOf) {
+        await db.exec(`INSERT INTO member (id, vendor) VALUES (${p(1)}, ${p(2)})`, [key, 'bulk']);
+        await db.exec(`INSERT INTO member_tally_notes (member_id, name, text) VALUES (${p(1)}, ${p(2)}, ${p(3)})`, [key, 'why', key]);
+      }
+      const bound: number[] = [];
+      const likeD1 = (store: RulesStore): RulesStore =>
+        db.dialect === 'postgres'
+          ? store
+          : {
+              ...store,
+              async query(text, values) {
+                bound.push(values.length);
+                if (values.length > 100) throw new Error(`too many SQL variables: ${values.length}`);
+                return store.query(text, values);
+              },
+            };
+      try {
+        const read = await db.transaction(store => readRows(onMembers(likeD1(store)), 'Member', { vendor: 'bulk' }, [{ useId: 'Tally', table: 'notes' }], undefined, 500));
+        expect(keys(read)).toEqual(keysOf);
+        expect(read.rows.map(row => row.tables)).toEqual(keysOf.map(key => ({ Tally: { notes: [{ key: 'why', values: { text: key } }] } })));
+        if (db.dialect !== 'postgres') expect(bound).toEqual([1, 100, 50]);
+      } finally {
+        await db.exec(`DELETE FROM member_tally_notes WHERE member_id IN (SELECT id FROM member WHERE vendor = ${p(1)})`, ['bulk']);
+        await db.exec(`DELETE FROM member WHERE vendor = ${p(1)}`, ['bulk']);
+      }
+    });
+
+    test("a read across a table of a field that is no own column, or of a sub-table the layout does not give the type, refuses as internal; a type the layout lacks has no rows", async () => {
+      await memberTables();
+      await expect(rowsOf({ tallyState: 'x' })).rejects.toMatchObject({ code: 'internal', message: "rules: Member has no own field tallyState in the behaviors' layout" });
+      await expect(rowsOf(undefined, undefined, 500, [{ useId: 'Tally', table: 'holds' }])).rejects.toMatchObject({ code: 'internal', message: "rules: Member's use Tally (Tally) keeps no table holds in the behaviors' layout" });
+      expect(await db.transaction(store => readRows(onMembers(store), 'Nobody', {}, [], undefined, 500))).toEqual({ rows: [], more: false });
+    });
+
+    test('an operation of the table as a whole runs as a command without a row: a read-only one reads every page and writes nothing, and a writing one writes each row its calls write, held to its version (D104)', async () => {
+      await memberTables();
+      const versions = async () => (await db.rows('SELECT id, _version, tally_state FROM member ORDER BY id')).map(row => `${row.id}@${Number(row._version)}:${row.tally_state ?? '-'}`);
+      const before = await versions();
+      expect(await db.transaction(store => runTableOperation(onMembers(store), 'Member', 'Tally', 'sweep', { vendor: 'a', read: true }, alice))).toEqual({ read: 2 });
+      expect(await versions()).toEqual(before);
+      const applied = await db.transaction(store => execute(onMembers(store), 'Member', { caller: alice, now: clock, action: { kind: 'tableOperation', useId: 'Tally', operation: 'sweep', params: { vendor: 'a', state: 'out' } } }));
+      expect([applied.result, applied.key, applied.attempts]).toEqual([{ swept: 2 }, null, 1]);
+      expect(await versions()).toEqual(['m1@2:out', 'm2@2:out', 'm3@1:-', 'm4@1:-', 'm5@1:-']);
+      // A command that writes no row applies nothing.
+      expect(await db.transaction(store => runTableOperation(onMembers(store), 'Member', 'Tally', 'sweep', { vendor: 'nobody' }, alice))).toEqual({ swept: 0 });
+      expect(await versions()).toEqual(['m1@2:out', 'm2@2:out', 'm3@1:-', 'm4@1:-', 'm5@1:-']);
+    });
+
+    test('a row another connection moves between the read across a table and the apply moves the operation of the table, which runs again over it', async () => {
+      await memberTables();
+      let applies = 0;
+      const movingMember = (store: RulesStore): RulesStore => ({
+        ...store,
+        async apply(statements) {
+          if (applies++ === 0) await db.concurrently(`UPDATE member SET rank = rank + 10, _version = _version + 1 WHERE id = ${p(1)}`, ['m2']);
+          return store.apply(statements);
+        },
+      });
+      const applied = await db.transaction(store => execute(onMembers(movingMember(store)), 'Member', { caller: alice, now: clock, action: { kind: 'tableOperation', useId: 'Tally', operation: 'sweep', params: { vendor: 'a', state: 'back' } } }));
+      expect([applied.result, applied.attempts]).toEqual([{ swept: 2 }, 2]);
+      const rows = await db.rows(`SELECT id, rank, tally_state, _version FROM member WHERE vendor = ${p(1)} AND deleted_at IS NULL ORDER BY id`, ['a']);
+      expect(rows.map(row => [row.id, Number(row.rank), row.tally_state, Number(row._version)])).toEqual([
+        ['m1', 2, 'back', 3],
+        ['m2', 11, 'back', 4],
+      ]);
+    });
+
+    test(`a read across a table under a lock ${dialect.name === 'Postgres' ? 'is made under the advisory lock' : 'is refused as internal on SQLite, which has no check of it yet'}`, async () => {
+      await memberTables();
+      const run = db.transaction(store => runTableOperation(onMembers(store), 'Member', 'Tally', 'sweep', { vendor: 'a', read: true, lock: 'Member/sweep' }, alice));
+      if (db.dialect === 'postgres') {
+        expect(await run).toEqual({ read: 2 });
+      } else {
+        await expect(run).rejects.toMatchObject({ code: 'internal', message: "rules: a read of a table's rows under a lock has no check on SQLite or D1 yet (D103)" });
+      }
     });
 
     if (dialect.name === 'Postgres') {

@@ -59,6 +59,18 @@
 //! [`View`] or a [`Cx`] and stop the run with a [`Stop`] when they need a
 //! read, a lock, or refuse.
 //!
+//! An operation of the table as a whole ([`Action::TableOperation`], D104),
+//! a declaration's scope `schema`, is a command without a row: it runs on
+//! the table's placeholder, reads the type's rows through a read across the
+//! table ([`ReadRequest::Rows`]), which a host answers from its layout with
+//! equality over own fields the one rule it learns, and writes rows only
+//! through the operations of their uses ([`Cx::call_on`]) and the creates it
+//! makes. A behavior may ask the uses of a row's type that implement a
+//! contract a question about the row ([`View::ask`], [`ContractQuery`]): the
+//! core resolves them by their declarations ([`Declaration::contracts`]),
+//! never by a behavior's name, and each answers through its pure
+//! [`Behavior::answer`], over the row as the read across the table gave it.
+//!
 //! A write of a row, whoever made it, comes back to the core from the
 //! table's outbox as a change command ([`Action::Change`]): the uses whose
 //! declaration hears changes run [`Behavior::heard`] on the row as it is
@@ -80,8 +92,8 @@ mod run;
 mod spec;
 
 pub use behavior::{
-    Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Heard, Hook, Listen,
-    OperationDecl, Stop, TableDecl, ValidationRequest,
+    Behavior, Change, ConfigError, ConfigTarget, ContractQuery, Declaration, GuardRequest, Heard,
+    Hook, Listen, OperationDecl, Stop, TableDecl, ValidationRequest,
 };
 pub use changes::{
     ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowImage, RowRef, RowWrite, SubRowChange,
@@ -94,7 +106,7 @@ pub use patch::merge_patch;
 pub use permissions::{covers, has_any_permission, DottedPermissions, PermissionMatcher};
 pub use reads::{
     key_of, Answer, Answered, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow,
-    LINKED_PAGE,
+    TableRef, LINKED_PAGE,
 };
 pub use refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,

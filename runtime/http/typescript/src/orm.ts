@@ -3,7 +3,7 @@ import { currentCaller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
-import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
+import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -2553,6 +2553,17 @@ class TableRepository {
   }
 
   /**
+   * Runs an operation of one of the table's uses on the table as a whole
+   * (D104), a command without a row, in a transaction, as options.caller,
+   * and resolves to its result: a read-only one writes nothing, and a
+   * writing one writes only the rows its calls write, each held to its
+   * version.
+   */
+  private async operateTable(useId: string, operation: string, params: unknown, options: RulesTableCallOptions = {}): Promise<unknown> {
+    return this.atomically(async repo => runTableOperation(repo.rulesHost(), repo.def.name, useId, operation, params, options.caller ?? repo.caller()));
+  }
+
+  /**
    * Runs a due deadline of one of the table's uses through the core, in a
    * transaction (this repository's, or one it opens), as options.caller or
    * the acting user, at max(now, at), stamping updatedAt and updatedBy on
@@ -2608,17 +2619,21 @@ class TableRepository {
   /**
    * The members the table's uses add (D103): under each use's member, its
    * field or the behavior's for a use the table implements, its
-   * operations; a use with none (Reactions) adds none. A use whose member
-   * is one the repository has throws, which the build refuses first.
+   * operations, each of a row taking the row's key and each of the table
+   * as a whole (D104) none; a use with none (Reactions) adds none. A use
+   * whose member is one the repository has throws, which the build refuses
+   * first.
    */
   bindUses(): void {
     for (const use of this.behaviors?.uses ?? []) {
       if (use.operations.length === 0) continue;
       const member = use.member ?? use.id;
       if (member in this) throw new Error(`orm: ${this.def.name}'s behavior ${use.behavior} on ${member} would be the repository's own member ${member}`);
-      const operations: Record<string, (key: unknown, params: unknown, options?: RulesCallOptions) => Promise<unknown>> = {};
+      const operations: Record<string, ((key: unknown, params: unknown, options?: RulesCallOptions) => Promise<unknown>) | ((params: unknown, options?: RulesTableCallOptions) => Promise<unknown>)> = {};
       for (const operation of use.operations) {
-        operations[operation.name] = (key, params, options) => this.operate(use.id, operation.name, key, params, options);
+        operations[operation.name] = operation.table
+          ? (params: unknown, options?: RulesTableCallOptions) => this.operateTable(use.id, operation.name, params, options)
+          : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, key, params, options);
       }
       Object.defineProperty(this, member, { value: Object.freeze(operations), enumerable: true });
     }

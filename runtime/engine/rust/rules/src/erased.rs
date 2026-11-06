@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::behavior::{
-    Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Heard, Hook, Listen,
-    ValidationRequest,
+    Behavior, Change, ConfigError, ConfigTarget, ContractQuery, Declaration, GuardRequest, Heard,
+    Hook, Listen, ValidationRequest,
 };
 use crate::context::{ConfigCx, Cx, View};
 use crate::reads::{Row, SubRow};
@@ -89,6 +89,16 @@ pub(crate) trait Erased: Send + Sync {
         tables: &BTreeMap<String, Vec<SubRow>>,
         now: i64,
     ) -> Option<Map<String, Value>>;
+    /// The behavior's answer to a contract's query about a row; the outer
+    /// `None` for a config of another type.
+    fn answer(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        query: &ContractQuery<'_>,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Option<Option<Value>>;
 }
 
 /// A typed behavior behind [`Erased`].
@@ -254,5 +264,17 @@ impl<B: Behavior> Erased for Typed<B> {
     ) -> Option<Map<String, Value>> {
         let config = config.downcast_ref::<B::Config>()?;
         Some(self.0.read_fields_at(config, row, tables, now))
+    }
+
+    fn answer(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        query: &ContractQuery<'_>,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Option<Option<Value>> {
+        let config = config.downcast_ref::<B::Config>()?;
+        Some(self.0.answer(config, query, row, tables, now))
     }
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -47,7 +49,7 @@ func TestNativeRunReturnsTheCoresStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(step.Read) != 1 || step.Read[0] != (rules.ReadRequest{Kind: rules.ReadKindRow, Type: "Order", Key: "o1"}) || step.Lock != nil || step.Done != nil {
+	if len(step.Read) != 1 || !reflect.DeepEqual(step.Read[0], rules.ReadRequest{Kind: rules.ReadKindRow, Type: "Order", Key: "o1"}) || step.Lock != nil || step.Done != nil {
 		t.Fatalf("step = %+v, want one read of Order o1", step)
 	}
 }
@@ -90,29 +92,53 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 	if transition == nil || !transition.Writes || len(transition.ParamsSchema) == 0 {
 		t.Fatalf("Workflow's transition = %+v, want an operation that writes, with its parameters' schema", transition)
 	}
-	// The core registers its behaviors in one order (D104), the three only
+	// The core registers its behaviors in one order (D104), the four only
 	// it implements last; Reconcile's value field is optional, its column
-	// NULL before the behavior sets it, and Schedules declares the one
-	// event it emits, run, whose payload's schema the declaration holds.
+	// NULL before the behavior sets it, Schedules and Pool each declare the
+	// one event they emit, run and recheck, whose payload's schema the
+	// declaration holds, Pool's pick and Lease's expireHolder run on the
+	// table as a whole, and Budget implements the contract Capacity, which
+	// Pool asks.
 	var names []string
+	byName := map[string]rules.Declaration{}
 	for _, declaration := range declarations {
 		names = append(names, declaration.Name)
+		byName[declaration.Name] = declaration
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules"}; !slices.Equal(names, want) {
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool"}; !slices.Equal(names, want) {
 		t.Fatalf("the core declares %q, want %q", names, want)
 	}
-	reconcile := declarations[len(declarations)-2]
+	reconcile := byName["Reconcile"]
 	if reconcile.Value != "observed" || len(reconcile.Fields) == 0 || reconcile.Fields[0].Name != "observed" || !reconcile.Fields[0].Optional {
 		t.Fatalf("Reconcile's declaration = %+v, want its value field observed, optional", reconcile)
 	}
-	schedules := declarations[len(declarations)-1]
-	if len(schedules.Events) != 1 || schedules.Events[0].Kind != "run" || len(schedules.Events[0].PayloadSchema) == 0 {
-		t.Fatalf("Schedules' events = %+v, want the one event run, with its payload's schema", schedules.Events)
-	}
-	for _, declaration := range declarations[:len(declarations)-1] {
-		if len(declaration.Events) > 0 {
-			t.Fatalf("%s declares events %+v, and only Schedules emits any", declaration.Name, declaration.Events)
+	for name, kind := range map[string]string{"Schedules": "run", "Pool": "recheck"} {
+		events := byName[name].Events
+		if len(events) != 1 || events[0].Kind != kind || len(events[0].PayloadSchema) == 0 {
+			t.Fatalf("%s's events = %+v, want the one event %s, with its payload's schema", name, events, kind)
 		}
+	}
+	for _, declaration := range declarations {
+		if len(declaration.Events) > 0 && declaration.Name != "Schedules" && declaration.Name != "Pool" {
+			t.Fatalf("%s declares events %+v, and only Schedules and Pool emit any", declaration.Name, declaration.Events)
+		}
+	}
+	scopes := map[string]string{}
+	for _, declaration := range declarations {
+		for _, operation := range declaration.Operations {
+			if operation.Scope == "schema" {
+				scopes[declaration.Name+"."+operation.Name] = operation.Scope
+			}
+		}
+	}
+	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema"}; !maps.Equal(scopes, want) {
+		t.Fatalf("the operations of a table as a whole = %v, want %v", scopes, want)
+	}
+	if got := byName["Budget"].Contracts; len(got) != 1 || got[0].Name != "Capacity" || got[0].Role != "implements" {
+		t.Fatalf("Budget's contracts = %+v, want it to implement Capacity", got)
+	}
+	if got := byName["Pool"].Contracts; len(got) != 1 || got[0].Name != "Capacity" || got[0].Role != "asks" {
+		t.Fatalf("Pool's contracts = %+v, want it to ask Capacity", got)
 	}
 	for _, field := range declarations[0].Fields {
 		if field.Optional {

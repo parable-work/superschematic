@@ -26,7 +26,12 @@
 //!   recording reads; a hand-written file declares it where it wants one.
 //! - `instances.create`, `update`, `delete` and `invoke` run the core's
 //!   commands, an update's, a delete's and an invoke's `preconditions`
-//!   option the command's preconditions (D16, D104); `get`, `list` and
+//!   option the command's preconditions (D16, D104); `invokeSchema` runs an
+//!   operation of the table as a whole as a command without a row
+//!   ([`superschematic_rules::Action::TableOperation`], D104), on the one
+//!   use of the type whose behavior declares it on the table, and skips one
+//!   a behavior declares on a namespace, which the core runs no command
+//!   for; `get`, `list` and
 //!   `events.read` read the host. A write's
 //!   own date-time fields are stored in their canonical form, as the
 //!   engine's parse of the scalar stores them. A record is compared by its
@@ -1957,36 +1962,89 @@ impl<'r> Run<'r> {
         })
     }
 
-    // invoke_schema maps no operation of a type as a whole: a row's core
-    // runs a row's operations (D104). One a behavior the core runs
-    // declares of its table (Lease's expireHolder) is skipped with that
-    // reason, the scenario stopping there when it wrote rows the steps
-    // after it read; any other is outside the host's surface.
+    // invoke_schema runs an operation of a type as a whole as a command
+    // without a row (D104), on the one use of the live type whose behavior's
+    // core declaration gives the operation on the table, as the step's
+    // principal, and compares its result as an invoke's. One a behavior the
+    // core runs declares on a namespace as a whole is skipped; an operation
+    // no use declares is outside the host's surface; and one more than one
+    // use declares is skipped, since the engine's call names no use.
     fn invoke_schema(&mut self, cx: &Cx<'_>) -> Done {
-        let operation = cx.args.get(1).and_then(Value::as_str).unwrap_or_default();
-        let declared = cx
+        let (Some(type_name), Some(operation)) = (
+            cx.args.first().and_then(Value::as_str),
+            cx.args.get(1).and_then(Value::as_str),
+        ) else {
+            return Done::Skipped("an invokeSchema without a schema and an operation".to_owned());
+        };
+        let params = cx.args.get(2).cloned().unwrap_or_else(|| json!({}));
+        let options = cx
             .args
-            .first()
-            .and_then(Value::as_str)
-            .and_then(|type_name| self.engines[cx.at].host.store().live(type_name))
-            .is_some_and(|spec| {
+            .get(3)
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(reason) = unmapped_options(&options, &[]) {
+            return Done::Skipped(reason);
+        }
+        let engine = &self.engines[cx.at];
+        let live_version = engine.host.store().live_version(type_name);
+        let live = engine.host.store().live(type_name);
+        let uses: Vec<String> = live
+            .map(|spec| {
                 spec.uses
                     .iter()
-                    .any(|entry| declares_row_less(&entry.behavior, operation))
-            });
-        if !declared {
-            return Done::Halted(
-                "instances.invokeSchema is outside the reference host's surface, and the steps after it may read what it changed"
-                    .to_owned(),
-            );
-        }
-        let reason = format!(
-            "{operation} runs on the table as a whole, which waits for a command without a row (D104)"
-        );
-        match cx.expected {
-            Expected::Error(_) => Done::Skipped(reason),
-            _ => Done::Halted(reason),
-        }
+                    .filter(|entry| {
+                        engine
+                            .host
+                            .core()
+                            .declaration(&entry.behavior)
+                            .is_some_and(|declaration| {
+                                declaration.find_table_operation(operation).is_some()
+                            })
+                    })
+                    .map(|entry| entry.id().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let namespaced = live.is_some_and(|spec| {
+            spec.uses
+                .iter()
+                .any(|entry| declares_namespace_operation(&entry.behavior, operation))
+        });
+        let outcome = match uses.as_slice() {
+            [] if namespaced => {
+                return Done::Skipped(format!(
+                    "{operation} runs on a namespace as a whole, which the core runs no command for (D104)"
+                ))
+            }
+            [] => {
+                return Done::Halted(
+                    "instances.invokeSchema is outside the reference host's surface, and the steps after it may read what it changed"
+                        .to_owned(),
+                )
+            }
+            [use_id] => {
+                let command = Command::new(
+                    cx.caller.clone(),
+                    cx.now,
+                    Action::TableOperation {
+                        use_id: use_id.clone(),
+                        operation: operation.to_owned(),
+                        params,
+                    },
+                );
+                self.execute(cx.at, type_name, command)
+                    .map(|applied| applied.result().clone())
+            }
+            _ => {
+                return Done::Skipped(format!(
+                    "more than one use of {type_name} declares {operation} on the table"
+                ))
+            }
+        };
+        self.judge(cx, type_name, live_version, outcome, |checks, e, a| {
+            checks.eq("result", e, a);
+        })
     }
 
     fn get(&mut self, cx: &Cx<'_>) -> Done {
@@ -2397,10 +2455,10 @@ fn sets_limit_field(store: &Store, type_name: &str, params: &Value) -> bool {
     })
 }
 
-// declares_row_less says whether a behavior the core runs declares an
-// operation of its table or namespace as a whole by a name, which its
+// declares_namespace_operation says whether a behavior the core runs
+// declares an operation of a namespace as a whole by a name, which its
 // declaration file holds and the core's declaration leaves out (D104).
-fn declares_row_less(behavior: &str, operation: &str) -> bool {
+fn declares_namespace_operation(behavior: &str, operation: &str) -> bool {
     superschematic_rules_behaviors::DECLARATIONS
         .iter()
         .any(|text| {
@@ -2413,10 +2471,7 @@ fn declares_row_less(behavior: &str, operation: &str) -> bool {
                     .flatten()
                     .any(|declared| {
                         declared.get("name").and_then(Value::as_str) == Some(operation)
-                            && matches!(
-                                declared.get("scope").and_then(Value::as_str),
-                                Some("schema" | "namespace")
-                            )
+                            && declared.get("scope").and_then(Value::as_str) == Some("namespace")
                     })
         })
 }
@@ -3048,19 +3103,14 @@ fn recorded_declaration(declaration: &Value) -> Value {
         names.sort();
         names
     };
-    // An operation of a table or a namespace as a whole, which a row's core
-    // does not run (D104), is left out.
+    // An operation of a namespace as a whole, which the core runs no
+    // command for (D104), is left out; one of the table is the core's.
     let mut operations: Vec<(String, bool)> = declaration
         .get("operations")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|operation| {
-            !matches!(
-                operation.get("scope").and_then(Value::as_str),
-                Some("schema" | "namespace")
-            )
-        })
+        .filter(|operation| operation.get("scope").and_then(Value::as_str) != Some("namespace"))
         .filter_map(|operation| {
             Some((
                 operation.get("name")?.as_str()?.to_owned(),

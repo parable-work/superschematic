@@ -98,6 +98,13 @@ func TestWriteTypesGolden(t *testing.T) {
 		// schedules with no repository, no upserts, runDeadline, runChange
 		// and runEvent, and its event queue in queues.ts and the layout.
 		{service: "fixture-schedules-db", behaviors: true},
+		// A table that implements Pool and Budget (D104): Pool's markOut and
+		// reportRoom under pool with the row's key, and its pick, an
+		// operation of the table as a whole, with none (TableOperations);
+		// Budget's meters, holds and buckets with no repository, no
+		// upserts, runDeadline and runEvent, and its deadline and event
+		// queues in queues.ts and the layout.
+		{service: "fixture-pool-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

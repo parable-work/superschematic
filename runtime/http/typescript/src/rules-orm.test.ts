@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import pg from 'pg';
 import { NotFoundError, ormOf, type Clauses, type Orm, type OrmDefinition, type TableDefinition, type WriteOptions } from './orm';
-import { RulesRefusal, withRulesCore, type BehaviorEvents, type RulesCallOptions, type RulesLayout } from './rules';
+import { RulesRefusal, withRulesCore, type BehaviorEvents, type CoreReadRequest, type CoreRowWrite, type RulesCallOptions, type RulesCore, type RulesLayout, type RulesTableCallOptions } from './rules';
 import { bumpVersion, rulesCore, rulesDsn } from './rules.testing';
 import { uuidToDb } from './uuid';
 
@@ -16,7 +16,9 @@ import { uuidToDb } from './uuid';
 // are held to the rules those uses hold an update to (D104); and a
 // repository's runEvent, which spends a worker's claim of a message of the
 // table's event queue, written here by hand as the adapter writes one, and
-// runs the project's handler in one transaction with it (D104). Postgres
+// runs the project's handler in one transaction with it (D104); and an
+// operation of the table as a whole, which a use's member holds with no key
+// and the repository runs as a command without a row (D104). Postgres
 // alone, the ORM's one dialect. Skipped without
 // SUPERSCHEMATIC_RULES_TEST_DATABASE_URL; the generated package's own
 // end-to-end test runs the generated definition itself.
@@ -482,6 +484,48 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     expect(await stored()).toEqual(gone);
     expect(gone).toMatchObject({ title: 'Drip', status: 'draft' });
     expect(Number(gone._version)).toBe(2);
+  });
+
+  test("an operation of the table as a whole sits under its use's member with no key, and runs in a transaction as a command without a row, as the call's caller (D104)", async () => {
+    // A core of the test's own for the table's operation sweep, the real
+    // one for the rest: it reads every live Order whose title is
+    // params.title, moves each to paid held to the version it read, and
+    // answers their keys and who called.
+    const sweeping: RulesCore = {
+      run(spec, command, answers = {}) {
+        const action = command.action;
+        if (action.kind !== 'tableOperation') return rulesCore!.run(spec, command, answers);
+        const request: CoreReadRequest = { kind: 'rows', type: 'Order', equal: { title: (action.params as { title: string }).title }, limit: 500 };
+        const read = (answers.reads ?? []).find(known => JSON.stringify(known.request) === JSON.stringify(request));
+        if (read === undefined || !('linked' in read.answer)) return { read: [request] };
+        const rows = read.answer.linked.rows;
+        const writes: CoreRowWrite[] = rows.map(({ key, row }) => ({ kind: 'update', type: 'Order', key, expectedVersion: row.version, own: {}, owned: { status: { status: 'paid' } } }));
+        return { done: { changed: { rows: writes, subRows: [], events: [], deadlines: [], result: { swept: rows.map(row => row.key).sort(), by: command.caller.subject } } } };
+      },
+    };
+    const use = rules.types.Order!.uses[0]!;
+    const layout: RulesLayout = { types: { ...rules.types, Order: { ...rules.types.Order!, uses: [{ ...use, operations: [...use.operations, { name: 'sweep', writes: true, table: true }] }] } } };
+    interface Sweeping {
+      readonly order: {
+        createOne(input: { title: string }): Promise<OrderRow>;
+        getOne(id: string): Promise<OrderRow>;
+        readonly status: {
+          transition(key: string, params: { to: string }, options?: RulesCallOptions): Promise<{ from: string; to: string }>;
+          sweep(params: { title: string }, options?: RulesTableCallOptions): Promise<{ swept: string[]; by: string }>;
+        };
+      };
+    }
+    const sweeper = ormOf<Sweeping>(pool, { ...definition, rules: layout }, withRulesCore(null, () => sweeping));
+    const swept = [await sweeper.order.createOne({ title: 'Sweep me' }), await sweeper.order.createOne({ title: 'Sweep me' })];
+    const spared = await sweeper.order.createOne({ title: 'Spare me' });
+    expect(await sweeper.order.status.sweep({ title: 'Sweep me' }, { caller: { subject: 'sam', permissions: [] } })).toEqual({ swept: swept.map(row => row.id).sort(), by: 'sam' });
+    for (const row of swept) expect(await sweeper.order.getOne(row.id)).toMatchObject({ status: 'paid', _version: 2 });
+    expect(await sweeper.order.getOne(spared.id)).toMatchObject({ status: 'draft', _version: 1 });
+    // In a transaction of the caller's, as its acting user, and a row's own
+    // operation beside it keeps its key.
+    expect(await sweeper.withUser('6fe1XoZ0UJpMNNdUOSMC2X').transaction(tx => tx.order.status.sweep({ title: 'Spare me' }))).toEqual({ swept: [spared.id], by: '6fe1XoZ0UJpMNNdUOSMC2X' });
+    expect(await sweeper.order.status.sweep({ title: 'Nobody' })).toEqual({ swept: [], by: '' });
+    expect(await sweeper.order.getOne(spared.id)).toMatchObject({ status: 'paid', _version: 2 });
   });
 
   test('an ORM opened with no core refuses a write of the table, and a use named as a member of the repository is refused', async () => {

@@ -99,7 +99,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
     Behavior, Change, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, GuardRequest, Hook,
-    KeyedRow, SchemaIssue, Veto, View,
+    KeyedRow, SchemaIssue, Stop, Veto, View,
 };
 
 use crate::declared;
@@ -644,17 +644,32 @@ fn release(
         }
     }
     let mut expired = Vec::new();
+    // A row whose call waits on the host goes on to the next, so one round
+    // answers every row's next read (Stop::is_waiting); the wait is
+    // returned at the end, over a refusal after it.
+    let mut waiting: Option<Stop> = None;
     for (key, form) in held {
-        let answer = cx.call_on(
+        let answer = match cx.call_on(
             table,
             &key,
             &lease,
             LEASE_EXPIRE,
             &json!({ "holder": form, "notRenewedAfter": seen }),
-        )?;
+        ) {
+            Ok(answer) => answer,
+            Err(stop) if stop.is_waiting() => {
+                waiting.get_or_insert(stop);
+                continue;
+            }
+            Err(_) if waiting.is_some() => continue,
+            Err(stop) => return Err(stop),
+        };
         if answer.get("expired") == Some(&Value::Bool(true)) {
             expired.push(key);
         }
+    }
+    if let Some(stop) = waiting {
+        return Err(stop);
     }
     Ok(expired)
 }

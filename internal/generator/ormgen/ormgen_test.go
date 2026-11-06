@@ -63,6 +63,13 @@ const seatsFixture = "fixture-seats-db"
 // which RunEvent spends in the transaction the project's handler runs in.
 const schedulesFixture = "fixture-schedules-db"
 
+// poolFixture is the DB fixture whose Account implements Pool and Budget
+// (D104): Pool's markOut and reportRoom under Pool(), and pick, an
+// operation of the table as a whole, a method that takes no key; Budget's
+// sub-tables; its rechecks armed on its deadline queue and the events they
+// emit, messages of its event queue, which RunEvent spends.
+const poolFixture = "fixture-pool-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -81,7 +88,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -172,9 +179,11 @@ func TestWriteORMGolden(t *testing.T) {
 		{approvalsFixture, []string{"repository_note.go", "repository_task.go", "rules.go"}},
 		// Tables that implement Lease, Retries, Presence and Budget (D104):
 		// their operations under Lease(), Retries(), Presence() and
-		// Budget(), WithPreconditions and JobLeasePrecondition, which every
-		// command through the core presents, no upsert, no repository of a
-		// sub-table, and the deadline queues of Job and Session.
+		// Budget(), Lease's expireHolder a method of the table as a whole
+		// that takes no key, WithPreconditions and JobLeasePrecondition,
+		// which every command of a row through the core presents, no
+		// upsert, no repository of a sub-table, and the deadline queues of
+		// Job and Session.
 		{agentsFixture, []string{"repository_account.go", "repository_job.go", "repository_session.go", "repository_workspace.go", "rules.go", "queues.go"}},
 		// Tables of Seats and Reconcile (D104): Seats' operations under
 		// Seats(), its seats ProblemSeatsSeat, no repository of its
@@ -186,6 +195,12 @@ func TestWriteORMGolden(t *testing.T) {
 		// queues, and RunEvent, which spends a claimed event and runs the
 		// project's handler in one transaction.
 		{schedulesFixture, []string{"repository_problem.go", "rules.go", "queues.go"}},
+		// A table of Pool and Budget (D104): Pool's operations under
+		// Pool(), pick among them a method of the table as a whole that
+		// takes no key and runs as a command without a row, Budget's under
+		// Budget(), no repository of a sub-table, and its deadline and
+		// event queues.
+		{poolFixture, []string{"repository_account.go", "rules.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

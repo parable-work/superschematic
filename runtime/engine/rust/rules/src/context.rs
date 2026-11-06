@@ -20,15 +20,21 @@
 //! reaches another use's state, on its row or another, through that use's
 //! operations ([`Cx::call`], [`Cx::call_on`]). The command's own operation
 //! may write nothing at all ([`Cx::unchanged`]), as an idempotent one does.
+//!
+//! An operation of the table as a whole (D104) runs on no row
+//! ([`View::on_table`]): it reads the rows of a type through
+//! [`View::read_rows`], asks the uses that implement a contract about each
+//! ([`View::ask`]), and reaches a row only through [`Cx::call_on`] and
+//! [`Cx::create_row`]; a write of its own state is a defect.
 
 use std::ops::Deref;
 
 use serde_json::{Map, Value};
 
-use crate::behavior::{Hook, Stop};
+use crate::behavior::{ContractQuery, Hook, Stop};
 use crate::changes::{DeadlineChange, OutboxEvent, SubRowChange, SubRowWrite};
 use crate::command::Caller;
-use crate::reads::{Answer, LinkedRows, LockKey, ReadRequest, Row, SubRow};
+use crate::reads::{Answer, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow, TableRef};
 use crate::refusal::{Refusal, Veto};
 use crate::run::{Frame, Run};
 use crate::spec::{Anchor, TypeSpec};
@@ -82,9 +88,16 @@ impl<'r, C> View<'r, C> {
     }
 
     /// The key of the row the hook runs on; `None` for a create the host
-    /// keys.
+    /// keys, and for an operation of the table as a whole.
     pub fn key(&self) -> Option<&'r str> {
         self.frame.key
+    }
+
+    /// Whether the hook runs on the table as a whole, for an operation of
+    /// a table (D104): no row, so `own`, `get` and `version` read nothing
+    /// and a write of the row's state is a defect.
+    pub fn on_table(&self) -> bool {
+        self.run.on_table(self.frame)
     }
 
     /// The command's time, in epoch milliseconds.
@@ -211,6 +224,57 @@ impl<'r, C> View<'r, C> {
             value.clone(),
             after,
         ))
+    }
+
+    /// One page of the live rows of a type, as the host read them
+    /// ([`ReadRequest::Rows`], D104): those whose own fields `equal` names
+    /// hold its values (null: no value), each with the sub-table rows
+    /// `tables` names, in key order, [`crate::LINKED_PAGE`] at most, after
+    /// the key `after` when given. A rule over a table's rows pages it to the
+    /// end (Pool's pick); the run's own writes are not in it.
+    pub fn read_rows(
+        &self,
+        type_name: &str,
+        equal: &Map<String, Value>,
+        tables: &[TableRef],
+        after: Option<&str>,
+    ) -> Hook<&'r LinkedRows> {
+        self.run.read_linked(&ReadRequest::rows(
+            type_name,
+            equal.clone(),
+            tables.to_vec(),
+            after,
+        ))
+    }
+
+    /// The uses of a type whose behaviors' declarations implement a
+    /// contract (D104), in the type's list order: each use's id. The
+    /// command's own type reads no host; another's spec is read.
+    pub fn implementers(&self, type_name: &str, contract: &str) -> Hook<Vec<String>> {
+        self.run.implementers(type_name, contract)
+    }
+
+    /// The sub-tables a read across a type takes with each row so its uses
+    /// that implement a contract can answer about it: every sub-table each
+    /// such use's behavior declares, in list order and declaration order.
+    pub fn contract_tables(&self, type_name: &str, contract: &str) -> Hook<Vec<TableRef>> {
+        self.run.contract_tables(type_name, contract)
+    }
+
+    /// Asks every use of a row's type that implements a contract a query
+    /// about the row (D104), as a read across the table gave it with the
+    /// sub-tables [`View::contract_tables`] names, at the command's time:
+    /// each implementer's use id and answer, in list order; none when no
+    /// use implements it. Asking a contract the asking use's declaration
+    /// does not list in `asks` is a defect; an implementer that answers no
+    /// such query is the implementer's defect.
+    pub fn ask(
+        &self,
+        type_name: &str,
+        row: &KeyedRow,
+        query: &ContractQuery<'_>,
+    ) -> Hook<Vec<(String, Value)>> {
+        self.run.ask(self.frame, self.index, type_name, row, query)
     }
 
     /// A row of any type as the run has it: with its writes so far applied
@@ -341,6 +405,14 @@ impl<'r, C> Cx<'r, C> {
         self.writable
     }
 
+    // off_table refuses a write of the row's own state on the table as a
+    // whole, which an operation of the table runs on (D104).
+    fn off_table(&self, what: &str) -> Hook<()> {
+        self.view
+            .run
+            .off_table(self.view.frame, self.view.index, what)
+    }
+
     // writing refuses a write from a read-only context, and one after the
     // command's operation said it writes nothing.
     fn writing(&self, what: &str) -> Hook<()> {
@@ -378,6 +450,7 @@ impl<'r, C> Cx<'r, C> {
     /// Sets one of the use's owned fields, by its declared name; null
     /// clears it.
     pub fn set(&self, field: &str, value: impl Into<Value>) -> Hook<()> {
+        self.off_table(&format!("set({field})"))?;
         self.writing(&format!("set({field})"))?;
         let view = &self.view;
         let declaration = view.run.declaration(view.frame, view.index);
@@ -412,6 +485,7 @@ impl<'r, C> Cx<'r, C> {
     }
 
     fn sub_row(&self, call: &str, table: &str, key: &str, change: SubRowChange) -> Hook<()> {
+        self.off_table(&format!("{call}({table})"))?;
         self.writing(&format!("a write of sub-table {table}"))?;
         let view = &self.view;
         let declaration = view.run.declaration(view.frame, view.index);
@@ -456,6 +530,7 @@ impl<'r, C> Cx<'r, C> {
     /// code is; the payload is the behavior's to hold to the kind's
     /// payloadSchema, which the core does not run.
     pub fn emit(&self, kind: &str, payload: Value) -> Hook<()> {
+        self.off_table(&format!("emit({kind})"))?;
         self.writing(&format!("emit({kind})"))?;
         if kind.is_empty() {
             return Err(self.defect("emit takes a kind: a non-empty string"));
@@ -486,6 +561,7 @@ impl<'r, C> Cx<'r, C> {
     /// Arming one that is armed moves it. A behavior whose declaration
     /// arms no deadlines arms none.
     pub fn arm(&self, name: &str, at: i64, payload: Value) -> Hook<()> {
+        self.off_table(&format!("arm({name})"))?;
         self.writing(&format!("arm({name})"))?;
         if name.is_empty() {
             return Err(self.defect("arm takes a deadline's name: a non-empty string"));
@@ -509,6 +585,7 @@ impl<'r, C> Cx<'r, C> {
     /// Clears one of the use's deadlines on the row; one not armed stays
     /// so.
     pub fn clear(&self, name: &str) -> Hook<()> {
+        self.off_table(&format!("clear({name})"))?;
         self.writing(&format!("clear({name})"))?;
         self.arming(&format!("clear({name})"))?;
         let view = &self.view;
@@ -550,9 +627,10 @@ impl<'r, C> Cx<'r, C> {
     /// Calls an operation of a use of the row (its own or another's), by
     /// the use's id: the operation's parameter check, every use's guard in
     /// list order (each told the call is this use's), and its handler. Its
-    /// effects join the run's change set; when it is refused they are
-    /// undone and the refusal returns, which the caller may pass on or go
-    /// on past. A read-only operation calls only operations that do not
+    /// effects join the run's change set; when it is refused, or waits on a
+    /// read or a lock the host has not answered, they are undone and the
+    /// stop returns, which the caller may pass on or go on past
+    /// ([`crate::Stop::is_waiting`]). A read-only operation calls only operations that do not
     /// write. A deadline's handler's call is the request of the worker that
     /// runs the deadline, which each guard is told (`fired`), as the
     /// engine's runner made it as its principal (D103).

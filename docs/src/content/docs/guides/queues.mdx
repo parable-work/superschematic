@@ -440,9 +440,10 @@ behaviors' core
 ([The worker](/superschematic/guides/api-routes/#the-worker)), and its
 deadline and change handlers are generated: your implementation has no
 method for them. A table whose behaviors emit events, a schedule's runs
-among them
-([A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules)),
-keeps a third queue, its event queue (`problem_event_queue`), whose
+([A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules))
+and a pool member's rechecks
+([A pool of members](/superschematic/guides/database-tables/#a-pool-of-members))
+among them, keeps a third queue, its event queue (`problem_event_queue`), whose
 messages the worker hands to your code. The API's `Workers` gets a method
 per event kind of each use of the table, named for the worker, the use and
 the kind, its event typed by the kind's payload (D104):
@@ -493,8 +494,8 @@ for `stack queue dead|retry|drop`. One row's events reach the method in
 the order they were written, so a failing one holds that row's later
 ones until it runs or is dead. Delivery is at least once, so make the
 method safe to run twice, by the row's key and what the payload says (a
-schedule's `name`, `setAt`, `run` and `attempt`, which no two fires
-share). A row deleted after its event
+schedule's `name`, `setAt`, `run` and `attempt`, a pool member's
+`dueAt`, which no two fires share). A row deleted after its event
 was written is gone when the method runs: complete the event (the
 repository's `not_found`). An event no method takes, a use or kind the
 build no longer knows, fails until it is dead. The scaffold stubs each
@@ -502,6 +503,28 @@ method, failing every event until you write it, and a build over an
 implementation that predates them fails, saying what to add, as it does
 for a `@worker`. A behavior worker of a table that emits no events has no
 method, and an API whose workers are all such needs no `Workers`.
+
+A pool member's recheck is such an event: the core calls no provider, so
+your method asks the member's provider whether it has room and reports
+what it says through the event's transaction. A check with room made at
+or after the member's `outUntil` opens it and clears the recheck; one
+without moves it, and while the member stays out a recheck comes again
+every `recheckAfterMs`:
+
+```ts
+export const createWorkers: WorkersConstructor = deps => ({
+  async accountRechecksPoolRecheck(event, tx) {
+    // Ask the account's provider for its usage (code of your own), then report it.
+    const { room, near, resetsAt } = await askProvider(event.key);
+    await tx.account.pool.reportRoom(event.key, room ? { room, near } : { room, resetsAt });
+  },
+});
+```
+
+In Rust the method reports with `run.operation("Account", &event.key,
+"Pool", "reportRoom", &json!({ "room": true }))`. A provider you cannot
+reach is an error: the event is due again after the queue's backoff, and
+the next recheck emits another.
 
 ## Run it
 

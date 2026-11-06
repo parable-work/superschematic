@@ -105,14 +105,28 @@ func (o *APIOutput) HasBehaviorPreconditions() bool {
 }
 
 // BehaviorRunner is the function a behavior endpoint's handler runs its
-// operation with: runBehaviorOperationWithPreconditions for one whose
-// input carries the caller's preconditions, runBehaviorOperation
-// otherwise.
+// operation with: runTableBehaviorOperation for an operation of the table
+// as a whole (D104), whose route and ORM method take no key;
+// runBehaviorOperationWithPreconditions for one whose input carries the
+// caller's preconditions; runBehaviorOperation otherwise.
 func (e EndpointInfo) BehaviorRunner() string {
+	if bo := e.BehaviorOperation(); bo != nil && bo.Table {
+		return "runTableBehaviorOperation"
+	}
 	if e.BehaviorPreconditions {
 		return "runBehaviorOperationWithPreconditions"
 	}
 	return "runBehaviorOperation"
+}
+
+// HasTableBehaviorEndpoints reports whether the API serves an operation of
+// a table as a whole (D104), a command without a row: behaviors.go then
+// holds the handler's runTableBehaviorOperation.
+func (o *APIOutput) HasTableBehaviorEndpoints() bool {
+	return slices.ContainsFunc(o.HandlerEndpoints(), func(ep EndpointInfo) bool {
+		bo := ep.BehaviorOperation()
+		return bo != nil && bo.Table
+	})
 }
 
 // BehaviorResultGoType is the Go type a behavior endpoint's handler

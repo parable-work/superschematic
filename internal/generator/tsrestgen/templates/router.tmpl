@@ -344,17 +344,26 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
   });
 {{- else if .Behavior }}
+{{- if .Behavior.Table }}
+  // {{ .Behavior.Type }}'s {{ .Behavior.Use }} {{ .Behavior.Operation }}, a {{ .Behavior.Behavior }}'s operation of the table as a
+  // whole (D104): the repository runs it through the behaviors' core as a
+  // command without a row, as the request's caller, and a refusal of the
+  // core's is the problem of its status, code and message.
+{{- else }}
   // {{ .Behavior.Type }}'s {{ .Behavior.Use }} {{ .Behavior.Operation }}, a {{ .Behavior.Behavior }} (D103): the
   // repository runs it through the behaviors' core as the request's
   // caller, and a refusal of the core's is the problem of its status,
   // code and message.
+{{- end }}
   mountOperation(
     router,
     operationSpecs.{{ .Key }},
     (ctx, request) =>
       behaviorOperation(() =>
         options.orm.{{ .Behavior.Method }}(
+{{- if not .Behavior.Table }}
           request.path[{{ tsString .Behavior.Key.Name }}] as {{ .Behavior.Key.TSType }},
+{{- end }}
 {{- if and .HasInput .Behavior.Preconditions }}
           // The repository's parameters: the wire values of {{ .InputType }},
           // each optional member that is null left out and its preconditions

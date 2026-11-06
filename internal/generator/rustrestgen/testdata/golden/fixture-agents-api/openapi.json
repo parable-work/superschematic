@@ -839,6 +839,87 @@
         ],
         "type": "object"
       },
+      "JobLeaseExpireHolderInput": {
+        "description": "The parameters of Job's lease expireHolder.",
+        "properties": {
+          "holder": {
+            "description": "The principal whose leases to expire.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "notRenewedAfter": {
+            "description": "As expire's: an active lease acquired or renewed after this time is spared.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "holder"
+        ],
+        "type": "object"
+      },
+      "JobLeaseExpireHolderReasons": {
+        "description": "How many leases a JobLease's expireHolder expired for each reason expire gives, by reason; a reason none expired for is absent.",
+        "properties": {
+          "holder": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "maxHold": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "ttl": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseExpireHolderResult": {
+        "description": "What Job's lease expireHolder returns.",
+        "properties": {
+          "expired": {
+            "description": "How many leases expired.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "ids": {
+            "description": "The instances whose lease expired, by id.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reasons": {
+            "$ref": "#/components/schemas/JobLeaseExpireHolderReasons",
+            "description": "How many expired for each reason expire gives, by reason; a reason none expired for is absent."
+          }
+        },
+        "required": [
+          "expired",
+          "ids",
+          "reasons"
+        ],
+        "type": "object"
+      },
       "JobLeaseExpireInput": {
         "description": "The parameters of Job's lease expire.",
         "properties": {
@@ -2844,6 +2925,133 @@
           "lifecycle": "active",
           "mappingStatus": "mapped",
           "title": "Account status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/lease/expire-holder": {
+      "post": {
+        "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+        "operationId": "JobLeaseExpireHolderHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseExpireHolderInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobLeaseExpireHolderResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: expire holder",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.expire-holder",
+          "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: expire holder",
           "visibility": "public"
         }
       }

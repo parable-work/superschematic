@@ -19,9 +19,11 @@ import (
 // handler runs it through the behaviors' core: src/behaviors.rs hands it to
 // superschematic-rules-adapter, with the core of
 // superschematic-rules-behaviors and the database's layout document, in a
-// transaction of the database's pool. The namespace traits have no method
-// for it, and the scaffold none. Rust has no ORM: the crate calls the
-// adapter itself.
+// transaction of the database's pool. An operation of the table as a whole
+// (D104: Pool's pick, Lease's expireHolder), routed with no key, runs as a
+// command without a row through the adapter's run_table_operation. The
+// namespace traits have no method for it, and the scaffold none. Rust has
+// no ORM: the crate calls the adapter itself.
 //
 // Its behavior workers (@behaviorWorker, D103) run a table's behavior
 // queues the same way: src/behaviors.rs opens each queue on a pool of the
@@ -62,8 +64,13 @@ type BehaviorInfo struct {
 	Operation string
 
 	// KeyField is the Args field of the row's key, the route's path
-	// parameter.
+	// parameter; empty for an operation of the table as a whole.
 	KeyField string
+
+	// Table is true for an operation of the table as a whole (D104), a
+	// declaration's scope schema: its route names no row, and its handler
+	// runs it as a command without a row (behaviors::run_table_operation).
+	Table bool
 
 	// Writes is the declaration's writes: the operation changes stored
 	// state.
@@ -119,7 +126,16 @@ func behaviorInfo(endpoint apigen.EndpointInfo, info EndpointInfo) (*BehaviorInf
 		Behavior:    op.Behavior,
 		Operation:   op.Operation,
 		Writes:      op.Writes,
+		Table:       op.Table,
 		Permissions: op.Permissions,
+	}
+	if op.Table {
+		// A command without a row (D104): its route names none, and its
+		// input presents no preconditions, a row's.
+		if len(info.PathArgs) > 0 || len(info.BodyArgs) > 0 || len(info.QueryArgs) > 0 || info.Page != nil {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s runs %s's %s %s on the table as a whole (D104), whose argument is its input alone", endpoint.Namespace, endpoint.Name, op.Type, op.Use, op.Operation)
+		}
+		return b, nil
 	}
 	for _, arg := range info.PathArgs {
 		if arg.Name == op.Key {
@@ -147,6 +163,18 @@ func behaviorInfo(endpoint apigen.EndpointInfo, info EndpointInfo) (*BehaviorInf
 func (o *APIOutput) HasBehaviorOperations() bool {
 	for _, endpoint := range o.Endpoints {
 		if endpoint.Behavior != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// HasTableBehaviorOperations reports whether the router mounts a behavior
+// operation of a table as a whole (D104): src/behaviors.rs then has
+// run_table_operation, which that operation's handler calls.
+func (o *APIOutput) HasTableBehaviorOperations() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Behavior != nil && endpoint.Behavior.Table {
 			return true
 		}
 	}
@@ -284,7 +312,7 @@ func (o *APIOutput) BehaviorUses() []string {
 		adapter = append(adapter, "Error", "Refusal")
 		runtime = append(runtime, "ApiError", "RequestContext")
 	}
-	if o.HasBehaviorPreconditions() {
+	if o.HasBehaviorPreconditions() || o.HasTableBehaviorOperations() {
 		adapter = append(adapter, "ExecuteOptions")
 	}
 	if len(o.BehaviorWorkers) > 0 {
@@ -564,7 +592,8 @@ func rustCall(indent, fn string, args []string, tail string) string {
 // whose parameters declare no property, the empty object the Go and
 // TypeScript servers send. An operation whose input carries the caller's
 // preconditions calls behaviors::run_operation_with_preconditions, which
-// takes them out of it (D16, D104).
+// takes them out of it (D16, D104); one of the table as a whole calls
+// behaviors::run_table_operation, with no key (D104).
 func (e EndpointInfo) BehaviorCall() string {
 	b := e.Behavior
 	params := "&Value::Object(Default::default())"
@@ -584,6 +613,10 @@ func (e EndpointInfo) BehaviorCall() string {
 		rustString(b.Use),
 		rustString(b.Operation),
 		params,
+	}
+	if b.Table {
+		run = "run_table_operation"
+		args = slices.Delete(args, 3, 4)
 	}
 	head := indent + "let result: Result<" + e.OutputRustType + ", ApiError> = behaviors::" + run + "("
 	return head + "\n" + indent + indent + strings.Join(args, ",\n"+indent+indent) + ",\n" + indent + ")\n" + indent + ".await;"

@@ -39,6 +39,8 @@ if TYPE_CHECKING:
         JobLeaseAcquireResult,
         JobLeaseDirectInput,
         JobLeaseDirectResult,
+        JobLeaseExpireHolderInput,
+        JobLeaseExpireHolderResult,
         JobLeaseExpireInput,
         JobLeaseExpireResult,
         JobLeaseHeartbeatInput,
@@ -749,6 +751,25 @@ class JobLeaseOperations:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
+    def expire_holder(self, input_data: JobLeaseExpireHolderInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> JobLeaseExpireHolderResult:
+        path = "/api/job/lease/expire-holder"
+        if input_data is None:
+            raise ValidationError(
+                {"": [{"validator": "required", "message": "input is required"}]},
+            )
+        validated_input_data = self._validate_input_model(input_data, "JobLeaseExpireHolderInput")
+        query_params: dict[str, Any] | None = None
+        payload: Any = self._client.to_dict(validated_input_data)
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "JobLeaseExpireHolderResult", False)
     def acknowledge(self, id: str, input_data: JobLeaseAcknowledgeInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> GenericJSON:
         path = f"/api/job/{path_segment(id)}/lease/acknowledge"
         if input_data is None:

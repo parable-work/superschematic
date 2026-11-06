@@ -498,10 +498,11 @@ docs:
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
 # fixture-timers-json, fixture-workqueue-json, fixture-commerce-json,
-# fixture-derived-json and the TypeScript fixture-seats-db and
-# fixture-schedules-db, whose types and tables compose the core's behaviors
-# (D10, D104): --emit-ir carries all thirty-one, Seats, Reconcile and
-# Schedules on their tables, and json-schema admits them; fixture-commerce-currency-json
+# fixture-derived-json and the TypeScript fixture-seats-db,
+# fixture-schedules-db and fixture-pool-db, whose types and tables compose
+# the core's behaviors (D10, D104): --emit-ir carries all thirty-two, Seats,
+# Reconcile, Schedules and Pool on their tables, and json-schema admits
+# them; fixture-commerce-currency-json
 # holds a commerce currency in a Finance.Currency own field (D70). The
 # engine runs the first eleven documents with its own behaviors in
 # runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
@@ -554,13 +555,15 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/tsreader/testdata/services/fixture-schedules-db --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/tsreader/testdata/services/fixture-pool-db --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-currency-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/commerce-currency-ir.json
 	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
 		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
 	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Derived Provenance \
-		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments Seats Reconcile Schedules; do \
+		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments Seats Reconcile Schedules Pool; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

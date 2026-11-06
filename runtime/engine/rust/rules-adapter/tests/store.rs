@@ -301,6 +301,32 @@ impl Db {
         )
     }
 
+    /// Runs an operation of a use on the table as a whole as a caller
+    /// (D104), a command without a row, with what the options give it
+    /// beside.
+    #[allow(clippy::too_many_arguments)]
+    async fn operate_table(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        use_id: &str,
+        operation: &str,
+        params: Value,
+        caller: Caller,
+        options: &ExecuteOptions,
+    ) -> Result<Value, Error> {
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_table_operation(
+                host, &tx, type_name, use_id, operation, params, caller, options
+            ),
+            superschematic_rules_adapter::postgres::run_table_operation(
+                host, &tx, type_name, use_id, operation, params, caller, options
+            )
+            .await
+        )
+    }
+
     /// An update of a row's own fields as a caller with what the options
     /// give it beside.
     async fn update_with(
@@ -1057,6 +1083,10 @@ on_each_dialect!(a_refused_or_moved_command_writes_no_event);
 on_each_dialect!(a_change_set_with_an_event_on_a_table_with_no_event_queue_is_refused_as_internal_naming_the_table_and_the_use);
 on_each_dialect!(spend_event_spends_a_claimed_message_and_a_lost_claim_spends_nothing);
 on_each_dialect!(read_queued_events_reads_one_rows_events_in_the_order_written);
+on_each_dialect!(
+    a_read_across_a_table_reads_the_live_rows_its_equality_keeps_each_with_its_sub_table_rows
+);
+on_each_dialect!(an_operation_of_the_table_writes_each_row_its_calls_reach_held_to_its_version);
 
 /// Creates Order o1, titled Desk, at `at`.
 async fn desk(
@@ -2918,4 +2948,245 @@ async fn a_lapsed_lease_is_taken_again_and_a_delete_presents_the_token(
     assert!(db.read(&at, "Job", "j1").await.expect("read").is_none());
     assert!(jobs.sub_rows(db, "Retries", "attempts").await.is_empty());
     assert!(db.messages("job_deadline_queue", "j1").await.is_empty());
+}
+
+/// A UUID's hyphenated text in its base62 wire form, as the core names a
+/// row of a UUID key (D79).
+fn wire(hyphenated: &str) -> String {
+    const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let mut n = u128::from_str_radix(&hyphenated.replace('-', ""), 16).expect("a UUID");
+    let mut out = Vec::new();
+    while n > 0 {
+        out.push(BASE62[(n % 62) as usize]);
+        n /= 62;
+    }
+    out.reverse();
+    String::from_utf8(out).expect("base62 is ASCII")
+}
+
+/// Probe's rows P1 to P4 created through the core at 9,000,000, each of
+/// whose Timers arms its `expire` a second on, a row of its sub-table: P1
+/// and P2 Desks of OWNER, in either of its forms, P1 done; P3 a Chair; and
+/// P4 a Desk of OWNER soft-deleted. Answers the versions of P1 to P3.
+async fn probes(db: &mut Db, host: &Host<'_>) -> Vec<i64> {
+    let postgres = db.postgres();
+    for (key, own) in [
+        (
+            P1,
+            json!({"title": "Desk", "ownerId": OWNER.1, "done": true}),
+        ),
+        (P2, json!({"title": "Desk", "ownerId": OWNER.0})),
+        (P3, json!({"title": "Chair"})),
+        (P4, json!({"title": "Desk", "ownerId": OWNER.1})),
+    ] {
+        db.create(host, "Probe", own, Some(key))
+            .await
+            .expect("created");
+    }
+    let deleted = format!(
+        "UPDATE probe SET deleted_at = {} WHERE id = {}",
+        p(postgres, 1),
+        p(postgres, 2)
+    );
+    let values = [Param::text(iso(9_000_500)), Param::text(P4)];
+    assert_eq!(db.exec(&deleted, &values).await, 1);
+    let mut versions = Vec::new();
+    for key in [P1, P2, P3] {
+        let row = db.read(host, "Probe", key).await.expect("read");
+        versions.push(row.expect("a row").version);
+    }
+    versions
+}
+
+/// Finder's `rows` of Probe, an operation of Job's table as a whole, with
+/// what params give it beside the type, as alice.
+async fn rows_of_probe(db: &mut Db, host: &Host<'_>, params: Value) -> Result<Value, Error> {
+    let mut params = params;
+    params["type"] = json!("Probe");
+    let none = ExecuteOptions::default();
+    db.operate_table(host, "Job", "Finder", "rows", params, alice(), &none)
+        .await
+}
+
+/// The keys of a page of a read across a table, in its order.
+fn keys_of(page: &Value) -> Vec<String> {
+    page["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["key"].as_str().expect("a key").to_owned())
+        .collect()
+}
+
+/// A read across a table (D104), through Finder's `rows`, an operation of
+/// Job's table as a whole, of Probe's rows: the live rows each own field
+/// equal names holds, a UUID in either form and a null as none, in key
+/// order, each with its Timers deadlines, its rows of the sub-table, in one
+/// read; a soft-deleted row is left out; after a key, the rows past it; a
+/// UUID field's value that is no UUID matches no row; a field that is no
+/// own field of the table is internal; and the read-only
+/// operation writes nothing, its rows' versions where they were.
+async fn a_read_across_a_table_reads_the_live_rows_its_equality_keeps_each_with_its_sub_table_rows(
+    mut db: Db,
+) {
+    for ddl in common::job_ddl(db.postgres()) {
+        db.exec(&ddl, &[]).await;
+    }
+    let core = common::core();
+    let layout = Layout::new([common::job_table(), common::probe_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 9_000_000);
+    let versions = probes(&mut db, &host).await;
+    let timers = json!([{"useId": "Timers", "table": "deadlines"}]);
+    for owner in [OWNER.0, OWNER.1] {
+        let params = json!({"equal": {"title": "Desk", "ownerId": owner}, "tables": timers});
+        let page = rows_of_probe(&mut db, &host, params).await.expect("read");
+        assert_eq!(keys_of(&page), [wire(P1), wire(P2)], "{page}");
+        assert_eq!(page["more"], json!(false));
+        for row in page["rows"].as_array().expect("rows") {
+            assert_eq!(row["row"]["own"]["ownerId"], json!(OWNER.1), "{row}");
+            let deadlines = &row["tables"]["Timers"]["deadlines"];
+            assert_eq!(deadlines[0]["key"], json!("expire"), "{row}");
+            assert_eq!(deadlines[0]["values"]["dueAt"], json!(9_001_000), "{row}");
+        }
+    }
+    let params = json!({"equal": {"title": "Desk", "done": null}});
+    let page = rows_of_probe(&mut db, &host, params).await.expect("read");
+    assert_eq!(keys_of(&page), [wire(P2)], "a null is no value: {page}");
+    assert!(page["rows"][0].get("tables").is_none(), "{page}");
+    let params = json!({"after": wire(P1)});
+    let page = rows_of_probe(&mut db, &host, params).await.expect("read");
+    assert_eq!(keys_of(&page), [wire(P2), wire(P3)], "{page}");
+    for value in [json!("x"), json!(7)] {
+        let params = json!({"equal": {"ownerId": value}});
+        let page = rows_of_probe(&mut db, &host, params).await.expect("read");
+        assert!(keys_of(&page).is_empty(), "no UUID matches no row: {page}");
+    }
+    let refused = rows_of_probe(&mut db, &host, json!({"equal": {"owner": "x"}})).await;
+    assert_eq!(
+        refusal(refused),
+        Refusal::internal("rules: Probe has no own field owner in the behaviors' layout")
+    );
+    for (key, version) in [P1, P2, P3].into_iter().zip(versions) {
+        let row = db.read(&host, "Probe", key).await.expect("read");
+        assert_eq!(row.map(|row| row.version), Some(version), "{key}");
+    }
+}
+
+/// Jobs j1 and j2 leased by wren and j3 by otto at 1,000,000, each its
+/// expiry armed a minute on; answers their versions.
+async fn leased_jobs(db: &mut Db, host: &Host<'_>) -> Vec<i64> {
+    let none = ExecuteOptions::default();
+    let mut held = Vec::new();
+    for (key, holder) in [("j1", wren()), ("j2", wren()), ("j3", otto())] {
+        let own = json!({"title": key, "revision": 1});
+        db.create(host, "Job", own, Some(key))
+            .await
+            .expect("created");
+        let lease = ("Lease", "acquire");
+        db.operate_with(host, "Job", key, lease.0, lease.1, json!({}), holder, &none)
+            .await
+            .expect("acquired");
+        held.push(job_version(db, host, key).await);
+    }
+    held
+}
+
+/// Lease's expireHolder of a holder on Job as a caller, with what the
+/// options give it beside.
+async fn expire_holder(
+    db: &mut Db,
+    host: &Host<'_>,
+    holder: &str,
+    caller: Caller,
+    options: &ExecuteOptions,
+) -> Result<Value, Error> {
+    let params = json!({ "holder": holder });
+    db.operate_table(
+        host,
+        "Job",
+        "Lease",
+        "expireHolder",
+        params,
+        caller,
+        options,
+    )
+    .await
+}
+
+/// An operation of the table as a whole that writes (D104), Lease's
+/// expireHolder on Job: without the override permission it is forbidden
+/// and writes nothing; with it, it expires each lease the holder holds, a
+/// command without a row whose change set holds each row its calls of
+/// Lease's expire wrote, each held to its version and moved on by one, its
+/// expiry's message cleared, and another holder's lease untouched; one that
+/// expires none applies nothing; and a precondition is refused, since a
+/// precondition is a row's.
+async fn an_operation_of_the_table_writes_each_row_its_calls_reach_held_to_its_version(mut db: Db) {
+    for ddl in common::job_ddl(db.postgres()) {
+        db.exec(&ddl, &[]).await;
+    }
+    let core = common::core();
+    let layout = Layout::new([common::job_table()]);
+    let held = leased_jobs(&mut db, &Host::new(&core, &layout).with_clock(|| 1_000_000)).await;
+    let host = Host::new(&core, &layout).with_clock(|| 1_010_000);
+    let none = ExecuteOptions::default();
+    let forbidden = expire_holder(&mut db, &host, "wren", wren(), &none).await;
+    assert_eq!(code(forbidden), Code::Forbidden);
+    for (key, version) in ["j1", "j2", "j3"].into_iter().zip(&held) {
+        assert_eq!(job_version(&mut db, &host, key).await, *version, "{key}");
+    }
+    let overrides = Caller::new("otto", ["jobs.override"]);
+    let presented = expire_holder(&mut db, &host, "wren", overrides.clone(), &token(1)).await;
+    assert_eq!(refusal(presented).class, "PreconditionsError");
+    let expired = expire_holder(&mut db, &host, "wren", overrides.clone(), &none)
+        .await
+        .expect("expired");
+    assert_eq!(
+        (&expired["expired"], &expired["reasons"]),
+        (&json!(2), &json!({"holder": 2})),
+        "{expired}"
+    );
+    expired_wrens(&mut db, &host, &expired, &held).await;
+    let again = expire_holder(&mut db, &host, "wren", overrides, &none)
+        .await
+        .expect("expired none");
+    assert_eq!(again["expired"], json!(0), "{again}");
+    assert_eq!(
+        job_version(&mut db, &host, "j1").await,
+        held[0] + 1,
+        "an empty unit"
+    );
+}
+
+/// What expireHolder of wren wrote: j1 and j2 among its ids, each moved on
+/// by one, its holder gone and its expiry's message cleared; otto's j3 as it
+/// was, its expiry armed.
+async fn expired_wrens(db: &mut Db, host: &Host<'_>, expired: &Value, held: &[i64]) {
+    let mut ids: Vec<&str> = expired["ids"]
+        .as_array()
+        .expect("ids")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["j1", "j2"]);
+    for (key, version) in ["j1", "j2"].into_iter().zip(held) {
+        let row = db.read(host, "Job", key).await.expect("read");
+        let row = row.expect("a row");
+        assert_eq!(row.version, version + 1, "{key}");
+        assert!(row.owned["Lease"].get("holder").is_none(), "{key}: {row:?}");
+        let messages = db.messages("job_deadline_queue", key).await;
+        assert!(messages.is_empty(), "{key}: {messages:?}");
+    }
+    assert_eq!(job_version(db, host, "j3").await, held[2], "otto's lease");
+    assert_eq!(
+        db.messages("job_deadline_queue", "j3").await,
+        [("expire".to_owned(), 1_060_000, "ready".to_owned())]
+    );
+}
+
+/// A Job row's version, as the core reads it.
+async fn job_version(db: &mut Db, host: &Host<'_>, key: &str) -> i64 {
+    let row = db.read(host, "Job", key).await.expect("read");
+    row.expect("a row").version
 }

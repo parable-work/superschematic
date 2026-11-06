@@ -1051,7 +1051,8 @@ or Lease, Retries, Presence and Budget
 ([Rows a worker leases, retries, beats and meters](#rows-a-worker-leases-retries-beats-and-meters)),
 or Seats, or types a field as a Reconcile
 ([A row's seats, and a field that follows observations](#a-rows-seats-and-a-field-that-follows-observations)),
-or Schedules ([A row's schedules](#a-rows-schedules)),
+or Schedules ([A row's schedules](#a-rows-schedules)), or Pool
+([A pool of members](#a-pool-of-members)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -1069,7 +1070,7 @@ the messages after the commit, one row's in the order they were written.
 No behavior worker claims on SQLite or D1 yet, where the messages
 accumulate until one does. Such a table has no upserts when its behaviors
 keep sub-tables or arm deadlines. A table whose behaviors emit events
-about its rows (Schedules' runs) gets an event queue,
+about its rows (Schedules' runs, Pool's rechecks) gets an event queue,
 `<table>_event_queue`, one message per event, written in the command's
 transaction, which the API's `@behaviorWorker` hands to a method of the
 API's `Workers` that you write
@@ -1448,7 +1449,9 @@ directives sent to the holder, and the deadline `expire` on
 `leaseToken` and the rest. Its operations are `lease.acquire({ ttlMs? })`,
 which answers `{ token, expiresAt, heartbeatMs }`, `heartbeat({
 acknowledge? })`, `release({ abandon? })`, `expire({ holder?,
-notRenewedAfter? })`, `direct`, `acknowledge` and `resetExpiries`. The
+notRenewedAfter? })`, `direct`, `acknowledge` and `resetExpiries`, and
+`expireHolder({ holder, notRenewedAfter? })`, an operation of the table
+as a whole ([below](#an-operation-of-the-table-as-a-whole)). The
 config is the engine's Lease's
 ([Work queues](/superschematic/guides/work-queues/#lease)): `ttlMs` (60
 seconds when absent), `heartbeatMs`, `maxHoldMs` or `maxHoldField` (a
@@ -1488,11 +1491,19 @@ seconds when absent), `heartbeatMs`, `maxHoldMs` or `maxHoldField` (a
   the status from one of its `from` states, and at `maxExpiries` `escalate`
   moves it instead. `release` ends it at once, and `release({ abandon:
   true })` counts as an expiry.
+- **A gone holder.** `expireHolder` expires every lease one holder holds,
+  for a caller holding `overridePermission` (403 `forbidden` otherwise, or
+  when the config names none): it reads the rows whose `lease_holder` is
+  the holder's exact text and calls `expire` on each, so each row's
+  guards, version and hooks run as for any expiry, and a lease renewed or
+  acquired after `notRenewedAfter` is spared and not written. A row a
+  guard vetoes, or one deleted since the read, is passed over. It answers
+  `{ expired, reasons, ids }`, the keys it expired and how many by each
+  reason. A Presence miss's `releaseLeases` does the same for a principal
+  gone quiet.
 - **Not on a table.** `sweepMs`, how often the engine's runner swept the
   lapsed leases, is refused, since each lease expires at its own deadline;
-  `directOn` waits for Revisions and Branches on the core; and
-  `expireHolder`, which runs on the table as a whole, is no operation of a
-  table: `@behaviorOperations` leaves it out with a warning.
+  and `directOn` waits for Revisions and Branches on the core.
 
 **Retries.** The row's attempts counted against caps by failure class, as
 the engine's Retries counts them
@@ -2005,3 +2016,178 @@ armed deadline), a deadline message moved with SQL fires when it falls
 due, and an event message deleted with SQL is never handed on. Prefer the
 operations: `pauseSchedule` and `resumeSchedule`, a `setSchedule` that
 replaces it, `cancelSchedule`.
+
+### A pool of members
+
+A table implements `Pool` as it implements Schedules (D104): each row is a
+member of a pool, open, near its limit, or out until a time, and `pick`
+chooses one to run work on. Accounts at model vendors, payment
+processors, SMS gateways and API credentials are pools. The behaviors'
+core alone implements it, so it composes on no engine type.
+
+```ts
+// pool-db
+export enum AccountKind {
+  Account = "account",
+  Key = "key"
+}
+
+export abstract class Account
+  implements
+    Pool<Account, {
+      order: "rank";
+      outForMs: 1800000;
+      recheckAfterMs: 120000;
+      permission: "accounts.pool";
+    }>,
+    Budget<Account, {
+      meters: { tokens: { limit: 1000; reset: "hourly" } };
+      observePermission: "accounts.observe";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  owner: Identity.UUID;
+  name: string;
+  vendor: string;
+  kind: AccountKind;
+  rank: Generic.Int64;
+}
+```
+
+Above, a person's agents run each turn on one of their accounts at two
+vendors, or on a paid key. A turn picks the same vendor's open accounts,
+then its near ones, then the others by rank, a key last. An account a
+provider refuses is out until the time the provider names, thirty minutes
+when it names none, and comes back only when a check of its usage made
+after that time finds room. Its tokens are metered by the hour, and an
+account with none left counts as out until the hour rolls over.
+
+| Member | What it does |
+| --- | --- |
+| `order` | the own number field (`number`, `Generic.Int64` or `Generic.Float64`) whose value ranks the members, lowest first; a member with no value comes after every one with one, and ties go by key |
+| `outForMs` | how long `markOut`, and a check that finds no room, puts a member out when it names no time, in milliseconds, at least 1000; thirty minutes when absent |
+| `recheckAfterMs` | how often an out member past its time is rechecked until a check comes, and the least time after a check without room before the next, in milliseconds, at least 1000; two minutes when absent |
+| `permission` | the permission `markOut` and `reportRoom` need; any caller the route admits when absent. `pick` needs none |
+
+The build refuses an `order` that is no own field of the table, one that
+holds no number, and one that is an owned field, a relation, an audit
+field, a list or a field encrypted at rest. It adds the columns
+`pool_availability` (`open`, `near` or `out`; a row that predates the
+use, which holds none, reads as open), `pool_out_until`,
+`pool_out_reason` and `pool_checked_at`, which the repositories read as
+`poolAvailability` and the rest and no input writes; the deadline queue
+`account_deadline_queue`, where an out member arms its `recheck`; and the
+event queue `account_event_queue`, where each recheck's event waits for
+your handler. It keeps no sub-table and hears no write, so it adds no
+change queue. A new member is open.
+
+- **markOut.** `pool.markOut(id, { until?, reason })` puts a member out
+  until `until` (epoch milliseconds), or `outForMs` from now when it names
+  none, a time already past reading as now, and answers `{ availability:
+  "out", outUntil, outReason }`. An out member keeps the later of its
+  `outUntil` and the new one and takes the new reason; a call that moves
+  neither, a retry that landed, answers `unchanged: true` and writes
+  nothing. It arms the member's recheck at its `outUntil`.
+- **reportRoom.** `pool.reportRoom(id, { room, near?, resetsAt?, reason?
+  })` records a check of the member at its provider, made now, each time
+  it is called. With room it opens an out member whose `outUntil` has come
+  (`opened: true`), near its limit when `near` says so, and keeps an open
+  or near member open or near as `near` says; it clears the recheck. A
+  check with room before an out member's `outUntil` records `checkedAt`
+  alone, since an early check may read a figure from before the refusal:
+  an out member opens only through a check made at or after its time,
+  never by the clock alone, as a breaker opens only on its probe. With no
+  room the member is out until the later of its `outUntil` and
+  `resetsAt`, or `outForMs` from now when the check names no time, for
+  `reason` (else its reason, else `no room`), and its recheck is armed
+  then, or `recheckAfterMs` from now when that is later. `near` is read
+  only with room, `resetsAt` and `reason` only without, so a provider's
+  figure can be passed as it comes.
+- **pick.** `pool.pick({ match?, prefer?, exclude? })` is an operation of
+  the table as a whole ([below](#an-operation-of-the-table-as-a-whole)):
+  it takes no key and writes nothing. Of the members `match` keeps (own
+  fields equal to values, a null member absent: `{ owner }` keeps one
+  person's accounts), leaving out the keys `exclude` names (the
+  ones the caller tried in this attempt, at most 100), it answers the
+  first of the open members `prefer` keeps, then of its near ones, then
+  of the other open and near ones, each by `order`: `{ member: { key,
+  availability, order, preferred } }`, `preferred` false when it fell
+  back past `prefer`. With no member open or near it answers `{ member:
+  null, until }`, the soonest time a member `match` keeps may be back (an
+  out member's `outUntil`, `recheckAfterMs` from now for one past it
+  awaiting a check, or when its Budget has room again), absent when none
+  has a time, so a caller waits on a deadline of its own. A UUID field's
+  value, and a key in `exclude`, may be given hyphenated or in base62. A
+  field the table lacks in `match` or `prefer` is 400 `invalid_argument`
+  (`/match/owner: Account has no own field owner (its own fields: name,
+  vendor, kind, rank)`). A pick reads at most 2,000 members `match` keeps
+  and refuses more (409 `vetoed`, `pool_too_large`, `{ max: 2000 }`):
+  narrow `match`, or pick with code of your own.
+- **The recheck.** An out member's recheck falls due at its `outUntil` on
+  the API's [behavior worker](/superschematic/guides/api-routes/#the-worker),
+  and then every `recheckAfterMs` while it stays out. Each one writes the
+  event `recheck`, `{ outUntil, outReason?, checkedAt?, dueAt, firedAt
+  }`, to the event queue, which the worker hands to the API's `Workers`
+  method `accountRechecksPoolRecheck`
+  ([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers)).
+  Ask the provider there and report what it says with `reportRoom`,
+  through the event's transaction; the core calls no provider. An event
+  may come twice: the row's key and `dueAt` say which fire it is. A check
+  with room clears the recheck; one without moves it.
+- **Capacity.** A member whose table also implements Budget counts as out
+  at a pick while a meter of its own has no room for one more (used, a
+  provider's figure while an `observe` holds, and reserved, within the
+  limit), until the meter's period rolls over or the figure lapses: Pool
+  asks the contract `Capacity`, which Budget implements, and reads no
+  column of Budget's. A scope's meters are not read. A table without
+  Budget picks by availability alone.
+- **Who.** A caller without `permission` is 403 `forbidden` at `markOut`
+  and `reportRoom` (`<caller> may not mark Account <id> out: it needs
+  permission accounts.pool`) after the parameters are checked and before
+  anything else; `pick` answers any caller its route admits, what a read
+  of the table shows. A recheck fires as the worker and calls no
+  operation, and the handler's `reportRoom` runs as the worker, which
+  holds `accounts.pool` in the fixture above. On a table that also
+  implements Lease, `markOut` and `reportRoom` are writes another
+  principal's active lease holds: list them in Lease's `exempt`
+  (`"Pool.markOut"`, `"Pool.reportRoom"`).
+- **Config changes.** Any change of the config is allowed, a narrower
+  time applying from each next `markOut`, check or fire. Pool may join a
+  table that has rows, each reading as open; removing it from a table
+  that has rows is refused, since the members' availability and their
+  rechecks would stay behind.
+
+A write around the core runs none of its rules, and no trigger or check
+refuses one, so an operator can repair a row: a raw write of a `pool_*`
+column is read at the next pick, check or fire, and re-arms nothing (a
+member put out by SQL arms no recheck until its next `markOut` or check,
+and an `outUntil` moved later is armed again there when the old recheck
+falls due). Prefer the operations: `markOut`, and `reportRoom` with the
+provider's figure.
+
+### An operation of the table as a whole
+
+Most behavior operations run on one row, by its key. An operation whose
+declaration says it runs on the table as a whole, Pool's `pick` and
+Lease's `expireHolder`, takes no key: the core runs it as a command
+without a row, which reads the table's rows and writes a row only by
+calling an operation of that row's, each row with its own rules, version
+and hooks, so a row that moved runs the command again. Its route is the
+row's with the key gone, `POST /api/account/pool/pick` and `POST
+/api/job/lease/expire-holder`
+([A table's route](/superschematic/guides/api-routes/#an-operation-of-the-table-as-a-whole)),
+and a repository's member method takes the parameters alone:
+
+```ts
+const picked = await orm.withBehaviorCaller({ subject: agent, permissions: [] })
+  .account.pool.pick({ match: { owner }, prefer: { vendor: "anthropic", kind: "account" } });
+```
+
+In Go it is `db.GetAccountRepository().Pool().Pick(ctx,
+orm.AccountPoolPickParams{...})`, which answers a
+`*orm.AccountPoolPickResult`. It takes no preconditions, which are a
+row's; one that writes no row applies nothing, and one that only reads,
+as `pick`, writes nothing in your transaction. An operation a behavior
+declares on a namespace as a whole (Comments') is left out:
+`@behaviorOperations` warns of it.

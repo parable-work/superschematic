@@ -706,3 +706,166 @@ func TestNarrowSchedules(t *testing.T) {
 		t.Errorf("a second narrowing's setSchedule params = %v: the first narrowing changed the declaration", got)
 	}
 }
+
+// poolAccounts is a database whose Account table implements Pool, with
+// own fields of every kind pick's match compares, and of each kind it does
+// not (D104).
+func poolAccounts(rank string) (*ir.Schema, *ir.TypeDef) {
+	document := ir.NewSchema("accounts", ir.SchemaKindDB)
+	for _, name := range []string{"Identity.UUID", "Identity.UserID", "Temporal.DateTime", "Generic.Int64", "Generic.Float64", "Generic.JSON"} {
+		document.Scalars[name] = &ir.ScalarDef{Name: name, LanguagePrimitive: ir.LanguageString}
+	}
+	document.Enums["AccountKind"] = &ir.EnumDef{Name: "AccountKind", Values: []ir.EnumValueDef{{Name: "Account", SerializedAs: "account"}, {Name: "Key", SerializedAs: "key"}}}
+	account := &ir.TypeDef{Name: "Account", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Pool", Implements: true}}, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+		{Name: "owner", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "kind", TypeRef: ir.TypeRef{Name: "AccountKind"}, Required: true},
+		{Name: "rank", TypeRef: ir.TypeRef{Name: rank}},
+		{Name: "active", TypeRef: ir.TypeRef{Name: "boolean"}},
+		{Name: "weight", TypeRef: ir.TypeRef{Name: "number"}},
+		{Name: "tags", TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
+		{Name: "openedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}},
+		{Name: "meta", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
+		{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, EncryptedAtRest: true},
+	}}
+	document.Types["Account"] = account
+	return document, account
+}
+
+// Pool (D104): a member's availability is the alias <Base>Availability,
+// which its field, markOut's and reportRoom's results and pick's member
+// name; on a table, pick's match and prefer are the alias <Base>Match, an
+// optional, nullable member per own field the core compares, by the JSON
+// value it holds (an enum and a UUID a string), and none for the key, a
+// list, a date-time, JSON or a field encrypted at rest; pick's member is
+// the alias <Base>PickMember or null, its order an integer when the order
+// field is a Generic.Int64 and a number otherwise. An engine type's, which
+// the build refuses, has no Match and no PickMember.
+func TestNarrowPool(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Pool")
+	config := json.RawMessage(`{"order": "rank", "permission": "accounts.pool"}`)
+	document, account := poolAccounts("Generic.Int64")
+	n, err := Narrow(declaration, config, Target{Schema: "accounts", Base: "AccountPool", Document: document, Instance: account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	aliases := map[string]map[string]any{}
+	for _, alias := range n.Aliases {
+		names = append(names, alias.Name+": "+alias.Doc)
+		aliases[alias.Name] = alias.Schema.(map[string]any)
+	}
+	if want := []string{
+		"AccountPoolAvailability: A Pool member's availability on Account.",
+		"AccountPoolMatch: The members of Account's Pool a pick keeps, or tries first, by the values own fields of Account hold; every member when absent.",
+		"AccountPoolPickMember: The member of Account's Pool a pick picked: its key in its wire form, its availability, its value of the order field and whether prefer keeps it.",
+	}; !slices.Equal(names, want) {
+		t.Fatalf("aliases =\n%s\nwant\n%s", strings.Join(names, "\n"), strings.Join(want, "\n"))
+	}
+	if values := stringsOf(aliases["AccountPoolAvailability"]["enum"]); !slices.Equal(values, []string{"open", "near", "out"}) {
+		t.Errorf("AccountPoolAvailability = %v", values)
+	}
+	match, _ := aliases["AccountPoolMatch"]["properties"].(map[string]any)
+	var members []string
+	for _, name := range SortedKeys(match) {
+		node := match[name].(map[string]any)
+		kind, _ := node["type"].(string)
+		members = append(members, name+":"+kind)
+	}
+	// A member takes no null, which the core reads as absent (D12).
+	if want := []string{"active:boolean", "kind:string", "name:string", "owner:string", "rank:integer", "weight:number"}; !slices.Equal(members, want) {
+		t.Errorf("AccountPoolMatch = %v, want %v", members, want)
+	}
+	refAt := func(schema any, path ...string) any {
+		node, err := at(schema, path...)
+		if err != nil {
+			return err
+		}
+		return node[RefKey]
+	}
+	for _, member := range []string{"match", "prefer"} {
+		if got := refAt(n.Params["pick"], "properties", member); got != "AccountPoolMatch" {
+			t.Errorf("pick's %s = %v, want AccountPoolMatch", member, got)
+		}
+	}
+	for _, op := range []string{"markOut", "reportRoom"} {
+		if got := refAt(n.Results[op], "properties", "availability"); got != "AccountPoolAvailability" {
+			t.Errorf("%s's availability = %v, want AccountPoolAvailability", op, got)
+		}
+	}
+	if node, err := at(n.Results["pick"], "properties", "member"); err != nil || node[RefKey] != "AccountPoolPickMember" || node["nullable"] != true {
+		t.Errorf("pick's member = %v (%v), want AccountPoolPickMember or null", node, err)
+	}
+	picked := aliases["AccountPoolPickMember"]
+	if got := refAt(picked, "properties", "availability"); got != "AccountPoolAvailability" || picked["type"] != "object" {
+		t.Errorf("AccountPoolPickMember = %v", picked)
+	}
+	if order, _ := at(picked, "properties", "order"); !slices.Equal(stringsOf(order["type"]), []string{"integer", "null"}) {
+		t.Errorf("AccountPoolPickMember's order of a Generic.Int64 = %v, want an integer or null", order["type"])
+	}
+	if field := n.Fields["availability"]; field.Present || field.Schema.(map[string]any)[RefKey] != "AccountPoolAvailability" {
+		t.Errorf("availability = %+v", field)
+	}
+	for _, name := range []string{"outUntil", "checkedAt"} {
+		if field := n.Fields[name]; field.Present || field.Schema.(map[string]any)["type"] != "integer" {
+			t.Errorf("%s = %+v, want epoch milliseconds, absent until set", name, field)
+		}
+	}
+	if !slices.Equal(n.Vetoes, []string{"pool_too_large"}) || len(n.Refused) != 0 {
+		t.Errorf("vetoes = %v, refused = %v", n.Vetoes, n.Refused)
+	}
+	// A number order field orders by a number.
+	document, account = poolAccounts("Generic.Float64")
+	float, err := Narrow(declaration, config, Target{Schema: "accounts", Base: "AccountPool", Document: document, Instance: account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order, _ := at(float.Aliases[2].Schema, "properties", "order"); !slices.Equal(stringsOf(order["type"]), []string{"number", "null"}) {
+		t.Errorf("AccountPoolPickMember's order of a Generic.Float64 = %v, want a number or null", order["type"])
+	}
+	// An engine type's, which the build refuses, names its availability
+	// alone.
+	engine := &ir.TypeDef{Name: "Account", Behaviors: []ir.BehaviorRef{{Name: "Pool"}}}
+	n, err = Narrow(declaration, config, Target{Schema: "accounts", Base: "Account", Document: ir.NewSchema("accounts", ir.SchemaKindGeneral), Instance: engine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "AccountAvailability" || refAt(n.Params["pick"], "properties", "match") != nil {
+		t.Errorf("an engine type's aliases = %+v, pick's match = %v", n.Aliases, refAt(n.Params["pick"], "properties", "match"))
+	}
+}
+
+// Lease on a table (D104): expireHolder's count of each reason is the alias
+// <Base>ExpireHolderReasons, which its result names, so the API and the
+// repositories name the type JobLeaseExpireHolderReasons; an engine type's
+// keeps its declaration's object in place, so its client reads as before.
+func TestNarrowLeaseExpireHolder(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Lease")
+	table := &ir.TypeDef{Name: "Job", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Lease", Implements: true}}}
+	n, err := Narrow(declaration, json.RawMessage(`{"overridePermission": "jobs.override"}`), Target{Schema: "jobs", Base: "JobLease", Document: ir.NewSchema("jobs", ir.SchemaKindDB), Instance: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "JobLeaseExpireHolderReasons" {
+		t.Fatalf("aliases = %+v, want JobLeaseExpireHolderReasons", n.Aliases)
+	}
+	reasons := n.Aliases[0].Schema.(map[string]any)
+	properties, _ := reasons["properties"].(map[string]any)
+	if got := SortedKeys(properties); !slices.Equal(got, []string{"holder", "maxHold", "ttl"}) || reasons["type"] != "object" {
+		t.Errorf("JobLeaseExpireHolderReasons = %v", reasons)
+	}
+	if node, err := at(n.Results["expireHolder"], "properties", "reasons"); err != nil || node[RefKey] != "JobLeaseExpireHolderReasons" {
+		t.Errorf("expireHolder's reasons = %v (%v)", node, err)
+	}
+	engine := &ir.TypeDef{Name: "Job", Behaviors: []ir.BehaviorRef{{Name: "Lease"}}}
+	n, err = Narrow(declaration, nil, Target{Schema: "jobs", Base: "Job", Document: ir.NewSchema("jobs", ir.SchemaKindGeneral), Instance: engine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node, err := at(n.Results["expireHolder"], "properties", "reasons"); err != nil || node[RefKey] != nil || len(n.Aliases) != 0 {
+		t.Errorf("an engine type's expireHolder reasons = %v (%v), aliases %v", node, err, n.Aliases)
+	}
+}

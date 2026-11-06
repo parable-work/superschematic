@@ -768,7 +768,7 @@ with `--package @superschematic/engine-workqueue` into the work queue's
 (`runtime/engine-workqueue/rust/declarations`), `Stock`, `Calendar`,
 `Holds` and `Payments` with `--package @superschematic/engine-commerce`
 into the commerce crate's (`runtime/engine-commerce/rust/declarations`,
-D70), and `Seats`, `Reconcile` and `Schedules`, which no engine implements, with
+D70), and `Seats`, `Reconcile`, `Schedules` and `Pool`, which no engine implements, with
 `--package @superschematic/rules` into the behaviors' core's
 (`runtime/engine/rust/rules-behaviors/declarations`, D104) (`make
 behaviors`; `make behaviors-check` in CI). Without `--extension`, an extension's binary

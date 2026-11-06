@@ -1,0 +1,136 @@
+{
+  "name": "Pool",
+  "description": "Members of a pool, the rows of the table, each open, near its limit or out until a time, among which pick chooses one to run work on, a read of the table as a whole. A caller tells the pool what a provider said with markOut and reportRoom. An out member opens only through a check with room made at or after its outUntil, never by the clock alone, as a breaker opens only on its probe. An out member past its outUntil is rechecked at its outUntil and then every recheckAfterMs until a check comes: each recheck emits the event recheck, which the API's behavior worker hands to the project's handler, which asks the provider and reports with reportRoom; the core calls no provider. A member whose table also implements a behavior that implements the contract Capacity, as Budget does, counts as out while it has no room. The behaviors' core alone implements it, on a table; no engine type composes it.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["order"],
+    "properties": {
+      "order": { "description": "The own number field whose value ranks the members, lowest first, a member with no value after every one with one, ties by key.", "type": "string", "minLength": 1 },
+      "outForMs": { "description": "How long markOut, and a check that finds no room, puts a member out when it names no time, in milliseconds; 1800000, thirty minutes, when absent.", "type": "integer", "minimum": 1000 },
+      "recheckAfterMs": { "description": "How often an out member past its outUntil is rechecked until a check comes, in milliseconds, and the least time after a check without room before the next; 120000, two minutes, when absent.", "type": "integer", "minimum": 1000 },
+      "permission": { "description": "The permission a caller needs for markOut and reportRoom; any caller the route admits when absent. pick needs none.", "type": "string", "minLength": 1 }
+    }
+  },
+  "fields": [
+    { "name": "availability", "description": "open, near its limit, or out; absent on a row that predates the use, which reads as open.", "type": "string" },
+    { "name": "outUntil", "description": "While the member is out, until when, in epoch milliseconds: the earliest time a check may open it; absent while it is open or near.", "type": "Temporal.DateTime" },
+    { "name": "outReason", "description": "While the member is out, why, as markOut or the check that put it out said; absent while it is open or near.", "type": "string" },
+    { "name": "checkedAt", "description": "When the last check of the member was reported, in epoch milliseconds; absent before the first.", "type": "Temporal.DateTime" }
+  ],
+  "armsDeadlines": true,
+  "operations": [
+    {
+      "name": "markOut",
+      "description": "Puts the member out until until, or outForMs from now when it names none, for reason: what a caller a provider refused tells the pool. An out member keeps the later of its outUntil and the new one and takes the new reason, and a call that moves neither is answered unchanged. Arms the member's recheck at its outUntil. Needs permission.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason"],
+        "properties": {
+          "until": { "description": "Until when the member is out, in epoch milliseconds, as the provider named it; outForMs from now when absent, and now for a time already past.", "type": "integer", "minimum": 0 },
+          "reason": { "description": "Why it is out: the provider's word, or the caller's.", "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["availability", "outUntil", "outReason"],
+        "properties": {
+          "availability": { "description": "The member's availability: out.", "enum": ["open", "near", "out"] },
+          "outUntil": { "description": "Until when the member is out, in epoch milliseconds.", "type": "integer" },
+          "outReason": { "description": "Why it is out.", "type": "string" },
+          "unchanged": { "description": "True when the member was out until then already, for the reason, so nothing was written; absent otherwise.", "type": "boolean" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "reportRoom",
+      "description": "Records a check of the member at its provider, made now. With room it opens an out member whose outUntil has come, near when near says so, and keeps an open or near one open or near as near says; a check with room before an out member's outUntil records checkedAt alone. With no room the member is out until the later of its outUntil and resetsAt, or outForMs from now when the check names no time, and its recheck is armed then, or recheckAfterMs from now when that is later. Needs permission.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["room"],
+        "properties": {
+          "room": { "description": "Whether the provider has room for the member now.", "type": "boolean" },
+          "near": { "description": "With room: whether the member is near its limit, which pick tries after the open members. Read only with room.", "type": "boolean" },
+          "resetsAt": { "description": "With no room: when the provider names the member's room back, in epoch milliseconds. Read only without room.", "type": "integer", "minimum": 0 },
+          "reason": { "description": "With no room: why, the provider's word; when absent, the member's reason when it was out already, else no room. Read only without room.", "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["availability", "checkedAt"],
+        "properties": {
+          "availability": { "description": "The member's availability after the check.", "enum": ["open", "near", "out"] },
+          "checkedAt": { "description": "When the check was recorded, the command's time, in epoch milliseconds.", "type": "integer" },
+          "outUntil": { "description": "Until when the member is out, in epoch milliseconds; absent unless it is out.", "type": "integer" },
+          "outReason": { "description": "Why the member is out; absent unless it is out.", "type": "string" },
+          "opened": { "description": "True when the check opened an out member; absent otherwise.", "type": "boolean" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "pick",
+      "description": "Picks a member to run work on, a read of the table as a whole that writes nothing: of the members match keeps, leaving out those exclude names, the first by order of the open members prefer keeps, then of its near ones, then of the other open and near ones. A member counts as out while its table's Capacity has no room for it. With none it answers member null and until, the soonest time a member match keeps may be back, so a caller waits on a deadline of its own. It reads at most 2000 members.",
+      "scope": "schema",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "match": { "description": "The members to pick among, by the values own fields of the table hold, a null member absent; every member when absent.", "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
+          "prefer": { "description": "The members to try first, by the values own fields of the table hold, a null member absent; every member when absent.", "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
+          "exclude": { "description": "The keys of the members the caller tried in this attempt, which pick leaves out.", "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1 } }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["member"],
+        "properties": {
+          "member": {
+            "description": "The member picked; null when no member match keeps is open or near.",
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["key", "availability", "order", "preferred"],
+            "properties": {
+              "key": { "description": "The member's key, in its wire form.", "type": "string" },
+              "availability": { "description": "The member's availability: open or near.", "enum": ["open", "near", "out"] },
+              "order": { "description": "The member's value of the config's order field; null when it has none.", "type": ["number", "null"] },
+              "preferred": { "description": "Whether prefer keeps the member: false when pick fell back to the other members.", "type": "boolean" }
+            }
+          },
+          "until": { "description": "With no member: the soonest time a member match keeps may be back, in epoch milliseconds: an out member's outUntil, or recheckAfterMs from now for one past it awaiting a check, or the time its Capacity gives it room again, the later of the two for a member out both ways; absent when no such member has a time.", "type": "integer" }
+        }
+      },
+      "writes": false
+    }
+  ],
+  "events": [
+    {
+      "kind": "recheck",
+      "description": "An out member past its outUntil with no check since was due a recheck: the project's handler asks the member's provider and reports what it says with reportRoom. Delivery is at least once, so a handler is idempotent by the row's key and dueAt, which no two rechecks of a row share.",
+      "payloadSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outUntil", "dueAt", "firedAt"],
+        "properties": {
+          "outUntil": { "description": "Until when the member was out, in epoch milliseconds.", "type": "integer" },
+          "outReason": { "description": "Why it was out; absent when it has no reason.", "type": "string" },
+          "checkedAt": { "description": "When the last check of it was reported, in epoch milliseconds; absent before the first.", "type": "integer" },
+          "dueAt": { "description": "When the recheck was due, in epoch milliseconds.", "type": "integer" },
+          "firedAt": { "description": "When it fired, in epoch milliseconds: the later of its due time and the worker's clock.", "type": "integer" }
+        }
+      }
+    }
+  ],
+  "contracts": [
+    { "name": "Capacity", "role": "asks", "description": "A member whose table's Capacity, Budget's meters, has no room for it counts as out at a pick until the time the contract gives." }
+  ],
+  "vetoes": [
+    { "code": "pool_too_large", "description": "pick of a table more members of which match keeps than it reads, 2000; details give the max." }
+  ]
+}

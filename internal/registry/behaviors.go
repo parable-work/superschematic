@@ -126,6 +126,16 @@ type BehaviorDeclaration struct {
 	// behaviors' core alone implements (RulesPackage) declares them: an
 	// engine's declaration parser refuses the key.
 	Events []BehaviorEvent `json:"events,omitempty"`
+	// Contracts are the contracts between behaviors the declaration names
+	// (D103's interfaces, D104): each one the behaviors' core defines
+	// (Contracts), which the behavior implements, answering its queries
+	// about a row, or asks of the other uses of its type. The core
+	// resolves a type's implementers of a contract by these, never by a
+	// behavior's name. Any package's behavior may implement one, since an
+	// engine's declaration parser shifts the member out unread; only a
+	// behavior the behaviors' core alone implements (RulesPackage) asks
+	// one, and no extension's behavior names one (checkBehaviorContracts).
+	Contracts []BehaviorContract `json:"contracts,omitempty"`
 	// Signals are the messages about an instance an engine delivers to
 	// the event streams open on it and keeps nowhere (D77): a client's
 	// typing indicator, a draft being written.
@@ -286,6 +296,43 @@ func (d BehaviorDeclaration) Event(kind string) (BehaviorEvent, bool) {
 	return BehaviorEvent{}, false
 }
 
+// BehaviorContract is a contract between behaviors the declaration names
+// (D103, D104): its name, whether the behavior implements it or asks it of
+// other uses, and what it means here.
+type BehaviorContract struct {
+	Name        string `json:"name"`
+	Role        string `json:"role"`
+	Description string `json:"description,omitempty"`
+}
+
+// The roles a declaration's contract takes (D104).
+const (
+	// ContractRoleImplements is the role of a behavior that answers the
+	// contract's queries about a row: Budget's Capacity.
+	ContractRoleImplements = "implements"
+	// ContractRoleAsks is the role of a behavior that asks the contract's
+	// queries of the other uses of its type that implement it: Pool's
+	// Capacity.
+	ContractRoleAsks = "asks"
+)
+
+// Contracts are the contracts the behaviors' core defines (D104): each a
+// name a declaration's contracts may give. Capacity, whether a row has room
+// now and when it will (superschematic_rules_behaviors::capacity), is the
+// first; superschematic_rules_behaviors::CONTRACTS lists the same, which a
+// test holds this list to.
+var Contracts = []string{"Capacity"}
+
+// Contract returns the behavior's contract named name, or false.
+func (d BehaviorDeclaration) Contract(name string) (BehaviorContract, bool) {
+	for _, contract := range d.Contracts {
+		if contract.Name == name {
+			return contract, true
+		}
+	}
+	return BehaviorContract{}, false
+}
+
 // The accesses a signal declares: who may send it.
 const (
 	// SignalAccessRead lets a caller who may read the schema send it.
@@ -385,7 +432,10 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // event of a behavior an engine runs (any Package but RulesPackage, D104),
 // or whose kind is not camelCase or repeats, or whose payloadSchema is
 // absent, does not compile, is not an object schema or does not set
-// "additionalProperties": false (checkBehaviorEvents); a preconditionSchema that does not compile, is
+// "additionalProperties": false (checkBehaviorEvents); a contract that is
+// not one the behaviors' core defines, whose role is neither "implements"
+// nor "asks", that repeats, that an extension's behavior names, or that a
+// behavior an engine runs asks (checkBehaviorContracts, D104); a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
 // sub-table whose name is not camelCase or repeats, whose key names no
 // string field of it, or whose field is untyped, volatile or named id
@@ -469,6 +519,9 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		return err
 	}
 	if err := checkBehaviorEvents(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorContracts(decl, spec); err != nil {
 		return err
 	}
 	if err := checkBehaviorSignals(decl); err != nil {
@@ -747,6 +800,37 @@ func checkBehaviorEvents(decl BehaviorDeclaration) error {
 		}
 		if !closed {
 			return fmt.Errorf("registry: behavior %s event %s payloadSchema must set \"additionalProperties\": false, so no member of a payload goes untyped", decl.Name, event.Kind)
+		}
+	}
+	return nil
+}
+
+// checkBehaviorContracts holds each contract a declaration names to its
+// rule (D104), in this order: a name the behaviors' core defines
+// (Contracts), a role of "implements" or "asks", named once, on no
+// extension's behavior, since the core alone asks and answers a contract
+// and an extension's behavior runs in its engine (D58), and asked only by a
+// behavior the core alone implements (RulesPackage), since no engine asks
+// one. A behavior of any core package implements one: an engine's
+// declaration parser shifts the member out unread, as it does tables.
+func checkBehaviorContracts(decl BehaviorDeclaration, spec BehaviorSpec) error {
+	seen := map[string]bool{}
+	for _, contract := range decl.Contracts {
+		if !slices.Contains(Contracts, contract.Name) {
+			return fmt.Errorf("registry: behavior %s names contract %q, which is not one the behaviors' core defines (%s)", decl.Name, contract.Name, strings.Join(Contracts, ", "))
+		}
+		if contract.Role != ContractRoleImplements && contract.Role != ContractRoleAsks {
+			return fmt.Errorf("registry: behavior %s contract %s role %q is not \"implements\" or \"asks\"", decl.Name, contract.Name, contract.Role)
+		}
+		if seen[contract.Name] {
+			return fmt.Errorf("registry: behavior %s names contract %s twice", decl.Name, contract.Name)
+		}
+		seen[contract.Name] = true
+		if spec.Extension != "" {
+			return fmt.Errorf("registry: behavior %s of extension %s names contract %s, which the behaviors' core asks and answers: an extension's behavior runs in its engine (D58)", decl.Name, spec.Extension, contract.Name)
+		}
+		if contract.Role == ContractRoleAsks && spec.Package != RulesPackage {
+			return fmt.Errorf("registry: behavior %s asks contract %s, which only a behavior the behaviors' core alone implements (package %s) asks: an engine asks no contract", decl.Name, contract.Name, RulesPackage)
 		}
 	}
 	return nil

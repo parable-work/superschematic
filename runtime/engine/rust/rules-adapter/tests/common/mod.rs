@@ -10,7 +10,7 @@
 use serde_json::{json, Value};
 use superschematic_rules::{
     Behavior, ConfigError, ConfigTarget, Cx, Declaration, FieldSpec, GuardRequest, Heard, Hook,
-    Refusal, UseSpec, Veto, View,
+    Refusal, TableRef, UseSpec, Veto, View,
 };
 use superschematic_rules_adapter::{
     Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SubTable,
@@ -386,10 +386,7 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
             member: "status".into(),
             anchor: Some("status".into()),
             fields: vec![owned("status", "status", "status", "string", true), entered],
-            operations: vec![Operation {
-                name: "transition".into(),
-                writes: true,
-            }],
+            operations: vec![Operation::new("transition", true)],
             tables: Vec::new(),
         }],
         deadlines: None,
@@ -512,10 +509,7 @@ pub fn task_table() -> Table {
             ("listSignOffs", false),
         ]
         .into_iter()
-        .map(|(name, writes)| Operation {
-            name: name.into(),
-            writes,
-        })
+        .map(|(name, writes)| Operation::new(name, writes))
         .collect(),
         tables: vec![SubTable {
             name: "signOffs".into(),
@@ -668,13 +662,10 @@ pub fn job_table() -> Table {
         column: Column::new(name, snake(name), "Temporal.DateTime").converted(Convert::EpochMillis),
         value: false,
     };
-    let operations = |names: &[&str]| {
+    let operations = |names: &[&str]| -> Vec<Operation> {
         names
             .iter()
-            .map(|name| Operation {
-                name: (*name).into(),
-                writes: true,
-            })
+            .map(|name| Operation::new(*name, true))
             .collect()
     };
     let lease = Use {
@@ -691,6 +682,8 @@ pub fn job_table() -> Table {
             field("expiries", "lease_expiries", "Generic.Int64"),
             field("ended", "lease_ended", "Generic.JSON"),
         ],
+        // Its operations of a row, then expireHolder, of the table as a
+        // whole (D104).
         operations: operations(&[
             "acquire",
             "heartbeat",
@@ -699,7 +692,10 @@ pub fn job_table() -> Table {
             "direct",
             "acknowledge",
             "resetExpiries",
-        ]),
+        ])
+        .into_iter()
+        .chain([Operation::of_table("expireHolder", true)])
+        .collect(),
         tables: vec![SubTable {
             name: "directives".into(),
             table: "job_lease_directives".into(),
@@ -756,10 +752,10 @@ pub fn job_table() -> Table {
         member: "finder".into(),
         anchor: None,
         fields: Vec::new(),
-        operations: vec![Operation {
-            name: "find".into(),
-            writes: false,
-        }],
+        operations: vec![
+            Operation::new("find", false),
+            Operation::of_table("rows", false),
+        ],
         tables: Vec::new(),
     };
     let mut status = order_table("Job", "job");
@@ -887,10 +883,7 @@ pub fn timers_use(table: &str, row: &str) -> Use {
         fields: Vec::new(),
         operations: ["fireTimer", "resetTimer", "snoozeTimer"]
             .into_iter()
-            .map(|name| Operation {
-                name: name.into(),
-                writes: true,
-            })
+            .map(|name| Operation::new(name, true))
             .collect(),
         tables: vec![SubTable {
             name: "deadlines".into(),
@@ -1020,10 +1013,7 @@ pub fn store_layout_in(room: &str) -> Layout {
             member: "shout".into(),
             anchor: None,
             fields: Vec::new(),
-            operations: vec![Operation {
-                name: "say".into(),
-                writes: true,
-            }],
+            operations: vec![Operation::new("say", true)],
             tables: Vec::new(),
         }],
         events: Some(events_of("Shout", "shout")),
@@ -1282,22 +1272,45 @@ impl Behavior for Echo {
 /// A behavior of the tests' own that reads the rows of a type whose use's
 /// owned field holds a value (D104), as Presence's releaseLeases reads the
 /// rows whose Lease's holder is a principal: its read-only operation `find`
-/// answers the page of `{type, use, field, value, after}`.
+/// answers the page of `{type, use, field, value, after}`. Its read-only
+/// operation of the table as a whole, `rows` (D104), answers the page of a
+/// read across a table, `{type, equal, tables, after}`, as Pool's pick
+/// reads its members.
 pub struct Finder;
 
 impl Behavior for Finder {
     type Config = Value;
 
     fn declaration(&self) -> Declaration {
-        Declaration::new("Finder").operation("find", false)
+        Declaration::new("Finder")
+            .operation("find", false)
+            .table_operation("rows", false)
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
         Ok(raw.clone())
     }
 
-    fn operation(&self, cx: &Cx<'_, Value>, _name: &str, params: &Value) -> Hook<Value> {
+    fn operation(&self, cx: &Cx<'_, Value>, name: &str, params: &Value) -> Hook<Value> {
         let param = |name: &str| params.get(name).and_then(Value::as_str);
+        if name == "rows" {
+            let equal = params
+                .get("equal")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let tables: Vec<TableRef> = params
+                .get("tables")
+                .and_then(|tables| serde_json::from_value(tables.clone()).ok())
+                .unwrap_or_default();
+            let page = cx.read_rows(
+                param("type").unwrap_or_default(),
+                &equal,
+                &tables,
+                param("after"),
+            )?;
+            return Ok(serde_json::to_value(page).unwrap_or_default());
+        }
         let page = cx.read_holding(
             param("type").unwrap_or_default(),
             param("use").unwrap_or_default(),

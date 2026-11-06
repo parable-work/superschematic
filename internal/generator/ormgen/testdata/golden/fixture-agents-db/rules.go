@@ -456,6 +456,11 @@ const rulesLayoutJSON = `{
               "writes": true
             },
             {
+              "name": "expireHolder",
+              "writes": true,
+              "table": true
+            },
+            {
               "name": "resetExpiries",
               "writes": true
             }

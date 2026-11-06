@@ -172,3 +172,73 @@ func TestCatalogListsSchedulesPermission(t *testing.T) {
 		}
 	}
 }
+
+// catalogOf generates the API api over its database db and reads its
+// permission catalog, by permission: the operations that require each.
+func catalogOf(t *testing.T, api, db string) map[string][]string {
+	t.Helper()
+	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, api), loader.WithWarnings(func(*verify.Diagnostic) {}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := apigen.Generate(apiSchema, apigen.Options{
+		Provider:           sessionauth.Provider{},
+		SchemaName:         api,
+		ModulePath:         "example.com/schemas/api/" + api,
+		TypesModule:        "example.com/schemas/types/go/" + api,
+		Dependencies:       map[string]*ir.Schema{db: dbSchema},
+		ModuleDependencies: []string{"example.com/schemas/types/go/" + db},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := permcatalog.Parse([]byte(output.PermissionCatalogJSON))
+	if err != nil {
+		t.Fatalf("permissions.json: %v\n%s", err, output.PermissionCatalogJSON)
+	}
+	operations := map[string][]string{}
+	for _, p := range catalog.Permissions {
+		operations[p.Name] = p.Operations
+	}
+	return operations
+}
+
+// TestCatalogListsPoolsPermission (D104): an API that serves a table's Pool
+// lists its config's permission under each of Pool's three operations, the
+// table's pick among them, as a use's config's permissions are listed under
+// every operation of the use until a class declaration says which checks
+// which (pick checks none), and Budget's observePermission under each of
+// Budget's nine. fixture-pool-api serves fixture-pool-db's Account, whose
+// Pool names accounts.pool and whose Budget names accounts.observe.
+func TestCatalogListsPoolsPermission(t *testing.T) {
+	operations := catalogOf(t, "fixture-pool-api", "fixture-pool-db")
+	want := map[string][]string{
+		"accounts.pool": {"AccountPoolMarkOutHandler", "AccountPoolPickHandler", "AccountPoolReportRoomHandler"},
+		"accounts.observe": {"AccountBudgetCheckReserveHandler", "AccountBudgetObserveHandler", "AccountBudgetRecordUsageForHandler", "AccountBudgetRecordUsageHandler",
+			"AccountBudgetReserveForHandler", "AccountBudgetReserveHandler", "AccountBudgetSetLimitHandler", "AccountBudgetSettleForHandler", "AccountBudgetSettleHandler"},
+	}
+	if len(operations) != len(want) {
+		t.Errorf("the catalog = %v, want %v", operations, want)
+	}
+	for name, ops := range want {
+		if got := operations[name]; !slices.Equal(got, ops) {
+			t.Errorf("%s is required by %v, want %v", name, got, ops)
+		}
+	}
+}
+
+// TestCatalogListsExpireHoldersOverridePermission (D104): an API that serves
+// a table's Lease lists its overridePermission under expireHolder, an
+// operation of the table as a whole, which checks it, beside every other
+// operation of the use. fixture-agents-api serves fixture-agents-db's Job,
+// whose Lease names jobs.override.
+func TestCatalogListsExpireHoldersOverridePermission(t *testing.T) {
+	operations := catalogOf(t, "fixture-agents-api", "fixture-agents-db")
+	if got := operations["jobs.override"]; !slices.Contains(got, "JobLeaseExpireHolderHandler") || !slices.Contains(got, "JobLeaseExpireHandler") {
+		t.Errorf("jobs.override is required by %v, want expireHolder and expire among them", got)
+	}
+}

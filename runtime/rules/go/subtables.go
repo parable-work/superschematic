@@ -24,16 +24,11 @@ func subTable(layout *Layout, typeName, useID, name string) (*Table, *SubTable, 
 	if err != nil {
 		return nil, nil, err
 	}
-	use := useOf(table, useID)
-	if use == nil {
-		return nil, nil, Internal("%s has no use %s in the behaviors' layout", typeName, useID)
+	_, sub, err := subTableOf(table, useID, name)
+	if err != nil {
+		return nil, nil, err
 	}
-	for i := range use.Tables {
-		if use.Tables[i].Name == name {
-			return table, &use.Tables[i], nil
-		}
-	}
-	return nil, nil, Internal("%s's use %s (%s) has no sub-table %s in the behaviors' layout", typeName, useID, use.Behavior, name)
+	return table, sub, nil
 }
 
 // ReadSubRows reads the rows of one sub-table of one use on a row, as the
@@ -54,18 +49,9 @@ func ReadSubRows(ctx context.Context, host Host, typeName, key, useID, table str
 // readSubRows is the rows of a sub-table of a use on the row of table by
 // key, ordered by the key's code points.
 func readSubRows(ctx context.Context, store Store, table *Table, key, useID, name string) ([]SubRow, error) {
-	use := useOf(table, useID)
-	if use == nil {
-		return nil, Internal("%s has no use %s in the behaviors' layout", table.Type, useID)
-	}
-	var sub *SubTable
-	for i := range use.Tables {
-		if use.Tables[i].Name == name {
-			sub = &use.Tables[i]
-		}
-	}
-	if sub == nil {
-		return nil, Internal("%s's use %s (%s) has no sub-table %s in the behaviors' layout", table.Type, useID, use.Behavior, name)
+	_, sub, err := subTableOf(table, useID, name)
+	if err != nil {
+		return nil, err
 	}
 	dialect := store.Dialect()
 	selected := []string{quote(sub.Key.Column.Column)}

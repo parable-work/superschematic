@@ -1037,6 +1037,101 @@
       ],
       "origin": "behavior"
     },
+    "JobLeaseExpireHolderInput": {
+      "name": "JobLeaseExpireHolderInput",
+      "owner": "fixture-agents-api",
+      "comment": "The parameters of Job's lease expireHolder.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "holder",
+          "comment": "The principal whose leases to expire.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "notRenewedAfter",
+          "comment": "As expire's: an active lease acquired or renewed after this time is spared.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 0,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseExpireHolderReasons": {
+      "name": "JobLeaseExpireHolderReasons",
+      "owner": "fixture-agents-api",
+      "comment": "How many leases a JobLease's expireHolder expired for each reason expire gives, by reason; a reason none expired for is absent.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "holder",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "maxHold",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "ttl",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "JobLeaseExpireHolderResult": {
+      "name": "JobLeaseExpireHolderResult",
+      "owner": "fixture-agents-api",
+      "comment": "What Job's lease expireHolder returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "expired",
+          "comment": "How many leases expired.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "ids",
+          "comment": "The instances whose lease expired, by id.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "reasons",
+          "comment": "How many expired for each reason expire gives, by reason; a reason none expired for is absent.",
+          "typeRef": {
+            "name": "JobLeaseExpireHolderReasons"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
     "JobLeaseExpireInput": {
       "name": "JobLeaseExpireInput",
       "owner": "fixture-agents-api",
@@ -2643,6 +2738,53 @@
           },
           "httpMethod": "POST",
           "restPath": "job/{id}/lease/acknowledge",
+          "origin": "behavior"
+        },
+        {
+          "name": "leaseExpireHolder",
+          "comment": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+          "docs": {
+            "title": "Job lease: expire holder",
+            "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+            "capability": "job.lease.expire-holder",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "job_lease_expire_holder",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "JobLeaseExpireHolderResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "JobLeaseExpireHolderInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-agents-db",
+            "type": "Job",
+            "key": "id",
+            "use": "Lease",
+            "behavior": "Lease",
+            "operation": "expireHolder",
+            "writes": true,
+            "table": true,
+            "permissions": [
+              "jobs.override"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "job/lease/expire-holder",
           "origin": "behavior"
         },
         {

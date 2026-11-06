@@ -62,6 +62,23 @@ writes them, and `test/corpus.test.ts` does not list them.
   change queue carries; max, the finished schedules beyond it pruned, and a
   new version's narrower config; with each one's define refusals. No
   engine implements Schedules.
+- `core-pool.json` (D104, step 3): Pool's members, each open, near its
+  limit or out until a time: `pick`, an operation of the table as a whole,
+  through each tier (the open members `prefer` keeps, then its near ones,
+  then the other open and near ones, by `order` and then the key), with
+  `match`, `prefer` and `exclude`, a null member of `match` absent, and
+  with none open, its `until`;
+  `markOut` with and without `until`, the later kept and a repeat answered
+  unchanged; `reportRoom` before and after `outUntil`, with and without
+  room, near and back; the recheck's deadline at `outUntil`, its fire's
+  event `recheck` and its arming again every `recheckAfterMs`; a member
+  whose Budget meter has no room counted out through the contract Capacity
+  until its period rolls over or a provider's figure lapses; each refusal;
+  and each one's define refusals. No engine implements Pool. A call of the
+  table as a whole is the engine's `instances.invokeSchema` (`args: [type,
+  operation, params]`), which the replayer runs as a command without a row
+  on the one use whose behavior declares the operation on the table, and
+  a transcript writes as a `command` step that names no row.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
@@ -84,8 +101,9 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/retries_waits_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/periods_and_presence_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/seats_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs` and
-`runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs` replay each file on
+`runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with
 `hand_written_transcript`, which also holds each command's row version

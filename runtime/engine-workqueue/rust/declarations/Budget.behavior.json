@@ -830,6 +830,13 @@
       "writes": true
     }
   ],
+  "contracts": [
+    {
+      "name": "Capacity",
+      "role": "implements",
+      "description": "hasRoom: whether a row has room in every meter now, used and reserved counted as checkReserve counts them, and when not, the earliest time the clock alone gives every meter room again."
+    }
+  ],
   "vetoes": [
     {
       "code": "over_limit",

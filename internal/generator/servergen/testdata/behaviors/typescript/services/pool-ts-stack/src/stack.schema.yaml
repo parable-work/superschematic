@@ -1,0 +1,22 @@
+# fixture-pool-api in TypeScript on the local target (D104): its default
+# server serves the operations of fixture-pool-db's Account, pick among
+# them, an operation of the table as a whole, and its behavior worker
+# AccountRechecks, the deployable fixture-pool-api-account-rechecks, runs
+# each out account's recheck as it falls due and hands each recheck event
+# to the implementation's Workers method accountRechecksPoolRecheck,
+# through the database's repositories.
+kind: Stack
+types:
+  Pool:
+    name: Pool
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-pool-api, kind: API }
+      expose:
+        - service: { name: fixture-pool-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

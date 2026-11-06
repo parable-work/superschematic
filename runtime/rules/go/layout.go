@@ -230,10 +230,15 @@ type SubTable struct {
 	Fields []OwnedField `json:"fields"`
 }
 
-// Operation is an operation a behavior declares on a row.
+// Operation is an operation a behavior declares on a row, or on the table
+// as a whole.
 type Operation struct {
 	Name   string `json:"name"`
 	Writes bool   `json:"writes"`
+	// Table is true for an operation of the table as a whole (D104), a
+	// declaration's scope schema: a repository method that takes no key,
+	// which the adapter runs as a command without a row (RunTableOperation).
+	Table bool `json:"table,omitempty"`
 }
 
 // ParseLayout reads a layout document, refusing one whose table names no

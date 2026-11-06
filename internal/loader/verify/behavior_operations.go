@@ -179,6 +179,114 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 		warnOverrideCovered(set, td, r)
 	}
 	checkBehaviorOperationNames(schema, planned, r)
+	checkTableRoutes(schema, planned, r)
+}
+
+// checkTableRoutes refuses an operation of the table as a whole the
+// expansion adds (D104), routed at POST <type>/<member>/<op> with no key,
+// whose method another operation of the API shares and whose path that
+// operation's matches, a {parameter} read as any one segment on either
+// side: which of the two a request reaches would be the router's
+// precedence to decide, which differs among the generated servers. The
+// API's own operations and every set's added ones are held to it.
+func checkTableRoutes(schema *ir.Schema, planned []plannedSet, r *Result) {
+	type route struct {
+		owner, method, path string
+	}
+	var routes []route
+	for _, set := range schema.OperationSets {
+		if set == nil || set.IsBehaviorOperations() {
+			continue
+		}
+		namespace := setNamespace(set.Name)
+		for _, op := range set.Operations {
+			if op == nil {
+				continue
+			}
+			if method, path, ok := operationRoute(schema, namespace, op); ok {
+				routes = append(routes, route{owner: set.Name + "." + op.Name, method: method, path: path})
+			}
+		}
+	}
+	for _, p := range planned {
+		for _, op := range p.plan.Operations {
+			routes = append(routes, route{owner: p.set.Name + "." + op.Name, method: op.HTTPMethod, path: "/api/" + op.RestPath})
+		}
+	}
+	for _, p := range planned {
+		for _, op := range p.plan.Operations {
+			if !op.BehaviorOperation.Table {
+				continue
+			}
+			owner, path := p.set.Name+"."+op.Name, "/api/"+op.RestPath
+			for _, other := range routes {
+				if other.owner == owner || other.method != op.HTTPMethod || !routesMatch(path, other.path) {
+					continue
+				}
+				set, name, _ := strings.Cut(other.owner, ".")
+				r.errorf("", "%s: the operation %s it adds is routed at POST %s, which %s.%s's POST %s also matches: rename one, or serve the table's operations from code of the project's own (D104)", p.set.Name, op.Name, path, set, name, other.path)
+			}
+		}
+	}
+}
+
+// operationRoute is the method and path the generated servers route op of
+// the namespace at, as apigen builds them: an explicit @rest path below
+// /api, or /api/<namespace>/<operation> and a segment for each argument a
+// path takes. It reports false for an operation that names no method.
+func operationRoute(schema *ir.Schema, namespace string, op *ir.FieldDef) (string, string, bool) {
+	method := strings.ToUpper(op.HTTPMethod)
+	if method == "" {
+		return "", "", false
+	}
+	if op.RestPath != "" {
+		return method, "/api/" + strings.Trim(op.RestPath, "/"), true
+	}
+	parts := []string{"api"}
+	if namespace != "" && namespace != "root" {
+		parts = append(parts, namespace)
+	}
+	parts = append(parts, codegen.ToKebabCase(op.Name))
+	for _, arg := range op.Arguments {
+		if arg != nil && !arg.IsQuery && pathLike(schema, arg.TypeRef) {
+			parts = append(parts, "{"+arg.Name+"}")
+		}
+	}
+	return method, "/" + strings.Join(parts, "/"), true
+}
+
+// pathLike reports whether an argument of type ref travels in the path of
+// an operation with no @rest path, as apigen's isPathParamType says: a
+// scalar that is a path, a UUID, an id or an integer, or a string.
+func pathLike(schema *ir.Schema, ref ir.TypeRef) bool {
+	if ref.IsArray || ref.IsMap {
+		return false
+	}
+	if def := schema.Scalars[ref.Name]; def != nil {
+		traits := codegen.BuildScalarTraits(def, codegen.BuildScalarTokens(ref.Name), def.TypeMappings["go"])
+		return traits.IsPathLike || traits.IsUUIDLike || traits.IsIDLike || traits.IsIntegerLike
+	}
+	return codegen.LanguagePrimitiveTraits(ref.Name).IsPathLike
+}
+
+// routesMatch reports whether two routes' paths reach one request: as many
+// segments, each pair the same text or one a {parameter}.
+func routesMatch(a, b string) bool {
+	as, bs := strings.Split(strings.Trim(a, "/"), "/"), strings.Split(strings.Trim(b, "/"), "/")
+	if len(as) != len(bs) {
+		return false
+	}
+	for i := range as {
+		if as[i] != bs[i] && !isPathParameter(as[i]) && !isPathParameter(bs[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isPathParameter reports whether a path segment is a {parameter}.
+func isPathParameter(segment string) bool {
+	return len(segment) > 2 && strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}")
 }
 
 // warnQueuesUnrun warns when set serves td, whose behaviors keep
@@ -413,8 +521,8 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 			}
 		}
 		for _, op := range declaration.Operations {
-			if op.Scope == registry.OperationScopeSchema || op.Scope == registry.OperationScopeNamespace {
-				r.warnf("", "%s: %s's %s is %s, whose operation %s runs on the %s as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves %s out (D103, D104)", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, op.Scope, op.Name)
+			if !behaviorops.Serves(op) {
+				r.warnf("", "%s: %s's %s is %s, whose operation %s runs on a namespace as a whole: @behaviorOperations serves the operations a behavior runs on a row or on its table, and leaves %s out (D103, D104)", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, op.Name)
 			}
 		}
 	}

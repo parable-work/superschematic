@@ -16,3 +16,7 @@ var (
 	LimitsTypes     = limitsTypes
 	IntegerSegments = integerSegments
 )
+
+// OrderTypes are the build's types of Pool's order field, for the external
+// test that holds them to the core's (D104).
+var OrderTypes = orderTypes

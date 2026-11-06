@@ -59,10 +59,7 @@ impl Source for Memory {
                             && row.own.get(field).and_then(key_of).as_deref() == Some(key.as_str())
                             && after.as_ref().is_none_or(|after| row_key > after)
                     })
-                    .map(|((_, row_key), row)| KeyedRow {
-                        key: row_key.clone(),
-                        row: row.clone(),
-                    })
+                    .map(|((_, row_key), row)| KeyedRow::new(row_key.clone(), row.clone()))
                     .collect();
                 let more = rows.len() > *limit;
                 rows.truncate(*limit);

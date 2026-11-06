@@ -1,6 +1,7 @@
 //! What the core is asked to run (D103): a create, an update, a delete, an
-//! operation of one use, a deadline that fell due, a write of a row the
-//! outbox hands it, or the define and publish checks of a type's configs. Every command carries its caller,
+//! operation of one use on a row, an operation of one use on the table as a
+//! whole (D104), a deadline that fell due, a write of a row the outbox hands
+//! it, or the define and publish checks of a type's configs. Every command carries its caller,
 //! the time it runs at, in epoch milliseconds, since the core reads no
 //! clock, and the host's id for the request, which the keys a behavior
 //! makes are derived from, since the core makes no id; a create carries
@@ -161,6 +162,18 @@ pub enum Action {
         #[serde(default = "empty_object")]
         params: Value,
     },
+    /// An operation of one use on the table as a whole (D104), by the use's
+    /// id and the operation's declared name: one its declaration's scope
+    /// `schema` gives ([`crate::Declaration::find_table_operation`]). It runs
+    /// on no row: it reads rows through the reads across a table, writes them
+    /// only through `Cx::call_on` and `Cx::create_row`, and presents no
+    /// preconditions.
+    TableOperation {
+        use_id: String,
+        operation: String,
+        #[serde(default = "empty_object")]
+        params: Value,
+    },
     /// A deadline a use armed that fell due: the time it was armed to fall
     /// due at and the payload it was armed with. The host runs it only
     /// while the deadline is still armed at that time, so a deadline
@@ -194,8 +207,8 @@ fn empty_object() -> Value {
 
 impl Action {
     /// What a refusal names as refused: `define`, `publish`, `create`,
-    /// `update`, `delete`, the operation's name, the deadline's, or
-    /// `change`.
+    /// `update`, `delete`, the operation's name (of a row or of the table),
+    /// the deadline's, or `change`.
     pub fn name(&self) -> &str {
         match self {
             Action::Define => "define",
@@ -203,14 +216,17 @@ impl Action {
             Action::Create { .. } => "create",
             Action::Update { .. } => "update",
             Action::Delete { .. } => "delete",
-            Action::Operation { operation, .. } => operation,
+            Action::Operation { operation, .. } | Action::TableOperation { operation, .. } => {
+                operation
+            }
             Action::Deadline { name, .. } => name,
             Action::Change { .. } => "change",
         }
     }
 
     /// The action's kind, as its JSON tag writes it: `define`, `publish`,
-    /// `create`, `update`, `delete`, `operation`, `deadline` or `change`.
+    /// `create`, `update`, `delete`, `operation`, `tableOperation`,
+    /// `deadline` or `change`.
     pub fn kind(&self) -> &'static str {
         match self {
             Action::Define => "define",
@@ -219,17 +235,18 @@ impl Action {
             Action::Update { .. } => "update",
             Action::Delete { .. } => "delete",
             Action::Operation { .. } => "operation",
+            Action::TableOperation { .. } => "tableOperation",
             Action::Deadline { .. } => "deadline",
             Action::Change { .. } => "change",
         }
     }
 
     /// The row the command runs on: a create's id, or the key the others
-    /// name; `None` for a create without one and for the define and
-    /// publish checks.
+    /// name; `None` for a create without one, for an operation of the table
+    /// as a whole and for the define and publish checks.
     pub fn key(&self) -> Option<&str> {
         match self {
-            Action::Define | Action::Publish { .. } => None,
+            Action::Define | Action::Publish { .. } | Action::TableOperation { .. } => None,
             Action::Create { id, .. } => id.as_deref(),
             Action::Update { key, .. }
             | Action::Delete { key }
@@ -303,5 +320,31 @@ mod tests {
             serde_json::to_value(Action::Publish { from: None }).unwrap(),
             json!({"kind": "publish", "from": null})
         );
+    }
+
+    /// An operation of the table as a whole names no row (D104).
+    #[test]
+    fn a_table_operation_reads_from_json_and_names_no_row() {
+        let written =
+            json!({"kind": "tableOperation", "useId": "Pool", "operation": "pick", "params": {}});
+        let action: Action = serde_json::from_value(written.clone()).unwrap();
+        assert_eq!(
+            action,
+            Action::TableOperation {
+                use_id: "Pool".into(),
+                operation: "pick".into(),
+                params: json!({}),
+            }
+        );
+        assert_eq!(action.key(), None);
+        assert_eq!(action.kind(), "tableOperation");
+        assert_eq!(action.name(), "pick");
+        assert_eq!(serde_json::to_value(&action).unwrap(), written);
+        // Its parameters are {} when it gives none.
+        let bare: Action = serde_json::from_value(
+            json!({"kind": "tableOperation", "useId": "Lease", "operation": "expireHolder"}),
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(&bare).unwrap()["params"], json!({}));
     }
 }

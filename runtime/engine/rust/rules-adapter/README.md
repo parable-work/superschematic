@@ -38,7 +38,9 @@ it already holds and no other:
 
 Each module has the same functions: `execute` (a command the caller built),
 `run_operation`, `run_operation_with` (an operation with `ExecuteOptions`,
-the caller's preconditions among them), `run_create`, `run_update`,
+the caller's preconditions among them), `run_table_operation` (an operation
+of the table as a whole, a command without a row, D104), `run_create`,
+`run_update`,
 `run_delete`, `prepare_create`
 (a create run to its change set and applied nowhere, for an upsert's
 insert), `read_row`, `read_sub_rows` (a use's sub-table rows of a row, in
@@ -146,7 +148,21 @@ brief:
    Presence's miss over Lease's `holder`) is answered alike from the
    layout's column of the use's field, the value bound as a command's value
    of that column binds; a use or a field the layout lacks is `internal`,
-   and so is one made under a lock on SQLite. A row a
+   and so is one made under a lock on SQLite. A `rows` read (a table's
+   rows, D104: Pool's pick) is answered alike from the table, each own
+   field its `equal` names held to its value (`= ?`, bound as a command's
+   value of the column binds, a UUID in either form as its column's, or
+   `IS NULL` for a null), live rows alone, after a key when given, in key
+   order, `LIMIT limit + 1`; then, for each sub-table its `tables` names,
+   one read of that sub-table's rows of every row of the page (`WHERE row
+   IN (...)`, in key order, `COLLATE "C"` on Postgres), each set on its
+   row by use id and table name, an empty list for a row that has none.
+   Equality over own columns is the only rule the adapter learns: the core
+   checks it again and applies every other. A UUID field's value that is
+   no UUID, which no column of it can hold, matches no row, as the Go and
+   TypeScript adapters answer it. A field that is no own field
+   of the table, and a use or a sub-table the layout lacks, are
+   `internal`, and so is one made under a lock on SQLite. A row a
    change command found gone (`RowWrite::Gone`) is applied in the row
    writes' place with two `NOT EXISTS` deletes: its deadline messages
    unless a live row of the key exists, then its sub-table rows unless any
@@ -158,6 +174,22 @@ brief:
    `created_at` are `clock_timestamp()`. An event of a table whose layout
    keeps no event queue is `internal`, naming the command, the kind, the
    use, the row and the table.
+
+## A command without a row
+
+`run_table_operation(host, client | conn, type, use, operation, params,
+caller, &ExecuteOptions)` runs an operation a behavior's declaration gives
+the scope `schema` (D104: Pool's `pick`, Lease's `expireHolder`) as the
+core's `tableOperation` action, which names no row, and returns its result;
+null params are `{}`. The core reads the table's rows through `rows` reads
+and the `linked` and `holding` ones, and writes each row it reaches through
+a call on that row, each with that row's guards, version and hooks: the
+change set holds those rows, each fenced on its version as any row write
+is, so one whose run writes no row applies an empty unit, and a read-only
+one writes nothing in the caller's transaction. It takes no lock of its
+own. The core refuses the options' preconditions, a row's, as
+`PreconditionsError`. A layout's operation of the table is
+`Operation { table: true }`, which a repository binds as a method of no key.
 
 ## Deadlines
 

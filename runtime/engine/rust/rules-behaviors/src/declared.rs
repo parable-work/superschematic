@@ -8,10 +8,13 @@
 //! its row's writes (`hearsChanges`), its operations and whether each
 //! writes, the kinds of the events it emits about a row (`events`, D104),
 //! its veto codes, whether a create gives it parameters (a
-//! createParamsSchema), and whether a caller presents it a precondition (a
-//! preconditionSchema). An operation of a table or a namespace as a whole
-//! (`scope` `schema` or `namespace`, Lease's expireHolder) is left out: a
-//! row's core runs the operations of a row (D104). The file stays the one declaration; the core reads
+//! createParamsSchema), whether a caller presents it a precondition (a
+//! preconditionSchema), and the contracts it implements and asks
+//! (`contracts`, each `{ name, role }`, D104). An operation whose `scope` is
+//! `schema` is one of the table as a whole (Lease's expireHolder, Pool's
+//! pick), which a command without a row runs (D104); one whose `scope` is
+//! `namespace` (Comments') is left out, since the core runs no command on a
+//! namespace as a whole. The file stays the one declaration; the core reads
 //! only what it holds a behavior to, and the rest (descriptions, schemas,
 //! an event's payloadSchema among them,
 //! each field's column type and whether a value field is `optional`, which
@@ -62,23 +65,40 @@ pub(crate) fn declaration(text: &str) -> Declaration {
         declaration = declaration.hears_changes();
     }
     for operation in listed(&file, "operations") {
-        // A row's core runs the operations of a row; one of a table or a
-        // namespace waits for a command without a row (D104).
+        // An operation of the table as a whole runs as a command without a
+        // row (D104); one of a namespace as a whole is left out, which the
+        // core runs no command for.
         let scope = operation.get("scope").and_then(Value::as_str);
-        if matches!(scope, Some("schema" | "namespace")) {
+        if scope == Some("namespace") {
             continue;
         }
         if let Some(name) = operation.get("name").and_then(Value::as_str) {
             // An operation writes only when it says so, as the engine reads
             // the file.
             let writes = operation.get("writes") == Some(&Value::Bool(true));
-            declaration = declaration.operation(name, writes);
+            declaration = if scope == Some("schema") {
+                declaration.table_operation(name, writes)
+            } else {
+                declaration.operation(name, writes)
+            };
         }
     }
     // The kinds of the events it emits, which an emit is held to (D104).
     for event in listed(&file, "events") {
         if let Some(kind) = event.get("kind").and_then(Value::as_str) {
             declaration = declaration.event(kind);
+        }
+    }
+    // The contracts it implements and asks (D104); an entry of another
+    // role is passed over, which the registry refuses.
+    for contract in listed(&file, "contracts") {
+        let Some(name) = contract.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        match contract.get("role").and_then(Value::as_str) {
+            Some("implements") => declaration = declaration.contract(name),
+            Some("asks") => declaration = declaration.asking(name),
+            _ => {}
         }
     }
     for veto in listed(&file, "vetoes") {
@@ -182,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_leaves_out_row_less_operations_and_says_it_takes_preconditions() {
+    fn a_file_declares_table_operations_and_leaves_out_namespace_ones() {
         let fenced = declaration(
             r#"{"name": "Tally",
                 "operations": [{"name": "add", "writes": true}, {"name": "sweep", "writes": true, "scope": "schema"},
@@ -193,10 +213,41 @@ mod tests {
             fenced,
             Declaration::new("Tally")
                 .operation("add", true)
+                .table_operation("sweep", true)
                 .operation("peek", false)
                 .preconditions()
         );
+        assert!(fenced.find_operation("sweep").is_none());
+        assert!(fenced.find_table_operation("sweep").is_some());
+        assert!(
+            fenced.find_operation("purge").is_none()
+                && fenced.find_table_operation("purge").is_none()
+        );
         assert!(!declaration(r#"{"name": "Tally", "preconditionSchema": null}"#).preconditions);
+    }
+
+    #[test]
+    fn a_file_declares_the_contracts_it_implements_and_asks() {
+        let declared = declaration(
+            r#"{"name": "Tally",
+                "contracts": [{"name": "Capacity", "role": "implements", "description": "x"},
+                              {"name": "Supply", "role": "asks"},
+                              {"name": "Odd", "role": "offers"}, {"role": "asks"},
+                              {"name": "Capacity", "role": "implements"}]}"#,
+        );
+        assert_eq!(
+            declared,
+            Declaration::new("Tally")
+                .contract("Capacity")
+                .asking("Supply")
+        );
+        assert!(declared.implements("Capacity") && !declared.implements("Odd"));
+        assert!(declared.asks_contract("Supply"));
+        assert!(
+            declaration(r#"{"name": "Tally", "contracts": {"name": "Capacity"}}"#)
+                .contracts
+                .is_empty()
+        );
     }
 
     #[test]

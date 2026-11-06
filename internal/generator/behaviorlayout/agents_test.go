@@ -13,8 +13,9 @@ const agentsFixture = "../../loader/tsreader/testdata/services/fixture-agents-db
 
 // The layout document of the tables that implement Lease, Retries, Presence
 // and Budget (D104): Job's uses are Lease's, with its seven owned fields
-// (active, which the core computes, takes none), its seven operations but
-// expireHolder, which runs on the table as a whole, and its directives
+// (active, which the core computes, takes none), its seven operations of a
+// row and expireHolder, an operation of the table as a whole, which the
+// adapters run as a command without a row (D104), and its directives
 // sub-table, then Retries', with its eight owned fields, recordAttempt and
 // its attempts sub-table, then its status; its deadline queue carries
 // Lease's expiry and Retries' then. Session's Presence owns its four
@@ -39,7 +40,7 @@ func TestLayoutOfLeaseRetriesPresenceAndBudget(t *testing.T) {
 			}
 			var operations []string
 			for _, op := range use.Operations {
-				operations = append(operations, op.Name+map[bool]string{true: " writes", false: ""}[op.Writes])
+				operations = append(operations, op.Name+map[bool]string{true: " writes", false: ""}[op.Writes]+map[bool]string{true: " table", false: ""}[op.Table])
 			}
 			var tables []string
 			for _, table := range use.Tables {
@@ -60,7 +61,7 @@ func TestLayoutOfLeaseRetriesPresenceAndBudget(t *testing.T) {
 	}{
 		{"Job", []string{
 			"Lease Lease lease [holder lease_holder, token lease_token, acquiredAt lease_acquired_at, renewedAt lease_renewed_at, expiresAt lease_expires_at, expiries lease_expiries, ended lease_ended] " +
-				"[acquire writes, heartbeat writes, release writes, expire writes, direct writes, acknowledge writes, resetExpiries writes] " +
+				"[acquire writes, heartbeat writes, release writes, expire writes, direct writes, acknowledge writes, expireHolder writes table, resetExpiries writes] " +
 				"[directives job_lease_directives job_id number (token, name, data, dedupeKey, sentBy, sentAt, acknowledgedAt)]",
 			"Retries Retries retries [total retries_total, classAttempts retries_class_attempts, bestScore retries_best_score, exhausted retries_exhausted, stuck retries_stuck, retryAt retries_retry_at, failingSince retries_failing_since, keyedBy retries_keyed_by] " +
 				"[recordAttempt writes] " +

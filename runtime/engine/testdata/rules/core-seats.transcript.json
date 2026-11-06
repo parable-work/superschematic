@@ -14,7 +14,8 @@
     "Retries",
     "Seats",
     "Reconcile",
-    "Schedules"
+    "Schedules",
+    "Pool"
   ],
   "scenarios": [
     {

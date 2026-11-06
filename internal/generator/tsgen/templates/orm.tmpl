@@ -62,6 +62,14 @@ claimed it, to the project's handler in the transaction that spends the
 claim (runEvent), so the handler's writes and the completion commit
 together or not at all.
 {{- end}}
+{{- if .ORM.HasTableOperations}}
+
+An operation of a table as a whole (D104), a declaration's scope schema,
+takes no key: orm.job.lease.expireHolder({ holder }) runs it through the
+core as a command without a row, which reads the table's rows and writes
+only the rows its calls on each write, each held to its version, and
+takes no preconditions.
+{{- end}}
 {{- if .ORM.HasPreconditions}}
 
 A table one of whose uses takes a precondition (D16, D104) types what a
@@ -181,11 +189,11 @@ export interface {{.Type}}Preconditions {
 
 {{- if .Uses}}
 
-/** The behaviors of {{.Type}} (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
+/** The behaviors of {{.Type}} (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes{{if .TableOperations}}, or on the table as a whole for one that takes none (D104){{end}}. */
 export interface {{.Type}}Uses {
 {{- range .Uses}}
   /** The operations of {{if eq .ID .Member}}{{.ID}}, a {{.Behavior}}{{else}}{{.Behavior}}, which {{$t.Type}} implements{{end}}. */
-  readonly {{.Member}}: UseOperations<{
+  readonly {{.Member}}: {{if .Operations}}UseOperations<{
 {{- range .Operations}}
 {{- if .Doc}}
     /** {{tsDoc .Doc "     * "}} */
@@ -195,7 +203,17 @@ export interface {{.Type}}Uses {
       result: {{.Result}};
     };
 {{- end}}
-  }, {{$t.KeyType}}{{if $t.Preconditions}}, {{$t.Type}}Preconditions{{end}}>;
+  }, {{$t.KeyType}}{{if $t.Preconditions}}, {{$t.Type}}Preconditions{{end}}>{{end}}{{if and .Operations .TableOperations}} & {{end}}{{if .TableOperations}}TableOperations<{
+{{- range .TableOperations}}
+{{- if .Doc}}
+    /** {{tsDoc .Doc "     * "}} */
+{{- end}}
+    {{.Name}}: {
+      params: {{.Params}};
+      result: {{.Result}};
+    };
+{{- end}}
+  }>{{end}};
 {{- end}}
 }
 {{- end}}

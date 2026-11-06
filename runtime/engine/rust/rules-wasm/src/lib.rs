@@ -28,7 +28,14 @@
 //!   [{"key", "row"}], "more"}}` in key order), or one page of the rows of a
 //!   type whose use's owned field holds a value (`{"kind": "holding",
 //!   "type", "useId", "field", "value", "after"?, "limit"}`, answered as a
-//!   linked read is); a command may carry the caller's preconditions by use
+//!   linked read is), or one page of a type's live rows whose own fields
+//!   hold the values `equal` names, each with the sub-table rows `tables`
+//!   names (`{"kind": "rows", "type", "equal"?, "tables"?: [{"useId",
+//!   "table"}], "after"?, "limit"}`, answered as a linked read is, each row
+//!   with `"tables": {<use>: {<table>: [{"key", "values"}]}}`, D104); a
+//!   command may be an operation of the table as a whole, which names no
+//!   row (`{"kind": "tableOperation", "useId", "operation", "params"}`,
+//!   D104); a command may carry the caller's preconditions by use
 //!   id (`"preconditions": {"Lease": {"token": 3}}`, D104), which the core
 //!   holds to the uses before it reads the row; a deadline command (`{"kind":
 //!   "deadline", ...}`) runs only while the host holds the deadline armed at
@@ -252,14 +259,27 @@ mod tests {
         assert!(lease["preconditionSchema"].is_object());
     }
 
-    /// Schedules, the last, declares the event it emits (D104), with its
-    /// payloadSchema, which a binding hands its host whole.
+    /// Schedules declares the event it emits (D104), with its payloadSchema,
+    /// which a binding hands its host whole; Pool, the last, its operation of
+    /// the table as a whole and the contract it asks.
     #[test]
     fn schedules_declares_the_event_it_emits() {
         let (out, ok) = run_json(Op::Declarations, b"");
         assert!(ok, "{out}");
         let files: Value = serde_json::from_str(&out).unwrap();
-        let schedules = files.as_array().and_then(|files| files.last()).unwrap();
+        let named = |name: &str| {
+            files
+                .as_array()
+                .and_then(|files| files.iter().find(|file| file["name"] == name))
+                .unwrap()
+                .clone()
+        };
+        let pool = files.as_array().and_then(|files| files.last()).unwrap();
+        assert_eq!(pool["name"], "Pool");
+        assert_eq!(pool["operations"][2]["scope"], "schema");
+        assert_eq!(pool["contracts"][0]["role"], "asks");
+        assert_eq!(pool["events"][0]["kind"], "recheck");
+        let schedules = named("Schedules");
         assert_eq!(schedules["name"], "Schedules");
         assert_eq!(schedules["tables"][0]["name"], "schedules");
         assert_eq!(schedules["events"][0]["kind"], "run");
@@ -419,6 +439,46 @@ mod tests {
         assert_eq!(
             step,
             json!({"read": [{"kind": "subRows", "type": "Ticket", "key": "t1", "useId": "Timers", "table": "deadlines"}]})
+        );
+    }
+
+    // An account in a pool, its rank ordering its members.
+    fn account() -> Value {
+        json!({
+            "name": "Account",
+            "uses": [{"behavior": "Pool", "config": {"order": "rank"}, "anchor": "type"}],
+            "fields": [{"name": "rank", "type": "Generic.Int64"}]
+        })
+    }
+
+    /// An operation of the table as a whole runs on no row (D104): it asks
+    /// for no row by its key but for a read across the table, and answers
+    /// from the rows it is given.
+    #[test]
+    fn a_table_operation_runs_with_no_row() {
+        let command = json!({"caller": {"subject": "sam"}, "now": 1000, "request": "r1",
+            "action": {"kind": "tableOperation", "useId": "Pool", "operation": "pick", "params": {}}});
+        let input = json!({"spec": account(), "command": command});
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let rows = json!({"kind": "rows", "type": "Account", "limit": 500});
+        assert_eq!(
+            serde_json::from_str::<Value>(&out).unwrap(),
+            json!({ "read": [rows] })
+        );
+        let answered = json!({"spec": account(), "command": command, "answers": {"reads": [{
+            "request": rows,
+            "answer": {"linked": {"rows": [
+                {"key": "a1", "row": {"own": {"rank": 2}, "owned": {"Pool": {"availability": "open"}}, "version": 1}},
+                {"key": "a2", "row": {"own": {"rank": 1}, "owned": {}, "version": 1}}
+            ], "more": false}}
+        }]}});
+        let (out, ok) = run_json(Op::Run, answered.to_string().as_bytes());
+        assert!(ok, "{out}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&out).unwrap(),
+            json!({"done": {"changed": {"rows": [], "subRows": [], "events": [], "deadlines": [], "result":
+                {"member": {"key": "a2", "availability": "open", "order": 1, "preferred": true}}}}})
         );
     }
 

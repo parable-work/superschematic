@@ -516,3 +516,33 @@ export interface SchedulesOn<T> {
  * first type argument is the table itself.
  */
 export type Schedules<T, C extends SchedulesOn<T>> = NonNullable<unknown>;
+
+/** A Pool member's availability (D104): open, near its limit, or out. */
+export type PoolAvailability = "open" | "near" | "out";
+
+/** Pool's config on a table (D104): the field that ranks its members, how long a member is out when no time is named, how often an out member past its time is rechecked, and the permission markOut and reportRoom need. */
+export interface PoolOn<T> {
+  /** The own number field whose value ranks the members, lowest first, ties by key. */
+  readonly order: Extract<keyof T, string>;
+  /** How long a member is out when markOut or a check names no time, in milliseconds, at least 1000; thirty minutes when absent. */
+  readonly outForMs?: number;
+  /** How often an out member past its outUntil is rechecked, in milliseconds, at least 1000; two minutes when absent. */
+  readonly recheckAfterMs?: number;
+  /** The permission markOut and reportRoom need; any caller the route admits when absent. pick needs none. */
+  readonly permission?: string;
+}
+
+/**
+ * A pool of interchangeable rows (D104):
+ * `export abstract class Account implements Pool<Account, { order: "rank" }>`.
+ * The type stays a table. Pool keeps each row's availability, outUntil,
+ * outReason and checkedAt as owned columns, arms an out row's recheck as a
+ * message of the table's deadline queue and writes each recheck's event to
+ * its event queue, which the API's @behaviorWorker(Account) runs, handing
+ * each event to the project's Workers method; its operations (pool.markOut,
+ * pool.reportRoom, and pool.pick, a read of the table as a whole) change and
+ * read them. The behaviors' core alone implements it: no engine type
+ * composes it. Like Timers, it resolves to the empty object type; the first
+ * type argument is the table itself.
+ */
+export type Pool<T, C extends PoolOn<T>> = NonNullable<unknown>;

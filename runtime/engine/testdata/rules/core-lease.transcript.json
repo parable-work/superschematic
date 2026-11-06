@@ -14,7 +14,8 @@
     "Retries",
     "Seats",
     "Reconcile",
-    "Schedules"
+    "Schedules",
+    "Pool"
   ],
   "scenarios": [
     {
@@ -27947,6 +27948,125 @@
               }
             }
           }
+        },
+        {
+          "kind": "command",
+          "step": 25,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1090000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren"
+              }
+            },
+            "request": "request-19"
+          },
+          "expect": {
+            "result": {
+              "expired": 1,
+              "reasons": {
+                "maxHold": 1
+              },
+              "ids": [
+                "j4"
+              ]
+            },
+            "others": [
+              {
+                "type": "Job",
+                "key": "j4",
+                "row": {
+                  "own": {
+                    "title": "j4"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "maxHold",
+                        "at": 1090000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1090000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1090000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-20"
+          },
+          "expect": {
+            "result": {
+              "token": 3,
+              "expiresAt": 1150000,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 3,
+                  "expiries": 1,
+                  "expiresAt": 1150000,
+                  "holder": "otto",
+                  "acquiredAt": 1090000,
+                  "renewedAt": 1090000
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1090000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1150000,
+                "payload": null
+              }
+            ]
+          }
         }
       ],
       "skipped": [
@@ -27971,19 +28091,9 @@
           "reason": "a read of the engine's event log, which a table has no counterpart of: its writes are heard through its change queue (D103), and the event stream comes later"
         },
         {
-          "step": 25,
-          "call": "instances.invokeSchema",
-          "reason": "expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 26,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 25: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
           "step": 27,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 25: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         }
       ]
     },
@@ -28378,6 +28488,68 @@
               }
             ]
           }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "expired": 1,
+              "reasons": {
+                "ttl": 1
+              },
+              "ids": [
+                "j1"
+              ]
+            },
+            "others": [
+              {
+                "type": "Job",
+                "key": "j1",
+                "row": {
+                  "own": {
+                    "title": "Build"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "ttl",
+                        "at": 1060000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1000000
+                    }
+                  }
+                }
+              }
+            ]
+          }
         }
       ],
       "skipped": [
@@ -28385,11 +28557,6 @@
           "step": 1,
           "call": "open",
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
-        },
-        {
-          "step": 6,
-          "call": "instances.invokeSchema",
-          "reason": "expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
         }
       ]
     },
@@ -30901,6 +31068,218 @@
               }
             ]
           }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1021000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren",
+                "notRenewedAfter": 1010000
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "expired": 2,
+              "reasons": {
+                "holder": 2
+              },
+              "ids": [
+                "j1",
+                "j3"
+              ]
+            },
+            "others": [
+              {
+                "type": "Job",
+                "key": "j1",
+                "row": {
+                  "own": {
+                    "title": "Build"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "holder",
+                        "at": 1021000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1000000
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Job",
+                "key": "j3",
+                "row": {
+                  "own": {
+                    "title": "j3"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "holder",
+                        "at": 1021000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1000000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1081000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren",
+                "notRenewedAfter": 1000000
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "expired": 1,
+              "reasons": {
+                "ttl": 1
+              },
+              "ids": [
+                "j2"
+              ]
+            },
+            "others": [
+              {
+                "type": "Job",
+                "key": "j2",
+                "row": {
+                  "own": {
+                    "title": "j2"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "ttl",
+                        "at": 1081000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1000000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1081000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "expire",
+              "params": {
+                "notRenewedAfter": 1000000
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation expire of behavior Lease: /notRenewedAfter: notRenewedAfter spares a holder's active leases, so it needs holder",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/notRenewedAfter",
+                    "message": "notRenewedAfter spares a holder's active leases, so it needs holder"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 2,
+                  "expiries": 1,
+                  "ended": {
+                    "reason": "holder",
+                    "at": 1021000
+                  }
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
         }
       ],
       "skipped": [
@@ -30925,34 +31304,19 @@
           "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
-          "step": 15,
-          "call": "instances.invokeSchema",
-          "reason": "expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
           "step": 16,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 15: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 17,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 15: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 18,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 15: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 19,
-          "call": "instances.invokeSchema",
-          "reason": "the scenario stopped at step 15: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 20,
-          "call": "instances.invoke",
-          "reason": "the scenario stopped at step 15: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         }
       ]
     },
@@ -31036,6 +31400,71 @@
                     },
                     "overridePermission": "jobs.override"
                   },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "timeLimitMs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "topic",
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "type": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "queued",
+                      "running",
+                      "done",
+                      "failed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "queued",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "queued"
+                      },
+                      {
+                        "from": "running",
+                        "to": "done"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "queued",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Lease",
                   "anchor": "type"
                 }
               ],
@@ -31603,6 +32032,398 @@
               }
             ]
           }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "otto may not expire the leases of a holder on Job: it needs permission jobs.override"
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "expired": 2,
+              "reasons": {
+                "holder": 2
+              },
+              "ids": [
+                "j1",
+                "j2"
+              ]
+            },
+            "others": [
+              {
+                "type": "Job",
+                "key": "j1",
+                "row": {
+                  "own": {
+                    "title": "Build"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "holder",
+                        "at": 1001000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1001000
+                    }
+                  }
+                }
+              },
+              {
+                "type": "Job",
+                "key": "j2",
+                "row": {
+                  "own": {
+                    "title": "j2"
+                  },
+                  "owned": {
+                    "Lease": {
+                      "token": 2,
+                      "expiries": 1,
+                      "ended": {
+                        "reason": "holder",
+                        "at": 1001000
+                      }
+                    },
+                    "Workflow": {
+                      "status": "queued",
+                      "enteredAt": 1000000
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 22,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "expired": 0,
+              "reasons": {},
+              "ids": []
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 24,
+          "call": "schemas.define",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 25,
+          "call": "schemas.publish",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.create",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "j1",
+              "own": {
+                "title": "Build"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "j1",
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 27,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "opal",
+              "permissions": [
+                "jobs.override"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Lease",
+              "operation": "expireHolder",
+              "params": {
+                "holder": "wren"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "opal may not expire the leases of a holder on Job: its Lease config names no overridePermission"
+            }
+          }
         }
       ],
       "skipped": [
@@ -31612,89 +32433,54 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
-          "step": 11,
-          "call": "instances.invokeSchema",
-          "reason": "expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 12,
-          "call": "instances.invokeSchema",
-          "reason": "expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
           "step": 13,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 14,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 15,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 16,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 17,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 18,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 19,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 20,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 21,
           "call": "instances.get",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 22,
-          "call": "instances.invokeSchema",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 23,
           "call": "open",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 24,
-          "call": "schemas.define",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 25,
-          "call": "schemas.publish",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 26,
-          "call": "instances.create",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
-        },
-        {
-          "step": 27,
-          "call": "instances.invokeSchema",
-          "reason": "the scenario stopped at step 12: expireHolder runs on the table as a whole, which waits for a command without a row (D104)"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         }
       ]
     },

@@ -22,7 +22,9 @@ const agentsService = "fixture-agents-api"
 // fixture-agents-api, its tool documents included: the operations of each
 // use Job, Session and Account implement are methods of a struct of their
 // own, the field of the namespace named for the use's member,
-// job.lease.heartbeat and account.budget.observe, whose tools are named
+// job.lease.heartbeat and account.budget.observe, and Lease's expireHolder,
+// an operation of the table as a whole, takes no key,
+// job.lease.expire_holder(input, None) (D104); their tools are named
 // job.lease.heartbeat with the method lease.heartbeat. Regenerate with:
 // go test ./internal/generator/rustsdkgen -run TestAgentsSDKGolden -update
 func TestAgentsSDKGolden(t *testing.T) {
@@ -66,6 +68,7 @@ func TestAgentsSDKGolden(t *testing.T) {
 	}
 	for _, want := range []string{
 		"job.lease JobLeaseOperations::heartbeat",
+		"job.lease JobLeaseOperations::expire_holder",
 		"job.retries JobRetriesOperations::record_attempt",
 		"job.status JobStatusOperations::transition",
 		"session.presence SessionPresenceOperations::beat",
@@ -75,8 +78,8 @@ func TestAgentsSDKGolden(t *testing.T) {
 			t.Errorf("members = %v, want %s among them", got, want)
 		}
 	}
-	if len(got) != 22 {
-		t.Errorf("members = %d (%v), want 22", len(got), got)
+	if len(got) != 23 {
+		t.Errorf("members = %d (%v), want 23", len(got), got)
 	}
 	tools, err := GenerateTools(sdkOutput, apiOutput, nestedArraysClock)
 	if err != nil {
@@ -86,7 +89,7 @@ func TestAgentsSDKGolden(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name+" "+tool.MethodName)
 	}
-	for _, want := range []string{"job.lease.heartbeat lease.heartbeat", "account.budget.recordUsageFor budget.record_usage_for", "session.presence.beat presence.beat"} {
+	for _, want := range []string{"job.lease.heartbeat lease.heartbeat", "job.lease.expireHolder lease.expire_holder", "account.budget.recordUsageFor budget.record_usage_for", "session.presence.beat presence.beat"} {
 		if !strings.Contains(strings.Join(names, "; "), want) {
 			t.Errorf("tools = %v, want %s among them", names, want)
 		}

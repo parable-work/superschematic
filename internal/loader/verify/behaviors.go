@@ -247,7 +247,8 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // the table's fields (checkSeatsConfig, D104), a Reconcile use's status
 // and unreachable to the table's Workflow (checkReconcileConfig, D104), and
 // a Schedules use's bounds, retry, status and endOn to its config and the
-// table's Workflow (checkSchedulesConfig, D104).
+// table's Workflow (checkSchedulesConfig, D104), and a Pool use's order to
+// the table's fields (checkPoolConfig, D104).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -337,7 +338,7 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
 				}
-			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior:
+			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior, poolBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {
 					break
 				}
@@ -346,6 +347,8 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 					checkSeatsConfig(schema, td, ref, uses, r)
 				case schedulesBehavior:
 					checkSchedulesConfig(schema, td, ref, uses, r)
+				case poolBehavior:
+					checkPoolConfig(schema, td, ref, uses, r)
 				case constantsBehavior:
 					checkConstantsConfig(schema, td, ref, uses, r)
 				case stateRulesBehavior:

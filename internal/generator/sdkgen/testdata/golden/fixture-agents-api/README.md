@@ -113,11 +113,12 @@ const result = await sdk.account.budget.checkReserve({
 #### JobNamespace
 
 ```typescript
-// Example: lease.acknowledge
-const result = await sdk.job.lease.acknowledge({
+// Example: lease.expireHolder
+const result = await sdk.job.lease.expireHolder({
   // Input data
 });
 // lease: the operations of the Lease Job implements (D103)
+//   sdk.job.lease.expireHolder
 //   sdk.job.lease.acknowledge
 //   sdk.job.lease.acquire
 //   sdk.job.lease.direct

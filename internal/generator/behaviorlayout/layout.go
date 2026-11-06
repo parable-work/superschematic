@@ -373,11 +373,16 @@ type OwnedField struct {
 	Value bool `json:"value,omitempty"`
 }
 
-// Operation is one operation a behavior declares on a row: its name, and
-// whether it writes, as the core's declaration has it.
+// Operation is one operation a behavior declares on a row or on the table
+// as a whole: its name, whether it writes, as the core's declaration has
+// it, and which of the two it runs on.
 type Operation struct {
 	Name   string `json:"name"`
 	Writes bool   `json:"writes"`
+	// Table is true for an operation of the table as a whole (D104), a
+	// declaration's scope "schema": a repository method that takes no key,
+	// which the adapters run as a command without a row.
+	Table bool `json:"table,omitempty"`
 }
 
 // TypeSpec is the type as the core runs it: superschematic_rules::TypeSpec
@@ -682,11 +687,16 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 				Value:  value,
 			})
 		}
+		// Its operations of a row and of the table as a whole, in
+		// declaration order (D104); one of a namespace (Comments') the core
+		// runs no command for.
 		for _, op := range behavior.Operations {
-			if op.Scope != "" && op.Scope != registry.OperationScopeInstance {
-				continue
+			switch op.Scope {
+			case "", registry.OperationScopeInstance:
+				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes})
+			case registry.OperationScopeSchema:
+				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes, Table: true})
 			}
-			use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes})
 		}
 		for _, declared := range behavior.Tables {
 			sub, err := subTableOf(schema, td, ref, declared, tables)

@@ -112,14 +112,16 @@ func TestWriteAPIGoldenBehaviorAgents(t *testing.T) {
 	}
 }
 
-// TestGenerateAgentsOperations: every behavior operation of a table one of
-// whose uses takes a precondition (Job's Lease, D104) takes the input's
-// preconditions apart from its parameters, an operation with no parameters
-// among them, and leaves them out of the optional members it hands the
-// repository; a table whose uses take none (Session, Account) has no such
-// member. Each operation calls the repository under its use's member. The
-// package has two behavior workers, each over its table's deadline queue,
-// SessionPresence's caller holding the override its miss needs.
+// TestGenerateAgentsOperations: every behavior operation of a row of a
+// table one of whose uses takes a precondition (Job's Lease, D104) takes
+// the input's preconditions apart from its parameters, an operation with
+// no parameters among them, and leaves them out of the optional members it
+// hands the repository; a table whose uses take none (Session, Account) has
+// no such member, and nor has Lease's expireHolder, an operation of the
+// table as a whole, which takes no key either. Each operation calls the
+// repository under its use's member. The package has two behavior workers,
+// each over its table's deadline queue, SessionPresence's caller holding
+// the override its miss needs.
 func TestGenerateAgentsOperations(t *testing.T) {
 	output := generateAgentsFixture(t)
 	if !output.TableBehaviors || !output.HasBehaviors() || !output.HasBehaviorWorkers() || !output.BehaviorsTakePreconditions() {
@@ -158,8 +160,12 @@ func TestGenerateAgentsOperations(t *testing.T) {
 			t.Errorf("%s hands the repository its preconditions among its optional parameters %v", name, route.Optional)
 		}
 	}
-	if _, ok := routes["Job.Lease.expireHolder"]; ok {
-		t.Errorf("expireHolder runs on the table as a whole, and the set serves it: %v", routes["Job.Lease.expireHolder"])
+	// expireHolder runs on the table as a whole (D104): routed with no key,
+	// it presents no preconditions, which only a row's command takes.
+	if route := routes["Job.Lease.expireHolder"]; route == nil || route.Method() != "job.lease.expireHolder" || !route.Table || route.Preconditions || route.Key.Name != "" {
+		t.Errorf("Job.Lease.expireHolder = %+v, want job.lease.expireHolder on the table, with no key and no preconditions", route)
+	} else if !slices.Equal(route.Optional, []string{"notRenewedAfter"}) {
+		t.Errorf("expireHolder's optional members = %v, want [notRenewedAfter]", route.Optional)
 	}
 	if got := routes["Job.Lease.heartbeat"].Optional; !slices.Equal(got, []string{"acknowledge"}) {
 		t.Errorf("heartbeat's optional members = %v, want [acknowledge]", got)
@@ -194,6 +200,7 @@ func TestGenerateAgentsOperations(t *testing.T) {
 		"behaviorParams(request.input, [], ['preconditions']) as never",
 		"{ caller: behaviorCaller(ctx), preconditions: behaviorPreconditions(request.input) as never }",
 		"behaviorPreconditions,",
+		"options.orm.job.lease.expireHolder(\n          // The repository's parameters: the wire values of JobLeaseExpireHolderInput,\n          // each optional member that is null left out (D104).\n          behaviorParams(request.input, ['notRenewedAfter']) as never,\n          { caller: behaviorCaller(ctx) }\n        )",
 	} {
 		if !strings.Contains(string(router), want) {
 			t.Errorf("router.ts has no %s", want)
@@ -226,6 +233,10 @@ export const deleted = orm.job.deleteOne(key, { preconditions: { Lease: { token:
 // @ts-expect-error a token is a number.
 export const wrong = orm.job.updateOne(key, { title: 'Build' }, { preconditions: { Lease: { token: '1' } } });
 export const recorded = orm.job.retries.recordAttempt(key, { failure: 'timeout' }, { preconditions: fenced });
+// expireHolder runs on the table as a whole (D104): no key, and no preconditions.
+export const expired: Promise<{ expired: number; ids: string[] }> = orm.job.lease.expireHolder({ holder: 'w' }, { caller: { subject: 'ops', permissions: ['jobs.override'] } });
+// @ts-expect-error an operation of the table takes no key.
+export const keyed = orm.job.lease.expireHolder(key, { holder: 'w' });
 `
 
 // TestGeneratedAgentsAPICompiles type-checks the package for
@@ -255,6 +266,7 @@ var agentsCases = []string{
 	"a lease that lapses expires when its deadline falls due on the worker: onExpiry moves the job back to queued and the token advances",
 	"a second build failure of one revision exhausts the job, and a new revision starts its counts again",
 	"a precondition for a use whose behavior takes none is refused as invalid_argument",
+	"expireHolder expires every lease a gone holder holds, for a caller holding jobs.override, and is forbidden without it",
 	"a session's create arms its miss ttlMs on: its deadline and its queue message",
 	"only the device's principal beats a session: another caller is 409 not_principal, and the device's beat moves the deadline ttlMs on",
 	"a session's transition into turn arms its miss fifteen minutes from the entry (ttlByState)",

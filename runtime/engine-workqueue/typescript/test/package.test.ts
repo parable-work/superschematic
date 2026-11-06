@@ -37,10 +37,11 @@ function fixtureType(name: string, file: string): Record<string, unknown> {
 // behaviors` writes and CI checks, as the engine answers with it: without
 // the members only a table's layout reads (D103), its value, tables,
 // armsDeadlines and hearsChanges and each field's type, which the engine,
-// keeping no table, leaves out.
+// keeping no table, leaves out, and its contracts (D104), which only the
+// behaviors' core reads.
 function declarationFile(name: string): unknown {
   const declaration = JSON.parse(readFileSync(new URL(`../../rust/declarations/${name}.behavior.json`, import.meta.url), 'utf8')) as Record<string, unknown>;
-  const { value: _value, tables: _tables, armsDeadlines: _armsDeadlines, hearsChanges: _hearsChanges, ...served } = declaration;
+  const { value: _value, tables: _tables, armsDeadlines: _armsDeadlines, hearsChanges: _hearsChanges, contracts: _contracts, ...served } = declaration;
   const fields = served.fields as Record<string, unknown>[] | undefined;
   return fields ? { ...served, fields: fields.map(({ type: _type, ...field }) => field) } : served;
 }

@@ -15,16 +15,16 @@ use std::task::{Context, Poll, Waker};
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
     Behavior, ConfigError, ConfigTarget, Cx, Declaration, FieldSpec, GuardRequest, Heard, Hook,
-    RowWrite, SchemaIssue, UseSpec, Veto, View,
+    RowWrite, SchemaIssue, TableRef, UseSpec, Veto, View,
 };
 
 use crate::convert::{iso_of_millis, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
     Action, Caller, ChangeRun, Changes, Claim, Code, Column, Command, Convert, Core, CreateOptions,
-    Deadline, DeadlineRun, Deadlines, Error, EventRun, Events, ExecuteOptions, Host, Layout, Live,
-    Operation, OwnedField, QueuedEvent, Refusal, SubTable, Table, TableChange, TypeSpec, Use,
-    MAX_ATTEMPTS,
+    Deadline, DeadlineRun, Deadlines, Error, EventRun, Events, ExecuteOptions, Executed, Host,
+    Layout, Live, Operation, OwnedField, QueuedEvent, Refusal, SubTable, Table, TableChange,
+    TypeSpec, Use, MAX_ATTEMPTS,
 };
 
 /// A UUID key in its two forms: base62 on the wire and in the core,
@@ -79,10 +79,7 @@ pub(crate) fn order_table() -> Table {
             member: "status".into(),
             anchor: Some("status".into()),
             fields: vec![status, entered],
-            operations: vec![Operation {
-                name: "transition".into(),
-                writes: true,
-            }],
+            operations: vec![Operation::new("transition", true)],
             tables: Vec::new(),
         }],
         deadlines: None,
@@ -159,6 +156,8 @@ impl Behavior for Toy {
             .operation("walk", false)
             .operation("mint", true)
             .operation("holding", false)
+            .table_operation("rows", false)
+            .table_operation("touch", true)
             .event("created")
             .event("paid")
             .preconditions()
@@ -315,6 +314,48 @@ impl Behavior for Toy {
                     param("after"),
                 )?;
                 Ok(serde_json::to_value(page).unwrap_or_default())
+            }
+            // An operation of the table as a whole (D104): a page of the
+            // live rows of params' type whose own fields hold its equal,
+            // each with the sub-tables its tables name, after its after,
+            // under the lock Stock/s1 with its lock.
+            "rows" => {
+                if params.get("lock") == Some(&Value::Bool(true)) {
+                    cx.lock("Stock/s1")?;
+                }
+                let param = |name: &str| params.get(name).and_then(Value::as_str);
+                let equal = params
+                    .get("equal")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                let tables: Vec<TableRef> = params
+                    .get("tables")
+                    .and_then(|tables| serde_json::from_value(tables.clone()).ok())
+                    .unwrap_or_default();
+                let page = cx.read_rows(
+                    param("type").unwrap_or_default(),
+                    &equal,
+                    &tables,
+                    param("after"),
+                )?;
+                Ok(serde_json::to_value(page).unwrap_or_default())
+            }
+            // An operation of the table as a whole that writes (D104): the
+            // operation params name, called on the Order of each key of
+            // its keys, each as its row's own call; it answers how many.
+            "touch" => {
+                let operation = params
+                    .get("operation")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let keys = params.get("keys").and_then(Value::as_array);
+                let mut touched = 0;
+                for key in keys.into_iter().flatten().filter_map(Value::as_str) {
+                    cx.call_on("Order", key, "Toy", operation, &json!({}))?;
+                    touched += 1;
+                }
+                Ok(json!({ "touched": touched }))
             }
             // A page of the rows of params' type whose field holds its
             // key, after its after, under the lock Stock/s1 with its lock.
@@ -3088,6 +3129,296 @@ fn a_holding_read_selects_a_page_of_the_live_rows_whose_use_field_holds_the_valu
         )),
         Refusal::internal("rules: a read of the rows whose use's field holds a value under a lock has no check on SQLite or D1 yet (D103)")
     );
+}
+
+// ---- the command without a row and the read across a table (D104) ----
+
+/// An operation of the toy on the table as a whole.
+fn toy_table_op(operation: &str, params: Value) -> Command {
+    command(Action::TableOperation {
+        use_id: "Toy".into(),
+        operation: operation.into(),
+        params,
+    })
+}
+
+/// The Postgres read of a page of Probe's live rows (D104), up to its
+/// conditions past the live one.
+const ROWS: &str = r#"SELECT to_jsonb("id") AS k, to_jsonb("title") AS c0, to_jsonb("at") AS c1, to_jsonb("owner_id") AS c2, to_jsonb("done") AS c3, to_jsonb("data") AS c4, to_jsonb("toy_seen") AS c5, "_version" AS v FROM "probe" WHERE "#;
+
+/// The Postgres read of the toy's notes of a page of Probe's rows.
+const NOTES: &str = r#"SELECT to_jsonb("probe_id") AS r, to_jsonb("key") AS c0 FROM "probe_toy_notes" WHERE "probe_id" IN ("#;
+
+/// Runs the toy's read across Probe, an operation of Order's table as a
+/// whole, with `params`, on `store`: its result and its applied units.
+fn rows(store: &MemoryStore, params: Value) -> Result<Executed, Error> {
+    let core = toy();
+    let layout = Layout::new([toy_table(), probe_table()]);
+    let host = Host::new(&core, &layout);
+    block(run::execute(
+        &host,
+        store,
+        "Order",
+        toy_table_op("rows", params),
+        &ExecuteOptions::default(),
+    ))
+}
+
+#[test]
+fn a_read_across_a_table_selects_a_page_of_its_live_rows_by_equality_and_each_rows_sub_table_rows_in_one_read(
+) {
+    let notes = vec![
+        vec![
+            Cell::Json(json!(crate::convert::hyphenate(2))),
+            Cell::Json(json!("n1")),
+        ],
+        vec![
+            Cell::Json(json!(crate::convert::hyphenate(2))),
+            Cell::Json(json!("n2")),
+        ],
+    ];
+    let store = MemoryStore::new(Dialect::Postgres, None)
+        .responding(ROWS, vec![linked_row(1), linked_row(2)])
+        .responding(NOTES, notes);
+    let executed = rows(
+        &store,
+        json!({
+            "type": "Probe",
+            "equal": {"title": "Desk", "ownerId": KEY, "done": null},
+            "tables": [{"useId": "Toy", "table": "notes"}]
+        }),
+    )
+    .expect("read");
+    let row = json!({"own": {"title": "Desk", "done": false}, "owned": {}, "version": 1});
+    assert_eq!(
+        executed.result,
+        json!({"rows": [
+            {"key": "1", "row": row, "tables": {"Toy": {"notes": []}}},
+            {"key": "2", "row": row, "tables": {"Toy": {"notes": [{"key": "n1", "values": {}}, {"key": "n2", "values": {}}]}}}
+        ], "more": false})
+    );
+    // Each own field equal names by its column, a UUID in its column's
+    // form and a null as none, then the live rows; the notes of the
+    // page's rows in one read, each row's key bound as the key column
+    // binds it.
+    assert_eq!(
+        store.queries(),
+        [
+            (
+                format!(
+                    r#"{ROWS}"title" = $1 AND "owner_id" = $2 AND "done" IS NULL AND "deleted_at" IS NULL ORDER BY "id" LIMIT 501"#
+                ),
+                vec![text("Desk"), text(KEY_COLUMN)]
+            ),
+            (
+                format!(r#"{NOTES}$1, $2) ORDER BY "probe_id", "key" COLLATE "C""#),
+                vec![
+                    text(&crate::convert::hyphenate(1)),
+                    text(&crate::convert::hyphenate(2))
+                ]
+            ),
+        ]
+    );
+    // A read-only operation of the table writes no row: an empty unit, no
+    // key, its result the handler's.
+    assert_eq!(store.applied(), [Vec::<Statement>::new()]);
+    assert_eq!(executed.key, None);
+
+    // After a key, bound as the key column binds one; a page of 500 of the
+    // 501 rows the read gives, and more follow; no sub-table named, none
+    // read.
+    let store = MemoryStore::new(Dialect::Postgres, None)
+        .responding(ROWS, (1..=501).map(linked_row).collect());
+    let page = rows(&store, json!({"type": "Probe", "after": "1"}))
+        .expect("read")
+        .result;
+    assert_eq!(page["rows"].as_array().map(Vec::len), Some(500));
+    assert_eq!(page["more"], json!(true));
+    assert!(
+        page["rows"][0].get("tables").is_none(),
+        "{}",
+        page["rows"][0]
+    );
+    assert_eq!(
+        store.queries(),
+        [(
+            format!(r#"{ROWS}"deleted_at" IS NULL AND "id" > $1 ORDER BY "id" LIMIT 501"#),
+            vec![text("00000000-0000-0000-0000-000000000001")]
+        )]
+    );
+
+    // SQLite selects each column as it is stored, and a page with no rows
+    // reads no sub-table.
+    let store = MemoryStore::new(Dialect::Sqlite, None)
+        .responding(r#"SELECT "id" AS k"#, vec![probe_sqlite_row(1)])
+        .responding(r#"SELECT "probe_id" AS r"#, Vec::new());
+    let page = rows(
+        &store,
+        json!({"type": "Probe", "equal": {"title": "Desk"}, "tables": [{"useId": "Toy", "table": "notes"}]}),
+    )
+    .expect("read")
+    .result;
+    assert_eq!(page["rows"][0]["tables"], json!({"Toy": {"notes": []}}));
+    assert_eq!(
+        store.queries(),
+        [
+            (
+                r#"SELECT "id" AS k, "title" AS c0, "at" AS c1, "owner_id" AS c2, "done" AS c3, "data" AS c4, "toy_seen" AS c5, "_version" AS v FROM "probe" WHERE "title" = ?1 AND "deleted_at" IS NULL ORDER BY "id" LIMIT 501"#.to_owned(),
+                vec![text("Desk")]
+            ),
+            (
+                r#"SELECT "probe_id" AS r, "key" AS c0 FROM "probe_toy_notes" WHERE "probe_id" IN (?1) ORDER BY "probe_id", "key""#.to_owned(),
+                vec![text(&crate::convert::hyphenate(1))]
+            ),
+        ]
+    );
+    let store =
+        MemoryStore::new(Dialect::Sqlite, None).responding(r#"SELECT "id" AS k"#, Vec::new());
+    let page = rows(
+        &store,
+        json!({"type": "Probe", "tables": [{"useId": "Toy", "table": "notes"}]}),
+    )
+    .expect("read")
+    .result;
+    assert_eq!(page, json!({"rows": [], "more": false}));
+    assert_eq!(store.queries().len(), 1, "no sub-table read for no rows");
+
+    // A table with no live column and no condition reads every row.
+    let store = MemoryStore::new(Dialect::Postgres, None)
+        .responding(r#"SELECT to_jsonb("id") AS k"#, Vec::new());
+    rows(&store, json!({"type": "Order"})).expect("read");
+    assert_eq!(
+        store.queries(),
+        [(
+            r#"SELECT to_jsonb("id") AS k, to_jsonb("title") AS c0, to_jsonb("toy_seen") AS c1, "_version" AS v FROM "order" ORDER BY "id" LIMIT 501"#.to_owned(),
+            Vec::new()
+        )]
+    );
+}
+
+/// Probe's row as SQLite reads it, its key hyphenated first: Desk, not
+/// done, at version 1.
+fn probe_sqlite_row(n: u128) -> Vec<Cell> {
+    vec![
+        Cell::Text(crate::convert::hyphenate(n)),
+        Cell::Text("Desk".into()),
+        Cell::Null,
+        Cell::Null,
+        Cell::Int(0),
+        Cell::Null,
+        Cell::Null,
+        Cell::Int(1),
+    ]
+}
+
+#[test]
+fn a_read_across_a_table_refuses_what_the_layout_lacks_and_a_read_under_a_lock_a_store_fences() {
+    // A type the layout lacks has no rows.
+    let store = MemoryStore::new(Dialect::Postgres, None);
+    assert_eq!(
+        rows(&store, json!({"type": "Ghost", "equal": {"title": "Desk"}}))
+            .expect("read")
+            .result,
+        json!({"rows": [], "more": false})
+    );
+    assert!(store.queries().is_empty());
+    // A field that is no own field of the table, a use or a sub-table the
+    // layout lacks, each before any read.
+    for (params, message) in [
+        (
+            json!({"type": "Probe", "equal": {"owner": "x"}}),
+            "rules: Probe has no own field owner in the behaviors' layout",
+        ),
+        (
+            json!({"type": "Probe", "equal": {"toySeen": "x"}}),
+            "rules: Probe has no own field toySeen in the behaviors' layout",
+        ),
+        (
+            json!({"type": "Probe", "tables": [{"useId": "Budget", "table": "meters"}]}),
+            "rules: Probe has no use Budget in the behaviors' layout",
+        ),
+        (
+            json!({"type": "Probe", "tables": [{"useId": "Toy", "table": "ghosts"}]}),
+            "rules: Probe's use Toy (Toy) has no sub-table ghosts in the behaviors' layout",
+        ),
+    ] {
+        let store = MemoryStore::new(Dialect::Postgres, None);
+        assert_eq!(refusal(rows(&store, params)), Refusal::internal(message));
+        assert!(store.queries().is_empty(), "{message}");
+        assert!(store.applied().is_empty(), "{message}");
+    }
+    // Under a lock, a store that fences its locks has no check of it; one
+    // that holds them reads it.
+    let fenced = MemoryStore::new(Dialect::Sqlite, None).fenced();
+    assert_eq!(
+        refusal(rows(&fenced, json!({"type": "Probe", "lock": true}))),
+        Refusal::internal(
+            "rules: a read of a table's rows under a lock has no check on SQLite or D1 yet (D103)"
+        )
+    );
+    let held = MemoryStore::new(Dialect::Postgres, None).responding(ROWS, Vec::new());
+    rows(&held, json!({"type": "Probe", "lock": true})).expect("read");
+    assert_eq!(held.recorded.borrow().locks, ["Stock/s1"]);
+}
+
+#[test]
+fn an_operation_of_the_table_writes_each_row_its_calls_reach_held_to_its_version_and_one_that_reaches_none_applies_an_empty_unit(
+) {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 2000);
+    let touch = |store: &MemoryStore, keys: Value| {
+        block(run::execute(
+            &host,
+            store,
+            "Order",
+            toy_table_op("touch", json!({"operation": "mint", "keys": keys})),
+            &ExecuteOptions::default(),
+        ))
+    };
+    // Each row a call reaches is read by its key and written held to the
+    // version read, as any row write is.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let executed = touch(&store, json!([KEY])).expect("applied");
+    assert_eq!(executed.result, json!({"touched": 1}));
+    assert_eq!(executed.key, None);
+    let applied = store.applied();
+    assert_eq!(applied.len(), 1, "one unit");
+    assert_eq!(applied[0].len(), 1, "{:?}", applied[0]);
+    let statement = &applied[0][0];
+    assert_eq!(
+        (statement.text.as_str(), statement.expect, statement.check),
+        (
+            r#"UPDATE "order" SET "toy_seen" = $1, "_version" = "_version" + 1 WHERE "id" = $2 AND "_version" = $3"#,
+            Some(1),
+            false
+        )
+    );
+    assert_eq!(statement.values[1..], [text(KEY_COLUMN), Bind::Int(1)]);
+    // A row that moved runs the command again from fresh state, and one
+    // that keeps moving is refused as busy, naming no row.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+        .applying(&[false; MAX_ATTEMPTS]);
+    let refused = refusal(touch(&store, json!([KEY])));
+    assert_eq!(refused.code, Code::Busy);
+    assert_eq!(
+        refused.message,
+        format!("touch of Order: the row kept moving while the command ran; it ran {MAX_ATTEMPTS} times and nothing was written, so it may be tried again")
+    );
+    // A call of a row the table lacks is the core's not_found, nothing
+    // applied; one that reaches no row applies an empty unit.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let missing = MemoryStore {
+        absent: Some(text(KEY_COLUMN)),
+        ..MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+    };
+    assert_eq!(refusal(touch(&missing, json!([KEY]))).code, Code::NotFound);
+    assert!(missing.applied().is_empty());
+    assert_eq!(
+        touch(&store, json!([])).expect("applied").result,
+        json!({"touched": 0})
+    );
+    assert_eq!(store.applied(), [Vec::<Statement>::new()]);
 }
 
 /// Preconditions of `entries`, by use id.

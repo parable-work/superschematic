@@ -14,8 +14,11 @@
 //! read of the rows whose owned field holds a value, the fields a read
 //! computes at a time, another row's sub-table rows as the run has them,
 //! and a call a behavior makes as the caller's own request, from a handler
-//! and from a deadline's (D104); and the events a behavior emits, each a
-//! kind its declaration lists (D104).
+//! and from a deadline's (D104); the events a behavior emits, each a
+//! kind its declaration lists (D104); and an operation of the table as a
+//! whole, a command without a row: its guards, the rows it reads across the
+//! table and the calls it makes on them, the defects of a write of its own
+//! state, and the contracts it asks of the uses that implement them (D104).
 
 use std::collections::BTreeMap;
 
@@ -23,11 +26,11 @@ use serde_json::{json, Map, Value};
 
 use superschematic_rules::{
     Action, Answer, Answers, Behavior, Caller, Change, Code, Command, ConfigCx, ConfigError,
-    ConfigIssueKind, ConfigTarget, Cx, DeadlineChange, Declaration, FieldSpec, GuardRequest, Heard,
-    Hook, KeyedRow, LinkedRows, Listen, LockKey, OutboxEvent, Outcome, PermissionMatcher,
-    ReadRequest, Refusal, Row, RowChange, RowImage, RowRef, RowWrite, SchemaIssue, Source, Step,
-    Stop, SubRow, SubRowChange, TableDecl, TypeSpec, UseSpec, ValidationIssue, ValidationRequest,
-    Veto, View, WriteKind, LINKED_PAGE,
+    ConfigIssueKind, ConfigTarget, ContractQuery, Cx, DeadlineChange, Declaration, FieldSpec,
+    GuardRequest, Heard, Hook, KeyedRow, LinkedRows, Listen, LockKey, OutboxEvent, Outcome,
+    PermissionMatcher, ReadRequest, Refusal, Row, RowChange, RowImage, RowRef, RowWrite,
+    SchemaIssue, Source, Step, Stop, SubRow, SubRowChange, TableDecl, TableRef, TypeSpec, UseSpec,
+    ValidationIssue, ValidationRequest, Veto, View, WriteKind, LINKED_PAGE,
 };
 
 const NOW: i64 = 1_000_000;
@@ -1058,6 +1061,222 @@ impl Behavior for Proxy {
     }
 }
 
+// Sweeper: operations of the table as a whole (D104). tally reads the
+// type's rows across the table, page by page, each with the sub-tables its
+// Gauge implementers keep, and asks each row's level of them; bump calls
+// the add of the Counter use its config names on each row, passing over a
+// row whose call is vetoed; scribble writes the frame's own state, which a
+// table operation has none of; meddle, read-only, calls a writing
+// operation on a row; poke is an operation of a row.
+struct Sweeper;
+
+impl Behavior for Sweeper {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Sweeper")
+            .field("swept")
+            .table("notes")
+            .arms_deadlines()
+            .event("swept")
+            .operation("poke", true)
+            .table_operation("tally", false)
+            .table_operation("bump", true)
+            .table_operation("scribble", true)
+            .table_operation("meddle", false)
+            .table_operation("seed", true)
+            .asking("Gauge")
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn operation(&self, cx: &Cx<'_, Value>, name: &str, params: &Value) -> Hook<Value> {
+        let counter = cx
+            .config()
+            .get("counter")
+            .and_then(Value::as_str)
+            .unwrap_or("Counter")
+            .to_owned();
+        let type_name = cx.type_name();
+        match name {
+            "poke" => Ok(json!({})),
+            "tally" => {
+                let equal = object(params.get("equal").cloned().unwrap_or(json!({})));
+                let contract = params
+                    .get("contract")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Gauge");
+                let query = params
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("level");
+                let tables = cx.contract_tables(type_name, contract)?;
+                let mut rows = Vec::new();
+                let mut pages = 0;
+                let mut after: Option<String> = None;
+                loop {
+                    let page = cx.read_rows(type_name, &equal, &tables, after.as_deref())?;
+                    pages += 1;
+                    for row in &page.rows {
+                        let none = json!({});
+                        let answers =
+                            cx.ask(type_name, row, &ContractQuery::new(contract, query, &none))?;
+                        rows.push(json!({ "key": row.key, "answers": answers }));
+                    }
+                    match (page.more, page.rows.last()) {
+                        (true, Some(last)) => after = Some(last.key.clone()),
+                        _ => break,
+                    }
+                }
+                Ok(json!({ "on": cx.on_table(), "key": cx.key(), "pages": pages, "rows": rows }))
+            }
+            "bump" => {
+                let mut bumped = Vec::new();
+                let page = cx.read_rows(type_name, &Map::new(), &[], None)?;
+                for row in &page.rows {
+                    match cx.call_on(type_name, &row.key, &counter, "add", &json!({ "by": 1 })) {
+                        Ok(_) => bumped.push(row.key.clone()),
+                        Err(Stop::Refuse(refusal)) if refusal.code == Code::Vetoed => {}
+                        Err(stop) => return Err(stop),
+                    }
+                }
+                Ok(json!({ "bumped": bumped }))
+            }
+            "scribble" => match params.get("what").and_then(Value::as_str) {
+                Some("set") => cx.set("swept", 1).map(|()| Value::Null),
+                Some("insert") => cx
+                    .insert_row("notes", "n1", Map::new())
+                    .map(|()| Value::Null),
+                Some("emit") => cx.emit("swept", json!({})).map(|()| Value::Null),
+                Some("arm") => cx.arm("later", NOW, Value::Null).map(|()| Value::Null),
+                Some("clear") => cx.clear("later").map(|()| Value::Null),
+                Some("call") => cx.call(&counter, "peek", &json!({})),
+                Some("subRows") => cx.sub_rows("notes").map(|_| Value::Null),
+                _ => Ok(Value::Null),
+            },
+            "meddle" => cx.call_on(type_name, "o1", &counter, "add", &json!({ "by": 1 })),
+            "seed" => {
+                let key = cx.new_key("seed")?;
+                cx.create_row(
+                    type_name,
+                    &key,
+                    &object(json!({"title": "Seeded"})),
+                    &Map::new(),
+                )?;
+                Ok(json!({ "created": key }))
+            }
+            _ => Err(cx.defect(format!("no operation {name}"))),
+        }
+    }
+}
+
+// Gate: a guard of every action of the type, which vetoes an operation of
+// the table as a whole while its config freezes the table, naming what it
+// was asked (D104).
+struct Gate;
+
+impl Behavior for Gate {
+    type Config = bool;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Gate").veto("frozen_table")
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<bool, ConfigError> {
+        Ok(raw.get("frozen") == Some(&Value::Bool(true)))
+    }
+
+    fn guard(&self, view: &View<'_, bool>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let GuardRequest::Table {
+            use_id,
+            operation,
+            writes,
+            ..
+        } = request
+        else {
+            return Ok(None);
+        };
+        if !*view.config() {
+            return Ok(None);
+        }
+        Ok(Some(
+            Veto::new(format!(
+                "the table is frozen ({use_id}.{operation}, writes {writes}, key {:?}, own {})",
+                view.key(),
+                view.own().len()
+            ))
+            .with_code("frozen_table"),
+        ))
+    }
+}
+
+// Gauge: implements the contract Gauge (D104), answering level about a row
+// from its readings sub-table, and no other query.
+struct Gauge;
+
+impl Behavior for Gauge {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Gauge")
+            .sub_table(TableDecl::new("readings", "at", ["n"]))
+            .table("spare")
+            .contract("Gauge")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn answer(
+        &self,
+        _config: &(),
+        query: &ContractQuery<'_>,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Option<Value> {
+        if query.contract != "Gauge" || query.query != "level" {
+            return None;
+        }
+        let level: i64 = tables
+            .get("readings")
+            .into_iter()
+            .flatten()
+            .filter_map(|reading| reading.value("n").and_then(Value::as_i64))
+            .sum();
+        Some(json!({ "level": level, "title": row.own.get("title"), "at": now }))
+    }
+}
+
+// Dial: implements Gauge too, from an own field.
+struct Dial;
+
+impl Behavior for Dial {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Dial").contract("Gauge")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn answer(
+        &self,
+        _config: &(),
+        _query: &ContractQuery<'_>,
+        row: &Row,
+        _tables: &BTreeMap<String, Vec<SubRow>>,
+        _now: i64,
+    ) -> Option<Value> {
+        Some(json!({ "dial": row.own.get("dial") }))
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -1077,6 +1296,10 @@ fn core() -> superschematic_rules::Core {
         .with(Fence)
         .with(Witness)
         .with(Proxy)
+        .with(Sweeper)
+        .with(Gate)
+        .with(Gauge)
+        .with(Dial)
 }
 
 fn alice() -> Caller {
@@ -1203,10 +1426,7 @@ impl Source for Memory {
                             && row.own.get(field).and_then(Value::as_str) == Some(key.as_str())
                             && after.as_ref().is_none_or(|after| row_key > after)
                     })
-                    .map(|((_, row_key), row)| KeyedRow {
-                        key: row_key.clone(),
-                        row: row.clone(),
-                    })
+                    .map(|((_, row_key), row)| KeyedRow::new(row_key.clone(), row.clone()))
                     .collect();
                 let more = rows.len() > *limit;
                 rows.truncate(*limit);
@@ -1232,9 +1452,62 @@ impl Source for Memory {
                             && row.owned(use_id, field) == Some(value)
                             && after.as_ref().is_none_or(|after| row_key > after)
                     })
-                    .map(|((_, row_key), row)| KeyedRow {
-                        key: row_key.clone(),
-                        row: row.clone(),
+                    .map(|((_, row_key), row)| KeyedRow::new(row_key.clone(), row.clone()))
+                    .collect();
+                let more = rows.len() > *limit;
+                rows.truncate(*limit);
+                Ok(Answer::Linked(LinkedRows { rows, more }))
+            }
+            ReadRequest::Rows {
+                type_name,
+                equal,
+                tables,
+                after,
+                limit,
+            } => {
+                self.log.push(format!(
+                    "rows {type_name} {} {} after {}",
+                    Value::Object(equal.clone()),
+                    serde_json::to_value(tables).unwrap_or_default(),
+                    after.as_deref().unwrap_or("-")
+                ));
+                // Each own field equal names holds its value, a null none.
+                let holds = |row: &Row| {
+                    equal.iter().all(|(field, value)| {
+                        let held = row.own.get(field).filter(|held| !held.is_null());
+                        match value {
+                            Value::Null => held.is_none(),
+                            value => held == Some(value),
+                        }
+                    })
+                };
+                let mut rows: Vec<KeyedRow> = self
+                    .rows
+                    .iter()
+                    .filter(|((name, row_key), row)| {
+                        name == type_name
+                            && holds(row)
+                            && after.as_ref().is_none_or(|after| row_key > after)
+                    })
+                    .map(|((_, row_key), row)| {
+                        let mut keyed = KeyedRow::new(row_key.clone(), row.clone());
+                        for table in tables {
+                            let at = (
+                                type_name.clone(),
+                                row_key.clone(),
+                                table.use_id.clone(),
+                                table.table.clone(),
+                            );
+                            keyed
+                                .tables
+                                .entry(table.use_id.clone())
+                                .or_default()
+                                .insert(
+                                    table.table.clone(),
+                                    self.sub_rows.get(&at).cloned().unwrap_or_default(),
+                                );
+                        }
+                        keyed
                     })
                     .collect();
                 let more = rows.len() > *limit;
@@ -2307,13 +2580,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -3854,4 +4127,444 @@ fn a_deadlines_call_as_the_caller_is_fired_too() {
         changes.owned("Proxy", "seen"),
         Some(&json!({"asCaller": true, "fired": true, "caller": "Proxy", "precondition": null}))
     );
+}
+
+// ---- an operation of the table as a whole (D104) ----
+
+fn table_op(use_id: &str, operation: &str, params: Value) -> Action {
+    Action::TableOperation {
+        use_id: use_id.into(),
+        operation: operation.into(),
+        params,
+    }
+}
+
+// swept is a type of three rows with a Counter, the table's Sweeper and the
+// uses given before it.
+fn swept(before: Vec<UseSpec>) -> (TypeSpec, Memory) {
+    let mut spec = TypeSpec::new("Order");
+    for entry in before {
+        spec = spec.with(entry);
+    }
+    let spec = spec
+        .with(UseSpec::on_type("Counter", json!({"max": 3})))
+        .with(UseSpec::on_type("Sweeper", json!({})));
+    let memory = Memory::default()
+        .with("Order", "o1", order_at(0, 4))
+        .with("Order", "o2", order_at(3, 7))
+        .with("Order", "o3", order_at(1, 2))
+        .with(
+            "Other",
+            "x1",
+            row(json!({"title": "Elsewhere"}), json!({}), 1),
+        );
+    (spec, memory)
+}
+
+/// An operation of the table as a whole runs on no row: it reads no row by
+/// its key, its handler sees no key and no fields, it reads the type's rows
+/// across the table page by page, and a read-only one writes nothing.
+#[test]
+fn a_table_operation_runs_on_no_row_and_answers_its_result() {
+    let core = core();
+    let (spec, mut memory) = swept(Vec::new());
+    for at in 0..LINKED_PAGE {
+        memory = memory.with("Order", &format!("p{at:04}"), order_at(0, 1));
+    }
+    let changes = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "tally", json!({}))),
+        &mut memory,
+    ));
+    assert!(changes.rows.is_empty());
+    assert!(changes.events.is_empty());
+    assert_eq!(changes.result["on"], json!(true));
+    assert_eq!(changes.result["key"], Value::Null);
+    // Its rows come a page at a time, the second after the first's last.
+    assert_eq!(changes.result["pages"], json!(2));
+    assert_eq!(
+        changes.result["rows"].as_array().map(Vec::len),
+        Some(LINKED_PAGE + 3)
+    );
+    assert_eq!(
+        memory.log,
+        [
+            "rows Order {} [] after -",
+            // o1, o2 and o3 come first by key.
+            &format!("rows Order {{}} [] after p{:04}", LINKED_PAGE - 4)
+        ]
+    );
+    // Equality over own fields is what the host is asked; a null asks for
+    // no value.
+    let (spec, mut memory) = swept(Vec::new());
+    let memory = &mut memory;
+    memory.rows.insert(
+        ("Order".into(), "o4".into()),
+        row(json!({"title": null}), json!({}), 1),
+    );
+    let titled = changed(core.drive(
+        &spec,
+        &command(
+            alice(),
+            table_op("Sweeper", "tally", json!({"equal": {"title": null}})),
+        ),
+        memory,
+    ));
+    assert_eq!(titled.result["rows"], json!([{"key": "o4", "answers": []}]));
+    assert_eq!(memory.log, [r#"rows Order {"title":null} [] after -"#]);
+}
+
+/// Every use's guard is asked about an operation of the table, in list
+/// order, with no row; the first veto refuses it, naming the type alone,
+/// and nothing runs.
+#[test]
+fn a_table_operations_guards_are_asked_in_list_order_with_no_row() {
+    let core = core();
+    let (spec, mut memory) = swept(vec![
+        UseSpec::on_type("Freeze", None),
+        UseSpec::on_type("Gate", json!({"frozen": true})),
+    ]);
+    let refusal = refused(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "bump", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(refusal.code, Code::Vetoed);
+    assert_eq!(
+        refusal.message,
+        "behavior Gate vetoes bump of Order: the table is frozen (Sweeper.bump, writes true, key None, own 0)"
+    );
+    assert_eq!(
+        refusal.details.as_deref().and_then(|d| d.get("action")),
+        Some(&json!("bump"))
+    );
+    // The guards are asked before any row is read.
+    assert!(memory.log.is_empty());
+    // An open gate lets it through.
+    let (spec, mut memory) = swept(vec![UseSpec::on_type("Gate", json!({}))]);
+    changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "tally", json!({}))),
+        &mut memory,
+    ));
+}
+
+/// An operation of the table writes rows only through their uses'
+/// operations: each call's row is held to the version it was read at, its
+/// hooks run, and a vetoed call is undone and passed over.
+#[test]
+fn a_table_operations_calls_on_rows_are_held_to_their_versions_and_run_their_hooks() {
+    let core = core();
+    let (spec, mut memory) = swept(vec![UseSpec::on_type("Freeze", None)]);
+    let changes = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "bump", json!({}))).with_request("r1"),
+        &mut memory,
+    ));
+    // o2 is at its max, so its add is vetoed and passed over.
+    assert_eq!(changes.result, json!({"bumped": ["o1", "o3"]}));
+    let written: Vec<(Option<&str>, Option<i64>)> = changes
+        .rows
+        .iter()
+        .map(|write| (write.key(), write.expected_version()))
+        .collect();
+    assert_eq!(written, [(Some("o1"), Some(4)), (Some("o3"), Some(2))]);
+    assert_eq!(changes.rows[1].owned("Counter", "count"), Some(&json!(2)));
+    // Each row's own events, Counter's and the after-change hook's of
+    // Freeze, which ran on the row and not on the table.
+    let events: Vec<(String, &str)> = changes
+        .events
+        .iter()
+        .map(|event| {
+            (
+                event.row.key.clone().unwrap_or_default(),
+                event.kind.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        events,
+        [
+            ("o1".to_owned(), "added"),
+            ("o1".to_owned(), "operation"),
+            ("o3".to_owned(), "added"),
+            ("o3".to_owned(), "operation"),
+        ]
+    );
+    // A run whose calls write nothing writes no row.
+    let mut empty = Memory::default();
+    let nothing = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "bump", json!({}))),
+        &mut empty,
+    ));
+    assert_eq!(nothing.result, json!({"bumped": []}));
+    assert!(nothing.rows.is_empty() && nothing.sub_rows.is_empty() && nothing.events.is_empty());
+}
+
+/// A table operation has no row of its own: a write of its own state, and
+/// a call on its row, is its defect; a read-only one calls no writing
+/// operation on a row.
+#[test]
+fn a_table_operation_that_writes_its_own_state_is_a_defect() {
+    let core = core();
+    let (spec, mut memory) = swept(Vec::new());
+    for (what, named) in [
+        ("set", "set(swept)"),
+        ("insert", "insert_row(notes)"),
+        ("emit", "emit(swept)"),
+        ("arm", "arm(later)"),
+        ("clear", "clear(later)"),
+        ("call", "call(Counter.peek)"),
+    ] {
+        let refusal = refused(core.drive(
+            &spec,
+            &command(
+                alice(),
+                table_op("Sweeper", "scribble", json!({ "what": what })),
+            ),
+            &mut memory,
+        ));
+        assert_eq!(refusal.code, Code::BehaviorError, "{what}");
+        assert_eq!(
+            refusal.message,
+            format!("behavior Sweeper: {named}: a table operation runs on no row: it reaches rows through call_on and create_row")
+        );
+    }
+    let refusal = refused(core.drive(
+        &spec,
+        &command(
+            alice(),
+            table_op("Sweeper", "scribble", json!({"what": "subRows"})),
+        ),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "behavior Sweeper: sub_rows(notes): a table operation runs on no row"
+    );
+    let refusal = refused(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "meddle", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "behavior Sweeper: a read-only operation cannot call Counter.add of Order o1, which writes"
+    );
+}
+
+/// An operation of a row and one of the table are found apart, each
+/// refusal listing the operations of its kind; a table operation takes no
+/// preconditions.
+#[test]
+fn an_operation_and_a_table_operation_are_each_found_apart() {
+    let core = core();
+    let (spec, mut memory) = swept(Vec::new());
+    let refusal = refused(core.drive(
+        &spec,
+        &command(alice(), invoke("o1", "Sweeper", "tally", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(refusal.code, Code::NotFound);
+    assert_eq!(
+        refusal.message,
+        "Order has no operation tally of Sweeper (its operations: poke)"
+    );
+    let refusal = refused(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "poke", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "Order has no operation poke of Sweeper on the table as a whole (its operations on the table: tally, bump, scribble, meddle, seed)"
+    );
+    let refusal = refused(core.drive(
+        &spec,
+        &command(alice(), table_op("Counter", "add", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "Order has no operation add of Counter on the table as a whole (its operations on the table: none)"
+    );
+    let refusal = refused(core.drive(
+        &spec,
+        &command(alice(), table_op("Swept", "tally", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "Order has no behavior use Swept (its uses: Counter, Sweeper)"
+    );
+    let fenced = command(alice(), table_op("Sweeper", "tally", json!({})))
+        .with_preconditions(object(json!({"Counter": {"token": 1}})));
+    let refusal = refused(core.drive(&spec, &fenced, &mut memory));
+    assert_eq!(refusal.class, "PreconditionsError");
+    assert_eq!(
+        refusal.message,
+        "preconditions of Order: a tableOperation takes no preconditions: an update, a delete or an operation of a row presents them"
+    );
+}
+
+/// A contract is asked of every use of the row's type that implements it,
+/// in list order, each over the sub-tables the read across the table took
+/// for it; a type with none answers none; an undeclared ask is the
+/// asker's defect and an unanswered query the implementer's.
+#[test]
+fn a_contract_is_asked_of_each_implementer_in_list_order() {
+    let core = core();
+    let spec = TypeSpec::new("Tank")
+        .with(UseSpec::on_type("Gauge", None))
+        .with(UseSpec::on_type("Dial", None))
+        .with(UseSpec::on_type("Sweeper", json!({})));
+    let mut memory = Memory::default()
+        .with(
+            "Tank",
+            "t1",
+            row(json!({"title": "Big", "dial": 7}), json!({}), 1),
+        )
+        .with("Tank", "t2", row(json!({"title": "Small"}), json!({}), 1))
+        .with_sub_rows(
+            ["Tank", "t1", "Gauge", "readings"],
+            json!([{"key": "a", "values": {"n": 2}}, {"key": "b", "values": {"n": 3}}]),
+        );
+    let changes = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "tally", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        changes.result["rows"],
+        json!([
+            {"key": "t1", "answers": [["Gauge", {"level": 5, "title": "Big", "at": NOW}], ["Dial", {"dial": 7}]]},
+            {"key": "t2", "answers": [["Gauge", {"level": 0, "title": "Small", "at": NOW}], ["Dial", {"dial": null}]]}
+        ])
+    );
+    // The read took every sub-table each implementer declares, in order.
+    assert_eq!(
+        memory.log,
+        [
+            r#"rows Tank {} [{"useId":"Gauge","table":"readings"},{"useId":"Gauge","table":"spare"}] after -"#
+        ]
+    );
+    // An undeclared contract is the asker's defect; a query an implementer
+    // answers none to, the implementer's.
+    let refusal = refused(core.drive(
+        &spec,
+        &command(
+            alice(),
+            table_op("Sweeper", "tally", json!({"contract": "Supply"})),
+        ),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "behavior Sweeper: ask(Supply): it declares no contract Supply it asks (its contracts asked: Gauge)"
+    );
+    let refusal = refused(core.drive(
+        &spec,
+        &command(
+            alice(),
+            table_op("Sweeper", "tally", json!({"query": "depth"})),
+        ),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.message,
+        "behavior Gauge: it implements contract Gauge and answers no query depth"
+    );
+    // A type with no implementer is asked nothing and answers none.
+    let (spec, mut memory) = swept(Vec::new());
+    let changes = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "tally", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        changes.result["rows"][0],
+        json!({"key": "o1", "answers": []})
+    );
+}
+
+/// The uses of a type that implement a contract, and the sub-tables a read
+/// across it takes for them, are found by their declarations; another
+/// type's are read by its spec.
+#[test]
+fn a_types_implementers_are_found_by_their_declarations() {
+    struct Finder;
+    impl Behavior for Finder {
+        type Config = ();
+        fn declaration(&self) -> Declaration {
+            Declaration::new("Finder").table_operation("find", false)
+        }
+        fn parse_config(
+            &self,
+            _raw: &Value,
+            _target: &ConfigTarget<'_>,
+        ) -> Result<(), ConfigError> {
+            Ok(())
+        }
+        fn operation(&self, cx: &Cx<'_, ()>, _name: &str, params: &Value) -> Hook<Value> {
+            let type_name = params["type"].as_str().unwrap_or_default();
+            Ok(json!({
+                "implementers": cx.implementers(type_name, "Gauge")?,
+                "tables": cx.contract_tables(type_name, "Gauge")?,
+            }))
+        }
+    }
+    let core = core().with(Finder);
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Finder", None));
+    let mut memory = Memory::default().with_spec(
+        TypeSpec::new("Tank")
+            .with(UseSpec::on_type("Dial", None))
+            .with(UseSpec::on_type("Counter", json!({"max": 1})))
+            .with(UseSpec::on_type("Gauge", None)),
+    );
+    let found = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Finder", "find", json!({"type": "Tank"}))),
+        &mut memory,
+    ));
+    assert_eq!(
+        found.result,
+        json!({
+            "implementers": ["Dial", "Gauge"],
+            "tables": [{"useId": "Gauge", "table": "readings"}, {"useId": "Gauge", "table": "spare"}]
+        })
+    );
+    let own = changed(core.drive(
+        &spec,
+        &command(
+            alice(),
+            table_op("Finder", "find", json!({"type": "Order"})),
+        ),
+        &mut memory,
+    ));
+    assert_eq!(own.result, json!({"implementers": [], "tables": []}));
+    let _ = TableRef::new("Gauge", "readings");
+}
+
+/// An operation of the table creates a row through create_row, which runs
+/// the new row's create as a caller's: its initializers and after-change
+/// hooks, by a key derived from the request.
+#[test]
+fn a_table_operation_creates_a_row_as_a_caller_creates_one() {
+    let core = core();
+    let (spec, mut memory) = swept(vec![UseSpec::on_type("Freeze", None)]);
+    let changes = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Sweeper", "seed", json!({}))).with_request("r7"),
+        &mut memory,
+    ));
+    assert_eq!(changes.result, json!({"created": "r7:Sweeper:seed:1"}));
+    assert_eq!(changes.rows.len(), 1);
+    assert!(matches!(
+        &changes.rows[0],
+        RowWrite::Create { key: Some(key), .. } if key == "r7:Sweeper:seed:1"
+    ));
+    assert_eq!(changes.rows[0].owned("Counter", "count"), Some(&json!(0)));
+    let kinds: Vec<&str> = changes.events.iter().map(|e| e.kind.as_str()).collect();
+    assert_eq!(kinds, ["create"]);
 }

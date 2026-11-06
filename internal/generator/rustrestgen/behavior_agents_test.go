@@ -37,6 +37,7 @@ var agentsCases = []string{
 	"under requireToken a write that presents no token is refused as token_required, and the holder's write that presents it is saved",
 	"a token a later lease replaced is refused as token_stale",
 	"another caller's acquire of a job whose lease is active is refused as held_by_another",
+	"expireHolder expires every lease a gone holder holds, for a caller holding jobs.override, and is forbidden without it",
 	"a failure in a class with a backoff sets retryAt, and until it passes the move into running and the lease's acquire are refused as backing_off",
 	"when the backoff ends its then, run by the worker, moves the waiting job back to queued",
 	"a lease that lapses expires when its deadline falls due on the worker: onExpiry moves the job back to queued and the token advances",
@@ -75,12 +76,15 @@ func agentsDeps(t *testing.T) (*APIOutput, DepsInfo) {
 // the router mounts each operation of Job's Lease and Retries, Session's
 // Presence and Account's Budget, which the tables implement, beside each
 // table's status transition, each run through the behaviors' core, and
-// Lease's expireHolder, which runs on the table as a whole, none; every
-// operation of Job, whose Lease takes a precondition, takes the caller's
+// Lease's expireHolder, which runs on the table as a whole, at
+// job/lease/expire-holder, a route with no key whose handler calls
+// run_table_operation, a command without a row (D104); every operation of
+// a row of Job, whose Lease takes a precondition, takes the caller's
 // preconditions in its input's preconditions member and calls
 // run_operation_with_preconditions, which hands them to the adapter's
-// run_operation_with, while Session's and Account's call run_operation as
-// before; and the behavior workers JobDeadlines and SessionPresence each
+// run_operation_with, while expireHolder's input presents none, a row's,
+// and Session's and Account's call run_operation as before; and the
+// behavior workers JobDeadlines and SessionPresence each
 // run its table's deadline queue, SessionPresence as the worker holding
 // jobs.override, which a miss's expiry of a device's leases needs.
 // Regenerate with:
@@ -117,6 +121,7 @@ func TestWriteRustAPIGoldenAgents(t *testing.T) {
 		"job.leaseAcquire POST /api/job/{id}/lease/acquire Job.Lease.acquire",
 		"job.leaseDirect POST /api/job/{id}/lease/direct Job.Lease.direct",
 		"job.leaseExpire POST /api/job/{id}/lease/expire Job.Lease.expire",
+		"job.leaseExpireHolder POST /api/job/lease/expire-holder Job.Lease.expireHolder",
 		"job.leaseHeartbeat POST /api/job/{id}/lease/heartbeat Job.Lease.heartbeat",
 		"job.leaseRelease POST /api/job/{id}/lease/release Job.Lease.release",
 		"job.leaseResetExpiries POST /api/job/{id}/lease/reset-expiries Job.Lease.resetExpiries",
@@ -135,7 +140,19 @@ func TestWriteRustAPIGoldenAgents(t *testing.T) {
 		"Job.Lease.heartbeat", "Job.Lease.release", "Job.Lease.resetExpiries",
 		"Job.Retries.recordAttempt", "Job.status.transition",
 	}; !slices.Equal(presenting, wantPresenting) {
-		t.Errorf("operations that take the caller's preconditions %q, want Job's every one, %q", presenting, wantPresenting)
+		t.Errorf("operations that take the caller's preconditions %q, want Job's every one of a row, %q", presenting, wantPresenting)
+	}
+	var tables []string
+	for _, endpoint := range output.Endpoints {
+		if b := endpoint.Behavior; b != nil && b.Table {
+			tables = append(tables, b.Type+"."+b.Use+"."+b.Operation+" "+b.KeyField)
+		}
+	}
+	if want := []string{"Job.Lease.expireHolder "}; !slices.Equal(tables, want) {
+		t.Errorf("operations of a table as a whole %q, want %q, which takes no key", tables, want)
+	}
+	if !output.HasTableBehaviorOperations() {
+		t.Error("the crate has no operation of a table as a whole, which Lease's expireHolder is")
 	}
 	if len(output.ImplementedEndpoints()) != 0 {
 		t.Errorf("implemented endpoints %d, want none: every operation is a behavior's", len(output.ImplementedEndpoints()))
@@ -172,12 +189,17 @@ func TestWriteRustAPIGoldenAgents(t *testing.T) {
 			"behaviors::run_operation_with_preconditions(\n        &state.implementations.behaviors,\n        &ctx,\n        \"Job\",\n        &args.id,\n        \"status\",\n        \"transition\",",
 			"behaviors::run_operation(\n        &state.implementations.behaviors,\n        &ctx,\n        \"Session\",\n        &args.id,\n        \"Presence\",\n        \"beat\",",
 			"behaviors::run_operation(\n        &state.implementations.behaviors,\n        &ctx,\n        \"Account\",\n        &args.id,\n        \"Budget\",\n        \"observe\",",
+			"behaviors::run_table_operation(\n        &state.implementations.behaviors,\n        &ctx,\n        \"Job\",\n        \"Lease\",\n        \"expireHolder\",\n        &args.input,\n    )",
+			`router = router.route("/api/job/lease/expire-holder", route);`,
 		},
 		"src/behaviors.rs": {
 			"use serde_json::{Map, Value};",
 			"DeadlineRun, Error, ExecuteOptions, Host, Layout,",
 			"pub(crate) async fn run_operation_with_preconditions<K, P, R>(",
 			"let ran = postgres::run_operation_with(",
+			"pub(crate) async fn run_table_operation<P, R>(",
+			"let ran = postgres::run_table_operation(",
+			"        &ExecuteOptions::default(),",
 			"fn presented(input: &mut Value) -> Map<String, Value> {",
 			`Caller::new("fixture-agents-api/SessionPresence", ["jobs.override"])`,
 			`Caller::new("fixture-agents-api/JobDeadlines", Vec::<String>::new())`,
@@ -192,11 +214,6 @@ func TestWriteRustAPIGoldenAgents(t *testing.T) {
 			if !strings.Contains(generated[file], text) {
 				t.Errorf("%s does not contain %q", file, text)
 			}
-		}
-	}
-	for _, absent := range []string{"expireHolder", "expire-holder"} {
-		if strings.Contains(generated["src/router.rs"], absent) {
-			t.Errorf("src/router.rs mounts %s, which runs on the table as a whole", absent)
 		}
 	}
 	for _, permission := range []string{"jobs.override", "accounts.limits", "accounts.observe"} {
@@ -231,8 +248,9 @@ func TestAgentsAPICrateBuilds(t *testing.T) {
 // updates them with its run_update, presenting the caller's preconditions
 // in ExecuteOptions (a Rust server has no repository); calls the tables'
 // behavior operations through the generated Rust SDK, a fencing token in
-// an input's preconditions member, as subjects that are fresh UUIDs in
-// their base62 form; runs JobDeadlines' and SessionPresence's queues and
+// an input's preconditions member, and Lease's expireHolder, a method of
+// the table with no key (D104), as subjects that are fresh UUIDs in their
+// base62 form; runs JobDeadlines' and SessionPresence's queues and
 // handlers in process, a deadline made due with SQL as the Timers test
 // makes one; and reads the columns and sub-tables with SQL: the cases
 // every language's end-to-end test runs, by the same names, each held to

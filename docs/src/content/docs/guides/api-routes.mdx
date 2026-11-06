@@ -797,6 +797,14 @@ whose every operation is a behavior's has no implementation at all:
 | TypeScript | `RouterOptions.orm`, the database's `orm.ts` repositories over Postgres, which `buildRouter` requires |
 | Rust | the database's pool, the last argument of `Implementations::new`; the handlers call `superschematic-rules-adapter` on it |
 
+An operation a behavior runs on the table as a whole (Pool's `pick`,
+Lease's `expireHolder`) is routed at `POST <table>/<member>/<operation>`,
+with no key, and runs as a command without a row: Go's handler through
+the ORM's method of no key, TypeScript's through the repository's, and
+Rust's through the generated `behaviors::run_table_operation`, which calls
+the adapter's `postgres::run_table_operation`
+([An operation of the table as a whole](#an-operation-of-the-table-as-a-whole)).
+
 A stack's server passes each. The behaviors' core comes with them: the Go
 module links the rules module's archive (`[paths] rules_go` in a
 checkout), the TypeScript package depends on `@superschematic/rules`, and
@@ -1069,7 +1077,7 @@ are generated, so your implementation has no method for them: it claims
 each message of the table's deadline queue as it falls due, and each
 message of its change queue, and runs it through the behaviors' core in one
 transaction with the message's completion, one claim loop per queue, the
-deadlines first. A table whose behaviors emit events (Schedules' runs)
+deadlines first. A table whose behaviors emit events (Schedules' runs, Pool's rechecks)
 also has an event queue, its third, whose messages the worker hands to a
 method of the API's `Workers` that you write
 ([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers));
@@ -1312,8 +1320,12 @@ The SDK methods and MCP tools follow the behavior's name, as Timers' do
 `account_budget_observe`). The types are typed by the config:
 `recordAttempt`'s `failure` is `JobRetriesClass`, the config's classes,
 and every Budget operation's `meter` is `AccountBudgetMeter`, its meters.
-Lease's `expireHolder` runs on the table as a whole, and no route serves
-it: the build warns of it and leaves it out of the set. A Budget scope's
+Lease's `expireHolder` runs on the table as a whole, at `POST
+/api/job/lease/expire-holder` with no key, for a caller holding
+`overridePermission`
+([An operation of the table as a whole](#an-operation-of-the-table-as-a-whole)):
+`sdk.job.lease.expireHolder({ holder: "w-7" })` answers `{ expired,
+reasons, ids }`, `job_lease_expire_holder`. A Budget scope's
 operations (`reserveFor` and the rest) are the core's calls from a row
 inside it; a route serves them, and the core refuses one from a row that
 does not draw the meter from the scope. A table's API has no update or
@@ -1555,6 +1567,115 @@ when it enters a state `endOn` names, the worker finishes the row's
 schedules. An API that serves `@behaviorOperations(Problem)` and declares
 no `@behaviorWorker(Problem)` is warned, naming what waits (`deadlines
 (Schedules), changes (Schedules) and events (Schedules: run)`).
+
+## A table's pool and its rechecks
+
+A table that implements Pool
+([A pool of members](/superschematic/guides/database-tables/#a-pool-of-members))
+has its operations, which a `@behaviorOperations` set serves, one of them
+on the table as a whole, and a deadline queue and an event queue, which a
+`@behaviorWorker` runs (D104). The worker hands each recheck's event to
+your `Workers` method, which asks the provider and reports:
+
+```ts
+// pool-api
+import { auth, behaviorOperations, behaviorWorker } from "@superschematic/api";
+import { Account } from "@acme/pool-db";
+
+@behaviorOperations(Account)
+@auth
+export abstract class AccountActions {}
+
+@behaviorWorker(Account, { permissions: ["accounts.pool"] })
+export abstract class AccountRechecks {}
+```
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /api/account/pool/pick` | `{ "match"?: { "owner": "..." }, "prefer"?: { "vendor": "anthropic", "kind": "account" }, "exclude"?: ["..."] }` | `{ member: { key, availability, order, preferred } }`, or `{ member: null, until? }`; it writes nothing |
+| `POST /api/account/{id}/pool/mark-out` | `{ "until"?: 1772325000000, "reason": "rate limited" }` | `{ availability: "out", outUntil, outReason, unchanged? }` |
+| `POST /api/account/{id}/pool/report-room` | `{ "room": true, "near"?: true }`, or `{ "room": false, "resetsAt"?: 1772326800000, "reason"?: "quota" }` | `{ availability, checkedAt, outUntil?, outReason?, opened? }` |
+
+`pick`'s `match` and `prefer` are `AccountPoolMatch`, a member per own
+field of the table but the key, each typed by the JSON value its field
+holds (`owner`, a UUID, and `kind`, an enum, are strings; `rank` is an
+integer). A null member is absent, as every optional value's null is, on
+every server and in every SDK, so a pick matches a field's value, never
+its absence: `{ "match": { "owner": "...", "rank": null } }` keeps the
+owner's accounts whatever their rank. `pick`'s `key` is the
+member's key as its routes take it, a UUID in base62. The SDK methods
+and MCP tools follow the use: `sdk.account.pool.pick({ match: { owner }
+})`, with no id, and `sdk.account.pool.markOut(id, { reason })`;
+`account_pool_pick`, whose input takes no id, `account_pool_mark_out`.
+The core checks the config's `permission` at `markOut` and `reportRoom`
+against the caller's, so an `@auth` set admits any signed-in caller to
+`pick` and the config decides the rest; the permission catalog lists it
+under each of the three operations.
+
+| Call | Answer |
+| --- | --- |
+| `pick` of `{ "match": { "owner": "..." } }` with an open account | 200, the open account lowest by `rank`, `preferred: true` |
+| `pick` with every account out | 200, `{ "member": null, "until": ... }`, the soonest time one may be back |
+| `markOut` by a caller holding `accounts.pool` | 200, `outUntil` thirty minutes on, the recheck armed then |
+| the same again, or an earlier `until` for the same reason | 200, `unchanged: true`, nothing written |
+| `reportRoom` with room before `outUntil` | 200, `availability: "out"`, `checkedAt` set |
+| `markOut` or `reportRoom` by a caller without `accounts.pool` | 403 `forbidden` |
+| `pick` whose `match` names a field the table lacks | 400 |
+| `pick` of more than 2,000 members `match` keeps | 409 `vetoed`, `pool_too_large`, `details.vetoDetails` `{ "max": 2000 }` |
+
+The worker runs each recheck as itself, the subject
+`pool-api/AccountRechecks`, holding the permissions its decorator lists:
+it writes the event and arms the next recheck in the deadline's
+transaction, then claims the event from `account_event_queue` and hands
+it to `accountRechecksPoolRecheck` (`AccountRechecksPoolRecheck` in Go,
+`account_rechecks_pool_recheck` in Rust) in the transaction that
+completes it:
+
+```go
+func (w *workers) AccountRechecksPoolRecheck(ctx context.Context, tx orm.TxInterface, event types.AccountPoolRecheckEvent) error {
+	id, err := dbtypes.ParseIdentityUUID(event.Key.String())
+	if err != nil {
+		return err
+	}
+	room, err := askProvider(ctx, id) // your provider's figure, code of your own
+	if err != nil {
+		return err // due again after the queue's backoff
+	}
+	_, err = tx.GetAccountRepository().Pool().ReportRoom(ctx, id, orm.AccountPoolReportRoomParams{
+		Room: room.Room, ResetsAt: room.ResetsAt,
+	})
+	if rules.IsNotFound(err) {
+		return nil // the account is gone: complete the event
+	}
+	return err
+}
+```
+
+An event may come twice; the row's key and `dueAt` say which fire it is.
+A check with room made at or after the account's `outUntil` opens it and
+clears the recheck; one without room moves it. An API that serves
+`@behaviorOperations(Account)` and declares no `@behaviorWorker(Account)`
+is warned, naming what waits (`deadlines (Pool) and events (Pool:
+recheck)`).
+
+## An operation of the table as a whole
+
+An operation a behavior declares on the table as a whole (D104: Pool's
+`pick`, Lease's `expireHolder`) is served at the row's route with its
+`{id}` segment gone, `POST /api/<table>/<member>/<operation>`, and its
+input takes no id and no preconditions. Each server runs it as a command
+without a row through the behaviors' core: TypeScript's router calls the
+repository's member method with no key, Go's handler the ORM's
+(`Pick(ctx, params)`, through `runTableBehaviorOperation`), and Rust's
+the generated `behaviors::run_table_operation`, which runs the adapter's
+`postgres::run_table_operation` in one transaction. Its answer and its
+refusals are a row operation's. The build refuses a set whose added
+table route an operation of the API also matches, by the same method,
+with a path parameter in a segment's place (`account/{id}/pick` matching
+`account/pool/pick`), so no router's precedence decides: rename one, or
+serve the table's operations from code of your own. An operation a
+behavior declares on a namespace as a whole (Comments') is not served,
+and the build warns of it.
 
 ## OpenAPI
 

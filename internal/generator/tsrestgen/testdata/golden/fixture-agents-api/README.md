@@ -60,6 +60,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `POST` | `/api/account/{id}/budget/settle` | `account.budgetSettle` (behavior: Account.Budget, a Budget) | authenticated |
 | `POST` | `/api/account/{id}/budget/settle-for` | `account.budgetSettleFor` (behavior: Account.Budget, a Budget) | authenticated |
 | `POST` | `/api/account/{id}/status/transition` | `account.statusTransition` (behavior: Account.status, a Workflow) | authenticated |
+| `POST` | `/api/job/lease/expire-holder` | `job.leaseExpireHolder` (behavior: Job.Lease, a Lease) | authenticated |
 | `POST` | `/api/job/{id}/lease/acknowledge` | `job.leaseAcknowledge` (behavior: Job.Lease, a Lease) | authenticated |
 | `POST` | `/api/job/{id}/lease/acquire` | `job.leaseAcquire` (behavior: Job.Lease, a Lease) | authenticated |
 | `POST` | `/api/job/{id}/lease/direct` | `job.leaseDirect` (behavior: Job.Lease, a Lease) | authenticated |

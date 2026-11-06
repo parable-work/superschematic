@@ -6,17 +6,19 @@
 //! `workqueue-lease.json`, `workqueue-presence.json`, `workqueue-budget.json`
 //! and `workqueue-retries.json`):
 //! the core's commands and what each must answer, which every language's adapter replays against tables of
-//! its own. The test fails when a file is not what the writer writes from
+//! its own, Lease's expireHolder among them as a command without a row
+//! (D104). The test fails when a file is not what the writer writes from
 //! its recording, so a change to the core, a behavior or the replayer that
 //! changes an answer changes the file in the same commit.
 //! `UPDATE_TRANSCRIPTS=1 cargo test -p superschematic-rules-testkit --test
 //! transcript` rewrites them; review the diff before keeping them. So are
 //! the transcripts of the hand-written scenario files
 //! (`runtime/engine/testdata/rules/scenarios`, D104), which hold each
-//! command's row version beside what it answers, Seats', Reconcile's and
-//! Schedules' (`core-seats`, `core-reconcile`, `core-schedules`) among them,
-//! behaviors no engine implements, Schedules' holding the events each
-//! command wrote (D104).
+//! command's row version beside what it answers, Seats', Reconcile's,
+//! Schedules' and Pool's (`core-seats`, `core-reconcile`, `core-schedules`,
+//! `core-pool`) among them, behaviors no engine implements, Schedules' and
+//! Pool's holding the events each command wrote, and Pool's its picks, each
+//! a command without a row (D104).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -144,21 +146,27 @@ const APPROVALS_FLOOR: usize = 122;
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
 /// The steps `core-lease.transcript.json` holds, of `workqueue-lease.json`'s
-/// 691 (D104, step 2): 113 define and publish checks and 323 commands,
+/// 691 (D104, step 2): 115 define and publish checks and 334 commands,
 /// creates, updates, deletes and invokes, 84 of them presenting Lease's
-/// token as the command's precondition, and the 3 expiries the runner's
-/// runDue ran as deadlines, each under the step number of the
-/// `runner.runDue` that ran it, in the 43 scenarios the core an adapter
-/// embeds runs, the configs with sweepMs left out. The three that compose
-/// test.Gate or test.Signal, which the reference host runs as fixtures,
-/// hold none (31 steps); the rest of the 255 left out are opens, reads of
-/// rows and of the event log, the runDues that ran nothing, and what the
-/// replay skips: the scenario that composes Dependencies, expireHolder and
-/// the steps after it wrote rows, the engines with a value store, Comments'
-/// steps (incidental), the reads of the engine's store and the options the
-/// reference host does not take. An adapter's replay holds its own count to
-/// this one.
-const LEASE_FLOOR: usize = 436;
+/// token as the command's precondition, the 3 expiries the runner's runDue
+/// ran as deadlines, each under the step number of the `runner.runDue` that
+/// ran it, and expireHolder's 8 calls, each a command without a row
+/// (`tableOperation`, D104) with the rows it expired as its `others`, in
+/// the 43 scenarios the core an adapter embeds runs, the configs with
+/// sweepMs left out. Of the 13 steps expireHolder's runs brought in: in
+/// "expire says why" its call and the acquire after it; in "a lapsed
+/// holder's" its call; in "notRenewedAfter spares" its two calls and the
+/// refused expire after them; in "expireHolder expires every lease" its
+/// refused call, its call, its call that expires none, the second engine's
+/// define and publish, the create and the refused call. The three that
+/// compose test.Gate or test.Signal, which the reference host runs as
+/// fixtures, hold none (31 steps); the rest of the 242 left out are opens,
+/// reads of rows and of the event log, the runDues that ran nothing, and
+/// what the replay skips: the scenario that composes Dependencies, the
+/// engines with a value store, Comments' steps (incidental), the reads of
+/// the engine's store and the options the reference host does not take. An
+/// adapter's replay holds its own count to this one.
+const LEASE_FLOOR: usize = 449;
 
 /// The steps `core-presence.transcript.json` holds, of the engine's
 /// `workqueue-presence.json`'s 226 (D104): 52 define and publish checks,
@@ -258,6 +266,20 @@ const RECONCILE_FLOOR: usize = 58;
 /// holds its own count to this one.
 const SCHEDULES_FLOOR: usize = 161;
 
+/// The steps `core-pool.transcript.json` holds, of the hand-written
+/// `core-pool.json`'s 91 (D104, step 3): 17 define and publish checks,
+/// seven of them refused (the last a removal of Pool from a type that has
+/// rows, which the reference host refuses at its define), and 65 commands:
+/// 12 creates, 22 picks, each a command without a row (`tableOperation`)
+/// whose `expect` holds its result alone, 27 of Pool's and Budget's
+/// operations of a row, one of them markOut's repeat answered unchanged,
+/// and the 4 rechecks the runner's runDues ran, each with the event
+/// recheck it wrote as its `events`, each command on a row holding its
+/// version after the step, in its 5 scenarios. The 9 left out are the
+/// opens, the read of a row and the three runDues that ran nothing. An
+/// adapter's replay holds its own count to this one.
+const POOL_FLOOR: usize = 82;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -327,6 +349,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-seats", SEATS_FLOOR, true),
         ("core-reconcile", RECONCILE_FLOOR, true),
         ("core-schedules", SCHEDULES_FLOOR, true),
+        ("core-pool", POOL_FLOOR, true),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

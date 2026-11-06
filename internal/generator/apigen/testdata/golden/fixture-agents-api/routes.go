@@ -185,6 +185,12 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/account/{id}/status/transition",
 			Handler: createAccountStatusTransitionHandler(cfg.DB),
 		},
+		// Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.
+		{
+			Method:  "POST",
+			Path:    "/job/lease/expire-holder",
+			Handler: createJobLeaseExpireHolderHandler(cfg.DB),
+		},
 		// Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.
 		{
 			Method:  "POST",
@@ -901,6 +907,56 @@ func createAccountStatusTransitionHandler(db orm.DatabaseInterface) gohttp.Handl
 		// Run the operation through the ORM, as the request's caller (D103)
 		var result types.AccountStatusTransitionResult
 		if err := runBehaviorOperation(r.Context(), db.GetAccountRepository().Status().Transition, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createJobLeaseExpireHolderHandler creates a handler for POST /api/job/lease/expire-holder
+//
+// Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.
+//
+// It runs Job's Lease expireHolder, a Lease (D103), an operation of the
+// table as a whole (D104), through the ORM of fixture-agents-db, which runs it
+// through the behaviors' core as a command without a row in a transaction:
+// no implementation method serves it.
+func createJobLeaseExpireHolderHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.JobLeaseExpireHolderInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.JobLeaseExpireHolderResult
+		if err := runTableBehaviorOperation(r.Context(), db.GetJobRepository().Lease().ExpireHolder, input, &result); err != nil {
 			respondBehaviorError(w, r, err)
 			return
 		}

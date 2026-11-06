@@ -72,7 +72,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -466,6 +466,76 @@ func TestRegisterBehaviorEvents(t *testing.T) {
 	}
 }
 
+// A declaration's contracts name one the behaviors' core defines
+// (Contracts, D104); a name it does not define is refused, naming the ones
+// it does.
+func TestRegisterBehaviorRefusesAContractItDoesNotKnow(t *testing.T) {
+	decl := declaration("Meter", map[string]any{"contracts": []any{map[string]any{"name": "Supply", "role": "implements"}}})
+	err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Package: RulesPackage, Declaration: decl})
+	if want := `registry: behavior Meter names contract "Supply", which is not one the behaviors' core defines (Capacity)`; err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+// Each other rule of a declaration's contracts (D104), in checkBehaviorContracts'
+// order: a role of implements or asks, a contract named once, none on an
+// extension's behavior, and asks only on a behavior the behaviors' core
+// alone implements; implements is taken from any core package, since an
+// engine's declaration parser shifts the member out unread.
+func TestRegisterBehaviorContracts(t *testing.T) {
+	contract := func(name, role string) map[string]any {
+		return map[string]any{"name": name, "role": role}
+	}
+	for _, test := range []struct {
+		name      string
+		extension string
+		pkg       string
+		contracts []any
+		want      string
+	}{
+		{"a role neither", "", RulesPackage, []any{contract("Capacity", "answers")}, `registry: behavior Meter contract Capacity role "answers" is not "implements" or "asks"`},
+		{"no role", "", RulesPackage, []any{map[string]any{"name": "Capacity"}}, `registry: behavior Meter contract Capacity role "" is not "implements" or "asks"`},
+		{"a contract twice", "", RulesPackage, []any{contract("Capacity", "implements"), contract("Capacity", "asks")}, `registry: behavior Meter names contract Capacity twice`},
+		{"an extension's", "acme", "", []any{contract("Capacity", "implements")}, `registry: behavior acme.Meter of extension acme names contract Capacity, which the behaviors' core asks and answers: an extension's behavior runs in its engine (D58)`},
+		{"asked by a behavior an engine runs", "", WorkQueuePackage, []any{contract("Capacity", "asks")}, `registry: behavior Meter asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`},
+		{"asked by a behavior of no package", "", "", []any{contract("Capacity", "asks")}, `registry: behavior Meter asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`},
+		{"an entry's unknown key", "", RulesPackage, []any{map[string]any{"name": "Capacity", "role": "asks", "queries": []any{"hasRoom"}}}, `unknown field "queries"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			name := "Meter"
+			if test.extension != "" {
+				name = test.extension + ".Meter"
+			}
+			err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: test.extension, Package: test.pkg, Declaration: declaration(name, map[string]any{"contracts": test.contracts})})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+		})
+	}
+	for _, test := range []struct {
+		pkg, role string
+	}{
+		{WorkQueuePackage, ContractRoleImplements},
+		{EnginePackage, ContractRoleImplements},
+		{RulesPackage, ContractRoleImplements},
+		{RulesPackage, ContractRoleAsks},
+	} {
+		reg := New(naming.Default())
+		decl := declaration("Meter", map[string]any{"contracts": []any{map[string]any{"name": "Capacity", "role": test.role, "description": "Room by its meters."}}})
+		if err := reg.RegisterBehavior(BehaviorSpec{Package: test.pkg, Declaration: decl}); err != nil {
+			t.Errorf("Capacity %s on a behavior of %s: %v", test.role, test.pkg, err)
+			continue
+		}
+		meter, _ := reg.Behavior("Meter")
+		if got, ok := meter.Contract("Capacity"); !ok || got.Role != test.role || got.Description != "Room by its meters." {
+			t.Errorf("Meter.Contract(Capacity) = %+v, %v", got, ok)
+		}
+		if _, ok := meter.Contract("Supply"); ok {
+			t.Errorf("Meter.Contract(Supply) found a contract")
+		}
+	}
+}
+
 // An extension's spec may name the Rust crate that implements its
 // behavior (D58), which the registered behavior carries for the
 // projectengine generator; a core behavior names none, and a crate name,
@@ -676,7 +746,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Pool, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},
@@ -823,8 +893,8 @@ func TestRegisterBehaviorTables(t *testing.T) {
 		t.Errorf("Timers = tables %+v, armsDeadlines %v", timers.Tables, timers.ArmsDeadlines)
 	}
 	// Timers and Reactions hear their table's writes (D103), and so does
-	// Schedules (D104), and no other core behavior does; Schedules alone
-	// emits events of its own.
+	// Schedules (D104), and no other core behavior does; Schedules and Pool
+	// alone emit events of their own.
 	var hearing, emitting []string
 	for _, name := range core.BehaviorNames() {
 		b, _ := core.Behavior(name)
@@ -838,7 +908,7 @@ func TestRegisterBehaviorTables(t *testing.T) {
 	if strings.Join(hearing, ",") != "Reactions,Schedules,Timers" {
 		t.Errorf("the behaviors that hear changes = %v, want Reactions, Schedules and Timers", hearing)
 	}
-	if strings.Join(emitting, ",") != "Schedules" {
-		t.Errorf("the behaviors that emit events = %v, want Schedules", emitting)
+	if strings.Join(emitting, ",") != "Pool,Schedules" {
+		t.Errorf("the behaviors that emit events = %v, want Pool and Schedules", emitting)
 	}
 }

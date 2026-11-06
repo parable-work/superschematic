@@ -207,8 +207,15 @@ type BehaviorRoute struct {
 	// implements Timers.
 	Member string
 	// Key is the path parameter that holds the row's key, which the
-	// repository's method takes first.
+	// repository's method takes first; none for an operation of the table
+	// as a whole.
 	Key ParamInfo
+	// Table reports an operation of the table as a whole (D104), a
+	// declaration's scope schema: its route takes no key, and the
+	// repository's method takes the parameters and the caller alone, which
+	// the adapter runs as a command without a row. It never carries
+	// preconditions, which only a row's command presents.
+	Table bool
 	// Optional are the input's optional members, by their wire names in
 	// the input type's order: the members the API's types take null for as
 	// their absence, which the handler leaves out of the repository's
@@ -967,11 +974,17 @@ func (b *builder) behaviorEndpoint(ep apigen.EndpointInfo, op *ir.BehaviorOperat
 			return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s runs %s's %s %s, and the repository's member %q is no identifier the router can call it by", ep.Namespace, ep.Name, op.Type, op.Use, op.Operation, member)
 		}
 	}
-	key := slices.IndexFunc(endpoint.PathParams, func(p ParamInfo) bool { return p.Name == op.Key })
-	if key < 0 {
-		return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s is routed at %s %s, which has no path parameter %s, the key of %s", ep.Namespace, ep.Name, endpoint.Method, endpoint.Path, op.Key, op.Type)
+	if op.Table {
+		// An operation of the table as a whole (D104) is routed with no
+		// key: the repository's method takes none.
+		route.Table = true
+	} else {
+		key := slices.IndexFunc(endpoint.PathParams, func(p ParamInfo) bool { return p.Name == op.Key })
+		if key < 0 {
+			return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s is routed at %s %s, which has no path parameter %s, the key of %s", ep.Namespace, ep.Name, endpoint.Method, endpoint.Path, op.Key, op.Type)
+		}
+		route.Key = endpoint.PathParams[key]
 	}
-	route.Key = endpoint.PathParams[key]
 	if endpoint.HasInput {
 		if input := b.findType(ep.InputType); input != nil {
 			for _, field := range input.Fields {

@@ -1,0 +1,178 @@
+{
+  "tools": [
+    {
+      "name": "account.budget.checkReserve",
+      "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "account.budget.observe",
+      "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+          "resetsAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "used": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "meter", "used"]
+      }
+    },
+    {
+      "name": "account.budget.recordUsage",
+      "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"}
+        },
+        "required": ["amount", "id", "meter"]
+      }
+    },
+    {
+      "name": "account.budget.recordUsageFor",
+      "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"A string value","minLength":1,"type":"string"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+          "released": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "schema": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["amount", "id", "id", "meter", "released", "schema"]
+      }
+    },
+    {
+      "name": "account.budget.reserve",
+      "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "account.budget.reserveFor",
+      "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"A string value","minLength":1,"type":"string"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+          "schema": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["amount", "id", "id", "meter", "schema"]
+      }
+    },
+    {
+      "name": "account.budget.setLimit",
+      "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"}
+        },
+        "required": ["id", "limit", "meter"]
+      }
+    },
+    {
+      "name": "account.budget.settle",
+      "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "account.budget.settleFor",
+      "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"A string value","minLength":1,"type":"string"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+          "schema": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["amount", "id", "id", "meter", "schema"]
+      }
+    },
+    {
+      "name": "account.pool.markOut",
+      "description": "Puts the member out until until, or outForMs from now when it names none, for reason: what a caller a provider refused tells the pool. An out member keeps the later of its outUntil and the new one and takes the new reason, and a call that moves neither is answered unchanged. Arms the member's recheck at its outUntil. Needs permission.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "reason": {"description":"A string value","maxLength":256,"minLength":1,"type":"string"},
+          "until": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "reason"]
+      }
+    },
+    {
+      "name": "account.pool.pick",
+      "description": "Picks a member to run work on, a read of the table as a whole that writes nothing: of the members match keeps, leaving out those exclude names, the first by order of the open members prefer keeps, then of its near ones, then of the other open and near ones. A member counts as out while its table's Capacity has no room for it. With none it answers member null and until, the soonest time a member match keeps may be back, so a caller waits on a deadline of its own. It reads at most 2000 members.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "exclude": {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+          "match": {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
+          "prefer": {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]}
+        }
+      }
+    },
+    {
+      "name": "account.pool.reportRoom",
+      "description": "Records a check of the member at its provider, made now. With room it opens an out member whose outUntil has come, near when near says so, and keeps an open or near one open or near as near says; a check with room before an out member's outUntil records checkedAt alone. With no room the member is out until the later of its outUntil and resetsAt, or outForMs from now when the check names no time, and its recheck is armed then, or recheckAfterMs from now when that is later. Needs permission.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "near": {"description":"A boolean value (true or false)","type":["boolean","null"]},
+          "reason": {"description":"A string value","maxLength":256,"minLength":1,"type":["string","null"]},
+          "resetsAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "room": {"description":"A boolean value (true or false)","type":"boolean"}
+        },
+        "required": ["id", "room"]
+      }
+    }
+  ]
+}

@@ -27,9 +27,12 @@ import (
 // scenarios written by hand in their format where the engine recorded
 // none, core-workflow-principals.json, core-freezes-and-sign-offs.json,
 // core-retries-waits.json, core-periods-and-presence.json, core-seats.json,
-// core-reconcile.json and core-schedules.json (D104), whose transcripts
-// hold each command's row version too, and core-schedules' the events each
-// command wrote
+// core-reconcile.json, core-schedules.json and core-pool.json (D104), whose
+// transcripts hold each command's row version too, and core-schedules' and
+// core-pool's the events each command wrote; core-pool's (Pool's row-less
+// pick and its recheck events, D104) and core-lease's expireHolder hold
+// commands without a row, each run through Execute with no row to read
+// back, its result or refusal and the rows its calls wrote compared
 // (runtime/engine/testdata/rules/*.transcript.json, whose format its
 // transcript module states) replayed through this adapter on SQLite and on
 // Postgres, as the TypeScript adapter replays them
@@ -87,7 +90,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
 	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
 	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
-	{"../../engine/testdata/rules/core-lease.transcript.json", 436},
+	{"../../engine/testdata/rules/core-lease.transcript.json", 449},
 	{"../../engine/testdata/rules/core-presence.transcript.json", 141},
 	{"../../engine/testdata/rules/core-budget.transcript.json", 495},
 	{"../../engine/testdata/rules/core-retries.transcript.json", 250},
@@ -96,7 +99,12 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-seats.transcript.json", 88},
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
+	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
 }
+
+// poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of
+// its transcript, every one of which each dialect replays.
+const poolFloor = 82
 
 type transcript struct {
 	File      string     `json:"file"`
@@ -345,8 +353,18 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, 
 				}
 				out.Fields = append(out.Fields, owned)
 			}
+			// An operation of the table as a whole is one of the layout's
+			// too (D104); one of a namespace is left out, as the
+			// generator's layout leaves it out.
 			for _, operation := range declaration.Operations {
-				out.Operations = append(out.Operations, rules.Operation{Name: operation.Name, Writes: operation.Writes})
+				switch operation.Scope {
+				case "namespace":
+					continue
+				case "schema":
+					out.Operations = append(out.Operations, rules.Operation{Name: operation.Name, Writes: operation.Writes, Table: true})
+				default:
+					out.Operations = append(out.Operations, rules.Operation{Name: operation.Name, Writes: operation.Writes})
+				}
 			}
 			uses = append(uses, out)
 		}

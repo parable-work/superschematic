@@ -20,7 +20,11 @@
 // ticket_timers_fire_timer), or a hidden @mcp when the set's
 // @requireService admits only calling services (D37), the set's clause as
 // its own, and the marker ir.FieldDef.BehaviorOperation, whose Use is the
-// use's id (status, Timers).
+// use's id (status, Timers). An operation a declaration gives the scope
+// schema runs on the table as a whole (D104): its route names no row,
+// POST account/pool/pick (TableRestPath), it takes no key, and its marker
+// says Table, which the servers run as a command without a row. One whose
+// scope is namespace is left out, of which the build warns.
 // The input and result types, and the enums they name, are the
 // declaration's schemas as the config narrows them (behaviortypes.Narrow),
 // as the repositories type them. So every check the pass makes of an
@@ -81,6 +85,14 @@ func ResultType(typeName, use, op string) string {
 // shipment/{id}/payment-status/transition).
 func RestPath(typeName, key, use, op string) string {
 	return codegen.ToKebabCase(typeName) + "/{" + key + "}/" + codegen.ToKebabCase(use) + "/" + codegen.ToKebabCase(op)
+}
+
+// TableRestPath is the route of the use's op of the table as a whole
+// (D104), below the API's prefix: the row route with its key segment gone,
+// as an engine's schema route drops the instance (account/pool/pick,
+// job/lease/expire-holder).
+func TableRestPath(typeName, use, op string) string {
+	return codegen.ToKebabCase(typeName) + "/" + codegen.ToKebabCase(use) + "/" + codegen.ToKebabCase(op)
 }
 
 // Handle is the MCP handle of the use's op (order_status_transition).
@@ -201,21 +213,31 @@ func TakesPreconditions(declaration registry.Behavior) bool {
 	return text != "" && text != "null"
 }
 
-// RunsOnARow reports whether op runs on a row, which a @behaviorOperations
-// set serves: an operation that runs on the schema or a namespace as a
-// whole (Lease's expireHolder) needs a command without a row, which the
-// core does not take yet, so the set leaves it out (D103, D104).
-func RunsOnARow(op registry.BehaviorOperation) bool {
-	return op.Scope != registry.OperationScopeSchema && op.Scope != registry.OperationScopeNamespace
+// Serves reports whether a @behaviorOperations set serves op: one that
+// runs on a row (scope instance, or none) or on the table as a whole
+// (scope schema, RunsOnTheTable), which the core runs as a command without
+// a row (D104). One that runs on a namespace as a whole (Comments') the
+// core runs no command for, so the set leaves it out, of which the build
+// warns (D103, D104).
+func Serves(op registry.BehaviorOperation) bool {
+	return op.Scope != registry.OperationScopeNamespace
+}
+
+// RunsOnTheTable reports whether op runs on the table as a whole (D104):
+// its declaration gives the scope schema (Pool's pick, Lease's
+// expireHolder), so its route names no row and the core runs it as a
+// command without a row.
+func RunsOnTheTable(op registry.BehaviorOperation) bool {
+	return op.Scope == registry.OperationScopeSchema
 }
 
 // PlanSet works out what the expansion adds for set, a @behaviorOperations
 // set whose table db, the API's database, declares, reading the behaviors' declarations
 // from reg. It assumes the table is one (verify.CheckBehaviorOperations):
 // declared by db, keyed by one field, one of whose fields is a behavior
-// registered in reg. It leaves out an operation that does not run on a row
-// (RunsOnARow), of which the build warns. It fails only when a declaration
-// does not narrow.
+// registered in reg. It leaves out an operation it does not serve (Serves:
+// one of a namespace), of which the build warns. It fails only when a
+// declaration does not narrow.
 func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan, error) {
 	td := db.Types[set.BehaviorOperations.Type]
 	if td == nil {
@@ -269,7 +291,7 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 		}
 		slices.Sort(permissions)
 		for _, op := range declaration.Operations {
-			if !RunsOnARow(op) || !narrowed.Offers(op.Name) {
+			if !Serves(op) || !narrowed.Offers(op.Name) {
 				// The build warns of the first (verify.CheckBehaviorOperations).
 				continue
 			}
@@ -281,9 +303,13 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 }
 
 // operationOf is the operation the expansion adds for op of the use ref,
-// named by its member and marked with its id.
+// named by its member and marked with its id. One of the table as a whole
+// (RunsOnTheTable, D104) is routed at TableRestPath and takes no key, and
+// its input presents no preconditions: a precondition is a row's, which
+// the core refuses on a command without a row.
 func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDef, key *ir.FieldDef, ref ir.BehaviorRef, op registry.BehaviorOperation, narrowed behaviortypes.Narrowing, permissions []string, policy registry.ToolInvocationPolicy) *ir.FieldDef {
 	use := behaviorlayout.UseMember(ref)
+	table := RunsOnTheTable(op)
 	out := &ir.FieldDef{
 		Name:       OperationName(use, op.Name),
 		Comment:    op.Description,
@@ -320,8 +346,13 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 			Behavior:    ref.Name,
 			Operation:   op.Name,
 			Writes:      op.Writes,
+			Table:       table,
 			Permissions: slices.Clone(permissions),
 		},
+	}
+	if table {
+		out.RestPath = TableRestPath(td.Name, use, op.Name)
+		out.Arguments = nil
 	}
 	if out.MCP.Invocation.Value == "" {
 		out.MCP.Invocation.Value = policy.Default
@@ -337,7 +368,8 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 	}
 	params, _ := narrowed.Params[op.Name].(map[string]any)
 	properties, _ := params["properties"].(map[string]any)
-	if len(properties) > 0 || b.preconditioned != "" {
+	preconditioned := b.preconditioned != "" && !table
+	if len(properties) > 0 || preconditioned {
 		name := InputType(td.Name, use, op.Name)
 		comment := fmt.Sprintf("The parameters of %s's %s %s.", td.Name, use, op.Name)
 		if len(properties) > 0 {
@@ -345,7 +377,7 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 		} else if b.claim("type", name) {
 			b.plan.Types = append(b.plan.Types, &ir.TypeDef{Name: name, Comment: comment, Role: ir.RoleAPIInput, Origin: ir.OriginBehavior})
 		}
-		if b.preconditioned != "" {
+		if preconditioned {
 			b.presentPreconditions(name)
 		}
 		out.Arguments = append(out.Arguments, &ir.ArgumentDef{Name: ir.BehaviorInputArgument, TypeRef: ir.TypeRef{Name: name}, Required: true})

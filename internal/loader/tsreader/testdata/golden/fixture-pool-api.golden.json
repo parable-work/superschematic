@@ -1,0 +1,41 @@
+{
+  "name": "fixture-pool-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-pool-db",
+      "types": [
+        "Account"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-pool-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "AccountActions",
+      "comment": "An account's pool and budget operations (D104), for any signed-in caller:\npick, a read of the table as a whole at account/pool/pick, for anyone the\nroute admits; markOut and reportRoom for callers holding accounts.pool,\nand observe for those holding accounts.observe.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Account"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "AccountRechecks",
+      "comment": "Runs Account's rechecks as they fall due and hands each recheck event to\nthe project's Workers method accountRechecksPoolRecheck, which asks the\naccount's provider and reports with reportRoom (D104). The worker\nfixture-pool-api-account-rechecks.",
+      "behaviorWorker": {
+        "type": "Account",
+        "permissions": [
+          "accounts.pool"
+        ]
+      }
+    }
+  ]
+}

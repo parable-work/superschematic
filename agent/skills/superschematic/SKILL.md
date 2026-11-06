@@ -308,8 +308,8 @@ Most are load errors; knowing them saves a build round-trip:
   `@behaviorWorker(Ticket, { concurrency: 2 }) export abstract class
   TicketTimers {}`, with `permissions: [...]` when a `then`'s transition
   needs one. Write no handler or `Workers` method for its deadlines and
-  changes (a table whose behaviors emit events, Schedules', gets one
-  `Workers` method per event kind, below). The same worker
+  changes (a table whose behaviors emit events, Schedules' or Pool's, gets
+  one `Workers` method per event kind, below). The same worker
   runs the table's change queue (`ticket_change_queue`), which a trigger
   writes on every insert, update and delete of a row, a soft delete and a
   restore among them, whoever makes it, and runs one row's in the order
@@ -422,8 +422,13 @@ Most are load errors; knowing them saves a build round-trip:
   `orm.WithPreconditions(ctx, rules.Preconditions{...})`), never a header.
   On `token_stale` the process lost the lease: stop writing for the row.
   A lapsed lease expires when its deadline falls due, `onExpiry` moving
-  the row back. Lease takes no `sweepMs` or `directOn` on a table and has
-  no `expireHolder` there. Retries: a class's `backoff` sets `retryAt`,
+  the row back. To expire every lease of a holder that is gone (a worker
+  process that died), call `lease.expireHolder({ holder })`, an operation
+  of the table as a whole with no key (`POST /api/job/lease/expire-holder`,
+  `sdk.job.lease.expireHolder({ holder })`), as a caller holding
+  `overridePermission`; it expires each lease through `expire`, spares one
+  renewed after `notRenewedAfter`, and answers `{ expired, reasons, ids }`.
+  Lease takes no `sweepMs` or `directOn` on a table. Retries: a class's `backoff` sets `retryAt`,
   until which a move into `retryInto` and Lease's `acquire` are
   `backing_off`; `then` moves the row back when it ends; `giveUpAfterMs`
   exhausts after a while; `window: { attempts, ms }` caps starts
@@ -539,6 +544,45 @@ Most are load errors; knowing them saves a build round-trip:
   (`pauseSchedule`, `resumeSchedule`, a replacing `setSchedule`,
   `cancelSchedule`) where you can. Schedules is the behaviors' core's
   alone: no engine type composes it.
+- When work runs on one of several interchangeable rows that a provider
+  can refuse for a while (a person's accounts at model vendors, paid
+  keys, payment processors, SMS gateways, API credentials), implement Pool
+  on the table, beside Budget when you meter it, rather than an
+  `available` column, a selector over your own columns or a poller:
+  `implements Pool<Account, { order: "rank"; outForMs: 1800000;
+  recheckAfterMs: 120000; permission: "accounts.pool" }>` (D104), `order`
+  an own number field, lowest first. Pick with `pool.pick({ match: {
+  owner }, prefer: { vendor }, exclude: [<keys tried this attempt>] })`,
+  an operation of the table as a whole with no key (`POST
+  /api/account/pool/pick`, `sdk.account.pool.pick({ ... })`, the MCP tool
+  `account_pool_pick`); it answers `{ member: { key, availability, order,
+  preferred } }`, the open members `prefer` keeps first, then its near
+  ones, then the rest, or `{ member: null, until }`: wait until `until` on
+  a deadline of your own, never in a loop that picks again. When the
+  provider refuses, call `pool.markOut(key, { until?, reason })` with the
+  time it names (thirty minutes when it names none); an out member keeps
+  the later time. An out member comes back only through
+  `pool.reportRoom(key, { room: true })` made at or after its `outUntil`,
+  never by the clock: its recheck falls due then and every
+  `recheckAfterMs` after on the API's `@behaviorWorker(Account)`, which
+  you must declare with the config's `permission`, and its event
+  `recheck` reaches your `Workers` method `accountRechecksPoolRecheck(event,
+  tx, signal)` (`AccountRechecksPoolRecheck(ctx, tx, event)` in Go,
+  `account_rechecks_pool_recheck(&self, event, run)` in Rust). Answer it
+  there: ask the provider, then `reportRoom` through `tx` with `room`,
+  `near` and `resetsAt` as the provider gives them; the core calls no
+  provider. Be idempotent by the row's key and the payload's `dueAt`, and
+  complete an event whose row is gone (`not_found`). With Budget on the
+  table, a member with a full meter counts as out at `pick` until the
+  meter has room again; no column of Budget's needs reading. On a table
+  with Lease, list `"Pool.markOut"` and `"Pool.reportRoom"` in Lease's
+  `exempt`. A null member of `match` or `prefer` is absent, in every
+  language: `pick` matches a field's value, never its absence, so give a
+  field you pick by a value (a boolean `retired`, not a null). A raw SQL
+  write of a `pool_*` column is never refused but runs none of Pool's
+  rules and re-arms no recheck: repair with `markOut` and `reportRoom`
+  where you can. Pool is the behaviors' core's alone: no engine type
+  composes it.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

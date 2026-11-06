@@ -411,6 +411,11 @@ func (noOpJobLeaseOperations) Acknowledge(_ context.Context, _ types.IdentityUUI
 	return none, ErrNotFound
 }
 
+func (noOpJobLeaseOperations) ExpireHolder(_ context.Context, _ JobLeaseExpireHolderParams) (*JobLeaseExpireHolderResult, error) {
+	var none *JobLeaseExpireHolderResult
+	return none, ErrNotFound
+}
+
 func (noOpJobLeaseOperations) ResetExpiries(_ context.Context, _ types.IdentityUUID, _ json.RawMessage) (*JobLeaseResetExpiriesResult, error) {
 	var none *JobLeaseResetExpiriesResult
 	return none, ErrNotFound

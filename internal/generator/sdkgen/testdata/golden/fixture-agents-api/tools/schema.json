@@ -443,6 +443,48 @@
       }
     },
     {
+      "name": "job.lease.expireHolder",
+      "operationId": "JobLeaseExpireHolderHandler",
+      "title": "Job lease: expire holder",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: expire holder",
+        "handle": "job_lease_expire_holder",
+        "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.expire-holder",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+      "namespace": "job",
+      "methodName": "lease.expireHolder",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/lease/expire-holder",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:1b2b3dc9635589ad50cc7163330f0de778f4f2bb4bc06e8700b4f97541b7d2f3",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "holder": {"description":"A string value","minLength":1,"type":"string"},
+          "notRenewedAfter": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["holder"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobLeaseExpireHolderResult object"
+      }
+    },
+    {
       "name": "job.lease.acknowledge",
       "operationId": "JobLeaseAcknowledgeHandler",
       "title": "Job lease: acknowledge",

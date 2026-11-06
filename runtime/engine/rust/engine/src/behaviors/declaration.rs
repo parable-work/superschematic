@@ -38,6 +38,9 @@
 //! each is a string, the value one of the fields, and leaves both out of
 //! the declaration's JSON it answers with ([`BehaviorDeclaration::json`]),
 //! so its answers read as the recordings hold them.
+//! A declaration may name the contracts between behaviors it implements or
+//! asks (`contracts`, D104), which only the behaviors' core answers and
+//! asks: the engine checks their shape and leaves them out of its JSON too.
 //! The compiler's registry refuses the same declarations, with the same
 //! wording.
 //!
@@ -61,7 +64,7 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 15] = [
+const DECLARATION_KEYS: [&str; 16] = [
     "name",
     "description",
     "configSchema",
@@ -75,6 +78,7 @@ const DECLARATION_KEYS: [&str; 15] = [
     "hearsChanges",
     "operations",
     "signals",
+    "contracts",
     "preconditionSchema",
     "vetoes",
 ];
@@ -82,6 +86,7 @@ const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"]
 const FIELD_KEYS: [&str; 5] = ["name", "description", "volatile", "perReader", "type"];
 const TABLE_KEYS: [&str; 4] = ["name", "description", "key", "fields"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
+const CONTRACT_KEYS: [&str; 3] = ["name", "role", "description"];
 const OPERATION_KEYS: [&str; 10] = [
     "name",
     "description",
@@ -419,7 +424,8 @@ impl BehaviorDeclaration {
 /// A declaration without the members only a table's layout reads (D103):
 /// its `value`, its `tables`, `armsDeadlines` and `hearsChanges`, and each
 /// field's `type`,
-/// which the engine, keeping no table, never answers with. It shifts them
+/// which the engine, keeping no table, never answers with, and its
+/// `contracts` (D104), which only the behaviors' core reads. It shifts them
 /// out, so the members after them keep the order the declaration writes
 /// them in.
 fn without_layout_members(mut value: Value) -> Value {
@@ -428,6 +434,7 @@ fn without_layout_members(mut value: Value) -> Value {
         members.shift_remove("tables");
         members.shift_remove("armsDeadlines");
         members.shift_remove("hearsChanges");
+        members.shift_remove("contracts");
         if let Some(Value::Array(fields)) = members.get_mut("fields") {
             for field in fields {
                 if let Value::Object(field) = field {
@@ -508,6 +515,7 @@ pub fn check_declaration(value: &Value) -> Vec<String> {
     check_operations(members.get("operations"), &mut problems);
     check_beside_fields(members, &mut problems);
     check_signals(members.get("signals"), &mut problems);
+    check_contracts(members.get("contracts"), &mut problems);
     if let Some(precondition) = members.get("preconditionSchema") {
         match precondition {
             Value::Object(schema) if schema.get("type") == Some(&Value::from("object")) => {
@@ -578,6 +586,39 @@ fn check_vetoes(vetoes: Option<&Value>, problems: &mut Vec<String>) {
             problems.push(format!("veto code {text} is declared twice"));
         }
         seen.push(text);
+    }
+}
+
+/// The contracts between behaviors a declaration names (D104), which the
+/// engine checks for their shape alone and answers with none of: each an
+/// object of a name and a role, and a description. Which names and roles a
+/// behavior may give is the registry's to say.
+fn check_contracts(contracts: Option<&Value>, problems: &mut Vec<String>) {
+    let Some(contracts) = contracts else {
+        return;
+    };
+    let shape = "contracts is a list of objects, each with a name and a role";
+    let Value::Array(contracts) = contracts else {
+        problems.push(shape.to_owned());
+        return;
+    };
+    for (index, contract) in contracts.iter().enumerate() {
+        let at = format!("contracts[{index}]");
+        let Value::Object(members) = contract else {
+            problems.push(shape.to_owned());
+            continue;
+        };
+        unknown_keys(members, &CONTRACT_KEYS, &at, problems);
+        if !members.get("name").is_some_and(Value::is_string)
+            || !members.get("role").is_some_and(Value::is_string)
+        {
+            problems.push(shape.to_owned());
+        }
+        optional_string(
+            members.get("description"),
+            &format!("{at}.description"),
+            problems,
+        );
     }
 }
 
@@ -1129,6 +1170,54 @@ mod tests {
                 "vetoes"
             ]
         );
+    }
+
+    /// A declaration may name the contracts it implements or asks (D104):
+    /// the engine checks their shape and answers with none of them, so the
+    /// work queue's Budget answers as it did.
+    #[test]
+    fn the_contracts_are_checked_and_left_out_of_its_json() {
+        assert_eq!(
+            check_declaration(&json!({
+                "name": "test.Meter",
+                "contracts": [
+                    {"name": "Capacity", "role": "implements", "description": "room"},
+                    {"name": "Capacity", "role": 1, "x": true},
+                    "Capacity",
+                    {"name": "Capacity", "role": "asks", "description": 2}
+                ]
+            })),
+            [
+                "contracts[1] has the unknown key \"x\"",
+                "contracts is a list of objects, each with a name and a role",
+                "contracts is a list of objects, each with a name and a role",
+                "contracts[3].description is a string"
+            ]
+        );
+        assert_eq!(
+            check_declaration(&json!({"name": "test.Meter", "contracts": {}})),
+            ["contracts is a list of objects, each with a name and a role"]
+        );
+        let declared = BehaviorDeclaration::from_json(json!({
+            "name": "test.Meter",
+            "description": "a meter",
+            "operations": [],
+            "contracts": [{"name": "Capacity", "role": "implements"}],
+            "vetoes": []
+        }))
+        .expect("the declaration is sound");
+        assert_eq!(
+            declared.json,
+            json!({"name": "test.Meter", "description": "a meter", "operations": [], "vetoes": []})
+        );
+        let members: Vec<&str> = declared
+            .json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(members, ["name", "description", "operations", "vetoes"]);
     }
 
     #[test]

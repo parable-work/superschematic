@@ -16,7 +16,7 @@ import (
 
 // coreBehaviorNames are the behaviors New registers, sorted.
 var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering",
-	"Payments", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
+	"Payments", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements, commerceBehaviorNames the ones @superschematic/engine-commerce
@@ -25,7 +25,7 @@ var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branch
 var (
 	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
 	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
-	rulesOnlyBehaviorNames = []string{"Reconcile", "Schedules", "Seats"}
+	rulesOnlyBehaviorNames = []string{"Pool", "Reconcile", "Schedules", "Seats"}
 )
 
 // A registry with no extension declares the behaviors the engine, the
@@ -1108,6 +1108,110 @@ func TestSchedulesIsTheCoresAlone(t *testing.T) {
 		if err := schedules.ValidateConfig(json.RawMessage(config)); err == nil {
 			t.Errorf("Schedules config %s: no error", config)
 		}
+	}
+}
+
+// Pool is a behavior the behaviors' core alone implements (D104): its
+// package is RulesPackage, it keeps four owned fields and no sub-table,
+// arms deadlines and hears no change, adds two writing operations of a row
+// and pick, a read of the table as a whole (scope schema), emits one event,
+// recheck, whose payload is a closed object, asks Capacity, which Budget
+// implements, and names one veto.
+func TestPoolIsTheCoresAlone(t *testing.T) {
+	reg := New(naming.Default())
+	finalizeWithCoreGenerators(t, reg)
+	pool, ok := reg.Behavior("Pool")
+	if !ok || pool.Package != RulesPackage || EngineImplements(pool) || !RunsOnTheCore("Pool") || !pool.ConfigRequired() {
+		t.Fatalf("Pool: registered %v, package %q, engine implements %v, runs on the core %v, config required %v", ok, pool.Package, EngineImplements(pool), RunsOnTheCore("Pool"), pool.ConfigRequired())
+	}
+	var fields []string
+	for _, field := range pool.Fields {
+		fields = append(fields, field.Name+":"+field.Type)
+	}
+	if !slices.Equal(fields, []string{"availability:string", "outUntil:Temporal.DateTime", "outReason:string", "checkedAt:Temporal.DateTime"}) ||
+		len(pool.Tables) != 0 || pool.Value != "" || !pool.ArmsDeadlines || pool.HearsChanges || len(pool.Requires) != 0 {
+		t.Errorf("Pool: fields %v, tables %v, value %q, arms deadlines %v, hears changes %v, requires %v", fields, pool.Tables, pool.Value, pool.ArmsDeadlines, pool.HearsChanges, pool.Requires)
+	}
+	var ops, vetoes, kinds []string
+	for _, op := range pool.Operations {
+		ops = append(ops, fmt.Sprintf("%s:%v:%s", op.Name, op.Writes, op.Scope))
+	}
+	for _, veto := range pool.Vetoes {
+		vetoes = append(vetoes, veto.Code)
+	}
+	for _, event := range pool.Events {
+		kinds = append(kinds, event.Kind)
+	}
+	if !slices.Equal(ops, []string{"markOut:true:", "reportRoom:true:", "pick:false:schema"}) || !slices.Equal(vetoes, []string{"pool_too_large"}) || !slices.Equal(kinds, []string{"recheck"}) {
+		t.Errorf("Pool operations %v, vetoes %v, events %v", ops, vetoes, kinds)
+	}
+	if capacity, ok := pool.Contract("Capacity"); !ok || capacity.Role != ContractRoleAsks || len(pool.Contracts) != 1 {
+		t.Errorf("Pool contracts %+v", pool.Contracts)
+	}
+	budget, _ := reg.Behavior("Budget")
+	if capacity, ok := budget.Contract("Capacity"); !ok || capacity.Role != ContractRoleImplements || len(budget.Contracts) != 1 || budget.Package != WorkQueuePackage {
+		t.Errorf("Budget contracts %+v, package %q", budget.Contracts, budget.Package)
+	}
+	var payload struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(pool.Events[0].PayloadSchema, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(payload.Required, []string{"outUntil", "dueAt", "firedAt"}) || len(payload.Properties) != 5 {
+		t.Errorf("Pool recheck payload: required %v, %d properties", payload.Required, len(payload.Properties))
+	}
+	for _, config := range []string{
+		`{"order":"rank"}`,
+		`{"order":"rank","outForMs":1800000,"recheckAfterMs":120000,"permission":"accounts.pool"}`,
+	} {
+		if err := pool.ValidateConfig(json.RawMessage(config)); err != nil {
+			t.Errorf("Pool config %s: %v", config, err)
+		}
+	}
+	for _, config := range []string{`{}`, `{"order":""}`, `{"order":"rank","outForMs":999}`, `{"order":"rank","recheckAfterMs":0}`, `{"order":"rank","permission":""}`, `{"order":"rank","ttlMs":1000}`, `{"order":"rank","outForMs":"30m"}`} {
+		if err := pool.ValidateConfig(json.RawMessage(config)); err == nil {
+			t.Errorf("Pool config %s: no error", config)
+		}
+	}
+}
+
+// The contracts the core's declarations name are those the behaviors' core
+// defines (Contracts, D104): every declaration the core reads, its own and
+// the work queue's copy, held to the list, each role one of the two.
+func TestContractsAreTheCores(t *testing.T) {
+	var named []string
+	for _, dir := range []string{
+		filepath.Join("..", "..", "runtime", "engine", "rust", "rules-behaviors", "declarations"),
+		filepath.Join("..", "..", "runtime", "engine-workqueue", "rust", "declarations"),
+		filepath.Join("..", "..", "runtime", "engine", "rust", "behaviors", "declarations"),
+		filepath.Join("..", "..", "runtime", "engine-commerce", "rust", "declarations"),
+	} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.behavior.json"))
+		if err != nil || len(files) == 0 {
+			t.Fatalf("no declaration under %s: %v", dir, err)
+		}
+		for _, file := range files {
+			data, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decl BehaviorDeclaration
+			if err := json.Unmarshal(data, &decl); err != nil {
+				t.Fatalf("%s: %v", file, err)
+			}
+			for _, contract := range decl.Contracts {
+				if !slices.Contains(Contracts, contract.Name) || (contract.Role != ContractRoleImplements && contract.Role != ContractRoleAsks) {
+					t.Errorf("%s names contract %s with role %q: Contracts is %v", filepath.Base(file), contract.Name, contract.Role, Contracts)
+				}
+				named = append(named, decl.Name+":"+contract.Name+":"+contract.Role)
+			}
+		}
+	}
+	slices.Sort(named)
+	if !slices.Equal(named, []string{"Budget:Capacity:implements", "Pool:Capacity:asks"}) {
+		t.Errorf("the core's declarations name the contracts %v, want Budget implementing Capacity and Pool asking it", named)
 	}
 }
 
