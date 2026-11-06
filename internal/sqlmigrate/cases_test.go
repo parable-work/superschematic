@@ -45,6 +45,22 @@ func implementTimers(s *ir.Schema) {
 	}
 }
 
+// implementSchedules has Product implement Schedules (D104), and adds what
+// the loader adds for it: its sub-table, its deadline queue, its change
+// queue and trigger, its event queue, and _version, with their scalars.
+func implementSchedules(s *ir.Schema) {
+	reg := registry.New(naming.Default())
+	product := typeNamed(s, "Product")
+	product.Behaviors = append(product.Behaviors, ir.BehaviorRef{Name: "Schedules", Implements: true,
+		Config: []byte(`{"max":2,"kinds":["every"],"outcomes":["done"]}`)})
+	if _, err := behaviorfields.Expand(s, reg); err != nil {
+		panic(err)
+	}
+	if err := loader.HydrateScalars(s, reg.Scalars()); err != nil {
+		panic(err)
+	}
+}
+
 // productPhase gives Product a Workflow on its field phase and, with
 // reactions, has it implement Reactions too, which hears its writes
 // (D103), and adds what the loader adds for them: the owned columns,
@@ -482,6 +498,12 @@ var planCases = []planCase{
 		productPhase(true)(s)
 	}, rows: heardProductWrites},
 	{name: "drop-change-trigger", before: productPhase(true), after: productPhase(false)},
+	// A table gains a behavior that emits events (D104): its event queue, a
+	// keyed queue its D80 indexes come with, beside the sub-table, the
+	// deadline queue, the change queue and its trigger; the behavior going
+	// drops them.
+	{name: "add-event-queue", after: implementSchedules},
+	{name: "drop-event-queue", before: implementSchedules},
 	{name: "optimistic-on", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 	{name: "optimistic-off", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @versioned",

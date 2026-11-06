@@ -3009,6 +3009,130 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Schedules"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "endOn": {
+                    "additionalProperties": false,
+                    "description": "The states of the Workflow status names whose entry finishes every live schedule of the row; a row in one takes no live schedule.",
+                    "properties": {
+                      "enters": {
+                        "description": "The states, each a state of that Workflow.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "enters"
+                    ],
+                    "type": "object"
+                  },
+                  "kinds": {
+                    "description": "The kinds a schedule may be: after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names.",
+                    "items": {
+                      "enum": [
+                        "after",
+                        "every",
+                        "cron"
+                      ]
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "max": {
+                    "description": "How many schedules a row holds live, active or paused, at once.",
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "maxMs": {
+                    "description": "The greatest delay of an after schedule and interval of an every one, and how far off a cron line's next run may be when it is set, in milliseconds; 2592000000, thirty days, when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "minMs": {
+                    "description": "The least delay of an after schedule and interval of an every one, and the least gap between two runs of a cron line, read across its times of day and the dates its day fields name, in milliseconds; 60000, a minute, when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "outcomes": {
+                    "description": "The outcomes reportRun records of a run.",
+                    "items": {
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 32,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs for every operation of Schedules; any caller when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "description": "The outcome that tries a run again, and how long after its report: the try is the run's next attempt, armed unless the schedule's next regular run comes first.",
+                    "properties": {
+                      "afterMs": {
+                        "description": "How long after the report the run is tried again, in milliseconds, between minMs and maxMs.",
+                        "minimum": 1000,
+                        "type": "integer"
+                      },
+                      "outcome": {
+                        "description": "One of outcomes.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "afterMs"
+                    ],
+                    "type": "object"
+                  },
+                  "status": {
+                    "description": "The field of the type whose Workflow endOn reads; a Workflow anchored on the type is named Workflow. Implied when the type has one Workflow. Needs endOn.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "timeZone": {
+                    "description": "The IANA time zone a cron line is read in when setSchedule names none; UTC when absent. Needs cron among kinds.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "max",
+                  "kinds",
+                  "outcomes"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Search"
               }
             }
@@ -3707,6 +3831,7 @@
             "Retries",
             "Revisions",
             "Rollups",
+            "Schedules",
             "Search",
             "Seats",
             "StateRules",

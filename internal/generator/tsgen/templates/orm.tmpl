@@ -53,6 +53,15 @@ own, updateMany's, deleteMany's and hardDeleteOne's among them, and raw
 SQL's; its repository runs one, as a behavior worker claimed it
 (runChange), so the row's deadlines reconcile, and its rules run, after the
 write commits.{{else}}, and arms or clears no deadline.{{end}}
+{{- if .ORM.EmitsEvents}}
+
+A table whose behaviors emit events (D104) keeps an event queue, a message
+of which the core's command writes in its transaction for each event, and
+a row's delete keeps; its repository hands one, as a behavior worker
+claimed it, to the project's handler in the transaction that spends the
+claim (runEvent), so the handler's writes and the completion commit
+together or not at all.
+{{- end}}
 {{- if .ORM.HasPreconditions}}
 
 A table one of whose uses takes a precondition (D16, D104) types what a
@@ -205,7 +214,7 @@ export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .S
   {{.Type}}Relations{{if .Preconditions}},
   {{.Type}}Preconditions{{end}}
 >{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
-  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}};
+  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}}{{if .Events}} & BehaviorEvents<{{.KeyType}}>{{end}};
 
 /** The {{.Table}} table, as the runtime reads and writes it. */
 export const {{.Const}}: TableDefinition = {

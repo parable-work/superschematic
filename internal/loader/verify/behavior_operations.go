@@ -182,9 +182,11 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 }
 
 // warnQueuesUnrun warns when set serves td, whose behaviors keep
-// deadlines or whose writes are heard (its change queue's marker names who
-// hears them), and the API declares no @behaviorWorker of td to run them
-// (D103). It is a warning, not a refusal: another API over the database
+// deadlines, whose writes are heard (its change queue's marker names who
+// hears them) or whose behaviors emit events (its event queue's, each
+// behavior with its kinds, D104), and the API declares no
+// @behaviorWorker of td to run them (D103). It is a warning, not a
+// refusal: another API over the database
 // may run them, and a table whose queues nothing runs is the author's to
 // choose, whose messages wait; the docs and the agent skill say why not to.
 func warnQueuesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, reg *registry.Registry, r *Result) {
@@ -202,10 +204,27 @@ func warnQueuesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db
 		}
 		kept = append(kept, "changes ("+strings.Join(who, "; ")+")")
 	}
+	decisions := "D103"
+	if queue := db.BehaviorQueueOf(td.Name, ir.BehaviorQueueEvents); queue != nil {
+		var who []string
+		for _, name := range queue.BehaviorQueue.Behaviors {
+			behavior, ok := reg.Behavior(name)
+			if !ok {
+				continue
+			}
+			kinds := make([]string, 0, len(behavior.Events))
+			for _, event := range behavior.Events {
+				kinds = append(kinds, event.Kind)
+			}
+			who = append(who, name+": "+strings.Join(kinds, ", "))
+		}
+		kept = append(kept, "events ("+strings.Join(who, "; ")+")")
+		decisions = "D103, D104"
+	}
 	if len(kept) == 0 || behaviorWorkerOf(schema, td.Name) {
 		return
 	}
-	r.warnf("", "%s: %s's behaviors keep %s for a worker to run, and %s declares no @behaviorWorker(%s): nothing runs them until a worker does; declare one on this API or another over %s (D103)", set.Name, td.Name, strings.Join(kept, " and "), schema.Name, td.Name, db.Name)
+	r.warnf("", "%s: %s's behaviors keep %s for a worker to run, and %s declares no @behaviorWorker(%s): nothing runs them until a worker does; declare one on this API or another over %s (%s)", set.Name, td.Name, joinAnd(kept), schema.Name, td.Name, db.Name, decisions)
 }
 
 // warnListensUnrun warns when set serves td, whose uses hear another

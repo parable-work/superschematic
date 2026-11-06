@@ -6,12 +6,14 @@
 //! `volatile` one), its sub-tables (`tables`: each one's name, key and
 //! fields), whether it arms deadlines (`armsDeadlines`) and whether it hears
 //! its row's writes (`hearsChanges`), its operations and whether each
-//! writes, its veto codes, whether a create gives it parameters (a
+//! writes, the kinds of the events it emits about a row (`events`, D104),
+//! its veto codes, whether a create gives it parameters (a
 //! createParamsSchema), and whether a caller presents it a precondition (a
 //! preconditionSchema). An operation of a table or a namespace as a whole
 //! (`scope` `schema` or `namespace`, Lease's expireHolder) is left out: a
 //! row's core runs the operations of a row (D104). The file stays the one declaration; the core reads
 //! only what it holds a behavior to, and the rest (descriptions, schemas,
+//! an event's payloadSchema among them,
 //! each field's column type and whether a value field is `optional`, which
 //! a table's layout reads) is the file's.
 
@@ -71,6 +73,12 @@ pub(crate) fn declaration(text: &str) -> Declaration {
             // the file.
             let writes = operation.get("writes") == Some(&Value::Bool(true));
             declaration = declaration.operation(name, writes);
+        }
+    }
+    // The kinds of the events it emits, which an emit is held to (D104).
+    for event in listed(&file, "events") {
+        if let Some(kind) = event.get("kind").and_then(Value::as_str) {
+            declaration = declaration.event(kind);
         }
     }
     for veto in listed(&file, "vetoes") {
@@ -189,6 +197,24 @@ mod tests {
                 .preconditions()
         );
         assert!(!declaration(r#"{"name": "Tally", "preconditionSchema": null}"#).preconditions);
+    }
+
+    #[test]
+    fn a_file_declares_the_kinds_of_the_events_it_emits() {
+        let emitting = declaration(
+            r#"{"name": "Tally",
+                "events": [{"kind": "counted", "description": "x", "payloadSchema": {"type": "object"}},
+                           {"description": "no kind"}, {"kind": "reset"}, {"kind": "counted"}]}"#,
+        );
+        assert_eq!(
+            emitting,
+            Declaration::new("Tally").event("counted").event("reset")
+        );
+        assert!(
+            declaration(r#"{"name": "Tally", "events": {"kind": "counted"}}"#)
+                .events
+                .is_empty()
+        );
     }
 
     #[test]

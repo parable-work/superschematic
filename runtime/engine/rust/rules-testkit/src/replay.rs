@@ -101,6 +101,12 @@
 //! later step of D103's order of the work stops the scenario there with the
 //! core's reason.
 //!
+//! Every step the replayer checks is held to the events its commands wrote
+//! (D104), the outbox entries the reference host gained while it ran, in
+//! order, each whole (the row's schema and id, the use, the kind, the
+//! command's time and the payload) against the step's `events`; a step
+//! without the member wrote none, and no recording's step emits one.
+//!
 //! [`crate::transcript`] writes a recording out as a transcript through this
 //! same mapping: the replayer records each command, check and raw write it
 //! made on the host, with what the host answered, as it makes it.
@@ -821,11 +827,17 @@ impl<'r> Run<'r> {
             return;
         }
         self.current = (index + 1, call_of(step).to_owned());
+        let before: Vec<usize> = self
+            .engines
+            .iter()
+            .map(|engine| engine.host.store().outbox().len())
+            .collect();
         let done = if step.get("js").and_then(Value::as_bool) == Some(true) {
             Done::Halted("only the recording's own host runs it (js)".to_owned())
         } else {
             self.make(step)
         };
+        let done = self.with_events(step, &before, done);
         let last = match &done {
             Done::Last(_, reason) => Some(reason.clone()),
             _ => None,
@@ -852,6 +864,42 @@ impl<'r> Run<'r> {
                 self.skip(index, step, reason.clone());
                 self.halted = Some((index + 1, reason));
             }
+        }
+    }
+
+    // with_events holds a checked step to the events its commands wrote
+    // (D104): the entries each engine's outbox gained since `before`, its
+    // lengths before the step, in the order of the engines and then of the
+    // writes, each whole, against the step's `events`, none when it has
+    // none.
+    fn with_events(&mut self, step: &Value, before: &[usize], done: Done) -> Done {
+        let (found, last) = match done {
+            Done::Checked(found) => (found, None),
+            Done::Last(found, reason) => (found, Some(reason)),
+            other => return other,
+        };
+        let emitted: Vec<Value> = self
+            .engines
+            .iter()
+            .enumerate()
+            .flat_map(|(at, engine)| {
+                let outbox = engine.host.store().outbox();
+                outbox[before.get(at).copied().unwrap_or(0).min(outbox.len())..].to_vec()
+            })
+            .map(|written| event_json(&written))
+            .collect();
+        let expected = step
+            .get("events")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let mut checks = Checks {
+            symbols: &mut self.symbols,
+            found,
+        };
+        checks.eq("events", &expected, &Value::Array(emitted));
+        match last {
+            Some(reason) => Done::Last(checks.found, reason),
+            None => Done::Checked(checks.found),
         }
     }
 
@@ -2268,6 +2316,20 @@ struct Cx<'c> {
 
 fn call_of(step: &Value) -> &str {
     step.get("call").and_then(Value::as_str).unwrap_or("?")
+}
+
+// event_json is an event the outbox holds as a scenario step's `events`
+// writes it (D104): the row's schema and id, the use, the kind, the
+// command's time and the payload.
+fn event_json(written: &crate::host::Outboxed) -> Value {
+    json!({
+        "schema": written.type_name,
+        "id": written.key,
+        "use": written.event.use_id,
+        "kind": written.event.kind,
+        "at": written.at,
+        "payload": written.event.payload,
+    })
 }
 
 // holds_unjsonable says whether an argument holds a value JSON cannot

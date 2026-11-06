@@ -93,6 +93,11 @@ func TestWriteTypesGolden(t *testing.T) {
 		// and Sandbox's observed, optional and typed as its Workflow's
 		// states, with its observe and its deadline queue.
 		{service: "fixture-seats-db", behaviors: true},
+		// A table that implements Schedules beside its status Workflow
+		// (D104): Schedules' operations under schedules, its sub-table of
+		// schedules with no repository, no upserts, runDeadline, runChange
+		// and runEvent, and its event queue in queues.ts and the layout.
+		{service: "fixture-schedules-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

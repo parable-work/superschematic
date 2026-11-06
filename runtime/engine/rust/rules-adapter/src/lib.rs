@@ -32,17 +32,24 @@
 //! begins with a check of each read made under one. A refusal is returned
 //! whole ([`Error::Refused`]); a change set is applied as one unit in a
 //! savepoint, every row fenced on the version it was read at, its
-//! sub-table rows written and its deadlines armed and cleared as messages
-//! of the table's deadline queue, and a row that moved runs the command
-//! again from fresh state, up to [`MAX_ATTEMPTS`] runs, before it is
-//! refused as `busy`. A due deadline runs through `run_deadline`, which
-//! spends its arming (a worker's claim of its message) in the same unit,
-//! and releases a fire a guard vetoes to fall due again a minute on; a
-//! write of a row its table's change trigger wrote to the change queue,
-//! whoever made it, runs through `run_change` as the core's change
-//! command, which spends its message in the same unit (D103). A raw SQL
-//! write of an owned column or a sub-table row is never refused: the core
-//! reads what was written, and the change queue hears it.
+//! sub-table rows written, its events written to their row's table's
+//! event queue (the layout's `events`, D104) after them, each with the
+//! command's time and kept when the row is deleted, and its deadlines
+//! armed and cleared as messages of the table's deadline queue; an event
+//! of a table with no event queue refuses the command as internal. A row
+//! that moved runs the command again from fresh state, up to
+//! [`MAX_ATTEMPTS`] runs, before it is refused as `busy`. A due deadline
+//! runs through `run_deadline`, which spends its arming (a worker's claim
+//! of its message) in the same unit, and releases a fire a guard vetoes to
+//! fall due again a minute on; a write of a row its table's change trigger
+//! wrote to the change queue, whoever made it, runs through `run_change`
+//! as the core's change command, which spends its message in the same unit
+//! (D103). A worker that claimed a message of a table's event queue spends
+//! it with `spend_event` in the transaction its handler runs in, both or
+//! neither committed (D104), and `read_queued_events` reads a table's
+//! queued events back. A raw SQL write of an owned column, a sub-table row
+//! or a queue's message is never refused: the core reads what was written,
+//! and the change queue hears it.
 //!
 //! ```ignore
 //! use superschematic_rules_adapter::{postgres, Caller, Host, Layout};
@@ -79,7 +86,8 @@ use serde_json::{Map, Value};
 
 pub use host::Host;
 pub use layout::{
-    Changes, Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table, Use,
+    Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SubTable,
+    Table, Use,
 };
 pub use superschematic_rules::{
     Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
@@ -254,6 +262,47 @@ impl ChangeRun {
             ChangeRun::ClaimLost => "claim lost",
         }
     }
+}
+
+/// What spending an event's claim came to (D104): its message of the
+/// table's event queue deleted by its id and token, or nothing spent
+/// because the claim no longer held it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventRun {
+    /// The claimed message was spent, in the caller's transaction.
+    Spent,
+    /// Nothing was spent: the claim's message was gone, or claimed again
+    /// after its lease, before the statement could spend it.
+    ClaimLost,
+}
+
+impl EventRun {
+    /// Whether the claimed message was spent, so its handler runs.
+    pub fn ran(&self) -> bool {
+        matches!(self, EventRun::Spent)
+    }
+
+    /// Why nothing was spent, as every adapter words it: `claim lost`;
+    /// empty for a message that was spent.
+    pub fn why(&self) -> &'static str {
+        match self {
+            EventRun::Spent => "",
+            EventRun::ClaimLost => "claim lost",
+        }
+    }
+}
+
+/// A message of a table's event queue as an adapter reads it back (D104):
+/// the row's key in the core's form (a UUID's base62 wire form), the use
+/// that emitted it, its kind, the time of the command that emitted it, in
+/// epoch milliseconds, and its payload, parsed (null for none).
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueuedEvent {
+    pub key: String,
+    pub use_id: String,
+    pub kind: String,
+    pub at: i64,
+    pub payload: Value,
 }
 
 /// Why a command did not apply.

@@ -13,9 +13,10 @@
 //! transcript` rewrites them; review the diff before keeping them. So are
 //! the transcripts of the hand-written scenario files
 //! (`runtime/engine/testdata/rules/scenarios`, D104), which hold each
-//! command's row version beside what it answers, Seats' and Reconcile's
-//! (`core-seats`, `core-reconcile`) among them, the first of behaviors no
-//! engine implements.
+//! command's row version beside what it answers, Seats', Reconcile's and
+//! Schedules' (`core-seats`, `core-reconcile`, `core-schedules`) among them,
+//! behaviors no engine implements, Schedules' holding the events each
+//! command wrote (D104).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -244,6 +245,19 @@ const SEATS_FLOOR: usize = 88;
 /// replay holds its own count to this one.
 const RECONCILE_FLOOR: usize = 58;
 
+/// The steps `core-schedules.transcript.json` holds, of the hand-written
+/// `core-schedules.json`'s 160 (D104, step 3): 29 define and publish
+/// checks, thirteen of them refused, and 131 commands: 102 creates,
+/// transitions and Schedules' operations, 27 of them refused and ten
+/// repeats and late reports answered unchanged, and the 19 deadlines and 10
+/// changes the runner's runDues ran, each fire with the event run it wrote
+/// as its `events`, each holding its row's version after the step, with its
+/// schedules as its sub-rows and its armed deadlines, and the raw write of
+/// a status its change queue carries, in its 8 scenarios. The 10 left out
+/// are the opens and the two runDues that ran nothing. An adapter's replay
+/// holds its own count to this one.
+const SCHEDULES_FLOOR: usize = 161;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -312,6 +326,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ),
         ("core-seats", SEATS_FLOOR, true),
         ("core-reconcile", RECONCILE_FLOOR, true),
+        ("core-schedules", SCHEDULES_FLOOR, true),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

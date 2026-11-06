@@ -417,8 +417,10 @@ type Worker struct {
 
 	// Behavior is set for a @behaviorWorker (D103), whose handler the
 	// API's generator writes: its main runs the table's behavior queues
-	// and builds no Deps or Workers. Method is empty then. Nil for an
-	// ordinary worker.
+	// and builds no Deps or Workers, unless the table's behaviors emit
+	// events, each of which it hands to a method of the implementation's
+	// Workers, which it builds from the API's Deps (D104). Method is empty
+	// then. Nil for an ordinary worker.
 	Behavior *apigen.BehaviorWorkerInfo
 }
 
@@ -431,9 +433,18 @@ func (s *Server) Background() bool {
 
 // BehaviorWorker reports whether the entrypoint is a behavior worker's
 // (D103): it opens the API's database and its ORM, and runs the queues of
-// the worker's generated handler, building no Deps and no implementation.
+// the worker's generated handler, building no Deps and no implementation
+// unless it hands events on (EventWorker).
 func (s *Server) BehaviorWorker() bool {
 	return s.Worker != nil && s.Worker.Behavior != nil
+}
+
+// EventWorker reports whether the entrypoint is a behavior worker's whose
+// table's behaviors emit events (D104): it builds the API's Deps and the
+// implementation's Workers, as a @worker's entrypoint does, and hands each
+// event to the Workers method of its use and kind.
+func (s *Server) EventWorker() bool {
+	return s.BehaviorWorker() && s.Worker.Behavior.Emits()
 }
 
 // QueuesFunc is the function of the API package that returns a behavior
@@ -894,9 +905,10 @@ func Plan(in Input) (*Server, error) {
 				d.TypesModule = in.Naming.OrDefault().GoTypesModule(d.Service)
 			}
 		}
-		if s.BehaviorWorker() {
+		if s.BehaviorWorker() && !s.EventWorker() {
 			// A behavior worker builds no Deps: it opens the database alone,
-			// whose ORM its handler runs on (D103).
+			// whose ORM its handler runs on (D103), unless it hands events to
+			// the implementation's Workers, which it builds from Deps (D104).
 			continue
 		}
 		for _, call := range o.Deps.Calls {
@@ -1472,8 +1484,9 @@ func templateFuncs() template.FuncMap {
 		"anyMountsEngine": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.MountsEngine })
 		},
-		"tsQuote": tsQuote,
-		"join":    strings.Join,
+		"tsQuote":   tsQuote,
+		"join":      strings.Join,
+		"joinNames": joinNames,
 		"tsServiceList": func(apis []*TypeScriptAPI) string {
 			names := make([]string, len(apis))
 			for i, a := range apis {

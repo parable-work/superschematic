@@ -159,6 +159,14 @@ Reconcile names its tool by the field, as a Workflow field does:
 `sandbox_observed_observe`, with `state`, an enum of the Workflow's
 states, and `at` (D104,
 [A table's seats and observations](/superschematic/guides/api-routes/#a-tables-seats-and-observations)).
+Schedules' are `problem_schedules_set_schedule`,
+`problem_schedules_pause_schedule`, `problem_schedules_resume_schedule`,
+`problem_schedules_cancel_schedule`, `problem_schedules_report_run` and
+the read-only `problem_schedules_list_schedules`, `setSchedule` taking
+only the kinds the config's `kinds` name and `reportRun`'s `outcome` an
+enum of its `outcomes`. The events a schedule's runs emit reach no tool:
+the API's behavior worker hands them to your `Workers` method (D104,
+[A table's schedules and their events](/superschematic/guides/api-routes/#a-tables-schedules-and-their-events)).
 
 A TypeScript API's endpoint lists the tool and runs it through its route,
 so the set's `@requirePermission` and the core's own permission checks

@@ -79,6 +79,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- if .ChangeQueue }}
 	RunChange(ctx context.Context, change types.{{ .ChangeQueue }}, claim *rules.Claim) (*rules.ChangeRun, error)
 	{{- end }}
+	{{- if .EventQueue }}
+	RunEvent(ctx context.Context, event types.{{ .EventQueue }}, claim *rules.Claim, handle func(ctx context.Context, tx TxInterface) error) (*rules.EventRun, error)
+	{{- end }}
 }
 {{- end }}
 
@@ -311,6 +314,17 @@ func (r *NoOp{{ .Name }}) RunDeadline(_ context.Context, _ types.{{ .DeadlineQue
 // finds its row gone, which leaves it nothing to write.
 func (r *NoOp{{ .Name }}) RunChange(_ context.Context, _ types.{{ .ChangeQueue }}, _ *rules.Claim) (*rules.ChangeRun, error) {
 	return &rules.ChangeRun{Ran: true, Result: &rules.Result{}}, nil
+}
+{{- end }}
+{{- if .EventQueue }}
+
+// RunEvent spends no message, the no-op repository holding no queue, and
+// runs handle with a no-op transaction, returning its error.
+func (r *NoOp{{ .Name }}) RunEvent(ctx context.Context, _ types.{{ .EventQueue }}, _ *rules.Claim, handle func(ctx context.Context, tx TxInterface) error) (*rules.EventRun, error) {
+	if err := handle(ctx, NewNoOpDatabase().tx); err != nil {
+		return nil, err
+	}
+	return &rules.EventRun{Ran: true}, nil
 }
 {{- end }}
 {{- else }}

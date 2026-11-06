@@ -13703,8 +13703,13 @@ copies are the core's crate's (`rules-behaviors/declarations`, which
 them on an engine type. Reconcile is the second behavior a field anchors,
 beside Workflow, and its value field is the first a declaration marks
 `optional`, so its column takes NULL. Both pass the test with state of
-their own: a row's seats, and what its provider last reported. The rest of
-step 4, and steps 5 to 7, are not built. The names and rules are
+their own: a row's seats, and what its provider last reported. Schedules
+(D104's step 3's second part) is the third, and passes it with a row's
+named schedules; it is the first behavior whose own events reach the app
+(`Cx::emit`): a table whose uses declare events keeps an event queue,
+which its behavior worker runs third and hands, event by event, to a
+method of the API's `Workers` the project writes. The rest of step 4, and
+steps 5 to 7, are not built. The names and rules are
 reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
@@ -14129,8 +14134,18 @@ reversible until the first release.
   D53's settings, `stack dev` process, image and gcp worker pool. Its
   handler is generated into the API's package (Go's `TicketTimersQueues`,
   TypeScript's `ticketTimersQueues`, Rust's `run_ticket_timers_deadline`),
-  and is never in `Workers`, a constructor of them or the scaffold, so an
-  API whose workers are all behavior workers needs none. It claims a due
+  and its deadline and change handlers are never in `Workers`, a
+  constructor of them or the scaffold, so an API whose workers are all
+  behavior workers of tables that emit no events needs none. (Amended by
+  D104's step 3's second part: a table whose uses emit events gives its
+  behavior worker an event queue whose generated handler hands each event
+  to a method of the API's `Workers`, named for the worker, the use's
+  member and the kind (`ProblemWakeUpsSchedulesRun`), which the
+  implementation's workers constructor builds and the scaffold stubs, so
+  such a worker's main builds the API's Deps and the implementation's
+  workers as a D80 worker's does; a behavior worker of a table that emits
+  none has no `Workers` method, builds no Deps, and its goldens stay byte
+  for byte.) It claims a due
   message and runs the core's deadline command through the adapter in one
   transaction with the message's completion; the loop's own completion
   does nothing (Go's `worker.RunAll` over the queues, Rust's
@@ -14152,8 +14167,10 @@ reversible until the first release.
   them. The verification pass refuses a
   worker outside an API, over no database or a table the API's database
   does not declare or the API imports from elsewhere, of an engine type,
-  of a table whose behaviors arm no deadlines and hear no writes (since
-  step 3's second half; a table that arms no deadlines before it), a
+  of a table whose behaviors arm no deadlines, hear no writes and emit no
+  events (since D104's step 3's second part; one that arms no deadlines
+  and hears no writes since step 3's second half, and one that arms no
+  deadlines before it), a
   second of one table, and `queue` beside it. A table whose deadlines no
   worker runs is not refused: an API that serves `@behaviorOperations(T)`
   of a table with a deadline queue or a change queue and declares no
@@ -14352,7 +14369,8 @@ reversible until the first release.
   cases.
 - **The worker runs both queues.** A `@behaviorWorker(T)` runs its table's
   deadline queue and its change queue, each when the table has it,
-  deadlines first, with no new decorator: Go's generated `<Worker>Queues`
+  deadlines first (and, since D104's step 3's second part, its event queue
+  third), with no new decorator: Go's generated `<Worker>Queues`
   returns both for `worker.RunAll`, TypeScript's `<worker>Queues` both for
   `runWorker`, and Rust's `<stem>_changes` and `run_<stem>_change` sit
   beside `<stem>_deadlines` and `run_<stem>_deadline`, each run by
@@ -14366,7 +14384,8 @@ reversible until the first release.
   may now have a change queue and no deadlines (`Project` in
   `fixture-reactions-db`). The verification pass refuses a worker of a
   table with neither queue (`@behaviorWorker names <T>, whose behaviors
-  arm no deadlines and hear no writes, so the worker has nothing to run`),
+  arm no deadlines, hear no writes and emit no events, so the worker has
+  nothing to run (D103, D104)`, since D104 counts an event queue too),
   and warns an API that serves `@behaviorOperations(T)` of a table with
   either and declares no `@behaviorWorker(T)`, naming what it keeps
   (`deadlines (Timers) and changes (Timers)`, `changes (Reactions; heard
@@ -14497,8 +14516,9 @@ reversible until the first release.
   - Refusing writes made in a delete's after-change hooks, which are
     dropped today.
   - `requires` in a declaration.
-  - Outbox events of a behavior's own (`Cx::emit`), which the adapters
-    still refuse as internal, and the event stream.
+  - The event stream over HTTP, and SSE or MCP surfaces for a table's
+    events: a behavior's own events (`Cx::emit`) reach the app through its
+    table's event queue (D104).
   - `holds` and `revised` (step 4: Rollups, Revisions and Branches on the
     core); the build and the core refuse them on a table, and
     `core-reactions-holds-revised.json` is not replayed.
@@ -14980,10 +15000,10 @@ recurring invoices and digests repeat the pattern.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Schedules` is a capability a table implements: `implements Schedules<Problem, { max, minMs, maxMs, kinds, timeZone?, outcomes, retry?, endOn?, permission? }>`. Its sub-table holds a row per schedule, keyed by name: its kind and spec, its time zone, its state (`active`, `paused` or `finished`), `nextAt`, `lastAt`, `lastOutcome` and its count of runs. | Timers, whose deadlines are the config's and not the row's; a `@job` per schedule, which is a deployable and not a row |
-| Its operations are `setSchedule({ name, after?, every?, cron?, timeZone? })`, `pauseSchedule`, `resumeSchedule`, `cancelSchedule` and `reportRun({ name, run, outcome })`, which `max`, `minMs` and `maxMs` bound. | |
-| Each active schedule arms a deadline at its `nextAt` (D103, step 3). Its fire records a run, writes an outbox event the app handles, and arms the next run from the time it fired, so a schedule overdue by many runs fires once; a resumed one past its `nextAt` fires at once, once. | Firing every missed run, which wakes a record ten times after a laptop slept |
-| `reportRun` records an outcome of `outcomes`, and `retry: { outcome, afterMs }` arms that run again. `endOn: { enters }` finishes every schedule of a row whose Workflow enters a listed state. | |
+| `Schedules` is a capability a table implements: `implements Schedules<Problem, { max, minMs, maxMs, kinds, timeZone?, outcomes, retry?, endOn?, permission? }>`. Its sub-table holds a row per schedule, keyed by name: its kind and spec, its time zone, its state (`active`, `paused` or `finished`), `nextAt`, `lastAt`, `lastOutcome` and its count of runs. (Amended when step 3's second part was built: the config is `{ max, minMs?, maxMs?, kinds, timeZone?, outcomes, retry?, endOn?, status?, permission? }`, `minMs` a minute and `maxMs` thirty days when absent, and `status` names the Workflow `endOn` reads, as Timers', StateRules' and Reconcile's do; the row also keeps `setAt`, an every's anchor, `retryAt`, `attempt`, `finishedAt` and `endedBy`, since a retry is a run's next attempt and a finished schedule says why it stopped.) | Timers, whose deadlines are the config's and not the row's; a `@job` per schedule, which is a deployable and not a row |
+| Its operations are `setSchedule({ name, after?, every?, cron?, timeZone? })`, `pauseSchedule`, `resumeSchedule`, `cancelSchedule` and `reportRun({ name, run, outcome })`, which `max`, `minMs` and `maxMs` bound. (Amended when step 3's second part was built: the read `listSchedules({ name? })` joins them, as Seats' `listSeats` does, since nothing else of a row's schedules reaches a client; and `reportRun` takes the run's `attempt` too, optional, since a report of an earlier attempt that lands after a later one fired would otherwise arm one more.) | |
+| Each active schedule arms a deadline at its `nextAt` (D103, step 3). Its fire records a run, writes an outbox event the app handles, and arms the next run from the time it fired, so a schedule overdue by many runs fires once; a resumed one past its `nextAt` fires at once, once. (Amended when step 3's second part was built: the fire emits the event `run`, which the table's event queue carries and the API's behavior worker hands to the project's `Workers` method; an every's runs fall on a grid from `setAt`, and a fire arms the grid's first point after it, so an overdue one fires once and drifts by no worker's latency; and the fire calls no operation, so no guard is asked of it and a lease never holds a run.) | Firing every missed run, which wakes a record ten times after a laptop slept |
+| `reportRun` records an outcome of `outcomes`, and `retry: { outcome, afterMs }` arms that run again. `endOn: { enters }` finishes every schedule of a row whose Workflow enters a listed state. (Amended when step 3's second part was built: the retry is the run's next attempt, its event carrying `attempt`; a name's runs count on across a replace and a finished name set again, and the event carries the schedule's `setAt`, so a handler is idempotent by the row, the name, `setAt`, the run and the attempt, which no two fires share, a name pruned and set again among them; a retry the next regular run would come before is not armed; and a report of an older run, of a replaced schedule's latest or of an attempt other than the latest answers `unchanged`, since a handler delivered at least once reports again, and late.) | |
 | Cron lines and time zones are the core's, in Rust, as `Calendar`'s zones are (D103). | A cron parser in each adapter |
 
 ### Seats
@@ -15040,7 +15060,10 @@ Two of the app's patterns need no rules of their own, and wait for step
 
 D103: `Lease` and `Retries` do not fold into `@queue`, and stay
 behaviors a table implements; `Queue` folds, its claim a declared read
-and Lease's `acquire`. Step 4 ports each upgrade below with the behavior
+and Lease's `acquire`. D103's behavior worker, since step 3's second
+part: a table whose uses emit events gives it an event queue, whose
+events it hands to methods of the API's `Workers`, so its handlers are no
+longer all generated. Step 4 ports each upgrade below with the behavior
 it amends, and step 5's bundles include Barrier, Mailbox and
 Assignment. D16, its amendment on writes that change nothing:
 `already_in_state` stays the default, and a type opts into
@@ -15084,12 +15107,20 @@ each in each language. Step 3's first part built: Seats and Reconcile,
 the first behaviors only the core implements, on the core, their cases
 written by hand and replayed by every adapter, and a table implementing
 Seats and a field that is a Reconcile in each language. Reconcile was
-built before Schedules, against the order above: Schedules needs a
+built before Schedules, against the order above: Schedules needed a
 behavior's own outbox events to reach the app's code, which every adapter
-refuses today, and cron lines and time zones in the core; Pool needs a
-read across a table and the Capacity contract with Budget. Schedules and
-Pool, the rest of step 3, and step 4 are not built. The names and configs
-are reversible until the first release.
+then refused, and cron lines and time zones in the core. Step 3's second
+part built: what Schedules needed, a behavior's own events written to its
+table's event queue in the command's transaction and handed by the
+table's behavior worker to a method of the API's `Workers` that the
+project writes, and cron lines read in a zone of the IANA database the
+core bundles; then Schedules on the core, its cases written by hand first and
+replayed by every adapter, and a table implementing it in each language
+whose wake-ups the project's handler answers. Pool, the rest of step 3,
+still needs a read across a table (its `pick`) and the `Capacity`
+contract with Budget; the events its recheck writes are built. Step 4 is
+not built. The names and configs are reversible until the first
+release.
 - **The core addition.** `Behavior::settle(view, operation, params)` is a
   hook a use answers about an operation of its own before any use's guard
   is asked. The core asks it after the parameter check, for a caller's
@@ -16227,11 +16258,357 @@ are reversible until the first release.
   `TestRustSeatsBehaviorWorkerEntrypoint`). No existing fixture's golden
   changes; the IR's schema file and its parity corpus change by the two
   declarations and the `by` descriptions.
+- **Step 3, second part: a behavior's own events.** A declaration may
+  list the events its behavior emits about a row (`events`, after
+  `operations`: each a camelCase `kind`, a `description` and a
+  `payloadSchema`, an object schema with `"additionalProperties": false`).
+  The engine's declaration parser refuses an unknown key, so the member
+  follows `optional`'s precedent: `RegisterBehavior` takes it on a
+  behavior of `@superschematic/rules` alone and refuses it on any other,
+  an extension's among them (`registry: behavior <B> declares events
+  (<kinds>), which only a behavior the behaviors' core alone implements
+  (package @superschematic/rules) declares: an engine's declaration parser
+  refuses the key`), beside six checks of the member's shape.
+  `superschematic_rules::Declaration` gains `events` (`event()`,
+  `has_event()`), which `declared.rs` reads, and `Cx::emit` refuses as a
+  defect a kind its use's declaration does not list (`behavior Schedules:
+  emit(x): it declares no event x (its events: run)`). The core holds no
+  payload to its `payloadSchema`, as it holds no operation's result to its
+  `resultSchema`: each behavior's tests do (`tests/schedules.rs` holds
+  every `run` payload to the file's). `tests/core.rs` has 58 cases.
+- **The event queue.** A table one of whose uses declares events gets a
+  third behavior queue in its database (`TypeDef.BehaviorQueue` of kind
+  `events`, `<Type>Event`, `problem_event_queue`): one message per event,
+  `rowKey`, `useId`, `kind`, `at` (the command's time, epoch milliseconds)
+  and `payload` as JSON, a D80 queue keyed by `rowKey` with `serialize` and
+  its line kept in the order written (`sqlutil.QueueSpec.InOrder`, as the
+  change queue's), append, `retain: "0s"`, D53/D68's retries, backoff and
+  lease. One row's events reach the app in the order the core wrote them,
+  and a failing one holds its row's later ones until it runs or is dead; a
+  done event has no reader, the record of a run being the behavior's
+  sub-table and the handler's own writes. A row's delete leaves its
+  messages, since the app may still need to hear them (a run that fired
+  before it); the handler meets the row gone and completes. sqlgen writes
+  it in both dialects with D80's indexes and no trigger, the migration
+  planner adds and drops it (the plan cases `add-event-queue` and
+  `drop-event-queue`, both dialects, applied by the convergence tests),
+  the IR's `Worker.Queues` lists it after deadlines and changes, and
+  `Worker.Events` (`ir.BehaviorWorkerEvent`, the loader's alone: the data
+  forms have no key for it, and the writer strips it) holds each event a
+  behavior worker hands on, with its `Workers` method
+  (`ProblemWakeUpsSchedulesRun`) and its API types
+  (`ProblemSchedulesRunEvent { key, at, payload }` and
+  `ProblemSchedulesRunPayload`, which `behaviorops.ExpandWorkers` adds to
+  the API from the narrowed payloadSchema; OpenAPI and the SDKs, which no
+  endpoint of them reaches, leave them out). The layout names its columns
+  (`events`: `{"queue": "ProblemEvent", "table": "problem_event_queue",
+  "rowKey": "row_key", "use": "use_id", "kind": "kind", "at": "at",
+  "payload": "payload"}`), absent for a table that emits none, so every
+  existing layout document stays byte for byte.
+- **Writing, spending and reading events.** Each adapter, on SQLite and
+  Postgres, writes a change set's events from the layout in the command's
+  unit, after the sub-table rows and before the deadline changes, in the
+  change set's order, for every action that runs hooks (a caller's
+  operation, a `call()` and a `call_on()`, a deadline's fire, a change's
+  hooks), each with the command's time, a deleted row's included; on
+  Postgres each insert's `due_at` and `created_at` are the statement's
+  `clock_timestamp()`, so one transaction's events of a row keep their
+  order in the claim. An event of a row whose table keeps no event queue
+  is still `internal`, nothing applied (`<action> of <Type> emits <kind>
+  of <use> on <Type> <key>, and <Type>'s table <table> keeps no event
+  queue in the behaviors' layout: a behavior whose declaration lists its
+  events gives its table one (D104)`). A worker's claim is spent by one
+  delete of the message by its id and token in the handler's transaction
+  (`spendEvent`, `SpendEvent`, `spend_event`; a lost claim spends nothing
+  and runs nothing), and `readQueuedEvents` (`ReadQueuedEvents`,
+  `read_queued_events`) reads a type's messages in the order written:
+  `created_at` then `id` on Postgres, and `created_at` then the rowid on
+  SQLite, whose millisecond `created_at` one command's events share. The
+  ORMs wrap the spend as `runEvent` (TypeScript, `BehaviorEvents<Key>` on
+  the repository's type) and `RunEvent` (Go), each spending the claim and
+  running the handler in one transaction, both or neither. Each adapter's
+  store tests hold five cases in one wording on both dialects (an event
+  written in the command's unit and kept after the row's delete, a refused
+  or moved command writing none, the internal refusal, a spend and a lost
+  claim, one row's events read in the order written), and the ORMs' a
+  handler that writes and one that fails. The reference host keeps each
+  event with its command's time (`Outboxed.at`).
+- **The handler is the project's.** A behavior worker of a table whose
+  uses emit events runs the event queue as its third queue, after its
+  deadlines and its changes, and hands each message to a method of the
+  API's `Workers`, one per event kind of each emitting use, named for the
+  worker, the use's member and the kind, and typed by the kind's narrowed
+  payloadSchema: Go's `ProblemWakeUpsSchedulesRun(ctx, tx
+  orm.TxInterface, event types.ProblemSchedulesRunEvent) error`, its `ctx`
+  naming the worker as the behavior caller; TypeScript's
+  `problemWakeUpsSchedulesRun(event: ProblemSchedulesRunEvent, tx:
+  FixtureSchedulesDbTx, signal: AbortSignal): Promise<void>`, `tx` the
+  event's transaction's repositories as the worker's caller (a transaction
+  and not an `Orm`, since an `OrmTx` is not assignable to one, so the
+  generated worker runs `orm.withBehaviorCaller(caller).transaction(tx =>
+  tx.problem.runEvent(...))`); and Rust's
+  `problem_wake_ups_schedules_run(&self, event:
+  crate::types::ProblemSchedulesRunEvent, run:
+  &crate::behaviors::EventRun<'_>)`, whose `EventRun` holds the
+  transaction (`client()`), the worker's caller (`caller()`) and
+  `operation(type, &key, use, operation, &params)`, which runs a behavior
+  operation there. D53's `Workers` is where an API's handlers of messages
+  live, with their Deps, constructor and scaffold in each language; a
+  method per kind types each payload without a union. A generated
+  dispatcher picks the method by use and kind and fails an event no method
+  takes (`behavior worker ProblemWakeUps: no Workers method takes event
+  <kind> of <use> on Problem <key> (D104)`), dead after its retries for an
+  operator. The handler runs in one transaction that first spends the
+  message; its return commits both, and its error, a panic or a failed
+  commit fails the message (D68's backoff, then dead). Delivery is at
+  least once, so a handler is idempotent by the row's key and what the
+  payload says. `Workers`, its constructor and the scaffold's stubs (each
+  failing with `event handler <method>` not implemented) exist
+  whenever an API has a `@worker` or an emitting `@behaviorWorker`, and
+  such a worker's main builds the API's Deps and calls the
+  implementation's `NewWorkers`, `createWorkers` or `create_workers` as a
+  D80 worker's main does (`TestGoBehaviorWorkerEntrypointOfProblemWakeUps`,
+  `TestTypeScriptSchedulesBehaviorWorkerEntrypoint`,
+  `TestRustSchedulesBehaviorWorkerEntrypoint`, each held to a golden and
+  compiled); a behavior worker of a table that emits none has no `Workers`
+  method, builds no Deps, and its goldens stay byte for byte. The build
+  refuses a stack whose implementation predates its event handlers, naming
+  each method to add, as it refuses one that predates its `@worker`s
+  (`TestATypeScriptImplementationThatPredatesItsEventHandlersFails`). The
+  verification pass refuses a `Workers` method or an event type whose name
+  another `@worker` or type of the API holds, takes a table with only an
+  event queue as one with something to run (`@behaviorWorker names <T>,
+  whose behaviors arm no deadlines, hear no writes and emit no events, so
+  the worker has nothing to run (D103, D104)`), and warns an API that
+  serves `@behaviorOperations(T)` of a table that emits events and
+  declares no `@behaviorWorker(T)`, naming the events kept (`deadlines
+  (Schedules), changes (Schedules) and events (Schedules: run)`); nothing
+  refuses a table whose event queue no worker runs, whose messages wait.
+- **The calendar.** `rules-behaviors`' `calendar` module reads a cron
+  line's runs in a zone, on jiff 0.2.38 with its bundled time zone
+  database alone (`default-features = false`, `["std",
+  "tzdb-bundle-always"]`, the commerce crate's pin and reasons: no host
+  zone file and no system zone, so every host, the wasm32 module among
+  them, computes the same runs; a rule change ships with a release), and
+  reads no clock. A line is Vixie cron's five fields (minute, hour,
+  day-of-month, month, day-of-week, 0 and 7 Sunday), each a list of `*`,
+  numbers, ranges and steps, with month and day names in any case and
+  Vixie's rule when both day fields are restricted (either matches); the
+  macros `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
+  `@midnight` and `@hourly`. A seconds field, `@reboot`, `?`, `L`, `W`,
+  `#` and `H` are refused, extensions no two crons agree on, each of
+  twelve refusals naming its field and what breaks (`a cron line names
+  five fields, minute hour day-of-month month day-of-week, and "0 0 9 * *
+  *" names 6: a seconds field is not taken`). The next run after an
+  instant is looked for over ten years of local dates (`HORIZON_DAYS`,
+  3653: a leap day's runs are at most eight years apart); a local time a
+  DST change skips runs at the gap's first instant, the change itself, so
+  a skipped wake is not lost, the gap's first minute among them (read at
+  the offset after the change, a time of the gap lies before it, so the
+  change is the first transition following it: `0 2 * * *` in New York
+  runs at 07:00Z on the spring day, not a day late), and one it repeats
+  runs once, at its first occurrence; an unknown zone is refused and a
+  name is matched ignoring ASCII case. A name is read in the bundled
+  database alone (`TimeZoneDatabase::bundled`), never jiff's global one,
+  which prefers the host's zone files (`TZDIR`) whenever a crate of a
+  project's Cargo graph turns on jiff's `tzdb-zoneinfo` by feature
+  unification; `tests/calendar_zones.rs` holds that, and CI runs it with
+  that feature on. A line's closest runs (`closest_ms`, which `minMs`
+  bounds) are read on the local clock across its times of day and the
+  dates its day fields name over the Gregorian calendar's 400-year cycle:
+  `@weekly`'s are a week apart, `@monthly`'s 28 days, `0 1,23 * * MON`'s
+  22 hours. `tests/calendar.rs` has 17 cases: the spring gap, its first
+  minute, and the autumn fold in America/New_York and Europe/London, a
+  gap's first minute in Paris, Havana, Santiago and Lord Howe, a leap day,
+  a month without the day, Vixie's rule, a line that never runs, the
+  closest runs around the clock and across the day fields, and a source
+  that names no clock. The bundled zones grow
+  `@superschematic/rules`'s wasm from 1,663,535 to 2,131,437 bytes
+  (+467,902) and the rules archive (darwin_arm64) from 24,357,288 to
+  26,286,688 bytes (+1,929,400), Schedules and the calendar together.
+- **Schedules.** `rules-behaviors/src/schedules.rs`: a table says
+  `implements Schedules<Problem, { max, minMs?, maxMs?, kinds, timeZone?,
+  outcomes, retry?, endOn?, status?, permission? }>`, and its module doc
+  holds it to D103's test, which it passes: its state is its own, the
+  `schedules` sub-table (`problem_schedules_schedules`, keyed by name,
+  with `kind`, `spec`, `timeZone`, `state`, `setAt`, `nextAt`, `retryAt`,
+  `runs`, `attempt`, `lastAt`, `lastOutcome`, `finishedAt` and `endedBy`)
+  and the deadline each live one arms; its rules say which schedules a row
+  may hold, how a run falls due and arms the next, how its outcome is
+  recorded and tried again, and when a row's schedules end; and it recurs
+  (a reminder, a recurring invoice, a digest, an agent's wake-ups).
+  `setSchedule` takes exactly one of `after`, `every` and `cron`, a kind
+  `kinds` takes, a delay or an interval within `minMs..maxMs`, and a cron
+  line whose runs come at least `minMs` apart on the local clock and whose
+  next run is within `maxMs`; a live name (active or paused) with the same
+  kind, spec and zone answers `unchanged: true`, another is replaced
+  (`replaced: true`), and a name with no live schedule needs room under
+  `max`, which counts the live ones (the veto `schedule_limit`); a
+  finished name set again is a new schedule. A replace and a finished name
+  set again count the name's `runs` on, so a run number names one run of
+  the name while its row lasts. Each active schedule arms the deadline of
+  its name at its due (the retry when one is armed, else `nextAt`),
+  payload `{}`, since the row is the truth the fire reads. The fire
+  records a run, emits `run` (`{ name, run, attempt, kind, spec,
+  timeZone?, setAt, dueAt, firedAt, nextAt? }`, so a handler is idempotent
+  by name, `setAt`, run and attempt, which no two fires share, a name
+  pruned and set again having a later `setAt`), and arms the next from the
+  time it fired: an every's at its grid's next point, a cron line's at its
+  first run after the fire; an after, and a cron line with no run left,
+  finish (`endedBy: run`). A fire of a schedule no longer active, or gone,
+  does nothing. `pauseSchedule` keeps `nextAt` and clears the deadline;
+  `resumeSchedule` arms it again, at once when past; `cancelSchedule`
+  finishes a schedule (`endedBy: cancel`) rather than deleting it, so a
+  late report lands, a read shows why it stopped, and its place under
+  `max` frees at once; a pause or a resume of a finished one is the veto
+  `schedule_finished`. `reportRun({ name, run, attempt?, outcome })`
+  records an outcome of `outcomes` for the latest run: a run not had is
+  the veto `no_run`; an older run, the latest run of a schedule a replace
+  took the place of (the current one has not fired), an `attempt` other
+  than the latest, and the outcome recorded answer `unchanged`, so a late
+  report of attempt 1 after attempt 2 fired arms no third; and `retry`'s
+  outcome arms the run again `afterMs` on as its next attempt, unless the
+  next regular run comes first, reviving an after (or a spent cron line)
+  for it while the row is under `max`; another outcome cancels an armed
+  retry. `endOn` finishes every live schedule of a row whose Workflow (the
+  one `status` names, or the type's one, `flow.rs`) is in a listed state
+  (`endedBy: endOn`), on every write through the core (`after_change`) and
+  every heard write of the row (`heard`, `hearsChanges`, as Timers'
+  `enters` is heard), a raw one among them, and such a row takes no live
+  schedule (the veto `schedules_ended`). `listSchedules({ name? })` reads
+  them by name. A write that finishes a schedule prunes the finished ones
+  beyond `max`, those finished longest ago first, so a row's sub-table
+  stays within twice `max`. The parameters, then `permission` (one for
+  every operation, any caller the route admits when absent: `<who> may not
+  set a schedule of Problem <key>: it needs permission
+  problems.schedule`), then the row's lookup, the answers that change
+  nothing and the vetoes run in `settle`, before any other use's guard.
+  The fire calls no operation and runs as the worker, so no guard is asked
+  of it: a lease never holds a run, while the handler's `reportRun`, the
+  worker's write, is held by another principal's lease unless Lease's
+  `exempt` lists it. Any config change is allowed: a dropped kind and
+  narrower bounds hold new sets alone, a lowered `max` refuses new names
+  until fewer are live and finishes none, and a schedule keeps the zone it
+  was set with. Its config checks are the schema's, then `minMs` within
+  `maxMs`, a known `timeZone` with cron among `kinds`, `retry`'s outcome
+  and bounds, `status` with `endOn`, the Workflow `endOn` reads and its
+  states. `tests/schedules.rs` has 18 cases. It registers thirteenth,
+  after Reconcile (`NAMES`, `DECLARATIONS`, `core()`,
+  `registry.RulesBehaviors`, every transcript's `behaviors`), and only the
+  core implements it (`registry.RulesPackage`): its declaration's copy is
+  `rules-behaviors/declarations/Schedules.behavior.json`, the engine never
+  registers it, and the build refuses it on an engine type.
+- **The surface.** `@superschematic/db` exports `ScheduleKind`,
+  `SchedulesOn` and `Schedules`, which resolves to the empty object type
+  as Timers does (`schedules.typecheck.ts` holds what fails to compile,
+  `@behavior("Schedules", ...)` among it). The build holds a config to the
+  table in the core's words and order (`verify/behaviors_schedules.go`),
+  but for the zone's name, which the core refuses at the table's first
+  command. `behaviortypes` names the kinds, outcomes, states and
+  `endedBy` (`ProblemSchedulesKind`, `ProblemSchedulesOutcome`,
+  `ProblemSchedulesState`, `ProblemSchedulesEndedBy`), and narrows the
+  inputs alone to the config: it drops `after`, `every` and `cron` from
+  `setSchedule`'s input for a kind the config leaves out and `timeZone`
+  without cron, and types `reportRun`'s `outcome` by `outcomes`. What a
+  call answers, and the event's payload, keep the declaration's values:
+  `ProblemSchedulesKind` is every kind, and a view's `lastOutcome` and
+  `reportRun`'s answered `outcome` are strings, since a schedule of a kind
+  a new config dropped keeps running and an outcome it dropped stays
+  recorded, and Go's and Rust's closed enums would refuse them, the
+  event's message dying unhandled (`TestNarrowSchedules` narrows a config
+  of `every` alone and holds its outputs to every kind and any
+  outcome). The permission catalog lists the config's `permission` under each
+  of the six operations. OpenAPI, the four SDKs and the MCP tools carry
+  them (`problem/{id}/schedules/set-schedule`, `listSchedules` a POST that
+  reads; `problem_schedules_set_schedule`). The writer writes the clause
+  back in every format (`TestSchedulesRoundTrip`). No existing fixture's
+  golden changes; the IR's schema file and its parity corpus change by
+  Schedules' branch.
+- **The specification.** The engine recorded none of this, so
+  `rules/scenarios/core-schedules.json` (8 scenarios, 160 steps: set of
+  each kind, a cron line in the config's zone and in its own, a repeat, a
+  replace and each parameter's refusal before the permission and the
+  permission before the row; a due schedule firing once, an overdue every
+  at its grid's next point, an after finishing and a finished name set
+  again counting its runs on; the spring gap, its first minute (`0 2 * *
+  *`), and the autumn fold in America/New_York and Europe/London, and a
+  schedule set just before the repeated hour firing none of it; pause,
+  resume past its time and cancel, and a replace counting the name's runs
+  on; reportRun's outcomes, a stale run, `no_run` and a retry as the run's
+  next attempt, an after revived for it, and a late report of an earlier
+  attempt and of a replaced schedule's latest run answered `unchanged`;
+  endOn through a transition and through a raw write of the status; max
+  and pruning, and a new version's narrower config; and the define
+  refusals) was written first, by hand in the recorded format, before
+  Schedules' code, and grew by eleven steps when review found the gap's
+  first minute lost a day's run, a replace numbered its runs from 1 again
+  and a late report of an earlier attempt armed one more. A
+  step of a scenario file may carry the events its command, or every
+  command a `runner.runDue` ran, wrote (`events`), which the replayer
+  compares for every step of every file, the recordings' among them (none
+  of which emits, so every replay keeps 0 mismatches). The reference host
+  checks 159 of its steps with 0 mismatches, floor 159, the raw write
+  applied and not compared. Its transcript, `core-schedules.transcript.json`,
+  holds 161 steps: 29 checks, 13 of them refused defines, and 131
+  commands, 10 of them repeats and late reports answered unchanged, 19
+  deadlines with their events and 10 changes a runner ran, and one raw
+  write; 10 steps are left out. Each
+  command carries its row's `expect.version` and its events
+  (`expect.events`: `{ type, key, useId, kind, at, payload }`), which an
+  adapter reads back from every event queue of its database after the
+  step and then deletes, so a step that wrote none is held to leaving
+  every queue empty. A raw write moves the row's version on by one, as
+  `@optimistic`'s trigger moves it on every update of a generated table,
+  and the reference host's raw write now does too, so the transcript holds
+  the version the adapters read after it. Its floor is 161. TypeScript
+  replays it on bun:sqlite and Postgres, Go on SQLite and Postgres and
+  Rust on rusqlite and Postgres, each at 161 steps with 0 mismatches,
+  every replay table carrying the trigger on both dialects; the seventeen
+  existing transcripts change by their `behaviors` header alone and stay
+  at their floors. The engine corpus changes by `registry.json`'s
+  metaSchema and the name enum's message alone, as the IR's schema file
+  gained Schedules' branch.
+- **Fixtures and end-to-end tests.** `fixture-schedules-db`'s `Problem`
+  is a record an agent wakes on: `implements Schedules<Problem, { max:
+  10; minMs: 60000; maxMs: 2592000000; kinds: ["after", "every",
+  "cron"]; timeZone: "America/New_York"; outcomes: ["told", "resumed",
+  "held", "missed"]; retry: { outcome: "missed"; afterMs: 300000 }; endOn:
+  { enters: ["done", "dropped"] }; permission: "problems.schedule" }>`
+  beside its `status` Workflow. `fixture-schedules-api` serves its
+  operations (`ProblemActions`, `@behaviorOperations @auth`) and runs its
+  deadlines, its heard writes and its events in `ProblemWakeUps`
+  (`@behaviorWorker(Problem, { permissions: ["problems.schedule"] })`),
+  whose event handler is the project's, with no warning
+  (`TestSchedulesFixturesLoad`). Each language's test runs, on Postgres,
+  the generated server through its SDK and the worker's three queues in
+  process with the test's own `Workers`, which records each event, fails
+  when told to, and otherwise reports the run, with its attempt, through
+  the event's transaction as the worker, through 14 cases in one wording:
+  set of each kind with its deadline due at `nextAt`; a repeat unchanged;
+  forbidden, a delay under `minMs` and an eleventh wake-up
+  `schedule_limit`; a due wake-up handed to the handler as run 1, its
+  payload's `setAt` the set's, which reports told; the handler
+  run once per event; a failing handler's message due again after the
+  backoff and handed to it again; an interval overdue by many runs firing
+  once on its grid; a missed run tried again as attempt 2; an older run
+  and `no_run`; pause and resume past `nextAt`; cancel freeing a place; a
+  status entering done and `schedules_ended`; a raw SQL write of the
+  status heard and finishing the wake-ups; and `listSchedules`
+  (`TestSchedulesGoServerOnPostgres`, which also plans and vets the
+  worker's main over the scaffolded implementation,
+  `TestGeneratedSchedulesEndToEnd`, which also calls the MCP tool
+  `problem_schedules_set_schedule`, and `TestRustSchedulesOnPostgres`). A
+  deadline is made due by moving its message's `due_at`, and each refusal
+  is checked whole and to leave the row's `_version` where it was.
 - **Left for later steps.**
-  - Schedules and Pool, the rest of step 3: Schedules needs a behavior's
-    own outbox events to reach the app's code, which every adapter refuses
-    today, and cron lines and time zones in the core; Pool needs a read
-    across a table (its `pick`) and the `Capacity` contract with Budget.
+  - Pool, the rest of step 3: its `pick`, a read across a table and a
+    command without a row, and the `Capacity` contract with Budget. The
+    events its recheck writes are built: a message of its table's event
+    queue, which the API's behavior worker hands to the project's
+    `Workers` method, the handler that calls `reportRoom`.
+  - The event stream over HTTP, and SSE or MCP surfaces for a table's
+    events: a behavior's own events reach the app through its table's
+    event queue and the worker's handler alone.
   - The `caller` operand, and Assignment as a bundle of one seat (step 4,
     with D103's bundles).
   - A `by` naming a to-one relation by its name (the build points at
@@ -16572,6 +16949,57 @@ are reversible until the first release.
   - The engine advertises `by`'s seat entries through the shared
     declarations and refuses every `by` on an engine type, until engine
     types go (D103, step 7).
+  - The build checks no `timeZone` name, since the compiler links no zone
+    database of the core's: the core refuses an unknown one at the
+    table's first define, and a `setSchedule`'s at the call.
+  - A cron line's closest-runs check reads civil times, so a run a spring
+    gap moves to the gap's end may come closer than `minMs` to the next,
+    once a year.
+  - A far next run is looked for ten years of local dates ahead: a line
+    with no run within them is refused at the set and finishes a schedule
+    at its fire (`endedBy: run`), and so does a spec or a zone a raw write
+    made unreadable.
+  - The finished schedules beyond `max` are pruned, so a pruned one's late
+    report is `no_schedule`; a revived after is refused at `max`, and
+    nothing is armed for it. A name pruned and set again counts its runs
+    from 1 again, its row gone; its later `setAt` keeps its fires apart
+    from the pruned schedule's.
+  - `reportRun`'s `attempt` is optional, so a report that leaves it out is
+    taken for the latest attempt's, and a late one of an earlier attempt
+    can still arm one more; a handler that reports out of band names it.
+  - A raw write of a schedule's row is read at its next fire: nothing
+    re-arms on it, so a `next_at` moved earlier waits for the armed
+    deadline, and one moved later is armed again there when the deadline
+    falls due. No trigger or check refuses a raw write of a
+    `*_schedules_schedules` row or of a queue's message; the docs and the
+    agent skill say what it skips.
+  - `listSchedules` reads the row's whole sub-table, with no paging.
+  - A payload is held to its kind's `payloadSchema` by the behavior's
+    tests alone: the core runs no JSON Schema.
+  - On SQLite one command's several events share a millisecond's
+    `created_at`, and each adapter reads them back by the rowid; no
+    behavior worker claims on SQLite yet, whose claim of a keyed line by
+    `created_at` and `id` would order them by their random ids.
+  - An event no `Workers` method takes fails until it is dead, for an
+    operator; a deleted row's events stay, and its handler meets the row
+    gone.
+  - The TypeScript event's `key` is the queue client's text (a UUID
+    hyphenated on Postgres), which every repository method takes; Go's is
+    the table key's type.
+  - A Rust handler acts through `EventRun`'s `operation` and its
+    transaction, with no repository (D103's Rust servers have none);
+    `operation` takes any serializable key.
+  - A Rust behavior worker that emits, over an API whose Deps hold an
+    engine, is not planned, as no behavior worker over one is; a
+    behavior table's API has no engine database, so no fixture reaches it.
+  - The loader refuses an event payload's enum whose name the API holds
+    with other values, and a table whose behaviors emit events and whose
+    key is several fields (its event queue's messages name one); Schedules
+    reaches neither, since its sub-table already needs one key field.
+  - Schedules' operations are writes of the row, which Lease's guard holds
+    for a caller without the active lease unless Lease's `exempt` lists
+    them, the handler's `reportRun` among them; no fixture composes
+    Schedules with Lease.
 
 ## D105. An upsert whose update sets no field writes nothing, and reads the row its key holds back, by the key's columns or by its expression's value (D79, D89 amended)
 

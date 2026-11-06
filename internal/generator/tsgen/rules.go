@@ -27,8 +27,10 @@ import (
 // orm.order.status.transition(key, { to: 'paid' }) and
 // orm.ticket.timers.fireTimer(key, { deadline: 'respond' }). A table whose
 // behaviors arm deadlines has runDeadline, and one whose writes its
-// behaviors hear runChange, which a behavior worker's handlers call, and
-// one whose behaviors keep sub-tables or arm deadlines has no upserts. A
+// behaviors hear runChange, which a behavior worker's handlers call, one
+// whose behaviors emit events runEvent (D104), which hands one of its event
+// queue to the project's handler, and one whose behaviors keep sub-tables
+// or arm deadlines has no upserts. A
 // table one of whose uses takes a precondition (D16, D104) types the
 // preconditions a write presents as <Type>Preconditions, each such use's
 // entry by its id, which updateOne, deleteOne and each operation take in
@@ -59,7 +61,7 @@ var repositoryMembers = []string{
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
 	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
-	"clearActor", "runDeadline", "runChange", "refusePreconditions",
+	"clearActor", "runDeadline", "runChange", "runEvent", "refusePreconditions",
 }
 
 // ORMUse is a use of a behavior on a table as orm.ts writes it: ID, the

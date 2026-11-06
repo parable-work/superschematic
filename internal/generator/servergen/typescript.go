@@ -366,8 +366,11 @@ type TypeScriptWorker struct {
 	// Behavior is set for a @behaviorWorker (D103), whose entrypoint
 	// (behavior_worker.ts.tmpl) runs each of the table's behavior queues
 	// that QueuesFunc, the API package's export, builds over the
-	// database's repositories, and builds no Deps or Workers. Method is
-	// empty then.
+	// database's repositories, and builds no Deps or Workers, unless its
+	// table's behaviors emit events (Behavior.Emits, D104), whose handlers
+	// are the implementation's Workers methods: it then builds Deps and
+	// calls createWorkers, as a worker's entrypoint does. Method is empty
+	// then.
 	Behavior   *apigen.BehaviorWorkerInfo
 	QueuesFunc string
 }

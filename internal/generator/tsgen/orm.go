@@ -112,6 +112,20 @@ func (o *ORMInfo) HearsChanges() bool {
 	return false
 }
 
+// EmitsEvents reports whether a table of the layout keeps an event queue
+// (D104), which orm.ts's comment then describes.
+func (o *ORMInfo) EmitsEvents() bool {
+	if o == nil || o.Rules == nil {
+		return false
+	}
+	for _, table := range o.Rules.Types {
+		if table != nil && table.Events != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ORMSystemActor is outputs.sql.systemActor as orm.ts writes it.
 type ORMSystemActor struct {
 	ID   string
@@ -189,6 +203,11 @@ type ORMTable struct {
 	// Changes is a table whose writes its behaviors hear (D103), whose
 	// repository runs a change its trigger wrote (runChange).
 	Changes bool
+
+	// Events is a table whose behaviors emit events (D104), whose
+	// repository hands one of its event queue to a handler in the
+	// transaction that spends its claim (runEvent).
+	Events bool
 
 	// Preconditions are the preconditions the table's uses take (D16,
 	// D104), in the uses' order, which orm.ts types as <Type>Preconditions
@@ -436,6 +455,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			if layout := rules.layout.Types[t.Type]; layout != nil {
 				table.Deadlines = layout.Deadlines != nil
 				table.Changes = layout.Changes != nil
+				table.Events = layout.Events != nil
 				table.NoUpserts = table.Deadlines
 				for _, use := range layout.Uses {
 					if len(use.Tables) > 0 {
@@ -849,6 +869,9 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		}
 		if t.Changes {
 			used["BehaviorChanges"] = true
+		}
+		if t.Events {
+			used["BehaviorEvents"] = true
 		}
 		if t.NoUpserts {
 			used["WithoutUpserts"] = true

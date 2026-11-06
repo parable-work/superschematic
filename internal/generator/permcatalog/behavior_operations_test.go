@@ -123,3 +123,52 @@ func TestCatalogListsASeatsTakeAndAssign(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogListsSchedulesPermission (D104): an API that serves a table's
+// Schedules lists its config's permission under each of Schedules' six
+// operations, each of which the core checks; the behavior worker's
+// permissions are its own, which no route requires. fixture-schedules-api
+// serves fixture-schedules-db's Problem, whose Schedules names
+// problems.schedule and whose status names none.
+func TestCatalogListsSchedulesPermission(t *testing.T) {
+	const api, db = "fixture-schedules-api", "fixture-schedules-db"
+	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, api), loader.WithWarnings(func(*verify.Diagnostic) {}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := apigen.Generate(apiSchema, apigen.Options{
+		Provider:           sessionauth.Provider{},
+		SchemaName:         api,
+		ModulePath:         "example.com/schemas/api/" + api,
+		TypesModule:        "example.com/schemas/types/go/" + api,
+		Dependencies:       map[string]*ir.Schema{db: dbSchema},
+		ModuleDependencies: []string{"example.com/schemas/types/go/" + db},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := permcatalog.Parse([]byte(output.PermissionCatalogJSON))
+	if err != nil {
+		t.Fatalf("permissions.json: %v\n%s", err, output.PermissionCatalogJSON)
+	}
+	operations := map[string][]string{}
+	for _, p := range catalog.Permissions {
+		operations[p.Name] = p.Operations
+	}
+	want := map[string][]string{
+		"problems.schedule": {"ProblemSchedulesCancelScheduleHandler", "ProblemSchedulesListSchedulesHandler", "ProblemSchedulesPauseScheduleHandler",
+			"ProblemSchedulesReportRunHandler", "ProblemSchedulesResumeScheduleHandler", "ProblemSchedulesSetScheduleHandler"},
+	}
+	if len(operations) != len(want) {
+		t.Errorf("the catalog = %v, want %v", operations, want)
+	}
+	for name, ops := range want {
+		if got := operations[name]; !slices.Equal(got, ops) {
+			t.Errorf("%s is required by %v, want %v", name, got, ops)
+		}
+	}
+}

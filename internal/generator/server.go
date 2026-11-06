@@ -627,20 +627,29 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 // create_workers (D65), as checkJobs refuses one without its jobs: the
 // implementation is the engineer's, and the build writes into it no more.
 // It refuses a Rust worker of a queue the Rust types of its database leave
-// out of src/queues.rs too (checkRustQueue). A behavior worker's handler is
-// generated (D103): it needs no method of the implementation, the methods
-// these refusals list leave it out, and an API whose workers are all
-// behavior workers needs no constructor of them.
+// out of src/queues.rs too (checkRustQueue). A behavior worker's deadline
+// and change handlers are generated (D103): they need no method of the
+// implementation, and an API whose workers are all behavior workers of
+// tables that emit no events needs no constructor of them. A behavior
+// worker of a table whose behaviors emit events (D104) hands each to a
+// method of the API's Workers, one per event (ir.Worker.Events), which
+// these refusals list beside the @worker classes' methods.
 func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
 	// implemented are the workers of each API whose implementation runs
-	// them, @worker classes: every one but a behavior worker.
+	// them: @worker classes, and behavior workers whose table's behaviors
+	// emit events, whose methods take them.
 	implemented := map[string][]ir.Worker{}
 	for _, svc := range services {
 		for _, worker := range svc.Workers {
-			if worker.BehaviorWorker == nil {
+			if worker.BehaviorWorker == nil || len(worker.Events) > 0 {
 				implemented[svc.Name] = append(implemented[svc.Name], worker)
 			}
 		}
+	}
+	// handles says what an event method handles, for the comment in its
+	// body: the event run of Problem's Schedules.
+	handles := func(worker ir.Worker, event ir.BehaviorWorkerEvent) string {
+		return fmt.Sprintf("the event %s of %s's %s", event.Kind, worker.BehaviorWorker.Type, event.Use)
 	}
 	checked := map[string]bool{}
 	for _, w := range workers {
@@ -659,10 +668,26 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
+			queues, events := false, false
 			for _, worker := range implemented[api] {
-				methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
+				if worker.BehaviorWorker == nil {
+					queues = true
+					methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
+					continue
+				}
+				for _, event := range worker.Events {
+					events = true
+					methods = append(methods, fmt.Sprintf("      async fn %s(&self, event: types::%s, run: &EventRun<'_>) -> Result<(), BoxError> {\n          // handle %s\n      }", rustutil.ToSnakeCase(event.Method), event.Event, handles(worker, event)))
+				}
 			}
-			if err := r.checkRustFunc(stackName, api, "workers", rustrestgen.WorkersFunc, "Workers", methods, "Deps, Workers, BoxError and "+rustrestgen.DatabaseTypesModule+", the Rust types of the database that declares each queue, are %s's", "8.8"); err != nil {
+			names := "Deps, Workers, BoxError and " + rustrestgen.DatabaseTypesModule + ", the Rust types of the database that declares each queue, are %s's"
+			switch {
+			case events && queues:
+				names = "Deps, Workers, BoxError, types, the API's types, behaviors::EventRun and " + rustrestgen.DatabaseTypesModule + ", the Rust types of the database that declares each queue, are %s's"
+			case events:
+				names = "Deps, Workers, BoxError, types, the API's types, and behaviors::EventRun are %s's"
+			}
+			if err := r.checkRustFunc(stackName, api, "workers", rustrestgen.WorkersFunc, "Workers", methods, names, "8.8"); err != nil {
 				return err
 			}
 			continue
@@ -673,7 +698,13 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 			var methods []string
 			for _, worker := range implemented[api] {
-				methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
+				if worker.BehaviorWorker == nil {
+					methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
+					continue
+				}
+				for _, event := range worker.Events {
+					methods = append(methods, fmt.Sprintf("    async %s(event, tx, signal) {\n      // handle %s\n    },", tsutil.ToCamelCase(event.Method), handles(worker, event)))
+				}
 			}
 			if err := r.checkTypeScriptExport(stackName, api, "workers", tsrestgen.WorkersFunc, "WorkersConstructor", methods, "8.8"); err != nil {
 				return err
@@ -710,15 +741,29 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				}
 			}
 		}
+		events := false
 		for _, worker := range implemented[api] {
-			methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
+			if worker.BehaviorWorker == nil {
+				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
+				continue
+			}
+			for _, event := range worker.Events {
+				events = true
+				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, tx orm.TxInterface, event types.%s) error // handles %s", event.Method, event.Event, handles(worker, event)))
+			}
+		}
+		// The packages an event method names (D104): the database's ORM,
+		// whose transaction it writes through, and the API's Go types.
+		eventPackages := ""
+		if events {
+			eventPackages = fmt.Sprintf(", orm is %s, the ORM of that database, and types is %s, the API's Go types", r.Options.Naming.GoORMModule(db), r.Options.Naming.GoTypesModule(api))
 		}
 		return fmt.Errorf("stack %s: %s declares workers, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
 			"\tfunc %s(deps api.Deps) (api.Workers, error)\n\n"+
 			"returning a value with a method per worker:\n\n%s\n\n"+
-			"where api is %s, whose api.WorkersConstructor is %s's signature, and %s is %s, the Go types of the database that declares each queue (docs/stack-model.md, section 8.8)",
+			"where api is %s, whose api.WorkersConstructor is %s's signature, and %s is %s, the Go types of the database that declares each queue%s (docs/stack-model.md, section 8.8)",
 			stackName, api, impl.Dir, apigen.WorkersFunc, apigen.WorkersFunc, strings.Join(methods, "\n"), r.Options.Naming.GoAPIModule(api), apigen.WorkersFunc,
-			toGoPackageName(db), r.Options.Naming.GoTypesModule(db))
+			toGoPackageName(db), r.Options.Naming.GoTypesModule(db), eventPackages)
 	}
 	return nil
 }

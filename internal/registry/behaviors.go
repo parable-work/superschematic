@@ -119,6 +119,13 @@ type BehaviorDeclaration struct {
 	// Operations are the operations the behavior adds to a type, beside
 	// the create, get, list, update and delete every schema has.
 	Operations []BehaviorOperation `json:"operations,omitempty"`
+	// Events are the events the behavior emits about a row
+	// (superschematic_rules::Cx::emit, D104): a table one of whose uses
+	// declares any gets an event queue, which a @behaviorWorker runs, handing
+	// each event to a method of the API's Workers. Only a behavior the
+	// behaviors' core alone implements (RulesPackage) declares them: an
+	// engine's declaration parser refuses the key.
+	Events []BehaviorEvent `json:"events,omitempty"`
 	// Signals are the messages about an instance an engine delivers to
 	// the event streams open on it and keeps nowhere (D77): a client's
 	// typing indicator, a draft being written.
@@ -259,6 +266,26 @@ type BehaviorOperation struct {
 	InvocationPolicy string `json:"invocationPolicy,omitempty"`
 }
 
+// BehaviorEvent is an event a behavior emits about a row (D104): its kind,
+// which names it in its table's event queue and names the handler of the
+// API's Workers that takes it, what it says, and the JSON Schema of its
+// payload, an object schema that sets "additionalProperties": false.
+type BehaviorEvent struct {
+	Kind          string          `json:"kind"`
+	Description   string          `json:"description,omitempty"`
+	PayloadSchema json.RawMessage `json:"payloadSchema"`
+}
+
+// Event returns the behavior's event of kind, or false.
+func (d BehaviorDeclaration) Event(kind string) (BehaviorEvent, bool) {
+	for _, event := range d.Events {
+		if event.Kind == kind {
+			return event, true
+		}
+	}
+	return BehaviorEvent{}, false
+}
+
 // The accesses a signal declares: who may send it.
 const (
 	// SignalAccessRead lets a caller who may read the schema send it.
@@ -354,7 +381,11 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // identifier or repeats, a volatile field with a type, an optional field
 // that is volatile, not the value field, or of a behavior an engine runs
 // (any Package but RulesPackage, which an engine's declaration parser
-// would refuse), and a value that names no field of the declaration; a preconditionSchema that does not compile, is
+// would refuse), and a value that names no field of the declaration; an
+// event of a behavior an engine runs (any Package but RulesPackage, D104),
+// or whose kind is not camelCase or repeats, or whose payloadSchema is
+// absent, does not compile, is not an object schema or does not set
+// "additionalProperties": false (checkBehaviorEvents); a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
 // sub-table whose name is not camelCase or repeats, whose key names no
 // string field of it, or whose field is untyped, volatile or named id
@@ -423,11 +454,21 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 				return fmt.Errorf("registry: behavior %s field %s is optional, which only a behavior the behaviors' core alone implements (package %s) declares: an engine's declaration parser refuses the key", decl.Name, field.Name, RulesPackage)
 			}
 		}
+		if len(decl.Events) > 0 {
+			kinds := make([]string, len(decl.Events))
+			for i, event := range decl.Events {
+				kinds[i] = event.Kind
+			}
+			return fmt.Errorf("registry: behavior %s declares events (%s), which only a behavior the behaviors' core alone implements (package %s) declares: an engine's declaration parser refuses the key", decl.Name, strings.Join(kinds, ", "), RulesPackage)
+		}
 	}
 	if err := checkBehaviorTables(decl); err != nil {
 		return err
 	}
 	if err := checkBehaviorOperations(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorEvents(decl); err != nil {
 		return err
 	}
 	if err := checkBehaviorSignals(decl); err != nil {
@@ -675,6 +716,37 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 		}
 		if !closed {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares", decl.Name, op.Name)
+		}
+	}
+	return nil
+}
+
+// checkBehaviorEvents holds each event to its rule (D104): a camelCase
+// kind, an operation name's, declared once, and a payloadSchema that
+// compiles and is an object schema that sets "additionalProperties": false,
+// as a paramsSchema is, so no member of a payload goes untyped.
+func checkBehaviorEvents(decl BehaviorDeclaration) error {
+	seen := map[string]bool{}
+	for _, event := range decl.Events {
+		if !behaviorOperationName.MatchString(event.Kind) {
+			return fmt.Errorf("registry: behavior %s event kind %q is not camelCase: a letter a-z, then letters and digits", decl.Name, event.Kind)
+		}
+		if seen[event.Kind] {
+			return fmt.Errorf("registry: behavior %s declares event %q twice", decl.Name, event.Kind)
+		}
+		seen[event.Kind] = true
+		if len(event.PayloadSchema) == 0 {
+			return fmt.Errorf("registry: behavior %s event %s has no payloadSchema", decl.Name, event.Kind)
+		}
+		if _, err := compileSchema(event.PayloadSchema, "superschematic://behaviors/"+decl.Name+"/events/"+event.Kind+".json"); err != nil {
+			return fmt.Errorf("registry: behavior %s event %s payloadSchema: %w", decl.Name, event.Kind, err)
+		}
+		object, closed := closedObjectSchema(event.PayloadSchema)
+		if !object {
+			return fmt.Errorf("registry: behavior %s event %s payloadSchema must be an object schema (\"type\": \"object\")", decl.Name, event.Kind)
+		}
+		if !closed {
+			return fmt.Errorf("registry: behavior %s event %s payloadSchema must set \"additionalProperties\": false, so no member of a payload goes untyped", decl.Name, event.Kind)
 		}
 	}
 	return nil

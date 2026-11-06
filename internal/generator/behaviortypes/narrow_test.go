@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -583,5 +584,125 @@ func TestNarrowReconcile(t *testing.T) {
 		if _, err := Narrow(declaration, json.RawMessage(test.config), target); err == nil || err.Error() != test.want {
 			t.Errorf("%s: err = %v, want %s", test.config, err, test.want)
 		}
+	}
+}
+
+// Schedules (D104): the config's outcomes are the alias <Base>Outcome,
+// which reportRun's input names, and the kinds, a schedule's states and
+// endings <Base>Kind, <Base>State and <Base>EndedBy, which every view
+// result names, as the event run's kind does; setSchedule takes no member
+// of a kind the config leaves out, and no timeZone when cron is not among
+// its kinds. Only inputs narrow: an output keeps every kind and any
+// outcome, so a schedule of a kind a new config dropped, and an outcome it
+// dropped, still read. Schedules keeps no field.
+func TestNarrowSchedules(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Schedules")
+	table := &ir.TypeDef{Name: "Problem", Behaviors: []ir.BehaviorRef{{Name: "Schedules", Implements: true}}}
+	target := Target{Schema: "problems", Base: "ProblemSchedules", Document: ir.NewSchema("problems", ir.SchemaKindDB), Instance: table}
+	config := json.RawMessage(`{"max": 10, "kinds": ["after", "every", "cron"], "timeZone": "America/New_York", "outcomes": ["told", "resumed", "held", "missed"], "retry": {"outcome": "missed", "afterMs": 300000}}`)
+	n, err := Narrow(declaration, config, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases := map[string][]string{}
+	var names []string
+	for _, alias := range n.Aliases {
+		names = append(names, alias.Name+": "+alias.Doc)
+		aliases[alias.Name] = stringsOf(alias.Schema.(map[string]any)["enum"])
+	}
+	if want := []string{
+		"ProblemSchedulesKind: The kind of a schedule of a ProblemSchedules's Schedules: after, every or cron, whichever its config took when the schedule was set.",
+		"ProblemSchedulesOutcome: An outcome a ProblemSchedules's Schedules records of a run.",
+		"ProblemSchedulesState: The state of a schedule of a ProblemSchedules's Schedules.",
+		"ProblemSchedulesEndedBy: What finished a schedule of a ProblemSchedules's Schedules.",
+	}; !slices.Equal(names, want) {
+		t.Fatalf("aliases =\n%s\nwant\n%s", strings.Join(names, "\n"), strings.Join(want, "\n"))
+	}
+	for name, want := range map[string][]string{
+		"ProblemSchedulesKind":    {"after", "every", "cron"},
+		"ProblemSchedulesOutcome": {"told", "resumed", "held", "missed"},
+		"ProblemSchedulesState":   {"active", "paused", "finished"},
+		"ProblemSchedulesEndedBy": {"run", "cancel", "endOn"},
+	} {
+		if !slices.Equal(aliases[name], want) {
+			t.Errorf("%s = %v, want %v", name, aliases[name], want)
+		}
+	}
+	refAt := func(schema any, path ...string) any {
+		node, err := at(schema, path...)
+		if err != nil {
+			return err
+		}
+		return node[RefKey]
+	}
+	for _, op := range []string{"setSchedule", "pauseSchedule", "resumeSchedule", "cancelSchedule", "listSchedules"} {
+		base := []string{"properties"}
+		if op == "listSchedules" {
+			base = []string{"properties", "items", "items", "properties"}
+		}
+		for member, alias := range map[string]string{"kind": "ProblemSchedulesKind", "state": "ProblemSchedulesState", "endedBy": "ProblemSchedulesEndedBy"} {
+			if got := refAt(n.Results[op], append(slices.Clone(base), member)...); got != alias {
+				t.Errorf("%s's result's %s = %v, want %s", op, member, got, alias)
+			}
+		}
+		// lastOutcome is any outcome a report recorded, the declaration's
+		// string.
+		if node, err := at(n.Results[op], append(slices.Clone(base), "lastOutcome")...); err != nil || node[RefKey] != nil || node["type"] != "string" {
+			t.Errorf("%s's result's lastOutcome = %v (%v), want the declaration's string", op, node, err)
+		}
+	}
+	if got := refAt(n.Params["reportRun"], "properties", "outcome"); got != "ProblemSchedulesOutcome" {
+		t.Errorf("reportRun's outcome = %v, want ProblemSchedulesOutcome", got)
+	}
+	if node, err := at(n.Results["reportRun"], "properties", "outcome"); err != nil || node[RefKey] != nil || node["type"] != "string" {
+		t.Errorf("reportRun's result's outcome = %v (%v), want the declaration's string", node, err)
+	}
+	if got := refAt(n.Events["run"], "properties", "kind"); got != "ProblemSchedulesKind" {
+		t.Errorf("run's kind = %v, want ProblemSchedulesKind", got)
+	}
+	if len(n.Fields) != 0 || !slices.Equal(n.Vetoes, []string{"no_schedule", "schedule_limit", "schedule_finished", "schedules_ended", "no_run"}) {
+		t.Errorf("fields = %v, vetoes = %v", n.Fields, n.Vetoes)
+	}
+	params := func(n Narrowing) []string {
+		properties, _ := at(n.Params["setSchedule"], "properties")
+		return SortedKeys(properties)
+	}
+	if got := params(n); !slices.Equal(got, []string{"after", "cron", "every", "name", "timeZone"}) {
+		t.Errorf("setSchedule's params = %v, want every one", got)
+	}
+	// A config of every kind alone takes neither after, cron nor a zone.
+	every, err := Narrow(declaration, json.RawMessage(`{"max": 1, "kinds": ["every"], "outcomes": ["told"]}`), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := params(every); !slices.Equal(got, []string{"every", "name"}) {
+		t.Errorf("setSchedule's params of an every config = %v, want every and name", got)
+	}
+	// Its outputs still read a schedule of a kind, and an outcome, a config
+	// before it took: the kind is every kind, and the outcome its input
+	// alone narrows.
+	if values := stringsOf(every.Aliases[0].Schema.(map[string]any)["enum"]); !slices.Equal(values, []string{"after", "every", "cron"}) {
+		t.Errorf("ProblemSchedulesKind of an every config = %v, want every kind", values)
+	}
+	if values := stringsOf(every.Aliases[1].Schema.(map[string]any)["enum"]); !slices.Equal(values, []string{"told"}) {
+		t.Errorf("ProblemSchedulesOutcome of an every config = %v, want told", values)
+	}
+	for _, path := range [][]string{{"properties", "kind"}, {"properties", "lastOutcome"}} {
+		got := refAt(every.Results["listSchedules"], append([]string{"properties", "items", "items"}, path...)...)
+		if want := map[string]any{"kind": "ProblemSchedulesKind", "lastOutcome": nil}[path[1]]; got != want {
+			t.Errorf("listSchedules' item's %s of an every config = %v, want %v", path[1], got, want)
+		}
+	}
+	if got := refAt(every.Events["run"], "properties", "kind"); got != "ProblemSchedulesKind" {
+		t.Errorf("run's kind of an every config = %v, want ProblemSchedulesKind", got)
+	}
+	// The declaration's own shapes are left as they were.
+	again, err := Narrow(declaration, config, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := params(again); !slices.Equal(got, []string{"after", "cron", "every", "name", "timeZone"}) {
+		t.Errorf("a second narrowing's setSchedule params = %v: the first narrowing changed the declaration", got)
 	}
 }

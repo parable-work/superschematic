@@ -1905,6 +1905,7 @@ dependencies = [
 name = "superschematic-rules-behaviors"
 version = "0.0.0"
 dependencies = [
+ "jiff",
  "serde",
  "serde_json",
  "superschematic-rules",

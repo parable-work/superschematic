@@ -119,7 +119,8 @@ const queueBackoffDoublings = 40
 // its ID, rather than by due time: a message that waits a failure's
 // backoff holds its key's later messages until it runs or is dead. A
 // table's change queue keeps it (D103), so one row's writes are heard in
-// the order they were made.
+// the order they were made, and so does its event queue (D104), so one
+// row's events reach the app in the order the core wrote them.
 type QueueSpec struct {
 	Table       string
 	Columns     []string
@@ -131,15 +132,15 @@ type QueueSpec struct {
 }
 
 // QueueSpecOf is the spec of the queue td declares, whose table and
-// columns are given quoted. A table's change queue (D103) keeps its line
-// in the order written.
+// columns are given quoted. A table's change queue (D103) and its event
+// queue (D104) keep their lines in the order written.
 func QueueSpecOf(td *ir.TypeDef, table string, columns []string, keepDone bool) QueueSpec {
 	spec := QueueSpec{Table: table, Columns: columns, KeepDone: keepDone}
 	if td != nil && td.Queue != nil {
 		spec.Key = QueueKeyColumn(td)
 		spec.OnDuplicate = td.Queue.OnDuplicate
 		spec.Serialize = td.Queue.Serialize
-		spec.InOrder = td.BehaviorQueue != nil && td.BehaviorQueue.Kind == ir.BehaviorQueueChanges
+		spec.InOrder = td.BehaviorQueue != nil && (td.BehaviorQueue.Kind == ir.BehaviorQueueChanges || td.BehaviorQueue.Kind == ir.BehaviorQueueEvents)
 	}
 	return spec
 }

@@ -307,7 +307,9 @@ Most are load errors; knowing them saves a build round-trip:
   deadlines with a worker of the API, a class with no members:
   `@behaviorWorker(Ticket, { concurrency: 2 }) export abstract class
   TicketTimers {}`, with `permissions: [...]` when a `then`'s transition
-  needs one. Write no handler or `Workers` method for it. The same worker
+  needs one. Write no handler or `Workers` method for its deadlines and
+  changes (a table whose behaviors emit events, Schedules', gets one
+  `Workers` method per event kind, below). The same worker
   runs the table's change queue (`ticket_change_queue`), which a trigger
   writes on every insert, update and delete of a row, a soft delete and a
   restore among them, whoever makes it, and runs one row's in the order
@@ -497,6 +499,46 @@ Most are load errors; knowing them saves a build round-trip:
   never refused but runs none of their rules and re-arms nothing until the
   stale deadline falls due: repair with `seats.leaveSeat` by a caller
   holding `assign`, or a newer observation, where you can.
+- When a row wakes on times its users or agents set (reminders, an agent's
+  wake-ups, a recurring invoice, a digest, a report's delivery), implement
+  Schedules on the table rather than a `@job` per schedule, a cron parser
+  of your own or a poller over a `next_run` column:
+  `implements Schedules<Problem, { max: 10; kinds: ["after", "every",
+  "cron"]; timeZone: "America/New_York"; outcomes: ["told", "missed"];
+  retry: { outcome: "missed"; afterMs: 300000 }; endOn: { enters: ["done",
+  "dropped"] }; permission: "problems.schedule" }>` (D104), beside a
+  Workflow field when it uses `endOn`. `minMs` (a minute) and `maxMs`
+  (thirty days) bound every delay, interval and cron line. Calls are
+  `schedules.setSchedule({ name, after? | every? | cron?, timeZone? })`,
+  one live schedule per name (the same spec again answers `unchanged`,
+  another replaces it), `pauseSchedule`, `resumeSchedule`,
+  `cancelSchedule`, `reportRun({ name, run, attempt?, outcome })` and the read
+  `listSchedules`. A run fires once however late it is, on the API's
+  `@behaviorWorker(Problem)`, which you must declare (give it the
+  config's `permission`, so its handler can report), and its event `run`
+  reaches your `Workers` method, `problemWakeUpsSchedulesRun(event, tx,
+  signal)` in TypeScript (`ProblemWakeUpsSchedulesRun(ctx, tx, event)` in Go,
+  `problem_wake_ups_schedules_run(&self, event, run)` in Rust). Answer it
+  there: do the work, then `reportRun` through `tx` (Rust: `run.operation`)
+  with the payload's `run` and `attempt`, so the report commits with the
+  event's completion and a late one of an earlier attempt changes nothing;
+  return an error to have it tried again after the queue's backoff. An
+  event comes at least once, so be idempotent by the row's key and the
+  payload's `name`, `setAt`, `run` and `attempt` (a name's runs count on
+  across a replace and a set again), and complete one whose row is gone
+  (`not_found`). A
+  reported `retry` outcome fires the run again as its next attempt. Write
+  a cron line as five fields (Vixie cron, names allowed, `@daily` and the
+  like); seconds, `L`, `W`, `#` and `?` are refused. On a table with
+  Lease, list `"Schedules.reportRun"` (and the other operations callers
+  make) in Lease's `exempt`. A raw SQL write of a
+  `*_schedules_schedules` row, of a deadline message or of an event
+  message is never refused but runs none of Schedules' rules: the row is
+  read as it is at the schedule's next fire, nothing re-arms on it, and an
+  event deleted with SQL is never handed on. Repair with the operations
+  (`pauseSchedule`, `resumeSchedule`, a replacing `setSchedule`,
+  `cancelSchedule`) where you can. Schedules is the behaviors' core's
+  alone: no engine type composes it.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

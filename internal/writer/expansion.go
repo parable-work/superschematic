@@ -12,8 +12,10 @@ import (
 // (ir.OriginIdentity). Any Origin marks loader output, and so does a field
 // a behavior owns, which the loader adds for a table's use, with the
 // @optimistic that use implies, and so do the sub-tables, the deadline
-// queue and the change queue a table's behaviors keep, and the queues a
-// @behaviorWorker is given (D103). The declarations stay, so a written schema file expands to the
+// queue, the change queue and the event queue a table's behaviors keep, and
+// the queues and events a @behaviorWorker is given (D103, D104), with the
+// types of those events, which carry an Origin. The declarations stay, so
+// a written schema file expands to the
 // same IR when it is read back. schema itself is not modified.
 func withoutExpansion(schema *ir.Schema) *ir.Schema {
 	expanded := false
@@ -70,9 +72,9 @@ func withoutExpansion(schema *ir.Schema) *ir.Schema {
 		view.Workers[i] = worker
 		if worker != nil && worker.Origin != "" {
 			// A behavior worker names its table; the loader gave it the
-			// queues (D103).
+			// queues and the events it hands to the Workers (D103, D104).
 			copied := *worker
-			copied.Queue, copied.Queues, copied.Origin = "", nil, ""
+			copied.Queue, copied.Queues, copied.Events, copied.Origin = "", nil, nil, ""
 			view.Workers[i] = &copied
 		}
 	}

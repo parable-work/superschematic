@@ -429,18 +429,167 @@ func (w WorkerInfo) ChangeQueueConst() string {
 	return tsgen.QueueConst(w.Behavior.ChangeQueue)
 }
 
+// EventQueueConst is the definition of a behavior worker's event queue
+// (D104) as the database's queues.ts exports it, problemEventQueue; "" for
+// a worker of a table whose behaviors emit none.
+func (w WorkerInfo) EventQueueConst() string {
+	if w.Behavior == nil || w.Behavior.EventQueue == "" {
+		return ""
+	}
+	return tsgen.QueueConst(w.Behavior.EventQueue)
+}
+
+// Emits reports whether a behavior worker's table's behaviors emit events
+// (D104), each of which its event queue hands to a method of the API's
+// Workers.
+func (w WorkerInfo) Emits() bool { return w.Behavior != nil && w.Behavior.Emits() }
+
+// EventFunc is the function behavior-workers.ts declares that hands an
+// event of a behavior worker's event queue to the Workers method of its
+// use and kind (D104), the worker's class in camel case and Event:
+// problemWakeUpsEvent.
+func (w WorkerInfo) EventFunc() string { return tsutil.ToCamelCase(w.Name) + "Event" }
+
+// WorkerEvent is an event a behavior worker's table emits (D104), which the
+// worker's event queue carries and a method of the API's Workers handles:
+// the worker, its table and its event queue, and the event as the loader
+// filled it (ir.BehaviorWorkerEvent: the use, the kind, the Workers
+// method's name and the API types of the event and its payload).
+type WorkerEvent struct {
+	Worker  string
+	Table   string
+	Queue   string
+	Subject string
+	ir.BehaviorWorkerEvent
+}
+
+// TSMethod is the Workers method that handles the event, its name in camel
+// case: problemWakeUpsSchedulesRun.
+func (e WorkerEvent) TSMethod() string { return tsutil.ToCamelCase(e.Method) }
+
+// Events are the events a behavior worker's event queue carries (D104), in
+// the order the loader lists them; none for a worker of a table that emits
+// none.
+func (w WorkerInfo) Events() []WorkerEvent {
+	if w.Behavior == nil {
+		return nil
+	}
+	var out []WorkerEvent
+	for _, event := range w.Behavior.Events {
+		out = append(out, WorkerEvent{Worker: w.Name, Table: w.Behavior.Table, Queue: w.Behavior.EventQueue, Subject: w.Behavior.Subject, BehaviorWorkerEvent: event})
+	}
+	return out
+}
+
 // QueueKinds names what a behavior worker's queues hold, for its queues
-// function's comment: deadlines, changes, or deadlines and changes.
+// function's comment: deadlines, changes, or deadlines and changes, and,
+// for a table whose behaviors emit events (D104), the parts it has joined
+// as a list (deadlines, changes and events).
 func (w WorkerInfo) QueueKinds() string {
 	switch {
 	case w.Behavior == nil:
 		return ""
+	case w.Behavior.EventQueue != "":
+		var parts []string
+		if w.Behavior.DeadlineQueue != "" {
+			parts = append(parts, "deadlines")
+		}
+		if w.Behavior.ChangeQueue != "" {
+			parts = append(parts, "changes")
+		}
+		parts = append(parts, "events")
+		if len(parts) == 1 {
+			return parts[0]
+		}
+		return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 	case w.Behavior.DeadlineQueue != "" && w.Behavior.ChangeQueue != "":
 		return "deadlines and changes"
 	case w.Behavior.ChangeQueue != "":
 		return "changes"
 	}
 	return "deadlines"
+}
+
+// QueueOrder is what a behavior worker's queues function's comment says
+// of their order: deadlines first, when it runs deadlines and another
+// queue; "" otherwise.
+func (w WorkerInfo) QueueOrder() string {
+	if w.Behavior == nil || w.Behavior.DeadlineQueue == "" || (w.Behavior.ChangeQueue == "" && w.Behavior.EventQueue == "") {
+		return ""
+	}
+	return ", deadlines first"
+}
+
+// DepsTx is the type of a transaction of the repositories Deps.orm holds
+// (D79), which DatabaseTypesPackage's ./orm entry exports beside the ORM:
+// FixtureSchedulesDbTx. A Workers method of a behavior worker's event takes
+// one (D104).
+func (o *APIOutput) DepsTx() string { return tsgen.ORMTypeName(o.Deps.Database) + "Tx" }
+
+// EmittingWorkers are the API's behavior workers whose tables' behaviors
+// emit events (D104), each a method of the generated Workers interface
+// per event.
+func (o *APIOutput) EmittingWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.BehaviorWorkers() {
+		if w.Emits() {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// WorkerEvents are the events of every behavior worker of the API (D104),
+// the workers by name and each one's in its order: each a method of the
+// generated Workers interface.
+func (o *APIOutput) WorkerEvents() []WorkerEvent {
+	var out []WorkerEvent
+	for _, w := range o.EmittingWorkers() {
+		out = append(out, w.Events()...)
+	}
+	return out
+}
+
+// WorkerEventTypes are the API types deps.ts imports from the API's types
+// package for the Workers methods of its behavior workers' events (D104):
+// each event's type, sorted and each once.
+func (o *APIOutput) WorkerEventTypes() []string {
+	var out []string
+	for _, e := range o.WorkerEvents() {
+		if !slices.Contains(out, e.Event) {
+			out = append(out, e.Event)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// BehaviorEventTypes are the API types behavior-workers.ts imports from
+// the API's types package for its dispatchers (D104): each event's
+// payload type, sorted and each once.
+func (o *APIOutput) BehaviorEventTypes() []string {
+	var out []string
+	for _, e := range o.WorkerEvents() {
+		if !slices.Contains(out, e.Payload) {
+			out = append(out, e.Payload)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// BehaviorEventMessages are the message types behavior-workers.ts imports
+// from the database's TypeScript types for its dispatchers (D104): each
+// emitting worker's event queue, sorted and each once.
+func (o *APIOutput) BehaviorEventMessages() []string {
+	var out []string
+	for _, w := range o.EmittingWorkers() {
+		if !slices.Contains(out, w.Behavior.EventQueue) {
+			out = append(out, w.Behavior.EventQueue)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // BehaviorQueueConsts are the queue definitions behavior-workers.ts
@@ -483,10 +632,13 @@ func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 // declares Jobs and JobsConstructor.
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
-// HasWorkers reports whether the API declares a @worker, for which deps.ts
-// declares Workers and WorkersConstructor. A behavior worker is not one:
-// its handler is generated (D103).
-func (o *APIOutput) HasWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
+// HasWorkers reports whether the API declares a @worker, or a behavior
+// worker whose table's behaviors emit events (D104), for which deps.ts
+// declares Workers and WorkersConstructor. Any other behavior worker is
+// not one: its handlers are generated (D103).
+func (o *APIOutput) HasWorkers() bool {
+	return len(o.OrdinaryWorkers()) > 0 || len(o.EmittingWorkers()) > 0
+}
 
 // WorkerQueues are the queues the API's @worker workers handle, sorted and
 // each once: the message types deps.ts imports from the database's types.

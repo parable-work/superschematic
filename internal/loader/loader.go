@@ -607,11 +607,21 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			}
 		}
 	}
-	// A @behaviorWorker runs its table's deadline queue, which the
-	// database's load added (D103): it becomes an ordinary worker of that
-	// queue before the pass, once its checks hold that the queue is there.
+	// A @behaviorWorker runs its table's behavior queues, which the
+	// database's load added (D103): it becomes an ordinary worker of those
+	// queues before the pass, once its checks hold that they are there,
+	// and the API gains the types of the events it hands to the project's
+	// Workers methods (D104).
 	if verify.CheckBehaviorWorkers(schema, vin).Err() == nil {
-		behaviorops.ExpandWorkers(schema, vin.Database)
+		added, err := behaviorops.ExpandWorkers(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
 	}
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {

@@ -9,8 +9,15 @@ repository.workspace = true
 publish.workspace = true
 
 # Like the core, nothing here does I/O (D103), so the crate builds for
-# wasm32-unknown-unknown.
+# wasm32-unknown-unknown, and nothing reads a clock: a time is the command's.
 [dependencies]
+# Schedules' cron lines and time zones (D104): the IANA database bundled into
+# the binary (tzdb-bundle-always) and no other, neither the host's zone files
+# nor its system zone (no tzdb-zoneinfo, tz-system), so every host, the wasm32
+# module among them, computes the same runs, as the commerce crate's Calendar
+# does (D70). A rule change ships with a release. Unlicense OR MIT, as
+# jiff-tzdb is.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
 serde = { version = "1.0.228", features = ["derive"] }
 # The engine's JSON features (D58): a number keeps its text, an object its
 # members' order.

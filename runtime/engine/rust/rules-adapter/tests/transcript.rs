@@ -18,10 +18,12 @@
 //! and observe, and Presence's `ttlByState`); and from the scenarios
 //! written by hand of the behaviors only the core implements,
 //! `core-seats.json` (D104: Seats' seats, kept in a sub-table, and a `by`
-//! naming a seat) and `core-reconcile.json` (D104: Reconcile's
+//! naming a seat), `core-reconcile.json` (D104: Reconcile's
 //! observations on a field beside a Workflow field, and its stale
-//! deadline), whose hand-written transcripts hold each command's row
-//! version too
+//! deadline) and `core-schedules.json` (D104: Schedules' named schedules
+//! after a delay, at an interval and on a cron line in a time zone, their
+//! fires, retries and endOn, and the event each fire emits), whose
+//! hand-written transcripts hold each command's row version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
 //! and on Postgres, as the HTTP runtime's `src/rules-transcript.test.ts`
@@ -30,8 +32,9 @@
 //! beside the owned columns the layout rule gives each use of any version
 //! and `_version` with sqlgen's trigger, a sub-table per table a use's
 //! behavior declares, each column of its declared type (a `Generic.Int64`
-//! a whole number's, D104), and a deadline queue when a use's behavior arms
-//! deadlines; each check runs on the core alone, answering whether the
+//! a whole number's, D104), a deadline queue when a use's behavior arms
+//! deadlines, and an event queue when one emits events (D104); each check
+//! runs on the core alone, answering whether the
 //! type has rows from its table; each command runs through `execute` in a
 //! transaction of its own over a layout of every type of its database, the
 //! caller's preconditions it carries passed through to the core as written
@@ -44,7 +47,9 @@
 //! numbers by value,
 //! with its version when the transcript holds one (so a repeat answered
 //! unchanged is held to writing nothing), that row's sub-table rows and its
-//! armed deadlines and the other rows its change set wrote; and each raw
+//! armed deadlines, the other rows its change set wrote, and the events it
+//! wrote, read from each type's event queue in the order written and then
+//! deleted, so no queue holds one the step lacks (D104); and each raw
 //! step writes owned columns with
 //! SQL past the adapter. The Postgres replay is skipped without
 //! `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
@@ -65,13 +70,14 @@ mod common;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
-use superschematic_rules::{Answer, Answers, Core, ReadRequest, Refusal, Step};
+use superschematic_rules::{Answer, Answers, Core, ReadRequest, Refusal, RowWrite, Step};
 use superschematic_rules_adapter::{
-    Action, Column, Command, Convert, Deadlines, Error, ExecuteOptions, Executed, Host, Layout,
-    Operation, OwnedField, Row, SubRow, SubTable, Table, TypeSpec, Use,
+    Action, Column, Command, Convert, Deadlines, Error, Events, ExecuteOptions, Executed, Host,
+    Layout, Operation, OwnedField, QueuedEvent, Row, SubRow, SubTable, Table, TypeSpec, Use,
 };
 use superschematic_rules_testkit::{
-    transcript_path, Transcript, TranscriptScenario, TranscriptStep, TranscriptType,
+    transcript_path, Transcript, TranscriptExpect, TranscriptScenario, TranscriptStep,
+    TranscriptType,
 };
 
 use common::{camel, column_types, p, snake, storage_key, Param};
@@ -79,7 +85,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 17] = [
+const TRANSCRIPTS: [(&str, usize); 18] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -97,6 +103,7 @@ const TRANSCRIPTS: [(&str, usize); 17] = [
     ("core-periods-and-presence", PERIODS_AND_PRESENCE_FLOOR),
     ("core-seats", SEATS_FLOOR),
     ("core-reconcile", RECONCILE_FLOOR),
+    ("core-schedules", SCHEDULES_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -202,6 +209,14 @@ const SEATS_FLOOR: usize = 88;
 /// them repeats answered unchanged, and 2 stale deadlines the runner ran.
 const RECONCILE_FLOOR: usize = 58;
 
+/// core-schedules' floor, as the core's milestone states it: 161 steps of
+/// the scenarios written by hand (D104), 29 checks and 131 commands, each
+/// holding its row's version (19 of them deadlines the runner ran, each a
+/// schedule's fire that emits its event run, and 10 changes, a raw write's
+/// among them heard and ending the row's schedules), and 1 raw write; the
+/// events each command wrote held to its table's event queue.
+const SCHEDULES_FLOOR: usize = 161;
+
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
 
@@ -224,6 +239,9 @@ struct Declared {
     tables: Vec<DeclaredTable>,
     /// Whether it arms deadlines, which its table's queue holds.
     arms_deadlines: bool,
+    /// Whether it emits events (its declaration lists `events`, D104),
+    /// which its table's event queue holds.
+    emits: bool,
 }
 
 /// A sub-table a declaration declares.
@@ -283,6 +301,7 @@ fn declarations() -> Vec<Declared> {
                     })
                     .collect(),
                 arms_deadlines: file.get("armsDeadlines") == Some(&Value::Bool(true)),
+                emits: !list("events").is_empty(),
             }
         })
         .collect()
@@ -404,6 +423,16 @@ fn arms_deadlines(declared: &[Declared], uses: &[Use]) -> bool {
         declared
             .iter()
             .any(|declaration| declaration.name == used.behavior && declaration.arms_deadlines)
+    })
+}
+
+/// Whether a declaration of a behavior any of the uses run emits events
+/// (D104), which its table's event queue holds.
+fn emits(declared: &[Declared], uses: &[Use]) -> bool {
+    uses.iter().any(|used| {
+        declared
+            .iter()
+            .any(|declaration| declaration.name == used.behavior && declaration.emits)
     })
 }
 
@@ -575,6 +604,26 @@ impl Db {
             .collect()
     }
 
+    /// A type's queued events, read back through the adapter in a fresh
+    /// transaction (D104).
+    async fn read_events(&mut self, host: &Host<'_>, type_name: &str) -> Vec<QueuedEvent> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let tx = conn.transaction().expect("a transaction");
+                superschematic_rules_adapter::sqlite::read_queued_events(host, &tx, type_name)
+                    .expect("the events read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let tx = client.transaction().await.expect("a transaction");
+                superschematic_rules_adapter::postgres::read_queued_events(host, &tx, type_name)
+                    .await
+                    .expect("the events read")
+            }
+        }
+    }
+
     /// Reads a row back in a fresh transaction.
     async fn read_row(&mut self, host: &Host<'_>, type_name: &str, key: &str) -> Option<Row> {
         match self {
@@ -670,6 +719,15 @@ impl<'s> Scenario<'s> {
             at: "at".into(),
             payload: "payload".into(),
         });
+        let events = emits(self.declared, &uses).then(|| Events {
+            queue: format!("{type_name}Event"),
+            table: format!("{table}_event_queue"),
+            row_key: "row_key".into(),
+            use_id: "use_id".into(),
+            kind: "kind".into(),
+            at: "at".into(),
+            payload: "payload".into(),
+        });
         Table {
             type_name: type_name.to_owned(),
             table,
@@ -691,6 +749,7 @@ impl<'s> Scenario<'s> {
             uses,
             deadlines,
             changes: None,
+            events,
             spec: spec
                 .cloned()
                 .or_else(|| type_def.and_then(|known| known.versions.first().cloned()))
@@ -760,6 +819,11 @@ impl<'s> Scenario<'s> {
         }
         if let Some(queue) = &table.deadlines {
             for ddl in common::deadline_queue_ddl(postgres, &queue.table, "TEXT") {
+                db.exec(&ddl, &[]).await;
+            }
+        }
+        if let Some(queue) = &table.events {
+            for ddl in common::event_queue_ddl(postgres, &queue.table, "TEXT") {
                 db.exec(&ddl, &[]).await;
             }
         }
@@ -1016,17 +1080,7 @@ impl<'s> Scenario<'s> {
             Action::Create { id, .. } => id.clone().or(key.clone()),
             action => action.key().map(str::to_owned),
         };
-        let mut others: Vec<(String, String)> = Vec::new();
-        for write in &written {
-            let (Some(write_key), write_type) = (write.key(), write.type_name()) else {
-                continue;
-            };
-            let other = (write_type.to_owned(), write_key.to_owned());
-            let mine = write_type == type_name && own_key.as_deref() == Some(write_key);
-            if !mine && !others.contains(&other) {
-                others.push(other);
-            }
-        }
+        let others = others_of(&written, type_name, own_key.as_deref());
         let mut actual = Vec::new();
         for (other_type, other_key) in others {
             let mut entry = json!({"type": other_type, "key": other_key});
@@ -1044,7 +1098,91 @@ impl<'s> Scenario<'s> {
             json!(expected.get("others")),
             json!(actual),
         );
+        self.compare_events(db, &host, &layout, *at, call, expect)
+            .await;
     }
+
+    /// The events a command's change set wrote (D104), read from each
+    /// type's event queue in the order written and compared with the
+    /// step's of that type, then deleted, so each step's are its own and no
+    /// queue holds one the step lacks; an event the step holds of a type
+    /// whose table keeps no event queue is a mismatch too.
+    async fn compare_events(
+        &mut self,
+        db: &mut Db,
+        host: &Host<'_>,
+        layout: &Layout,
+        at: usize,
+        call: &str,
+        expect: &TranscriptExpect,
+    ) {
+        for table in layout.types.values() {
+            let Some(queue) = &table.events else {
+                continue;
+            };
+            let read = db.read_events(host, &table.type_name).await;
+            let actual: Vec<Value> = read
+                .into_iter()
+                .map(|event| {
+                    json!({
+                        "type": table.type_name,
+                        "key": event.key,
+                        "useId": event.use_id,
+                        "kind": event.kind,
+                        "at": event.at,
+                        "payload": event.payload,
+                    })
+                })
+                .collect();
+            let expected: Vec<Value> = expect
+                .events
+                .iter()
+                .filter(|event| event.type_name == table.type_name)
+                .map(|event| serde_json::to_value(event).expect("an event of JSON"))
+                .collect();
+            self.compare(
+                at,
+                call,
+                &format!("events of {}", table.type_name),
+                Value::Array(expected),
+                Value::Array(actual),
+            );
+            db.exec(&format!("DELETE FROM \"{}\"", queue.table), &[])
+                .await;
+        }
+        for event in &expect.events {
+            if !layout
+                .table(&event.type_name)
+                .is_some_and(|table| table.events.is_some())
+            {
+                self.mismatches.push(format!(
+                    "step {at} ({call}) events: the step writes an event of {}, whose table keeps no event queue",
+                    event.type_name
+                ));
+            }
+        }
+    }
+}
+
+/// The rows other than the command's own, `own_key` of `type_name`, that
+/// its change set wrote, each once, in its order: each its type and key.
+fn others_of(
+    written: &[RowWrite],
+    type_name: &str,
+    own_key: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut others: Vec<(String, String)> = Vec::new();
+    for write in written {
+        let (Some(write_key), write_type) = (write.key(), write.type_name()) else {
+            continue;
+        };
+        let other = (write_type.to_owned(), write_key.to_owned());
+        let mine = write_type == type_name && own_key == Some(write_key);
+        if !mine && !others.contains(&other) {
+            others.push(other);
+        }
+    }
+    others
 }
 
 /// Whether two JSON values are one value, as the core compares them (D104):

@@ -14,10 +14,20 @@ message, due again a minute on. A change is claimed, one row's in the order
 they were written, and run through the repository (runChange) the same way:
 the core runs the behaviors that hear the write on the row as it is now, so
 a raw SQL write, or a repository's bulk or hard write, is heard after its
-commit. The worker's main runs each queue with runWorker; the queue's
+commit.{{ if .EmittingWorkers }} A table whose behaviors emit events (D104) has an
+event queue too, whose messages the core's commands write in their
+transactions: an event is claimed, one row's in the order they were
+written, and handed to the project's Workers method of its use and kind
+with the database's repositories in a transaction that first spends the
+claim (runEvent), as the worker, so the method's writes and the
+completion commit together or not at all, and its rejection fails the
+message. The worker's main runs each queue with runWorker; the queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
-the queue's backoff, and dead once its retries are spent.
+the queue's backoff, and dead once its retries are spent.{{ else }} The worker's main runs each queue with runWorker; the queue's
+complete does nothing, since the handler completes the message in the
+transaction that runs it. A message the handler fails is due again after
+the queue's backoff, and dead once its retries are spent.{{ end }}
 */
 
 import type { Pool } from 'pg';
@@ -25,24 +35,42 @@ import type { Logger } from '{{ .RuntimePackage }}';
 import { postgresQueue, type CoreCaller } from '{{ .RuntimePackage }}/postgres';
 import type { WorkerQueue } from '{{ .RuntimePackage }}/worker';
 import { {{ join .BehaviorQueueConsts ", " }} } from '{{ .Deps.DatabaseTypesPackage }}{{ .QueuesEntry }}';
-import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}{{ .ORMEntry }}';
+import type { {{ .Deps.ORM }}{{ if .EmittingWorkers }}, {{ .DepsTx }}{{ end }} } from '{{ .Deps.DatabaseTypesPackage }}{{ .ORMEntry }}';
+{{- if .EmittingWorkers }}
+import type { {{ join .BehaviorEventMessages ", " }} } from '{{ .Deps.DatabaseTypesPackage }}';
+import type { {{ join .BehaviorEventTypes ", " }} } from '{{ .TypesPackage }}/types';
+import type { Workers } from './deps';
+{{- end }}
 {{- range .BehaviorWorkers }}
 
 /** The caller {{ .Possessive }} commands run as (D103). */
 const {{ .CallerConst }}: CoreCaller = { subject: {{ tsString .Behavior.Subject }}, permissions: [{{ range $i, $p := .Behavior.Permissions }}{{ if $i }}, {{ end }}{{ tsString $p }}{{ end }}] };
 
 /**
+{{- if .Emits }}
+ * The queues of the behavior worker {{ .Name }} (D103, D104): {{ $.Deps.Database }}'s
+ * {{ .Behavior.Table }}'s {{ .QueueKinds }}{{ .QueueOrder }}, each deadline and change run
+ * through the behaviors' core in one transaction with its message's
+ * completion, as {{ .CallerConst }}, and each event handed to the method of
+ * workers its use and kind name ({{ .EventFunc }}), with the repositories in
+ * the transaction that spends its claim, as the worker. The worker's main
+ * runs each with runWorker.
+{{- else }}
  * The queues of the behavior worker {{ .Name }} (D103): {{ $.Deps.Database }}'s
- * {{ .Behavior.Table }}'s {{ .QueueKinds }}{{ if and .DeadlineQueueConst .ChangeQueueConst }}, deadlines first{{ end }}, each run through the
+ * {{ .Behavior.Table }}'s {{ .QueueKinds }}{{ .QueueOrder }}, each run through the
  * behaviors' core in one transaction with its message's completion, as
  * {{ .CallerConst }}. The worker's main runs each with runWorker.
+{{- end }}
  */
-export function {{ .QueuesFunc }}(pool: Pool, orm: {{ $.Deps.ORM }}, logger?: Logger): WorkerQueue[] {
+export function {{ .QueuesFunc }}(pool: Pool, orm: {{ $.Deps.ORM }}, {{ if .Emits }}workers: Workers, {{ end }}logger?: Logger): WorkerQueue[] {
 {{- if .DeadlineQueueConst }}
   const deadlines = postgresQueue(pool, {{ .DeadlineQueueConst }});
 {{- end }}
 {{- if .ChangeQueueConst }}
   const changes = postgresQueue(pool, {{ .ChangeQueueConst }});
+{{- end }}
+{{- if .EventQueueConst }}
+  const events = postgresQueue(pool, {{ .EventQueueConst }});
 {{- end }}
   return [
 {{- if .DeadlineQueueConst }}
@@ -89,6 +117,48 @@ export function {{ .QueuesFunc }}(pool: Pool, orm: {{ $.Deps.ORM }}, logger?: Lo
       prune: limit => changes.prune(limit),
     },
 {{- end }}
+{{- if .EventQueueConst }}
+    {
+      name: events.name,
+      leaseSeconds: events.leaseSeconds,
+      claim: async (n, leaseSeconds) =>
+        (await events.claim(n, leaseSeconds)).map(claim => ({
+          id: claim.id,
+          token: claim.token,
+          attempt: claim.attempt,
+          handle: async (signal: AbortSignal) => {
+            const run = await orm
+              .withBehaviorCaller({{ .CallerConst }})
+              .transaction(tx => tx.{{ .Repository }}.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => {{ .EventFunc }}(workers, tx, claim.message, signal)));
+            if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
+          },
+        })),
+      extend: (id, token, leaseSeconds) => events.extend(id, token, leaseSeconds),
+      // The handler completes its message in the transaction that runs it.
+      complete: async () => {},
+      fail: (id, token, cause) => events.fail(id, token, cause),
+      release: (id, token) => events.release(id, token),
+      prune: limit => events.prune(limit),
+    },
+{{- end }}
   ];
 }
+{{- if .Emits }}
+
+/**
+ * Hands an event of {{ .Behavior.Table }}'s event queue to the method of workers its use
+ * and kind name (D104): its row's key as the queue reads it, which every
+ * repository method takes, its time in epoch milliseconds and its payload,
+ * as the method's types say. An event no method takes rejects, failing its
+ * message, which is dead after its retries, for an operator.
+ */
+async function {{ .EventFunc }}(workers: Workers, tx: {{ $.DepsTx }}, message: {{ .Behavior.EventQueue }}, signal: AbortSignal): Promise<void> {
+{{- range .Events }}
+  if (message.useId === {{ tsString .Use }} && message.kind === {{ tsString .Kind }}) {
+    return workers.{{ .TSMethod }}({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as {{ .Payload }} }, tx, signal);
+  }
+{{- end }}
+  throw new Error(`behavior worker {{ .Name }}: no Workers method takes event ${message.kind} of ${message.useId} on {{ .Behavior.Table }} ${message.rowKey} (D104)`);
+}
+{{- end }}
 {{- end }}

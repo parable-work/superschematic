@@ -6,7 +6,8 @@
 //! fields' columns and the audit columns read beside them (`createdBy`,
 //! D104), each use's owned columns, operations and sub-tables, the
 //! queue its deadlines are armed in, the queue its change trigger writes
-//! its writes to, and the type as the core runs it.
+//! its writes to, the queue its behaviors' events are written to (D104),
+//! and the type as the core runs it.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -161,6 +162,10 @@ pub struct Table {
     /// table nothing hears.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changes: Option<Changes>,
+    /// The queue the events its behaviors emit about its rows are messages
+    /// of (D104); `None` for a table whose behaviors emit none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<Events>,
     /// The type as the core runs it.
     pub spec: TypeSpec,
 }
@@ -216,6 +221,33 @@ pub struct Changes {
     /// The row's columns after the write, as JSON by column; NULL for a
     /// delete.
     pub after: String,
+}
+
+/// The event queue of a table whose behaviors emit events about its rows
+/// (D104): a queue of its database the loader adds (`<Type>Event`), keyed
+/// by the row's key and serialized, one message per event a behavior
+/// emits, which the adapter writes in the command's transaction and a
+/// behavior worker claims and hands to the project's handler. Each member
+/// is a column, unquoted, beside the queue's own (`id`, `state`,
+/// `due_at`, `created_at`, `claim_token`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Events {
+    /// The queue's name in the IR (`ProblemEvent`).
+    pub queue: String,
+    /// The queue's table.
+    pub table: String,
+    /// The row's key, bound as the row table's key binds.
+    pub row_key: String,
+    /// The id of the use that emitted it.
+    #[serde(rename = "use")]
+    pub use_id: String,
+    /// The event's kind, as its behavior declares it.
+    pub kind: String,
+    /// The time of the command that emitted it, in epoch milliseconds.
+    pub at: String,
+    /// What it says, as JSON.
+    pub payload: String,
 }
 
 /// What a live row of a soft-deletable table holds: NULL in its
@@ -589,6 +621,50 @@ mod tests {
                 .map(|field| field.type_name.as_str()),
             Some("Identity.UUID")
         );
+    }
+
+    /// A table whose behaviors emit events (D104): its event queue's
+    /// columns read as the generator writes them, and write back so; a
+    /// table without one writes none.
+    #[test]
+    fn a_tables_event_queue_reads_as_the_generator_writes_it() {
+        let document = json!({
+            "types": {
+                "Problem": {
+                    "type": "Problem",
+                    "table": "problem",
+                    "key": {"field": "id", "column": "id", "type": "Identity.UUID"},
+                    "version": "_version",
+                    "own": [{"field": "title", "column": "title", "type": "string"}],
+                    "uses": [],
+                    "events": {"queue": "ProblemEvent", "table": "problem_event_queue", "rowKey": "row_key", "use": "use_id", "kind": "kind", "at": "at", "payload": "payload"},
+                    "spec": {"name": "Problem", "uses": []}
+                }
+            }
+        });
+        let layout = Layout::from_json(&document.to_string()).expect("it reads");
+        let problem = layout.table("Problem").expect("Problem");
+        assert_eq!(
+            problem.events,
+            Some(Events {
+                queue: "ProblemEvent".into(),
+                table: "problem_event_queue".into(),
+                row_key: "row_key".into(),
+                use_id: "use_id".into(),
+                kind: "kind".into(),
+                at: "at".into(),
+                payload: "payload".into(),
+            })
+        );
+        assert_eq!(serde_json::to_value(&layout).expect("it writes"), document);
+        let mut without = document;
+        without["types"]["Problem"]
+            .as_object_mut()
+            .expect("a table")
+            .remove("events");
+        let layout = Layout::from_json(&without.to_string()).expect("it reads");
+        assert!(layout.table("Problem").expect("Problem").events.is_none());
+        assert_eq!(serde_json::to_value(&layout).expect("it writes"), without);
     }
 
     /// The document behaviorlayout writes for fixture-timers-db, as its

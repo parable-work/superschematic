@@ -474,3 +474,45 @@ export interface ReconcileConfig {
  * behaviors' core alone implements it: no engine type composes it.
  */
 export type Reconcile<C extends ReconcileConfig> = string | null;
+
+/** A kind of schedule (D104): after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names. */
+export type ScheduleKind = "after" | "every" | "cron";
+
+/** Schedules' config on a table (D104): how many schedules a row holds live, the bounds of a delay, an interval and a cron line's runs, the kinds a schedule may be, the zone a cron line is read in, the outcomes a run reports, the outcome that tries a run again, the states that end every schedule, and the permission its operations need. */
+export interface SchedulesOn<T> {
+  /** How many schedules a row holds live, active or paused, at once: 1 to 100. */
+  readonly max: number;
+  /** The least delay or interval, and the least gap between a cron line's times of day, in milliseconds, at least 1000; a minute when absent. */
+  readonly minMs?: number;
+  /** The greatest delay or interval, and how far off a cron line's next run may be when it is set, in milliseconds; thirty days when absent. */
+  readonly maxMs?: number;
+  /** The kinds a schedule may be. */
+  readonly kinds: readonly ScheduleKind[];
+  /** The IANA time zone a cron line is read in when setSchedule names none; UTC when absent. Needs cron among kinds. */
+  readonly timeZone?: string;
+  /** The outcomes reportRun records of a run. */
+  readonly outcomes: readonly string[];
+  /** The outcome that tries a run again, afterMs after its report, unless the next regular run comes first. */
+  readonly retry?: { readonly outcome: string; readonly afterMs: number };
+  /** The states of the table's Workflow whose entry finishes every live schedule of the row. */
+  readonly endOn?: { readonly enters: readonly string[] };
+  /** The field whose Workflow endOn reads; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+  /** The permission every operation of Schedules needs; any caller the route admits when absent. */
+  readonly permission?: string;
+}
+
+/**
+ * Named schedules on a table's rows (D104):
+ * `export abstract class Problem implements Schedules<Problem, { max: 10, kinds: [...], outcomes: [...] }>`.
+ * The type stays a table. Schedules keeps a row per schedule in a sub-table
+ * (problem_schedules_schedules), arms each live one's next run as a message
+ * of the table's deadline queue and writes each run's event to its event
+ * queue, which the API's @behaviorWorker(Problem) runs, handing each event to
+ * the project's Workers method; its operations (schedules.setSchedule,
+ * pauseSchedule, resumeSchedule, cancelSchedule, reportRun, listSchedules)
+ * change and read them. The behaviors' core alone implements it: no engine
+ * type composes it. Like Timers, it resolves to the empty object type; the
+ * first type argument is the table itself.
+ */
+export type Schedules<T, C extends SchedulesOn<T>> = NonNullable<unknown>;

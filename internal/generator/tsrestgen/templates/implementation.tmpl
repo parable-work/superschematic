@@ -6,8 +6,11 @@
 {{- if .HasJobs }}
 // Each job fails until you implement it.
 {{- end }}
-{{- if .HasWorkers }}
+{{- if .OrdinaryWorkers }}
 // Each worker fails every message until you implement it.
+{{- end }}
+{{- if .WorkerEvents }}
+// Each event handler fails every event until you implement it.
 {{- end }}
 {{- if .HasDerivers }}
 // Each deriver fails every field until you implement it.
@@ -109,6 +112,11 @@ export const createWorkers: WorkersConstructor = deps => ({
 {{- range .OrdinaryWorkers }}
   async {{ .Method }}(message) {
     throw notImplemented('worker {{ .Name }}');
+  },
+{{- end }}
+{{- range .WorkerEvents }}
+  async {{ .TSMethod }}(event, tx) {
+    throw notImplemented('event handler {{ .TSMethod }}');
   },
 {{- end }}
 });

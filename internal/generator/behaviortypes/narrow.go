@@ -57,6 +57,10 @@ type Narrowing struct {
 	// Signals are each signal's data, its paramsSchema, by name (D77): a
 	// config narrows none.
 	Signals map[string]any
+	// Events are each event's payload, its payloadSchema, by kind, as the
+	// config narrows it (D104): what the API's Workers method of the event
+	// takes.
+	Events map[string]any
 	// CreateParams is the create parameters' schema, as the config
 	// narrows it; nil when the declaration takes none.
 	CreateParams any
@@ -128,6 +132,7 @@ var coreNarrowers = map[string]narrower{
 	"Retries":      narrowRetries,
 	"Seats":        narrowSeats,
 	"Reconcile":    narrowReconcile,
+	"Schedules":    narrowSchedules,
 	"Stock":        narrowStock,
 	"Calendar":     narrowCalendar,
 	"Holds":        narrowHolds,
@@ -146,7 +151,7 @@ func NarrowerNames() []string {
 // Narrow starts from the declaration's shapes and applies the behavior's
 // core narrowing, when it has one.
 func Narrow(declaration registry.Behavior, config json.RawMessage, target Target) (Narrowing, error) {
-	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}, Signals: map[string]any{}}
+	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}, Signals: map[string]any{}, Events: map[string]any{}}
 	for _, field := range declaration.Fields {
 		n.Fields[field.Name] = FieldShape{Schema: map[string]any{"description": field.Description}}
 	}
@@ -171,6 +176,13 @@ func Narrow(declaration registry.Behavior, config json.RawMessage, target Target
 			return n, fmt.Errorf("signal %s paramsSchema: %w", signal.Name, err)
 		}
 		n.Signals[signal.Name] = data
+	}
+	for _, event := range declaration.Events {
+		payload, err := decodeSchema(event.PayloadSchema)
+		if err != nil {
+			return n, fmt.Errorf("event %s payloadSchema: %w", event.Kind, err)
+		}
+		n.Events[event.Kind] = payload
 	}
 	var err error
 	if n.CreateParams, err = decodeSchema(declaration.CreateParamsSchema); err != nil {
@@ -1206,6 +1218,83 @@ func narrowReconcile(n *Narrowing, config map[string]any, target Target) error {
 		if err := setOperationProperty(n.Results, "observe", []string{"properties", "drift"}, name, ref(state, "")); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// The states a schedule is in and what finishes one (D104), in the order
+// the declaration's enums list them.
+var (
+	scheduleStates  = []string{"active", "paused", "finished"}
+	scheduleEndings = []string{"run", "cancel", "endOn"}
+)
+
+// The kinds a schedule is of (D104), in the order the declaration's enum
+// lists them.
+var scheduleKinds = []string{"after", "every", "cron"}
+
+// Schedules (D104): the config's outcomes are the alias <Base>Outcome,
+// which reportRun's input names, and the kinds of schedule, a schedule's
+// states and what finished it are <Base>Kind, <Base>State and
+// <Base>EndedBy, which every view result names (set, pause, resume and
+// cancel's, and listSchedules' items'), as the event run's kind does.
+// Only inputs narrow to the config: setSchedule takes no after, every or
+// cron for a kind the config leaves out, and no timeZone when cron is not
+// among its kinds, and reportRun takes an outcome of outcomes. An output
+// keeps the declaration's values, every kind and any outcome (lastOutcome
+// and reportRun's result's outcome are strings), since a schedule of a
+// kind a new config dropped keeps running and an outcome it dropped stays
+// recorded (D104's configChange), and a reader's closed enum would refuse
+// them. Schedules keeps no field: its schedules are a sub-table, which
+// listSchedules reads.
+func narrowSchedules(n *Narrowing, config map[string]any, target Target) error {
+	kinds, outcomes := stringsOf(config["kinds"]), stringsOf(config["outcomes"])
+	kind, outcome, state, endedBy := target.Base+"Kind", target.Base+"Outcome", target.Base+"State", target.Base+"EndedBy"
+	owner := An(target.Base) + "'s Schedules"
+	n.Aliases = append(n.Aliases,
+		Alias{Name: kind, Doc: fmt.Sprintf("The kind of a schedule of %s: after, every or cron, whichever its config took when the schedule was set.", owner), Schema: EnumOf(scheduleKinds)},
+		Alias{Name: outcome, Doc: fmt.Sprintf("An outcome %s records of a run.", owner), Schema: EnumOf(outcomes)},
+		Alias{Name: state, Doc: fmt.Sprintf("The state of a schedule of %s.", owner), Schema: EnumOf(scheduleStates)},
+		Alias{Name: endedBy, Doc: fmt.Sprintf("What finished a schedule of %s.", owner), Schema: EnumOf(scheduleEndings)},
+	)
+	params, err := at(n.Params["setSchedule"], "properties")
+	if err != nil {
+		return fmt.Errorf("operation setSchedule: %w", err)
+	}
+	for _, each := range []string{"after", "every", "cron"} {
+		if _, ok := params[each]; !ok {
+			return fmt.Errorf("operation setSchedule: the declaration's schema has no property %s", each)
+		}
+		if !slices.Contains(kinds, each) {
+			delete(params, each)
+		}
+	}
+	if !slices.Contains(kinds, "cron") {
+		if err := deleteProperty(n.Params["setSchedule"], "timeZone"); err != nil {
+			return fmt.Errorf("operation setSchedule: %w", err)
+		}
+	}
+	if err := setOperationProperty(n.Params, "reportRun", nil, "outcome", ref(outcome, "")); err != nil {
+		return err
+	}
+	view := map[string]string{"kind": kind, "state": state, "endedBy": endedBy}
+	for _, op := range []string{"setSchedule", "pauseSchedule", "resumeSchedule", "cancelSchedule", "listSchedules"} {
+		var path []string
+		if op == "listSchedules" {
+			path = []string{"properties", "items", "items"}
+		}
+		for _, member := range SortedKeys(view) {
+			if err := setOperationProperty(n.Results, op, path, member, ref(view[member], "")); err != nil {
+				return err
+			}
+		}
+	}
+	payload, ok := n.Events["run"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("the declaration has no event run")
+	}
+	if err := setProperty(payload, "kind", ref(kind, "")); err != nil {
+		return fmt.Errorf("event run: %w", err)
 	}
 	return nil
 }

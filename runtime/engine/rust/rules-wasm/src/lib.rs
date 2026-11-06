@@ -252,6 +252,23 @@ mod tests {
         assert!(lease["preconditionSchema"].is_object());
     }
 
+    /// Schedules, the last, declares the event it emits (D104), with its
+    /// payloadSchema, which a binding hands its host whole.
+    #[test]
+    fn schedules_declares_the_event_it_emits() {
+        let (out, ok) = run_json(Op::Declarations, b"");
+        assert!(ok, "{out}");
+        let files: Value = serde_json::from_str(&out).unwrap();
+        let schedules = files.as_array().and_then(|files| files.last()).unwrap();
+        assert_eq!(schedules["name"], "Schedules");
+        assert_eq!(schedules["tables"][0]["name"], "schedules");
+        assert_eq!(schedules["events"][0]["kind"], "run");
+        assert_eq!(
+            schedules["events"][0]["payloadSchema"]["additionalProperties"],
+            false
+        );
+    }
+
     // A job whose lease's token a command presents as its precondition.
     fn job() -> Value {
         json!({

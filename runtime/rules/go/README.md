@@ -19,6 +19,7 @@ adapter.go           Host, Execute, RunOperation, RunCreate, RunUpdate, RunDelet
 subtables.go         a use's sub-table rows: the subRows read, the change set's writes, ReadSubRows
 deadlines.go         a table's deadline queue: arms and clears, the spend, RunDeadline, Deadline, Claim, ReadDeadlines
 changes.go           a table's change queue: RunChange, Change, ChangeRun, the trigger's images converted, the linked and holding reads, a gone row's deletes
+events.go            a table's event queue (D104): a change set's events written, SpendEvent, EventRun, ReadQueuedEvents, QueuedEvent
 convert.go           core JSON to column values and back, the UUID base62 codec (D79), TimeOfMillis
 refusal.go           Refusal, Code, AsRefusal, IsNotFound, Internal, BusyRefusal
 postgres/            package postgres: a Store over a pgx transaction
@@ -123,9 +124,12 @@ commands with.
   deadline messages unless a live row of the key exists, and its sub-table
   rows unless any row of the key does. A run still asking after
   `MaxRounds` (256) is `internal`, as are a kind of read, step, outcome or
-  write the adapter does not know, a type the layout lacks, and outbox
-  events of a behavior's own (`Cx::emit`), which the event stream will take
-  (D103).
+  write the adapter does not know, and a type the layout lacks. A change
+  set's events (`Cx::emit`, D104) are written to their row's table's event
+  queue (the layout's `Events`) in the unit, after the sub-table rows and
+  before the deadline changes, each with the command's time, and kept when
+  the row is deleted; one of a row whose table keeps no event queue is
+  `internal`, nothing applied.
 
 Every refusal, the core's or the adapter's, is a `*Refusal` (`Code`,
 `Status`, `Class`, `Message`, `Details`), in TypeScript's adapter's words
@@ -214,6 +218,31 @@ dead). A generated Go ORM's repository of a table whose layout has
 `changes` wraps it as `RunChange(ctx, message, claim)` in its transaction,
 and a generated API's behavior worker calls that for each claimed message
 of its table's change queue, beside its deadline queue.
+
+## Events
+
+A change set's events (D104) are messages of the event queue of their
+row's table (`Table.Events`): the row's key, bound as its table's key
+binds, the use, the kind, the command's time in epoch milliseconds and the
+payload's JSON, NULL for none. On Postgres each insert's `due_at` and
+`created_at` are the statement's `clock_timestamp()`, so one transaction's
+events of a row keep their order in the queue's claim; on SQLite the
+table's defaults stamp them to the millisecond. `SpendEvent(ctx, host,
+type, *Claim)` spends a worker's claim of a message of a type's event queue
+in the caller's transaction, deleting it by its id and token, held to one
+row, and returns an `*EventRun`: `Ran`, or nothing spent with `Why` `claim
+lost`; without a claim nothing is spent. The handler runs in the same
+transaction after it, so its writes and the completion commit together. A
+type whose table keeps no event queue is `internal`. `ReadQueuedEvents(ctx,
+host, type)` reads a type's messages in the order written (`created_at`,
+then `id` on Postgres and the rowid on SQLite, whose one command's events
+share a millisecond), each a `QueuedEvent{Key, UseID, Kind, At, Payload}`
+with the key in the core's form; a table with no event queue has none. A
+generated Go ORM's repository of a table whose layout has `events` wraps
+the spend as `RunEvent(ctx, event, claim, handle)`, which runs `handle`
+with a `TxInterface` over the same transaction, and a generated API's
+behavior worker calls it for each claimed message, handing the event to
+the API's Workers method of its use and kind.
 
 ## The stores
 
@@ -325,7 +354,7 @@ the archive's core, a malformed precondition refused as
 `PreconditionsError` before the row is read, a stale token vetoed and the
 current one going through (`TestThePreconditionsReachTheCoresLease`), on
 SQLite and on Postgres. `transcript_test.go`
-replays the seventeen transcripts in `runtime/engine/testdata/rules` on SQLite
+replays the eighteen transcripts in `runtime/engine/testdata/rules` on SQLite
 and on Postgres, as the TypeScript adapter does:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, one raw
 write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
@@ -358,8 +387,12 @@ takes, leaves and lists among them and four repeats answered unchanged,
 each compared with its row's `expect.version`, and 22 checks), and
 `core-reconcile.transcript.json` (D104), 58 steps (36 commands, two of
 them the stale deadline, each compared with its row's `expect.version`,
-and 22 checks), whose Workflow and Reconcile are anchored on fields; each
-held to a floor of its step count, its `expect.others`
+and 22 checks), whose Workflow and Reconcile are anchored on fields, and
+`core-schedules.transcript.json` (D104), 161 steps (131 commands, 19 of
+them deadlines and 10 changes, each compared with its row's
+`expect.version`, 29 checks and one raw write), each command held to its
+`expect.events` by reading every event queue of its database back after
+it and deleting what it read; each held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every
 type live in its database, each at the version the scenario last made
 live, since a step names its own type's version alone. The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`,

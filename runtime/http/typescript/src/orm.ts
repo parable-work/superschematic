@@ -3,7 +3,7 @@ import { currentCaller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
-import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runUpdate, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RunChangeOptions, type RunDeadlineOptions } from './rules.js';
+import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -140,7 +140,11 @@ deleteMany's and hardDeleteOne's among them, and its repository's
 runChange runs one, as a behavior worker claimed it, through the core in a
 transaction (./rules, runChange): so a bulk or hard write, and a raw SQL
 write, arms and clears its deadlines after its commit, when the worker
-runs its change. A raw SQL write of an owned column or a sub-table row is
+runs its change. A table whose behaviors emit events keeps them in an
+event queue (D104), and its repository's runEvent spends a behavior
+worker's claim of one in the transaction that runs the project's handler,
+so the handler's writes and the completion commit together or not at
+all (./rules, spendEvent). A raw SQL write of an owned column or a sub-table row is
 never refused (D103). updateOne, deleteOne and each operation take the
 caller's preconditions (D16, D104) in their options, each use's entry by
 its use id (orm.job.updateOne(key, { title }, { preconditions: { Lease: {
@@ -2575,6 +2579,29 @@ class TableRepository {
     return this.atomically(async repo => {
       const message = { key: repo.wireKey(change.rowKey), write: change.write, at: change.at, before: change.before, after: change.after };
       return runChange(repo.rulesHost(), repo.def.name, message, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns() });
+    });
+  }
+
+  /**
+   * Hands an event of a row, a message of the table's event queue as a
+   * behavior worker claimed it, to handle in a transaction (this
+   * repository's, or one it opens) (D104): with the claim it first spends
+   * the message by its id and token, then runs handle, so the handler's
+   * writes and the completion commit together or not at all; a lost claim
+   * runs nothing and says why, and handle's rejection rolls the spend back
+   * and is thrown, for the worker to fail the message. Without a claim
+   * nothing is spent.
+   */
+  async runEvent(
+    _event: { readonly rowKey: unknown; readonly useId: string; readonly kind: string; readonly at: number | string; readonly payload?: unknown },
+    options: RunEventOptions,
+    handle: () => Promise<void>
+  ): Promise<EventRun> {
+    return this.atomically(async repo => {
+      const spent = await spendEvent(repo.rulesHost(), repo.def.name, options.claim);
+      if (!spent.ran) return spent;
+      await handle();
+      return spent;
     });
   }
 

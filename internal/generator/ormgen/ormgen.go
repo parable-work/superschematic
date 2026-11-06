@@ -400,6 +400,12 @@ type Repository struct {
 	ChangeQueue string
 	Change      *ChangeMessage
 
+	// EventQueue is the event queue of a table whose behaviors emit events
+	// (D104), its message's type (ProblemEvent), whose RunEvent spends a
+	// claimed message and runs the project's handler in one transaction;
+	// "" for any other table.
+	EventQueue string
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool

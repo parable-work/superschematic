@@ -309,6 +309,23 @@ lacks before it sends the call:
 `takeSeat`'s and `leaveSeat`'s `subject` is optional: without it the call
 seats or unseats its caller.
 
+A table that implements Schedules puts its operations under `schedules`
+(D104,
+[A table's schedules and their events](/superschematic/guides/api-routes/#a-tables-schedules-and-their-events)).
+`setSchedule`'s input carries only the kinds the config's `kinds` name
+(`after`, `every`, `cron`, and `timeZone` beside cron), and `reportRun`'s
+`outcome` is an enum of its `outcomes` (`ProblemSchedulesOutcome`); what
+a call answers keeps every kind and any outcome, so a schedule a later
+config narrowed still reads:
+
+| Language | Call |
+| --- | --- |
+| Go | `sdk.ProblemNamespace.Schedules.ReportRun(ctx, id, types.ProblemSchedulesReportRunInput{Name: "standup", Run: types.GenericInt64(3), Outcome: "told"})`, `sdk.ProblemNamespace.Schedules.ListSchedules(ctx, id, types.ProblemSchedulesListSchedulesInput{})` |
+| TypeScript | `await sdk.problem.schedules.setSchedule(id, { name: "standup", cron: "0 9 * * MON-FRI" })`, `await sdk.problem.schedules.reportRun(id, { name: "standup", run: 3, outcome: "told" })` |
+
+The events a schedule's runs emit reach no SDK: the API's behavior worker
+hands each to your `Workers` method.
+
 ## Timeouts, retries and hooks
 
 | | Go | TypeScript | Python | Rust |

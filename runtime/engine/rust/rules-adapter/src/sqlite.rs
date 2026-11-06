@@ -40,8 +40,8 @@ use serde_json::{Map, Value};
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
-    Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions,
-    Executed, Host, Owned, Row, SubRow, TableChange,
+    Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, EventRun,
+    ExecuteOptions, Executed, Host, Owned, QueuedEvent, Row, SubRow, TableChange,
 };
 
 /// The savepoint a change set applies in.
@@ -291,6 +291,40 @@ pub fn run_change(
     ))
 }
 
+/// Spends a worker's claim of a message of a type's event queue on `conn`
+/// (D104), in the transaction the project's handler of the event then runs
+/// in, as Postgres's `spend_event` says: a claim lost spends nothing, and
+/// without a claim nothing is spent.
+pub fn spend_event(
+    host: &Host<'_>,
+    conn: &Connection,
+    type_name: &str,
+    claim: Option<&Claim>,
+) -> Result<EventRun, Error> {
+    finish(run::spend_event(
+        host,
+        &SqliteStore { conn },
+        type_name,
+        claim,
+    ))
+}
+
+/// Reads every message of a type's event queue on `conn` in the order
+/// written (D104), as Postgres's `read_queued_events` says: one command's
+/// events share a millisecond's `created_at`, which their rowid, the order
+/// they were inserted in, breaks.
+pub fn read_queued_events(
+    host: &Host<'_>,
+    conn: &Connection,
+    type_name: &str,
+) -> Result<Vec<QueuedEvent>, Error> {
+    finish(run::read_queued_events(
+        host,
+        &SqliteStore { conn },
+        type_name,
+    ))
+}
+
 /// Runs the host loop to its end. A SQLite store's every step returns at
 /// once, so one poll finishes it; a future that waits all the same is
 /// refused as internal rather than spun on.
@@ -446,7 +480,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::tests::{alice, both, db_layout, own, refusal, transition, KEY, KEY_COLUMN};
+    use crate::tests::{
+        alice, both, db_layout, emit_on_toy, own, refusal, transition, KEY, KEY_COLUMN,
+    };
     use crate::{Action, Code, MAX_ATTEMPTS};
 
     fn open() -> Connection {
@@ -585,6 +621,55 @@ mod tests {
         async fn lock(&self, key: &str) -> Result<(), Error> {
             self.inner.lock(key).await
         }
+    }
+
+    /// An event of a command whose row moved is written by the run that
+    /// applies alone, the moved run's undone with its unit, and none of a
+    /// command that kept moving (D104).
+    #[test]
+    fn an_event_of_a_command_whose_row_moved_is_written_once_and_none_of_one_that_kept_moving() {
+        let (core, layout) = (both(), db_layout());
+        let host = Host::new(&core, &layout).with_clock(|| 5000);
+        let conn = open();
+        create(&host, &conn, "Toy");
+        let bump = r#"UPDATE toy SET title = title || '!', _version = _version + 1 WHERE id = ?1"#;
+        let key = vec![Bind::Text(KEY_COLUMN.into())];
+
+        let once = Moving::new(&conn, bump, key.clone(), 1);
+        let executed = finish(run::execute(
+            &host,
+            &once,
+            "Toy",
+            emit_on_toy(json!({"n": 1})),
+            &ExecuteOptions::default(),
+        ))
+        .expect("applied");
+        assert_eq!(executed.attempts, 2);
+        let paid = QueuedEvent {
+            key: KEY.into(),
+            use_id: "Toy".into(),
+            kind: "paid".into(),
+            at: 2000,
+            payload: json!({"n": 1}),
+        };
+        assert_eq!(
+            read_queued_events(&host, &conn, "Toy").expect("read"),
+            std::slice::from_ref(&paid)
+        );
+
+        let always = Moving::new(&conn, bump, key, MAX_ATTEMPTS);
+        let refused = refusal(finish(run::execute(
+            &host,
+            &always,
+            "Toy",
+            emit_on_toy(json!({"n": 2})),
+            &ExecuteOptions::default(),
+        )));
+        assert_eq!(refused.code, Code::Busy);
+        assert_eq!(
+            read_queued_events(&host, &conn, "Toy").expect("read"),
+            [paid]
+        );
     }
 
     fn create(host: &Host<'_>, conn: &Connection, type_name: &str) {

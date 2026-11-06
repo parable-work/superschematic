@@ -1,0 +1,1879 @@
+{
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProblemSchedulesCancelScheduleInput": {
+        "description": "The parameters of Problem's schedules cancelSchedule.",
+        "properties": {
+          "name": {
+            "description": "The schedule to cancel.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesCancelScheduleResult": {
+        "description": "What Problem's schedules cancelSchedule returns.",
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemSchedulesEndedBy"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProblemSchedulesKind",
+            "description": "after, every or cron."
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProblemSchedulesState",
+            "description": "active, paused or finished."
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "nullable": true,
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when it was finished already, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "runs",
+          "setAt",
+          "spec",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesEndedBy": {
+        "description": "What finished a schedule of Problem's Schedules.",
+        "enum": [
+          "run",
+          "cancel",
+          "endOn"
+        ],
+        "type": "string"
+      },
+      "ProblemSchedulesKind": {
+        "description": "The kind of a schedule of Problem's Schedules: after, every or cron, whichever its config took when the schedule was set.",
+        "enum": [
+          "after",
+          "every",
+          "cron"
+        ],
+        "type": "string"
+      },
+      "ProblemSchedulesListSchedulesInput": {
+        "description": "The parameters of Problem's schedules listSchedules.",
+        "properties": {
+          "name": {
+            "description": "Only this schedule.",
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProblemSchedulesListSchedulesResult": {
+        "description": "What Problem's schedules listSchedules returns.",
+        "properties": {
+          "items": {
+            "description": "The schedules, by name.",
+            "items": {
+              "$ref": "#/components/schemas/ProblemSchedulesListSchedulesResultItems"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesListSchedulesResultItems": {
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemSchedulesEndedBy"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProblemSchedulesKind",
+            "description": "after, every or cron."
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProblemSchedulesState",
+            "description": "active, paused or finished."
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "runs",
+          "setAt",
+          "spec",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesOutcome": {
+        "description": "An outcome Problem's Schedules records of a run.",
+        "enum": [
+          "told",
+          "resumed",
+          "held",
+          "missed"
+        ],
+        "type": "string"
+      },
+      "ProblemSchedulesPauseScheduleInput": {
+        "description": "The parameters of Problem's schedules pauseSchedule.",
+        "properties": {
+          "name": {
+            "description": "The schedule to pause.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesPauseScheduleResult": {
+        "description": "What Problem's schedules pauseSchedule returns.",
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemSchedulesEndedBy"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProblemSchedulesKind",
+            "description": "after, every or cron."
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProblemSchedulesState",
+            "description": "active, paused or finished."
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "nullable": true,
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when it was paused already, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "runs",
+          "setAt",
+          "spec",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesReportRunInput": {
+        "description": "The parameters of Problem's schedules reportRun.",
+        "properties": {
+          "attempt": {
+            "description": "The attempt of the run, its number in the event run's payload; when given, a report of an attempt other than the latest is answered unchanged.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The schedule whose run it reports.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ProblemSchedulesOutcome",
+            "description": "One of the config's outcomes."
+          },
+          "run": {
+            "description": "The run, its number in the event run's payload.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "outcome",
+          "run"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesReportRunResult": {
+        "description": "What Problem's schedules reportRun returns.",
+        "properties": {
+          "name": {
+            "description": "The schedule.",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "The outcome reported.",
+            "type": "string"
+          },
+          "retryAt": {
+            "description": "When the run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "run": {
+            "description": "The run reported.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "True when the run was older than the latest, the latest of a schedule the name's current one replaced, or another attempt than the latest, or its outcome was recorded already, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "outcome",
+          "run"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesResumeScheduleInput": {
+        "description": "The parameters of Problem's schedules resumeSchedule.",
+        "properties": {
+          "name": {
+            "description": "The schedule to resume.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesResumeScheduleResult": {
+        "description": "What Problem's schedules resumeSchedule returns.",
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemSchedulesEndedBy"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProblemSchedulesKind",
+            "description": "after, every or cron."
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProblemSchedulesState",
+            "description": "active, paused or finished."
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "nullable": true,
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when it was active already, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "runs",
+          "setAt",
+          "spec",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesSetScheduleInput": {
+        "description": "The parameters of Problem's schedules setSchedule.",
+        "properties": {
+          "after": {
+            "description": "One run this many milliseconds from now.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "cron": {
+            "description": "A run at each time this cron line names: five fields, minute hour day-of-month month day-of-week, or a macro: @yearly, @annually, @monthly, @weekly, @daily, @midnight or @hourly.",
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          },
+          "every": {
+            "description": "A run at each whole interval of this many milliseconds from now.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The schedule's name: a letter, then letters, digits, _ and -.",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The IANA time zone the cron line is read in; the config's timeZone, else UTC, when absent. A cron schedule's alone.",
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesSetScheduleResult": {
+        "description": "What Problem's schedules setSchedule returns.",
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemSchedulesEndedBy"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProblemSchedulesKind",
+            "description": "after, every or cron."
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "replaced": {
+            "description": "True when it replaced a live schedule of the name; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProblemSchedulesState",
+            "description": "active, paused or finished."
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "nullable": true,
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when a live schedule of the name had the same kind, spec and time zone, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "runs",
+          "setAt",
+          "spec",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ProblemSchedulesState": {
+        "description": "The state of a schedule of Problem's Schedules.",
+        "enum": [
+          "active",
+          "paused",
+          "finished"
+        ],
+        "type": "string"
+      },
+      "ProblemStatusState": {
+        "description": "A state of Problem's status Workflow.",
+        "enum": [
+          "open",
+          "working",
+          "done",
+          "dropped"
+        ],
+        "type": "string"
+      },
+      "ProblemStatusTransitionInput": {
+        "description": "The parameters of Problem's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/ProblemStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "ProblemStatusTransitionResult": {
+        "description": "What Problem's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/ProblemStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/ProblemStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-schedules-api schema",
+    "title": "Fixture-Schedules-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/problem/{id}/schedules/cancel-schedule": {
+      "post": {
+        "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+        "operationId": "ProblemSchedulesCancelScheduleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSchedulesCancelScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSchedulesCancelScheduleResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem schedules: cancel schedule",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.schedules.cancel-schedule",
+          "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem schedules: cancel schedule",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/schedules/list-schedules": {
+      "post": {
+        "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+        "operationId": "ProblemSchedulesListSchedulesHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSchedulesListSchedulesInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSchedulesListSchedulesResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem schedules: list schedules",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.schedules.list-schedules",
+          "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Problem schedules: list schedules",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/schedules/pause-schedule": {
+      "post": {
+        "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+        "operationId": "ProblemSchedulesPauseScheduleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSchedulesPauseScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSchedulesPauseScheduleResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem schedules: pause schedule",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.schedules.pause-schedule",
+          "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem schedules: pause schedule",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/schedules/report-run": {
+      "post": {
+        "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+        "operationId": "ProblemSchedulesReportRunHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSchedulesReportRunInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSchedulesReportRunResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem schedules: report run",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.schedules.report-run",
+          "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem schedules: report run",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/schedules/resume-schedule": {
+      "post": {
+        "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+        "operationId": "ProblemSchedulesResumeScheduleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSchedulesResumeScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSchedulesResumeScheduleResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem schedules: resume schedule",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.schedules.resume-schedule",
+          "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem schedules: resume schedule",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/schedules/set-schedule": {
+      "post": {
+        "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+        "operationId": "ProblemSchedulesSetScheduleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemSchedulesSetScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemSchedulesSetScheduleResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem schedules: set schedule",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.schedules.set-schedule",
+          "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem schedules: set schedule",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/problem/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "ProblemStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProblemStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProblemStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Problem status: transition",
+        "tags": [
+          "problem"
+        ],
+        "x-superschematic-docs": {
+          "capability": "problem.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Problem status: transition",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

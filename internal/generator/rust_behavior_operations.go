@@ -134,9 +134,10 @@ func behaviorOperationUse(schema *ir.Schema) string {
 // behaviorWorkerUse names the first @behaviorWorker of the schema (D103),
 // as a refusal names what runs through the behaviors' core: what the
 // worker runs, as apigen's BehaviorWorkerInfo.Runs words it for the other
-// generators (its table's deadlines, its changes, or both), from the
-// queues the loader gave it or, when db, the table's database, is given,
-// from the queues db holds with the behaviors that arm its deadlines, and
+// generators (its table's deadlines, its changes, its events, D104, or a
+// list of them), from the queues the loader gave it or, when db, the
+// table's database, is given, from the queues db holds with the behaviors
+// that arm its deadlines, and
 // the worker (Ticket's deadlines and changes by its @behaviorWorker
 // TicketTimers); "" for a schema without one.
 func behaviorWorkerUse(schema *ir.Schema, db *ir.Schema) string {
@@ -151,6 +152,9 @@ func behaviorWorkerUse(schema *ir.Schema, db *ir.Schema) string {
 		}
 		if queue := db.BehaviorQueueOf(table, ir.BehaviorQueueChanges); queue != nil {
 			info.ChangeQueue = queue.Name
+		}
+		if queue := db.BehaviorQueueOf(table, ir.BehaviorQueueEvents); queue != nil {
+			info.EventQueue = queue.Name
 		}
 		runs := info.Runs()
 		if strings.Contains(runs, ", which ") {

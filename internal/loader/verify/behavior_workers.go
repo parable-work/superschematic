@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -23,10 +24,14 @@ func CheckBehaviorWorkers(schema *ir.Schema, in Input) *Result {
 // each is in an API, names no queue of its own, and names a table of the
 // API's database (its authDb, or its one DB dependency, in.Database) that
 // the API imports from it, which is a table and no engine type, and whose
-// behaviors arm deadlines or hear its writes, so the database holds a queue
-// the worker runs; and an API runs a table's behaviors from one worker. Run runs it
-// again after the loader filled each worker's queue, which it does not
-// refuse.
+// behaviors arm deadlines, hear its writes or emit events (D104), so the
+// database holds a queue the worker runs; and an API runs a table's
+// behaviors from one worker. A worker of a table whose behaviors emit
+// events hands each to a method of the API's Workers, and adds the types
+// of each event and its payload (behaviorops.ExpandWorkers): no @worker
+// takes a method's name, and no type the API declares takes a type's
+// (checkBehaviorWorkerEvents). Run runs it again after the loader filled
+// each worker's queue, which it does not refuse.
 func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 	var workers []*ir.Worker
 	for _, worker := range schema.Workers {
@@ -90,8 +95,8 @@ func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 		case td.IsEngineType():
 			r.errorf("", "%s: @behaviorWorker names %s, an engine type of %s (D58), whose engine runs its timed work; a behavior worker runs a table's behaviors (D103)", worker.Name, typeName, in.Database.Name)
 			continue
-		case !runsDeadlines(td, in.Database, reg) && in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueChanges) == nil:
-			r.errorf("", "%s: @behaviorWorker names %s, whose behaviors arm no deadlines and hear no writes, so the worker has nothing to run (D103)", worker.Name, typeName)
+		case !runsDeadlines(td, in.Database, reg) && in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueChanges) == nil && in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueEvents) == nil:
+			r.errorf("", "%s: @behaviorWorker names %s, whose behaviors arm no deadlines, hear no writes and emit no events, so the worker has nothing to run (D103, D104)", worker.Name, typeName)
 			continue
 		}
 		if other, taken := run[typeName]; taken {
@@ -99,7 +104,37 @@ func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		run[typeName] = worker.Name
+		checkBehaviorWorkerEvents(schema, worker, td, in.Database, reg, r)
 		warnReleaseLeasesUnheld(schema, worker, td, in.Database, r)
+	}
+}
+
+// checkBehaviorWorkerEvents refuses a name the events of worker's table,
+// td, give the API that it already holds (D104): the Workers method each
+// event is handed to (behaviorops.EventMethod) is no @worker's, whose
+// method of Workers has its class's name, and the types the loader adds
+// for each event and its payload (behaviorops.EventType, EventPayloadType)
+// are no type or input the API declares. A type the loader added
+// (ir.OriginBehavior), as Run meets it after the expansion, is its own.
+func checkBehaviorWorkerEvents(schema *ir.Schema, worker *ir.Worker, td *ir.TypeDef, db *ir.Schema, reg *registry.Registry, r *Result) {
+	if db.BehaviorQueueOf(td.Name, ir.BehaviorQueueEvents) == nil {
+		return
+	}
+	workers := map[string]bool{}
+	for _, other := range schema.Workers {
+		if other != nil && other.BehaviorWorker == nil {
+			workers[other.Name] = true
+		}
+	}
+	for _, event := range behaviorops.WorkerEvents(worker.Name, td, reg) {
+		if workers[event.Method] {
+			r.errorf("", "%s: @behaviorWorker(%s) hands %s's event %s to the Workers method %s, which is the name of the @worker %s: rename one (D104)", worker.Name, td.Name, event.Use, event.Kind, event.Method, event.Method)
+		}
+		for _, name := range []string{event.Payload, event.Event} {
+			if declared := schema.Types[name]; (declared != nil && declared.Origin != ir.OriginBehavior) || schema.Inputs[name] != nil {
+				r.errorf("", "%s: @behaviorWorker(%s) adds the type %s for %s's event %s, which %s declares: rename it (D104)", worker.Name, td.Name, name, event.Use, event.Kind, schema.Name)
+			}
+		}
 	}
 }
 

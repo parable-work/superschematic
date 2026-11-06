@@ -209,11 +209,17 @@ type Worker struct {
 	// loader fills.
 	Queue string `json:"queue,omitempty" yaml:"queue,omitempty"`
 
-	// Queues are a behavior worker's queues, deadlines first: its table's
-	// deadline queue and its change queue, each when the database holds it
-	// (D103). The loader fills it with Queue, which is its first; the data
-	// forms have no key for it.
+	// Queues are a behavior worker's queues: its table's deadlines, then
+	// changes, then events, each when the database holds it (D103, D104).
+	// The loader fills it with Queue, which is its first; the data forms
+	// have no key for it.
 	Queues []string `json:"queues,omitempty" yaml:"queues,omitempty" jsonschema:"-"`
+
+	// Events are the events a behavior worker's event queue carries, each
+	// handed to a method of the API's Workers (D104), in the order of the
+	// table's uses and then of each declaration's events. The loader fills
+	// it; the data forms have no key for it.
+	Events []BehaviorWorkerEvent `json:"events,omitempty" yaml:"events,omitempty" jsonschema:"-"`
 
 	// Concurrency is how many messages an instance handles at a time.
 	// Zero is DefaultWorkerConcurrency; an environment's settings change
@@ -228,13 +234,30 @@ type Worker struct {
 	// BehaviorWorker is @behaviorWorker(Type, options) (D103): the worker
 	// runs the table's behavior queues through the behaviors' core, by a
 	// handler the API's generator writes; the API's Workers has no method
-	// for it. The loader fills Queues with the table's deadline queue and
-	// change queue, and Queue with the first.
+	// for it but one per event its table's behaviors emit (Events, D104).
+	// The loader fills Queues with the table's deadline queue, change queue
+	// and event queue, and Queue with the first.
 	BehaviorWorker *BehaviorWorkerConfig `json:"behaviorWorker,omitempty" yaml:"behaviorWorker,omitempty"`
 
 	// Origin is [OriginBehavior] once the loader filled Queue from
 	// BehaviorWorker; the data forms have no key for it.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+}
+
+// BehaviorWorkerEvent is an event a use of a behavior worker's table emits
+// (D104), which the worker's event queue carries and a method of the API's
+// Workers handles: the use, its member, its behavior, the event's kind, the
+// Workers method, and the API types of the event and its payload, which the
+// loader adds.
+type BehaviorWorkerEvent struct {
+	Use         string `json:"use" yaml:"use"`           // Schedules
+	Member      string `json:"member" yaml:"member"`     // schedules (behaviorlayout.UseMember)
+	Behavior    string `json:"behavior" yaml:"behavior"` // Schedules
+	Kind        string `json:"kind" yaml:"kind"`         // run
+	Method      string `json:"method" yaml:"method"`     // ProblemWakeUpsSchedulesRun
+	Event       string `json:"event" yaml:"event"`       // ProblemSchedulesRunEvent
+	Payload     string `json:"payload" yaml:"payload"`   // ProblemSchedulesRunPayload
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // BehaviorWorkerConfig is what @behaviorWorker names (D103): the table

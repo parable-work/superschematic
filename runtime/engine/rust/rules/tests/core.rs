@@ -14,7 +14,8 @@
 //! read of the rows whose owned field holds a value, the fields a read
 //! computes at a time, another row's sub-table rows as the run has them,
 //! and a call a behavior makes as the caller's own request, from a handler
-//! and from a deadline's (D104).
+//! and from a deadline's (D104); and the events a behavior emits, each a
+//! kind its declaration lists (D104).
 
 use std::collections::BTreeMap;
 
@@ -23,10 +24,10 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{
     Action, Answer, Answers, Behavior, Caller, Change, Code, Command, ConfigCx, ConfigError,
     ConfigIssueKind, ConfigTarget, Cx, DeadlineChange, Declaration, FieldSpec, GuardRequest, Heard,
-    Hook, KeyedRow, LinkedRows, Listen, LockKey, Outcome, PermissionMatcher, ReadRequest, Refusal,
-    Row, RowChange, RowImage, RowRef, RowWrite, SchemaIssue, Source, Step, Stop, SubRow,
-    SubRowChange, TableDecl, TypeSpec, UseSpec, ValidationIssue, ValidationRequest, Veto, View,
-    WriteKind, LINKED_PAGE,
+    Hook, KeyedRow, LinkedRows, Listen, LockKey, OutboxEvent, Outcome, PermissionMatcher,
+    ReadRequest, Refusal, Row, RowChange, RowImage, RowRef, RowWrite, SchemaIssue, Source, Step,
+    Stop, SubRow, SubRowChange, TableDecl, TypeSpec, UseSpec, ValidationIssue, ValidationRequest,
+    Veto, View, WriteKind, LINKED_PAGE,
 };
 
 const NOW: i64 = 1_000_000;
@@ -59,6 +60,7 @@ impl Behavior for Counter {
             .operation("add", true)
             .operation("peek", false)
             .operation("sneak", false)
+            .event("added")
             .veto("over_max")
             .create_params()
     }
@@ -217,6 +219,7 @@ impl Behavior for Relay {
             .operation("bump", true)
             .operation("tryBump", true)
             .operation("peekBump", false)
+            .event("tried")
     }
 
     // The config names the Counter use it relays to, which must be one of
@@ -257,7 +260,18 @@ impl Behavior for Freeze {
     type Config = ();
 
     fn declaration(&self) -> Declaration {
-        Declaration::new("Freeze").veto("frozen")
+        // It emits what changed, by the change's kind.
+        [
+            "create",
+            "update",
+            "delete",
+            "operation",
+            "deadline",
+            "heard",
+        ]
+        .into_iter()
+        .fold(Declaration::new("Freeze"), Declaration::event)
+        .veto("frozen")
     }
 
     fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
@@ -349,6 +363,7 @@ impl Behavior for Stock {
             .arms_deadlines()
             .operation("reserve", true)
             .operation("release", true)
+            .event("expired")
             .veto("sold_out")
     }
 
@@ -435,6 +450,8 @@ impl Behavior for Ledger {
             .operation("undeclared", true)
             .operation("keyed", true)
             .operation("peer", true)
+            .event("changed")
+            .event("deleted")
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
@@ -599,6 +616,7 @@ impl Behavior for Bin {
             .table("takes")
             .operation("take", true)
             .operation("count", false)
+            .event("changed")
             .veto("short")
             .veto("refused")
             .create_params()
@@ -697,6 +715,7 @@ impl Behavior for Picker {
             .operation("stockAndPick", true)
             .operation("note", true)
             .operation("configOf", false)
+            .event("tried")
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
@@ -771,6 +790,7 @@ impl Behavior for Latch {
         Declaration::new("Latch")
             .value("state")
             .operation("set", true)
+            .event("latched")
             .veto("stale")
     }
 
@@ -2896,6 +2916,117 @@ fn a_veto_code_the_declaration_does_not_list_is_a_defect() {
     assert_eq!(
         refused(core.drive(&spec, &veto, &mut memory)).error_json(),
         json!({"class": "BehaviorError", "message": "behavior Loop: a veto's code \"not_listed\" is not one its declaration lists (undeclared_elsewhere)", "details": {"behavior": "Loop"}})
+    );
+}
+
+#[test]
+fn an_emit_of_a_declared_kind_lands_in_the_change_set_with_its_row_use_and_payload() {
+    let core = core();
+    let spec = counter_spec(json!({"max": 9}));
+    let mut memory = Memory::default().with("Order", "o1", order_at(2, 3));
+    let add = command(alice(), invoke("o1", "Counter", "add", json!({"by": 1})));
+    let changes = changed(core.drive(&spec, &add, &mut memory));
+    assert_eq!(
+        changes.events,
+        vec![OutboxEvent {
+            row: RowRef::new("Order", Some("o1")),
+            kind: "added".to_owned(),
+            use_id: "Counter".to_owned(),
+            payload: json!({"by": 1, "count": 3}),
+        }]
+    );
+    assert_eq!(
+        core.declaration("Counter")
+            .map(|declared| declared.events.clone()),
+        Some(vec!["added".to_owned()])
+    );
+}
+
+// Blurt: emits whatever kind its operation names, and declares one.
+struct Blurt;
+
+impl Behavior for Blurt {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Blurt")
+            .operation("say", true)
+            .event("said")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, params: &Value) -> Hook<Value> {
+        let kind = params
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        cx.emit(kind, json!({}))?;
+        Ok(Value::Null)
+    }
+}
+
+#[test]
+fn an_emit_of_a_kind_the_declaration_does_not_list_is_a_defect() {
+    let core = superschematic_rules::Core::new().with(Blurt);
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Blurt", json!({})));
+    let mut memory = Memory::default().with("Order", "o1", row(json!({}), json!({}), 1));
+    let said = command(
+        alice(),
+        invoke("o1", "Blurt", "say", json!({"kind": "said"})),
+    );
+    assert_eq!(
+        changed(core.drive(&spec, &said, &mut memory)).events[0].kind,
+        "said"
+    );
+    let shouted = command(
+        alice(),
+        invoke("o1", "Blurt", "say", json!({"kind": "shouted"})),
+    );
+    assert_eq!(
+        refused(core.drive(&spec, &shouted, &mut memory)).error_json(),
+        json!({"class": "BehaviorError", "message": "behavior Blurt: emit(shouted): it declares no event shouted (its events: said)", "details": {"behavior": "Blurt"}})
+    );
+}
+
+// Hush: declares no events, and its operation emits one.
+struct Hush;
+
+impl Behavior for Hush {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Hush").operation("note", true)
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, _params: &Value) -> Hook<Value> {
+        cx.emit("noted", json!({}))?;
+        Ok(Value::Null)
+    }
+}
+
+#[test]
+fn a_declaration_without_events_emits_none() {
+    let core = superschematic_rules::Core::new().with(Hush);
+    let declared = core.declaration("Hush").expect("Hush");
+    assert!(declared.events.is_empty());
+    assert!(serde_json::to_value(declared)
+        .expect("it writes")
+        .get("events")
+        .is_none());
+    // An emit of any kind is the defect an undeclared one is.
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Hush", json!({})));
+    let mut memory = Memory::default().with("Order", "o1", row(json!({}), json!({}), 1));
+    let noting = command(alice(), invoke("o1", "Hush", "note", json!({})));
+    assert_eq!(
+        refused(core.drive(&spec, &noting, &mut memory)).error_json(),
+        json!({"class": "BehaviorError", "message": "behavior Hush: emit(noted): it declares no event noted (its events: none)", "details": {"behavior": "Hush"}})
     );
 }
 

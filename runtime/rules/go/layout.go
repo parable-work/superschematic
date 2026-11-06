@@ -105,6 +105,29 @@ type Table struct {
 	// for each write its behaviors hear (D103); nil for a table nothing
 	// hears.
 	Changes *Changes `json:"changes,omitempty"`
+	// Events is the queue the events its behaviors emit are messages of
+	// (D104); nil for a table whose behaviors emit none.
+	Events *Events `json:"events,omitempty"`
+}
+
+// Events is a table's event queue (D104): one message per event a
+// behavior emits about a row (Cx::emit), which the adapter writes in the
+// command's unit and a behavior worker claims and hands to the project's
+// handler, spending it (SpendEvent). Each member but Queue is a column,
+// unquoted.
+type Events struct {
+	// Queue is the queue's type (ProblemEvent), Table its table.
+	Queue string `json:"queue"`
+	Table string `json:"table"`
+	// RowKey holds the key of the row the event is about, bound as the row
+	// table's key binds; Use the id of the use that emitted it; Kind the
+	// event's kind; At the command's time in epoch milliseconds; Payload
+	// what the event says, JSON.
+	RowKey  string `json:"rowKey"`
+	Use     string `json:"use"`
+	Kind    string `json:"kind"`
+	At      string `json:"at"`
+	Payload string `json:"payload"`
 }
 
 // Changes is a hearing table's change queue (D103): one message per write

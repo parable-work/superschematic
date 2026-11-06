@@ -1,0 +1,275 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "2e636c1ad9808334fed461c928be7f9be3bc5c100e2551d6503afd325cd5b6c1",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_change_queue (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  row_key UUID NOT NULL,\n  write TEXT NOT NULL,\n  at BIGINT NOT NULL,\n  before JSONB,\n  \"after\" JSONB,\n  state TEXT DEFAULT 'ready' NOT NULL,\n  attempts INTEGER DEFAULT 0 NOT NULL,\n  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  claim_expires_at TIMESTAMPTZ,\n  claim_token UUID,\n  last_error TEXT,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT product_change_queue_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product_change_queue IS 'The writes of Product''s rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).'"
+      ],
+      "subject": "table/product_change_queue",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_deadline_queue (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  row_key UUID NOT NULL,\n  use_id TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  at BIGINT NOT NULL,\n  payload JSONB,\n  state TEXT DEFAULT 'ready' NOT NULL,\n  attempts INTEGER DEFAULT 0 NOT NULL,\n  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  claim_expires_at TIMESTAMPTZ,\n  claim_token UUID,\n  last_error TEXT,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT product_deadline_queue_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product_deadline_queue IS 'The deadlines Product''s behaviors arm, one message per row, use and deadline, due when it falls due (D103).'"
+      ],
+      "subject": "table/product_deadline_queue",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_event_queue (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  row_key UUID NOT NULL,\n  use_id TEXT NOT NULL,\n  kind TEXT NOT NULL,\n  at BIGINT NOT NULL,\n  payload JSONB,\n  state TEXT DEFAULT 'ready' NOT NULL,\n  attempts INTEGER DEFAULT 0 NOT NULL,\n  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  claim_expires_at TIMESTAMPTZ,\n  claim_token UUID,\n  last_error TEXT,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT product_event_queue_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product_event_queue IS 'The events Product''s behaviors emit about its rows, one message per event, written in the command''s transaction, which a behavior worker hands to the project''s handler (D104).'"
+      ],
+      "subject": "table/product_event_queue",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_schedules_schedules (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  product_id UUID NOT NULL,\n  \"name\" TEXT NOT NULL,\n  kind TEXT,\n  spec TEXT,\n  time_zone TEXT,\n  state TEXT,\n  set_at TIMESTAMPTZ,\n  next_at TIMESTAMPTZ,\n  retry_at TIMESTAMPTZ,\n  runs BIGINT,\n  attempt BIGINT,\n  last_at TIMESTAMPTZ,\n  last_outcome TEXT,\n  finished_at TIMESTAMPTZ,\n  ended_by TEXT,\n  CONSTRAINT product_schedules_schedules_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product_schedules_schedules IS 'One row per schedule of the row, keyed by its name: its kind and spec, its time zone, its state, when it was set, its next run and the retry of its latest one, how many runs it has had and which attempt of the latest fired last and when, the outcome reported of it, and when and why it finished. A finished schedule stays until its name is set again, or until the row keeps more than max finished ones, when those finished longest ago go.'"
+      ],
+      "subject": "table/product_schedules_schedules",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product ADD COLUMN _version BIGINT DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_change_queue_claim_expires_at ON product_change_queue USING BTREE (claim_expires_at) WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_change_queue_due_at ON product_change_queue USING BTREE (due_at) WHERE state = 'ready'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_due_at",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_change_queue_ready_key ON product_change_queue USING BTREE (row_key) WHERE state = 'ready'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_ready_key",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_change_queue_updated_at ON product_change_queue USING BTREE (updated_at) WHERE state = 'done'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX uq_product_change_queue_claimed_key ON product_change_queue USING BTREE (row_key) WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_change_queue/index/uq_product_change_queue_claimed_key",
+      "transactional": true
+    },
+    {
+      "index": 11,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_claim_expires_at ON product_deadline_queue USING BTREE (claim_expires_at) WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_due_at ON product_deadline_queue USING BTREE (due_at) WHERE state = 'ready'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_due_at",
+      "transactional": true
+    },
+    {
+      "index": 13,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_row_key ON product_deadline_queue USING BTREE (row_key)"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_row_key",
+      "transactional": true
+    },
+    {
+      "index": 14,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX idx_product_deadline_queue_row_key_use_id_name ON product_deadline_queue USING BTREE (row_key, use_id, \"name\") WHERE state IN ('ready', 'claimed')"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_row_key_use_id_name",
+      "transactional": true
+    },
+    {
+      "index": 15,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_updated_at ON product_deadline_queue USING BTREE (updated_at) WHERE state = 'done'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 16,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_event_queue_claim_expires_at ON product_event_queue USING BTREE (claim_expires_at) WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_event_queue/index/idx_product_event_queue_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 17,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_event_queue_due_at ON product_event_queue USING BTREE (due_at) WHERE state = 'ready'"
+      ],
+      "subject": "table/product_event_queue/index/idx_product_event_queue_due_at",
+      "transactional": true
+    },
+    {
+      "index": 18,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_event_queue_ready_key ON product_event_queue USING BTREE (row_key) WHERE state = 'ready'"
+      ],
+      "subject": "table/product_event_queue/index/idx_product_event_queue_ready_key",
+      "transactional": true
+    },
+    {
+      "index": 19,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_event_queue_updated_at ON product_event_queue USING BTREE (updated_at) WHERE state = 'done'"
+      ],
+      "subject": "table/product_event_queue/index/idx_product_event_queue_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 20,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX uq_product_event_queue_claimed_key ON product_event_queue USING BTREE (row_key) WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_event_queue/index/uq_product_event_queue_claimed_key",
+      "transactional": true
+    },
+    {
+      "index": 21,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX idx_product_schedules_schedules_product_name ON product_schedules_schedules USING BTREE (product_id, \"name\")"
+      ],
+      "subject": "table/product_schedules_schedules/index/idx_product_schedules_schedules_product_name",
+      "transactional": true
+    },
+    {
+      "index": 22,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product_schedules_schedules ADD CONSTRAINT fk_product_schedules_schedules_product_id FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/product_schedules_schedules/constraint/fk_product_schedules_schedules_product_id",
+      "transactional": true
+    },
+    {
+      "index": 23,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION product_bump_version() RETURNS trigger AS $$\nBEGIN\n  -- BEFORE UPDATE: the stored row takes the next version.\n  NEW._version := OLD._version + 1;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 24,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION \"product_changes\"() RETURNS trigger AS $$\nDECLARE\n  written timestamptz := clock_timestamp();\nBEGIN\n  -- Writes a message of ProductChange for each write of a row of product\n  -- its behaviors hear, whoever makes it (D103).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.\"title\" IS DISTINCT FROM NEW.\"title\" OR OLD.\"price\" IS DISTINCT FROM NEW.\"price\") THEN\n    RETURN NULL;\n  END IF;\n  IF TG_OP = 'INSERT' THEN\n    INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\", \"due_at\", \"created_at\")\n    VALUES (NEW.\"id\", 'insert', floor(extract(epoch FROM written) * 1000)::bigint, NULL, jsonb_build_object('title', NEW.\"title\", 'price', NEW.\"price\"), written, written);\n  ELSIF TG_OP = 'UPDATE' THEN\n    INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\", \"due_at\", \"created_at\")\n    VALUES (NEW.\"id\", 'update', floor(extract(epoch FROM written) * 1000)::bigint, jsonb_build_object('title', OLD.\"title\", 'price', OLD.\"price\"), jsonb_build_object('title', NEW.\"title\", 'price', NEW.\"price\"), written, written);\n  ELSE\n    INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\", \"due_at\", \"created_at\")\n    VALUES (OLD.\"id\", 'delete', floor(extract(epoch FROM written) * 1000)::bigint, jsonb_build_object('title', OLD.\"title\", 'price', OLD.\"price\"), NULL, written, written);\n  END IF;\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/product_changes",
+      "transactional": true
+    },
+    {
+      "index": 25,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_product_bump_version\n  BEFORE UPDATE ON product\n  FOR EACH ROW EXECUTE FUNCTION product_bump_version()"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 26,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_product_changes\n  AFTER INSERT OR UPDATE OR DELETE ON product\n  FOR EACH ROW EXECUTE FUNCTION product_changes()"
+      ],
+      "subject": "trigger/product/trg_product_changes",
+      "transactional": true
+    }
+  ],
+  "to": "a28ec3dfa559d2d5462960090e89dd09770c667fc6575486ceccc735ede17476",
+  "toModel": null,
+  "version": 1
+}

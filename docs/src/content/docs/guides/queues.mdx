@@ -433,6 +433,76 @@ worker that dies holding a message gives it back when its claim expires,
 and another worker handles it again, so write each method to be safe to
 run twice for one message.
 
+### A behavior worker's event handlers
+
+A `@behaviorWorker(T)` runs a table's behavior queues through the
+behaviors' core
+([The worker](/superschematic/guides/api-routes/#the-worker)), and its
+deadline and change handlers are generated: your implementation has no
+method for them. A table whose behaviors emit events, a schedule's runs
+among them
+([A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules)),
+keeps a third queue, its event queue (`problem_event_queue`), whose
+messages the worker hands to your code. The API's `Workers` gets a method
+per event kind of each use of the table, named for the worker, the use and
+the kind, its event typed by the kind's payload (D104):
+
+```go
+type Workers interface {
+	ProblemWakeUpsSchedulesRun(ctx context.Context, tx orm.TxInterface, event types.ProblemSchedulesRunEvent) error
+}
+```
+
+```ts
+export interface Workers {
+  problemWakeUpsSchedulesRun(event: ProblemSchedulesRunEvent, tx: FixtureSchedulesDbTx, signal: AbortSignal): Promise<void>;
+}
+```
+
+```rust
+#[async_trait]
+pub trait Workers: Send + Sync {
+    async fn problem_wake_ups_schedules_run(&self, event: crate::types::ProblemSchedulesRunEvent, run: &crate::behaviors::EventRun<'_>) -> Result<(), BoxError>;
+}
+```
+
+An event is `{ key, at, payload }`: the row's key, the time of the
+command that emitted it in epoch milliseconds, and what it says. The
+method runs in the transaction that completes the event's message, as the
+worker, the subject `<API>/<class>` holding the decorator's
+`permissions`: Go's `tx` is that transaction and its `ctx` names the
+worker as the behavior caller, TypeScript's `tx` is the database's
+repositories in it, as the worker, and Rust's `run` holds it
+(`run.client()`) and runs a behavior operation in it as the worker
+(`run.operation(type, &key, use, operation, &params)`). Write through it,
+and your writes commit with the completion or not at all:
+
+```ts
+export const createWorkers: WorkersConstructor = deps => ({
+  async problemWakeUpsSchedulesRun(event, tx) {
+    const { name, run, attempt } = event.payload;
+    // Tell the agent its wake-up came, then report how it went.
+    await tx.problem.schedules.reportRun(event.key, { name, run, attempt, outcome: 'told' });
+  },
+});
+```
+
+The method's return completes the event; an error, or a panic, fails it:
+it is due again after the queue's backoff and dead after its retries,
+for `stack queue dead|retry|drop`. One row's events reach the method in
+the order they were written, so a failing one holds that row's later
+ones until it runs or is dead. Delivery is at least once, so make the
+method safe to run twice, by the row's key and what the payload says (a
+schedule's `name`, `setAt`, `run` and `attempt`, which no two fires
+share). A row deleted after its event
+was written is gone when the method runs: complete the event (the
+repository's `not_found`). An event no method takes, a use or kind the
+build no longer knows, fails until it is dead. The scaffold stubs each
+method, failing every event until you write it, and a build over an
+implementation that predates them fails, saying what to add, as it does
+for a `@worker`. A behavior worker of a table that emits no events has no
+method, and an API whose workers are all such needs no `Workers`.
+
 ## Run it
 
 In a stack each worker is a deployable of its own, named after its API

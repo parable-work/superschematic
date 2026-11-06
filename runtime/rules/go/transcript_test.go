@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,9 +26,10 @@ import (
 // core-presence, core-budget and core-retries, D104), and from the
 // scenarios written by hand in their format where the engine recorded
 // none, core-workflow-principals.json, core-freezes-and-sign-offs.json,
-// core-retries-waits.json, core-periods-and-presence.json, core-seats.json
-// and core-reconcile.json (D104), whose transcripts hold each command's
-// row version too
+// core-retries-waits.json, core-periods-and-presence.json, core-seats.json,
+// core-reconcile.json and core-schedules.json (D104), whose transcripts
+// hold each command's row version too, and core-schedules' the events each
+// command wrote
 // (runtime/engine/testdata/rules/*.transcript.json, whose format its
 // transcript module states) replayed through this adapter on SQLite and on
 // Postgres, as the TypeScript adapter replays them
@@ -36,8 +38,9 @@ import (
 // link's <link>Id among them) beside the owned columns the layout rule
 // gives each use of any version and _version, with @optimistic's trigger;
 // for each use whose behavior declares tables, a sub-table per table, a
-// child of the row; and, when a use's behavior arms deadlines, the type's
-// deadline queue. A Generic.Int64 column is an integer column, as sqlgen
+// child of the row; when a use's behavior arms deadlines, the type's
+// deadline queue; and when a use's behavior declares events, the type's
+// event queue (D104). A Generic.Int64 column is an integer column, as sqlgen
 // writes one, and a command presents the preconditions the transcript's
 // command holds (D104). Each check runs on the core alone, answering
 // whether the type has rows from its table; each command runs through
@@ -47,9 +50,12 @@ import (
 // change the runner drained, whose listeners write rows of other types),
 // its refusal compared whole and the row it names read back after it and
 // compared, with its version when the transcript holds it (so a repeat is
-// held to writing nothing), its sub-table rows, its armed deadlines and
-// the other rows its change set wrote; and each raw step writes owned
-// columns with SQL past the adapter.
+// held to writing nothing), its sub-table rows, its armed deadlines, the
+// other rows its change set wrote, and the events it wrote (D104), read
+// from each of the database's types' event queues (ReadQueuedEvents) after
+// it, compared type by type in the order written, and then deleted, so no
+// queue holds an event the step's expect lacks; and each raw step writes
+// owned columns with SQL past the adapter.
 // The Postgres replay skips without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
@@ -89,6 +95,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-periods-and-presence.transcript.json", 77},
 	{"../../engine/testdata/rules/core-seats.transcript.json", 88},
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
+	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 }
 
 type transcript struct {
@@ -144,7 +151,22 @@ type transcriptStep struct {
 		// recording's do not: compared, when present, with the version
 		// read back.
 		Version *int64 `json:"version"`
+		// Events are the events the command's change set wrote, in its
+		// order (D104); absent when none.
+		Events []transcriptEvent `json:"events"`
 	} `json:"expect"`
+}
+
+// transcriptEvent is an event a command's change set wrote, as a
+// transcript's expect writes it (D104): the row's type and key, the use,
+// the kind, the command's time and the payload.
+type transcriptEvent struct {
+	Type    string          `json:"type"`
+	Key     string          `json:"key"`
+	UseID   string          `json:"useId"`
+	Kind    string          `json:"kind"`
+	At      int64           `json:"at"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 // transcriptOther is a row other than a command's own that its change set
@@ -246,11 +268,12 @@ func sqlType(db *rulestest.DB, column rules.Column) string {
 
 // usesOf is the uses of a type of a table across its versions, each with
 // the owned columns the layout rule gives it, its declared operations and
-// its declared sub-tables, and whether a use's behavior arms deadlines.
-func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, table string) ([]rules.Use, bool) {
+// its declared sub-tables, whether a use's behavior arms deadlines, and
+// whether one declares events (D104).
+func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, table string) ([]rules.Use, bool, bool) {
 	t.Helper()
 	var uses []rules.Use
-	arms := false
+	arms, emits := false, false
 	seen := map[string]bool{}
 	for _, version := range typ.Versions {
 		for _, use := range version.Uses {
@@ -278,6 +301,7 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, 
 			}
 			out := rules.Use{ID: id, Behavior: use.Behavior, Member: member, Anchor: anchor, Fields: []rules.OwnedField{}, Operations: []rules.Operation{}}
 			arms = arms || declaration.ArmsDeadlines
+			emits = emits || len(declaration.Events) > 0
 			for _, declared := range declaration.Tables {
 				sub := rules.SubTable{
 					Name:   declared.Name,
@@ -327,7 +351,7 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, 
 			uses = append(uses, out)
 		}
 	}
-	return uses, arms
+	return uses, arms, emits
 }
 
 // mismatch is a step that answered otherwise than the transcript.
@@ -402,10 +426,13 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 					for _, field := range typ.Fields {
 						table.Own = append(table.Own, rules.Column{Field: field.Name, Column: field.Name, Type: irType(field.Type)})
 					}
-					uses, arms := usesOf(t, declarations, *typ, name)
+					uses, arms, emits := usesOf(t, declarations, *typ, name)
 					table.Uses = uses
 					if arms {
 						table.Deadlines = &rules.Deadlines{Queue: typeName + "Deadline", Table: name + "_deadline_queue", RowKey: "row_key", Use: "use_id", Name: "name", At: "at", Payload: "payload"}
+					}
+					if emits {
+						table.Events = &rules.Events{Queue: typeName + "Event", Table: name + "_event_queue", RowKey: "row_key", Use: "use_id", Kind: "kind", At: "at", Payload: "payload"}
 					}
 					if len(typ.Versions) > 0 {
 						table.Spec = typ.Versions[0]
@@ -481,6 +508,11 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 				}
 				if table.Deadlines != nil {
 					for _, ddl := range db.DeadlineQueue(table.Deadlines.Table, db.ColumnTypes().Text) {
+						db.Exec(t, ddl)
+					}
+				}
+				if table.Events != nil {
+					for _, ddl := range db.EventQueue(table.Events.Table, db.ColumnTypes().Text) {
 						db.Exec(t, ddl)
 					}
 				}
@@ -648,6 +680,9 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 						others = othersOf(t, db, layout, result.Changes, step.Type, rowKey)
 					}
 					compare(step, "others", step.Expect.Others, others)
+					for _, each := range eventsOf(t, db, layout, step.Expect.Events) {
+						compare(step, "events of "+each.typeName, each.expected, each.actual)
+					}
 				default:
 					t.Fatalf("step %d: a step of kind %q", step.Step, step.Kind)
 				}
@@ -742,6 +777,71 @@ func othersOf(t *testing.T, db *rulestest.DB, layout *rules.Layout, changes rule
 		return nil
 	}
 	return jsonOf(t, others)
+}
+
+// typeEvents are one type's events a step's expect holds and those its
+// event queue held after the step, each as JSON, nil for none.
+type typeEvents struct {
+	typeName         string
+	expected, actual json.RawMessage
+}
+
+// eventsOf reads, after a command, the event queue of each type of the
+// layout that keeps one (D104), in the order written, deletes the messages
+// read, and pairs each type's events with those expected of it, in the
+// expect's order, by type in code point order: a queue holding an event
+// the expect lacks, or lacking one it holds, is a mismatch.
+func eventsOf(t *testing.T, db *rulestest.DB, layout *rules.Layout, expected []transcriptEvent) []typeEvents {
+	t.Helper()
+	byType := map[string][]transcriptEvent{}
+	for _, event := range expected {
+		byType[event.Type] = append(byType[event.Type], event)
+	}
+	read := map[string][]transcriptEvent{}
+	ctx := context.Background()
+	for typeName, table := range layout.Types {
+		if table.Events == nil {
+			continue
+		}
+		err := db.InTx(ctx, func(tx *rulestest.Tx) error {
+			queued, err := rules.ReadQueuedEvents(ctx, rules.Host{Layout: layout, Store: tx.Store()}, typeName)
+			if err != nil {
+				return err
+			}
+			for _, event := range queued {
+				read[typeName] = append(read[typeName], transcriptEvent{Type: typeName, Key: event.Key, UseID: event.UseID, Kind: event.Kind, At: event.At, Payload: event.Payload})
+			}
+			_, err = tx.Exec(ctx, fmt.Sprintf(`DELETE FROM "%s"`, table.Events.Table))
+			return err
+		})
+		if err != nil {
+			t.Fatalf("read %s's event queue back: %v", typeName, err)
+		}
+	}
+	names := map[string]bool{}
+	for name := range byType {
+		names[name] = true
+	}
+	for name := range read {
+		names[name] = true
+	}
+	sorted := make([]string, 0, len(names))
+	for name := range names {
+		sorted = append(sorted, name)
+	}
+	sort.Strings(sorted)
+	var out []typeEvents
+	for _, name := range sorted {
+		each := typeEvents{typeName: name}
+		if len(byType[name]) > 0 {
+			each.expected = jsonOf(t, byType[name])
+		}
+		if len(read[name]) > 0 {
+			each.actual = jsonOf(t, read[name])
+		}
+		out = append(out, each)
+	}
+	return out
 }
 
 // rawValue is a raw step's value as the dialect binds its column.

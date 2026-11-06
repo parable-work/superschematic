@@ -178,14 +178,20 @@ type BehaviorWorkerInfo struct {
 	Table string
 
 	// Queues are the table's behavior queues, deadlines first: its deadline
-	// queue (TicketDeadline) and its change queue (TicketChange), each when
-	// the table has it.
+	// queue (TicketDeadline), its change queue (TicketChange) and its event
+	// queue (ProblemEvent, D104), each when the table has it.
 	Queues []string
 
 	// DeadlineQueue is the deadline queue, "" when its behaviors arm none;
 	// ChangeQueue the change queue, "" when nothing hears its writes.
 	DeadlineQueue string
 	ChangeQueue   string
+
+	// EventQueue is the event queue (ProblemEvent), "" when the table's
+	// behaviors emit none; Events are the events it carries, each handed to
+	// a method of the API's Workers (ir.Worker.Events, D104).
+	EventQueue string
+	Events     []ir.BehaviorWorkerEvent
 
 	// Subject is the subject the worker's commands run as,
 	// ir.BehaviorWorkerSubject(api, worker).
@@ -209,13 +215,14 @@ type BehaviorWorkerInfo struct {
 
 // BehaviorWorkerOf is what the @behaviorWorker w of the API schema runs
 // (D103): its table's queues as the loader filled them (w.Queues, else
-// w.Queue), each named a deadline or a change queue by its table
-// (behaviorlayout.DeadlineQueueTypeName, ChangeQueueTypeName, whose rule
-// behaviorQueueName repeats, since the registry imports apigen), the subject
-// and permissions its commands run with, and from its database among deps
-// the behaviors that arm, hear and listen. Nil for a worker that is no
-// behavior worker. apigen, tsrestgen and rustrestgen build their worker
-// info with it.
+// w.Queue), each named a deadline, a change or an event queue by its table
+// (behaviorlayout.DeadlineQueueTypeName, ChangeQueueTypeName,
+// EventQueueTypeName, whose rule behaviorQueueName repeats, since the
+// registry imports apigen), the events its event queue carries (w.Events,
+// D104), the subject and permissions its commands run with, and from its
+// database among deps the behaviors that arm, hear and listen. Nil for a
+// worker that is no behavior worker. apigen, tsrestgen and rustrestgen
+// build their worker info with it.
 func BehaviorWorkerOf(schema *ir.Schema, deps map[string]*ir.Schema, w *ir.Worker) *BehaviorWorkerInfo {
 	if w == nil || w.BehaviorWorker == nil {
 		return nil
@@ -224,6 +231,7 @@ func BehaviorWorkerOf(schema *ir.Schema, deps map[string]*ir.Schema, w *ir.Worke
 	info := &BehaviorWorkerInfo{
 		Table:       bw.Type,
 		Queues:      slices.Clone(w.Queues),
+		Events:      slices.Clone(w.Events),
 		Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
 		Permissions: slices.Clone(bw.Permissions),
 	}
@@ -236,6 +244,8 @@ func BehaviorWorkerOf(schema *ir.Schema, deps map[string]*ir.Schema, w *ir.Worke
 			info.DeadlineQueue = queue
 		case behaviorQueueName(bw.Type, ir.BehaviorQueueChanges):
 			info.ChangeQueue = queue
+		case behaviorQueueName(bw.Type, ir.BehaviorQueueEvents):
+			info.EventQueue = queue
 		}
 	}
 	info.Behaviors = ArmingBehaviors(schema, deps, bw.Type)
@@ -250,24 +260,53 @@ func BehaviorWorkerOf(schema *ir.Schema, deps map[string]*ir.Schema, w *ir.Worke
 
 // behaviorQueueName is the name of the behavior queue of kind the loader
 // adds for table (D103): behaviorlayout.DeadlineQueueTypeName's
-// TicketDeadline, ChangeQueueTypeName's TicketChange.
+// TicketDeadline, ChangeQueueTypeName's TicketChange, EventQueueTypeName's
+// ProblemEvent (D104).
 func behaviorQueueName(table, kind string) string {
-	if kind == ir.BehaviorQueueChanges {
+	switch kind {
+	case ir.BehaviorQueueChanges:
 		return table + "Change"
+	case ir.BehaviorQueueEvents:
+		return table + "Event"
 	}
 	return table + "Deadline"
 }
 
+// Emits reports whether the worker's table's behaviors emit events (D104),
+// each of which its event queue hands to a method of the API's Workers.
+func (b *BehaviorWorkerInfo) Emits() bool { return len(b.Events) > 0 }
+
 // Runs names what the worker runs for a generator's refusal: Deadlines()
-// alone, "<Table>'s changes" alone, or "<Table>'s deadlines and changes".
+// alone, "<Table>'s changes" alone, "<Table>'s deadlines and changes", or,
+// with the events of a table whose behaviors emit them (D104), the parts
+// it has joined as a list ("<Table>'s deadlines, changes and events").
 func (b *BehaviorWorkerInfo) Runs() string {
-	switch {
-	case b.ChangeQueue == "":
-		return b.Deadlines()
-	case b.DeadlineQueue == "":
-		return b.Table + "'s changes"
+	if b.EventQueue == "" {
+		switch {
+		case b.ChangeQueue == "":
+			return b.Deadlines()
+		case b.DeadlineQueue == "":
+			return b.Table + "'s changes"
+		}
+		return b.Table + "'s deadlines and changes"
 	}
-	return b.Table + "'s deadlines and changes"
+	var parts []string
+	if b.DeadlineQueue != "" {
+		parts = append(parts, "deadlines")
+	}
+	if b.ChangeQueue != "" {
+		parts = append(parts, "changes")
+	}
+	parts = append(parts, "events")
+	return b.Table + "'s " + listed(parts)
+}
+
+// listed joins parts as a list: "a", "a and b", "a, b and c".
+func listed(parts []string) string {
+	if len(parts) < 2 {
+		return strings.Join(parts, "")
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 }
 
 // Deadlines names the deadlines the worker runs for a generator's
@@ -335,6 +374,18 @@ func (w WorkerInfo) QueuesDoc(database string) string {
 	if w.Behavior == nil {
 		return ""
 	}
+	if w.Behavior.Emits() {
+		var kinds []string
+		if w.Behavior.DeadlineQueue != "" {
+			kinds = append(kinds, "deadlines")
+		}
+		if w.Behavior.ChangeQueue != "" {
+			kinds = append(kinds, "changes")
+		}
+		kinds = append(kinds, "events")
+		return wrapComment("", fmt.Sprintf("%s are the queues of the behavior worker %s (D103, D104): %s's %s's %s, each claimed as it falls due and run through the behaviors' core as the worker, %s, in one transaction with its message's completion, and each event handed in that transaction to the method of workers its use and kind name (%s). Its main runs them with worker.RunAll; logger, nil for none, logs a message spent with nothing run: its claim lost, its row gone, or its fire vetoed and released.",
+			w.QueuesFunc(), w.Name, database, w.Behavior.Table, listed(kinds), w.Behavior.Subject, w.EventFunc()))
+	}
 	kinds := "deadlines"
 	switch {
 	case w.Behavior.ChangeQueue != "" && w.Behavior.DeadlineQueue != "":
@@ -344,17 +395,95 @@ func (w WorkerInfo) QueuesDoc(database string) string {
 	}
 	text := fmt.Sprintf("%s are the queues of the behavior worker %s (D103): %s's %s's %s, each claimed as it falls due and run through the behaviors' core as the worker, %s, in one transaction with its message's completion. Its main runs them with worker.RunAll; logger, nil for none, logs a message spent with nothing run: its claim lost, its row gone, or its fire vetoed and released.",
 		w.QueuesFunc(), w.Name, database, w.Behavior.Table, kinds, w.Behavior.Subject)
+	return wrapComment("", text)
+}
+
+// wrapComment is text as a doc comment at indent, wrapped as gofmt keeps
+// it, each line at most 78 columns of words past its indent.
+func wrapComment(indent, text string) string {
 	var lines []string
-	line := "//"
+	line := indent + "//"
 	for _, word := range strings.Fields(text) {
-		if len(line)+1+len(word) > 78 && line != "//" {
+		if len(line)-len(indent)+1+len(word) > 78 && line != indent+"//" {
 			lines = append(lines, line)
-			line = "//"
+			line = indent + "//"
 		}
 		line += " " + word
 	}
 	return strings.Join(append(lines, line), "\n")
 }
+
+// EventFunc is the function behaviors.go holds that hands an event of a
+// behavior worker's event queue to the Workers method of its use and kind
+// (D104): problemWakeUpsEvent.
+func (w WorkerInfo) EventFunc() string {
+	return goutil.GoPrivateIdentifier(w.Name) + "Event"
+}
+
+// EventFuncDoc is the doc comment of a behavior worker's EventFunc,
+// wrapped as gofmt keeps it.
+func (w WorkerInfo) EventFuncDoc() string {
+	if w.Behavior == nil {
+		return ""
+	}
+	return wrapComment("", fmt.Sprintf("%s hands an event of %s's event queue to the Workers method of its use and kind (D104), its payload read as the method's type through encoding/json. An event no method takes fails its message, which is dead after its retries, for an operator.",
+		w.EventFunc(), w.Behavior.Table))
+}
+
+// EventField is the Go field of a message of a behavior worker's event
+// queue that holds the member of the field name (behaviorlayout's
+// EventRowKeyField, ...), as typegen names a queue message's fields.
+func (w WorkerInfo) EventField(name string) string {
+	return codegen.ToPascalCase(name)
+}
+
+// WorkerEventInfo is a method of the API's Workers that handles an event a
+// behavior worker's table's behaviors emit (D104): the worker, its table,
+// its event queue and the subject it runs as, and the event as the loader
+// names it (ir.BehaviorWorkerEvent): its use, member, behavior, kind,
+// method and the API types of the event and its payload.
+type WorkerEventInfo struct {
+	Worker  string
+	Table   string
+	Queue   string
+	Subject string
+	ir.BehaviorWorkerEvent
+}
+
+// Doc is the doc comment of the event's Workers method, indented in the
+// interface, wrapped as gofmt keeps it.
+func (e WorkerEventInfo) Doc() string {
+	return wrapComment("\t", fmt.Sprintf("%s handles an event %s of %s's %s, which the behavior worker %s claims from the queue %s: tx is the transaction its completion commits in, and ctx names the worker as the behavior caller (orm.WithBehaviorCaller), so the repositories' operations run as %s. The event is done when it returns nil; an error, or a panic, fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it: a method is idempotent by the row's key and what the payload says makes it so.",
+		e.Method, e.Kind, e.Table, e.Use, e.Worker, e.Queue, e.Subject))
+}
+
+// WorkerEvents are the events the API's behavior workers hand to methods
+// of its Workers (D104), worker by worker in name order, each worker's in
+// the order the loader listed them.
+func (o *APIOutput) WorkerEvents() []WorkerEventInfo {
+	var out []WorkerEventInfo
+	for _, w := range o.BehaviorWorkers() {
+		for _, event := range w.Behavior.Events {
+			out = append(out, WorkerEventInfo{Worker: w.Name, Table: w.Behavior.Table, Queue: w.Behavior.EventQueue, Subject: w.Behavior.Subject, BehaviorWorkerEvent: event})
+		}
+	}
+	return out
+}
+
+// WorkersDoc is the doc comment of Workers when a behavior worker of the
+// API hands events to its methods (D104), wrapped as gofmt keeps it.
+func (o *APIOutput) WorkersDoc() string {
+	return wrapComment("", fmt.Sprintf("Workers are the workers of %s: a method per @worker class, each of which handles one message of its queue, and a method per event its behavior workers' tables' behaviors emit (D104), which the behavior worker hands it in the transaction the event's completion commits in. A worker's entrypoint calls its method once per message it claims, with a context that ends when the worker stops and its grace is over. The message is done when the method returns nil; an error, or a panic, fails it, and the queue retries it after its backoff until its retries are spent. A message may come again after a worker dies holding it, so a method is idempotent.", o.SchemaName))
+}
+
+// HasWorkerEvents reports whether a behavior worker of the API hands
+// events to methods of its Workers (D104).
+func (o *APIOutput) HasWorkerEvents() bool { return len(o.WorkerEvents()) > 0 }
+
+// HasOrdinaryWorkers reports whether the API declares a @worker, each a
+// method of Workers that handles a message of a queue of its database,
+// whose Go types deps.go and the scaffold import.
+func (o *APIOutput) HasOrdinaryWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
 
 // OrdinaryWorkers are the API's @worker workers, each a method of the
 // generated Workers interface; a behavior worker is none (D103).
@@ -380,10 +509,14 @@ func (o *APIOutput) BehaviorWorkers() []WorkerInfo {
 	return out
 }
 
-// HasWorkers reports whether the API declares a @worker, for which deps.go
-// declares Workers and WorkersConstructor. A behavior worker is not one:
-// its handler is generated (D103).
-func (o *APIOutput) HasWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
+// HasWorkers reports whether deps.go declares Workers and
+// WorkersConstructor: the API declares a @worker, or a @behaviorWorker
+// whose table's behaviors emit events, each handed to a method of Workers
+// (D104). A behavior worker's deadline and change handlers are generated
+// and are no methods of it (D103).
+func (o *APIOutput) HasWorkers() bool {
+	return o.HasOrdinaryWorkers() || o.HasWorkerEvents()
+}
 
 // HasBehaviorWorkers reports whether the API declares a @behaviorWorker
 // (D103), whose queues behaviors.go writes.

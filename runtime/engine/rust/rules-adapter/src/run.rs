@@ -14,15 +14,15 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     Action, Answer, Answered, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
-    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage, RowWrite, Step,
-    SubRow, SubRowChange, SubRowWrite, TypeSpec, ValidationIssue, WriteKind,
+    KeyedRow, LinkedRows, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage,
+    RowWrite, Step, SubRow, SubRowChange, SubRowWrite, TypeSpec, ValidationIssue, WriteKind,
 };
 
 use crate::convert::{base62, from_cell, internal, key_value, to_column, Bind, Cell, UUID_TYPES};
 use crate::host::Host;
-use crate::layout::{Changes, Column, Deadlines, Layout, SubTable, Table};
+use crate::layout::{Changes, Column, Deadlines, Events, Layout, SubTable, Table};
 use crate::{busy_refusal, CreateOptions, Error, ExecuteOptions, Executed, Owned};
-use crate::{ChangeRun, Claim, Deadline, DeadlineRun, TableChange};
+use crate::{ChangeRun, Claim, Deadline, DeadlineRun, EventRun, QueuedEvent, TableChange};
 use crate::{MAX_ATTEMPTS, MAX_ROUNDS, VETOED_RETRY_SECONDS};
 
 /// The SQL a store's statements are written in. A build with one store
@@ -1487,10 +1487,13 @@ fn fences_of<S: Store>(
 /// is refused as conflict), and a row a change command found gone, its
 /// deadlines and sub-table rows deleted unless a row of its key came back;
 /// a deadline command's spend of its arming, or a change command's of its
-/// message; the sub-table row writes; the deadlines armed and cleared;
-/// then, for each row the change set deletes, its deadlines' messages and,
-/// deleted for good, its sub-table rows, whose writes and deadlines the
-/// unit skips. Outbox events, and a kind of write the adapter does not
+/// message; the sub-table row writes; the events, each a message of its
+/// row's table's event queue with the command's time, a deleted row's
+/// among them (D104); the deadlines armed and cleared; then, for each row
+/// the change set deletes, its deadlines' messages and, deleted for good,
+/// its sub-table rows, whose writes and deadlines the unit skips, its
+/// events' messages kept for the app to hear. An event of a table the
+/// layout gives no event queue, and a kind of write the adapter does not
 /// know, refuse the command as internal.
 async fn statements_of<S: Store>(
     layout: &Layout,
@@ -1501,15 +1504,13 @@ async fn statements_of<S: Store>(
     options: &ExecuteOptions,
     spend: Option<Statement>,
 ) -> Result<Vec<Statement>, Error> {
-    if !changes.events.is_empty() {
-        return Err(internal(format!(
-            "{} of {type_name} writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)",
-            command.action.name()
-        ))
-        .into());
-    }
     let dialect = store.dialect();
     let command_key = command.action.key();
+    let events = changes
+        .events
+        .iter()
+        .map(|event| event_of(layout, dialect, type_name, command, event))
+        .collect::<Result<Vec<_>, Error>>()?;
     let mut statements = Vec::new();
     // Each row the change set deletes: its table, its key and whether it
     // is deleted for good.
@@ -1615,6 +1616,9 @@ async fn statements_of<S: Store>(
         }
         statements.extend(sub_row_of(layout, dialect, write)?);
     }
+    // The events after the sub-table rows, in the change set's order, a
+    // deleted row's too: the app may still need to hear them (D104).
+    statements.extend(events);
     for change in &changes.deadlines {
         let row = change.row();
         if gone(&row.type_name, row.key.as_deref()) {
@@ -1693,6 +1697,217 @@ fn gone_of(dialect: Dialect, table: &Table, key: &str) -> Result<Vec<Statement>,
         ));
     }
     Ok(statements)
+}
+
+/// The statement of one event of a change set (D104): a message of its
+/// row's table's event queue, the row's key bound as the table's key binds
+/// (the command's own for the row a create without an id makes), the use,
+/// the kind, the command's time and the payload's JSON text, NULL for a
+/// null payload. On Postgres its `due_at` and `created_at` are
+/// `clock_timestamp()`, statement by statement, so one transaction's
+/// events of a row keep their order in the claim, as the change trigger's
+/// do; on SQLite the table's defaults stamp them. An insert never
+/// conflicts, so it is held to no count. A row of a table the layout gives
+/// no event queue refuses the command as internal.
+fn event_of(
+    layout: &Layout,
+    dialect: Dialect,
+    type_name: &str,
+    command: &Command,
+    event: &OutboxEvent,
+) -> Result<Statement, Error> {
+    let table = table_of(layout, &event.row.type_name)?;
+    let Some(key) = event.row.key.as_deref().or(command.action.key()) else {
+        return Err(internal(format!(
+            "{} of {type_name} emits {} of {} on {}, which names no row's key",
+            command.action.name(),
+            event.kind,
+            event.use_id,
+            table.type_name
+        ))
+        .into());
+    };
+    let Some(queue) = &table.events else {
+        return Err(internal(format!(
+            "{} of {type_name} emits {} of {} on {} {key}, and {}'s table {} keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)",
+            command.action.name(),
+            event.kind,
+            event.use_id,
+            table.type_name,
+            table.type_name,
+            table.table
+        ))
+        .into());
+    };
+    let payload = match &event.payload {
+        Value::Null => Bind::Null,
+        payload => Bind::Text(json_of(payload)),
+    };
+    let values = vec![
+        key_value(table, key)?,
+        Bind::Text(event.use_id.clone()),
+        Bind::Text(event.kind.clone()),
+        Bind::Int(command.now),
+        payload,
+    ];
+    let columns = [
+        &queue.row_key,
+        &queue.use_id,
+        &queue.kind,
+        &queue.at,
+        &queue.payload,
+    ]
+    .map(|column| quote(column))
+    .join(", ");
+    let text = match dialect {
+        Dialect::Postgres => format!(
+            "INSERT INTO {} ({columns}, \"due_at\", \"created_at\") VALUES ($1, $2, $3, $4, $5::jsonb, clock_timestamp(), clock_timestamp())",
+            quote(&queue.table)
+        ),
+        Dialect::Sqlite => format!(
+            "INSERT INTO {} ({columns}) VALUES (?1, ?2, ?3, ?4, ?5)",
+            quote(&queue.table)
+        ),
+    };
+    Ok(Statement::any(text, values))
+}
+
+/// The event queue of a type's table a worker's claim spends, or an
+/// internal refusal for a table the layout gives none.
+fn events_of<'t>(table: &'t Table, what: &str) -> Result<&'t Events, Error> {
+    table.events.as_ref().ok_or_else(|| {
+        internal(format!(
+            "{what} of {type_name}'s event queue, and the behaviors' layout gives {type_name} no event queue (D104)",
+            type_name = table.type_name
+        ))
+        .into()
+    })
+}
+
+/// Spends a worker's claim of a message of a type's event queue in the
+/// store's transaction (D104): the claimed message deleted by its id and
+/// its claim's token, which must delete one row, or nothing spent when the
+/// claim no longer holds it ([`EventRun::ClaimLost`]). Without a claim
+/// nothing is spent, and the handler runs. A type the layout lacks, or
+/// whose table keeps no event queue, is refused as internal.
+pub(crate) async fn spend_event<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    claim: Option<&Claim>,
+) -> Result<EventRun, Error> {
+    let table = table_of(host.layout, type_name)?;
+    let queue = events_of(table, "a claim spends a message")?;
+    let Some(claim) = claim else {
+        return Ok(EventRun::Spent);
+    };
+    let spend = Statement::write(
+        format!(
+            "DELETE FROM {} WHERE {}",
+            quote(&queue.table),
+            claimed_where(store.dialect())
+        ),
+        vec![
+            Bind::Text(claim.id.clone()),
+            Bind::Text(claim.token.clone()),
+        ],
+    );
+    Ok(if store.apply(&[spend]).await? {
+        EventRun::Spent
+    } else {
+        EventRun::ClaimLost
+    })
+}
+
+/// Every message of a type's event queue in the order written (D104): its
+/// `created_at`, then its `id` on Postgres and its rowid on SQLite; each
+/// its row's key in the core's form, the use, the kind, the command's time
+/// and the payload, parsed. None for a type the layout lacks or whose
+/// table keeps no event queue.
+pub(crate) async fn read_queued_events<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+) -> Result<Vec<QueuedEvent>, Error> {
+    let Some(table) = host.layout.table(type_name) else {
+        return Ok(Vec::new());
+    };
+    let Some(queue) = &table.events else {
+        return Ok(Vec::new());
+    };
+    let dialect = store.dialect();
+    let list = [
+        &queue.row_key,
+        &queue.use_id,
+        &queue.kind,
+        &queue.at,
+        &queue.payload,
+    ]
+    .map(|column| selected(dialect, column))
+    .join(", ");
+    // SQLite stamps one command's events with one millisecond, so its
+    // rowid, the order they were inserted in, breaks the tie there.
+    let tie = match dialect {
+        Dialect::Postgres => "\"id\"",
+        Dialect::Sqlite => "rowid",
+    };
+    let text = format!(
+        "SELECT {list} FROM {} ORDER BY \"created_at\", {tie}",
+        quote(&queue.table)
+    );
+    let mut events = Vec::new();
+    for row in store.query(&text, &[]).await? {
+        let mut cells = row.into_iter();
+        let mut next = || cells.next().unwrap_or(Cell::Null);
+        let key = match from_cell(next(), &table.key, table)? {
+            Some(Value::String(key)) => key,
+            Some(other) => other.to_string(),
+            None => {
+                return Err(internal(format!(
+                    "a message of {type_name}'s event queue names no row's key"
+                ))
+                .into())
+            }
+        };
+        let text_of = |cell: Cell, what: &str| match cell {
+            Cell::Text(text) => Ok(text),
+            Cell::Json(Value::String(text)) => Ok(text),
+            other => Err(internal(format!(
+                "a message of {type_name}'s event queue holds a {what} that is no text: {other:?}"
+            ))),
+        };
+        let use_id = text_of(next(), "use")?;
+        let kind = text_of(next(), "kind")?;
+        let at_cell = next();
+        let at = integer_of(&at_cell).ok_or_else(|| {
+            internal(format!(
+                "a message of {type_name}'s event queue holds a time that is no integer: {at_cell:?}"
+            ))
+        })?;
+        let payload = match next() {
+            Cell::Null => Value::Null,
+            Cell::Json(value) => value,
+            Cell::Text(text) => serde_json::from_str(&text).map_err(|error| {
+                internal(format!(
+                    "a message of {type_name}'s event queue holds a payload that is no JSON: {error}"
+                ))
+            })?,
+            other => {
+                return Err(internal(format!(
+                    "a message of {type_name}'s event queue holds a payload that is no JSON: {other:?}"
+                ))
+                .into())
+            }
+        };
+        events.push(QueuedEvent {
+            key,
+            use_id,
+            kind,
+            at,
+            payload,
+        });
+    }
+    Ok(events)
 }
 
 /// The statement of one sub-table row write, each expecting one row: an

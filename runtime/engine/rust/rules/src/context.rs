@@ -3,7 +3,7 @@
 //! caller, the time, whether the caller holds a permission, and reads. A
 //! [`Cx`] is an initializer's, a handler's, a deadline's and an
 //! after-change hook's: a view that also sets the use's owned fields,
-//! writes its sub-table rows, emits outbox events, arms and clears its
+//! writes its sub-table rows, emits events about its row, arms and clears its
 //! deadlines, makes keys, calls an operation of a use of its row or of
 //! another row, and creates rows. A [`ConfigCx`] is a config change's,
 //! which reads alone.
@@ -448,13 +448,30 @@ impl<'r, C> Cx<'r, C> {
         Ok(())
     }
 
-    /// Emits an outbox event of the use's, about its row.
+    /// Emits an event of the use's about its row (D104), which the host
+    /// writes to the event queue of the row's table in the change set's
+    /// transaction, with the command's time, and a worker of the API hands
+    /// to the project's handler. A kind the behavior's declaration does not
+    /// list ([`crate::Declaration::events`]) is a defect, as an undeclared veto
+    /// code is; the payload is the behavior's to hold to the kind's
+    /// payloadSchema, which the core does not run.
     pub fn emit(&self, kind: &str, payload: Value) -> Hook<()> {
         self.writing(&format!("emit({kind})"))?;
         if kind.is_empty() {
             return Err(self.defect("emit takes a kind: a non-empty string"));
         }
         let view = &self.view;
+        let declaration = view.run.declaration(view.frame, view.index);
+        if !declaration.has_event(kind) {
+            let events = if declaration.events.is_empty() {
+                "none".to_owned()
+            } else {
+                declaration.events.join(", ")
+            };
+            return Err(self.defect(format!(
+                "emit({kind}): it declares no event {kind} (its events: {events})"
+            )));
+        }
         view.run.pending.borrow_mut().events.push(OutboxEvent {
             row: view.frame.row_ref(),
             kind: kind.to_owned(),

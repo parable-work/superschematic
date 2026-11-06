@@ -8,6 +8,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The behavior operations of a Rust API (D103): the operations the loader
@@ -294,6 +295,10 @@ func (o *APIOutput) BehaviorUses() []string {
 		if o.HasChangeQueues() {
 			adapter = append(adapter, "TableChange")
 		}
+		// EventRun's operation answers the adapter's Error (D104).
+		if o.EmitsEvents() && !o.HasBehaviorOperations() {
+			adapter = append(adapter, "Error", "Refusal")
+		}
 		runtime = append(runtime, "BoxError")
 		for _, w := range o.BehaviorWorkers {
 			for _, q := range w.BehaviorQueues {
@@ -301,9 +306,14 @@ func (o *APIOutput) BehaviorUses() []string {
 			}
 		}
 	}
+	pool := "use " + o.RuntimeCrateIdent + "::postgres::Pool;"
+	if o.EmitsEvents() {
+		// EventRun holds a transaction of the pool (D104).
+		pool = rustutil.UseLine(o.RuntimeCrateIdent+"::postgres", []string{"tokio_postgres", "Pool"})
+	}
 	uses := []string{
 		rustutil.UseLine(strings.ReplaceAll(RulesAdapterCrate, "-", "_"), adapter),
-		"use " + o.RuntimeCrateIdent + "::postgres::Pool;",
+		pool,
 	}
 	if len(o.BehaviorWorkers) > 0 {
 		uses = append(uses,
@@ -399,9 +409,12 @@ func (w WorkerInfo) ModuleDoc(schemaName, database string) string {
 	for _, q := range w.BehaviorQueues {
 		queues = append(queues, q.Queue)
 		handlers = append(handlers, "`"+q.Func+"` with `"+q.Handler+"`")
-		if q.Changes() {
+		switch {
+		case q.Changes():
 			runs = append(runs, "the writes of its rows "+w.hearers()+" hear")
-		} else {
+		case q.Events():
+			runs = append(runs, "the events "+w.emitters()+" about its rows")
+		default:
 			runs = append(runs, "its deadlines")
 		}
 	}
@@ -413,9 +426,44 @@ func (w WorkerInfo) ModuleDoc(schemaName, database string) string {
 	if len(handlers) > 1 {
 		handler = "the handlers"
 	}
+	if w.Behavior.EventQueue != "" {
+		// An emitting table's events reach the project's Workers (D104).
+		text := fmt.Sprintf("The behavior worker %s of %s (D103, D104): %s's behavior queues, %s, each message claimed from %s's %s as it falls due and run on a transaction of the pool, as the worker, its message completed in the same commit: a deadline or a change through the behaviors' core by superschematic-rules-adapter, and an event handed to the Workers method of its use and kind, %s, which the implementation writes. Its main runs %s as %s in the HTTP runtime's claim loop.",
+			w.Name, schemaName, w.Behavior.Table, andList(runs), database, queue, andList(w.eventMethods()), andList(handlers), handler)
+		return docLines("//!", text, 80)
+	}
 	text := fmt.Sprintf("The behavior worker %s of %s (D103): %s's behavior queues, %s, each message claimed from %s's %s as it falls due and run through the behaviors' core by superschematic-rules-adapter on a transaction of the pool, as the worker, its message completed in the same commit. Its main runs %s as %s in the HTTP runtime's claim loop; no implementation method serves it.",
 		w.Name, schemaName, w.Behavior.Table, andList(runs), database, queue, andList(handlers), handler)
 	return docLines("//!", text, 80)
+}
+
+// eventMethods are the Workers methods the worker's events go to, each in
+// backticks (D104).
+func (w WorkerInfo) eventMethods() []string {
+	var methods []string
+	for _, h := range w.EventHandlers() {
+		methods = append(methods, "`"+h.Fn+"`")
+	}
+	return methods
+}
+
+// emitters names whose behaviors emit the events of the worker's table,
+// with the verb (D104): its uses' behaviors that declare events, each once
+// ("Schedules emits", "Schedules and Pool emit").
+func (w WorkerInfo) emitters() string {
+	var behaviors []string
+	for _, h := range w.EventHandlers() {
+		if !slices.Contains(behaviors, h.Behavior) {
+			behaviors = append(behaviors, h.Behavior)
+		}
+	}
+	switch len(behaviors) {
+	case 0:
+		return "its behaviors emit"
+	case 1:
+		return behaviors[0] + " emits"
+	}
+	return andList(behaviors) + " emit"
 }
 
 // hearers names whose behaviors hear the writes of the worker's table:
@@ -462,24 +510,13 @@ func docLines(prefix, text string, width int) string {
 // HasDeadlineQueues reports whether a behavior worker runs a table's
 // deadline queue, whose messages src/behaviors.rs reads with deadline_of.
 func (o *APIOutput) HasDeadlineQueues() bool {
-	return o.hasBehaviorQueue(false)
+	return o.hasQueueOfKind(ir.BehaviorQueueDeadlines)
 }
 
 // HasChangeQueues reports whether a behavior worker runs a table's change
 // queue, whose messages src/behaviors.rs reads with change_of (D103).
 func (o *APIOutput) HasChangeQueues() bool {
-	return o.hasBehaviorQueue(true)
-}
-
-func (o *APIOutput) hasBehaviorQueue(changes bool) bool {
-	for _, w := range o.BehaviorWorkers {
-		for _, q := range w.BehaviorQueues {
-			if q.Changes() == changes {
-				return true
-			}
-		}
-	}
-	return false
+	return o.hasQueueOfKind(ir.BehaviorQueueChanges)
 }
 
 // FuncSignature is the signature of the function that opens the queue,

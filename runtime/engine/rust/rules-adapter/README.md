@@ -150,9 +150,14 @@ brief:
    change command found gone (`RowWrite::Gone`) is applied in the row
    writes' place with two `NOT EXISTS` deletes: its deadline messages
    unless a live row of the key exists, then its sub-table rows unless any
-   row of the key does. An outbox event of a behavior's own is `internal`:
-   a table's change queue holds its writes, and the event stream comes
-   later (D103).
+   row of the key does. A change set's events (`Cx::emit`, D104) are
+   written to their row's table's event queue (the layout's `events`) in
+   the unit, after the sub-table rows and before the deadline changes, in
+   the change set's order, each with the command's time and its payload's
+   JSON, a deleted row's kept; on Postgres each insert's `due_at` and
+   `created_at` are `clock_timestamp()`. An event of a table whose layout
+   keeps no event queue is `internal`, naming the command, the kind, the
+   use, the row and the table.
 
 ## Deadlines
 
@@ -212,6 +217,24 @@ guards one, and the core reads what was written. The version moves with
 every update (`@optimistic`'s trigger: `BEFORE UPDATE` on Postgres, `AFTER
 UPDATE` on SQLite), so a raw write made under a command moves the row and
 the command runs again.
+
+## Events
+
+`spend_event(host, client | conn, type, Option<&Claim>)` spends a worker's
+claim of a message of a type's event queue (D104) in the caller's
+transaction, deleting the message by its id and token (held to one row),
+and returns `EventRun::Spent` or `EventRun::ClaimLost`, whose `why()` is
+`""` or `claim lost`; without a claim nothing is spent. A type whose table
+keeps no event queue is `internal`. `read_queued_events(host, client |
+conn, type)` reads a type's queued events in the order written
+(`created_at`, then `id` on Postgres and the rowid on SQLite, whose one
+command's events share a millisecond), each a `QueuedEvent { key, use_id,
+kind, at, payload }` with the key in the core's form; a table with no
+event queue has none. The layout's `events` is `Table.events:
+Option<Events>`. A generated API's behavior worker spends each claimed
+message in a transaction of the pool and hands the event to the API's
+Workers method of its use and kind with an `EventRun` of that transaction,
+so the method's writes and the completion commit together.
 
 ## Values
 
@@ -336,9 +359,13 @@ them repeats, each compared with its row's `expect.version`, and 22
 checks), and `core-reconcile.transcript.json`, 58 steps (36 commands, two
 of them repeats and two the stale deadline, each compared with its row's
 `expect.version`, and 22 checks), whose Workflow and Reconcile are
-anchored on fields; each held to a floor of its step count, its
-`expect.others` compared on every command step and its numbers by value,
-0 mismatches each.
+anchored on fields, and `core-schedules.transcript.json`, 161 steps (131
+commands, 19 of them deadlines and 10 changes, each compared with its
+row's `expect.version`, 29 checks and one raw write), each command's
+`expect.events` compared with what `read_queued_events` reads of every
+type's event queue after it, which it then empties; each held to a floor
+of its step count, its `expect.others` compared on every command step and
+its numbers by value, 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
 schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are

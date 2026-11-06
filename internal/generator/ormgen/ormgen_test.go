@@ -56,6 +56,13 @@ const agentsFixture = "fixture-agents-db"
 // whose stale deadline it arms on its deadline queue.
 const seatsFixture = "fixture-seats-db"
 
+// schedulesFixture is the DB fixture whose Problem implements Schedules
+// beside its Workflow on status (D104): its schedules in a sub-table, its
+// wake-ups armed on its deadline queue, its writes heard through its change
+// queue, and the events its wake-ups emit, messages of its event queue,
+// which RunEvent spends in the transaction the project's handler runs in.
+const schedulesFixture = "fixture-schedules-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -74,7 +81,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -174,6 +181,11 @@ func TestWriteORMGolden(t *testing.T) {
 		// sub-table; Reconcile's observe under Observed(), its field
 		// optional, and Sandbox's deadline queue.
 		{seatsFixture, []string{"repository_problem.go", "repository_sandbox.go", "rules.go", "queues.go"}},
+		// A table of Schedules (D104): its operations under Schedules(),
+		// no repository of its sub-table, its deadline, change and event
+		// queues, and RunEvent, which spends a claimed event and runs the
+		// project's handler in one transaction.
+		{schedulesFixture, []string{"repository_problem.go", "rules.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

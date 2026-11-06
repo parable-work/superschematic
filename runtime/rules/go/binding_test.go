@@ -90,19 +90,29 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 	if transition == nil || !transition.Writes || len(transition.ParamsSchema) == 0 {
 		t.Fatalf("Workflow's transition = %+v, want an operation that writes, with its parameters' schema", transition)
 	}
-	// The core registers its behaviors in one order (D104), the two only it
-	// implements last; the second's value field is optional, its column
-	// NULL before the behavior sets it.
+	// The core registers its behaviors in one order (D104), the three only
+	// it implements last; Reconcile's value field is optional, its column
+	// NULL before the behavior sets it, and Schedules declares the one
+	// event it emits, run, whose payload's schema the declaration holds.
 	var names []string
 	for _, declaration := range declarations {
 		names = append(names, declaration.Name)
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile"}; !slices.Equal(names, want) {
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules"}; !slices.Equal(names, want) {
 		t.Fatalf("the core declares %q, want %q", names, want)
 	}
-	reconcile := declarations[len(declarations)-1]
+	reconcile := declarations[len(declarations)-2]
 	if reconcile.Value != "observed" || len(reconcile.Fields) == 0 || reconcile.Fields[0].Name != "observed" || !reconcile.Fields[0].Optional {
 		t.Fatalf("Reconcile's declaration = %+v, want its value field observed, optional", reconcile)
+	}
+	schedules := declarations[len(declarations)-1]
+	if len(schedules.Events) != 1 || schedules.Events[0].Kind != "run" || len(schedules.Events[0].PayloadSchema) == 0 {
+		t.Fatalf("Schedules' events = %+v, want the one event run, with its payload's schema", schedules.Events)
+	}
+	for _, declaration := range declarations[:len(declarations)-1] {
+		if len(declaration.Events) > 0 {
+			t.Fatalf("%s declares events %+v, and only Schedules emits any", declaration.Name, declaration.Events)
+		}
 	}
 	for _, field := range declarations[0].Fields {
 		if field.Optional {

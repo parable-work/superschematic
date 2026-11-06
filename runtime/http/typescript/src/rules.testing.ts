@@ -155,8 +155,17 @@ export function columnTypes(dialect: 'sqlite' | 'postgres'): { text: string; tim
     : { text: 'TEXT', timestamp: 'TEXT', version: 'INTEGER DEFAULT 1 NOT NULL', key: 'TEXT PRIMARY KEY', number: 'REAL', integer: 'INTEGER', boolean: 'INTEGER', json: 'TEXT' };
 }
 
-/** The @optimistic trigger sqlgen writes on Postgres, which bumps _version on every update of a table. */
-export function bumpVersion(table: string): string[] {
+/**
+ * The @optimistic trigger sqlgen writes, which bumps _version on every update
+ * of a table: on Postgres before the update, on SQLite after one that left
+ * the version where it was (a raw write's among them).
+ */
+export function bumpVersion(table: string, dialect: 'sqlite' | 'postgres' = 'postgres'): string[] {
+  if (dialect === 'sqlite') {
+    return [
+      `CREATE TRIGGER "trg_${table}_bump_version" AFTER UPDATE ON "${table}" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE "${table}" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END`,
+    ];
+  }
   return [
     `CREATE OR REPLACE FUNCTION ${table}_bump_version() RETURNS trigger AS $$
 BEGIN

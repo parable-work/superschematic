@@ -4,6 +4,7 @@ import {
   RulesRefusal,
   execute,
   readArmedDeadlines,
+  readQueuedEvents,
   readRow,
   readSubRows,
   type ArmedDeadline,
@@ -15,6 +16,7 @@ import {
   type CoreTypeSpec,
   type RulesColumn,
   type RulesDeadlines,
+  type RulesEvents,
   type RulesHost,
   type RulesLayout,
   type RulesOwnedField,
@@ -57,19 +59,29 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // only the core implements (D104), whose occupants are a sub-table of the
 // row keyed by their number, whose by names a seat, and whose Workflow and
 // Reconcile are anchored on fields, Reconcile's value column NULL before
-// the first observation and its stale deadline in the row's queue. Each
+// the first observation and its stale deadline in the row's queue; and
+// core-schedules', written by hand for Schedules (D104), whose schedules
+// are a sub-table of the row keyed by name, whose runs are deadlines of the
+// row's queue and whose every run is an event of its own, which the
+// adapter writes to the table's event queue. Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
 // and _version, and, for a use whose behavior declares tables, each
 // sub-table, and for a type whose behaviors arm deadlines, its deadline
-// queue; each check runs on the core alone, answering whether the type has
+// queue, and for one whose behaviors declare events, its event queue; each
+// check runs on the core alone, answering whether the type has
 // rows from its table; each command runs through execute in a transaction
 // over a layout of every type of its database, the command's own at the
 // version live at it and each other at the one its last publish made live,
 // its refusal compared whole and the row it names read back after it and
-// compared, its version where the step holds one, with the row's
+// compared, its version where the step holds one (a raw write moves it
+// on, through @optimistic's trigger, as the reference host's does), with
+// the row's
 // sub-table rows and armed deadlines, and each other row its change set
-// wrote (others); a deadline is a command whose
+// wrote (others), and the events it wrote, read from each event queue of
+// its database after it, compared type by type in the order written with
+// the step's events and deleted, so a step that wrote none is held to
+// leaving every queue empty (D104); a deadline is a command whose
 // action is deadline, which the adapter runs only while its arming is a
 // live message of the queue, and a change one whose action is change, the
 // write the reference host's outbox heard, with its images; and each raw
@@ -114,6 +126,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-periods-and-presence', floor: 77 },
   { file: 'core-seats', floor: 88 },
   { file: 'core-reconcile', floor: 58 },
+  { file: 'core-schedules', floor: 161 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
@@ -135,6 +148,18 @@ interface Expect {
   readonly deadlines?: ArmedDeadline[];
   /** The row's version after the step, as the reference host held it: a hand-written transcript's commands hold it (D104), a recording's never; absent after a delete. */
   readonly version?: number;
+  /** The events the command's change set wrote, in its order (D104): each its row's type and key, the use, the kind, the command's time and the payload; absent when none. */
+  readonly events?: readonly TranscriptEvent[];
+}
+
+/** An event a command wrote, as a transcript holds it (superschematic-rules-testkit's TranscriptEvent). */
+interface TranscriptEvent {
+  readonly type: string;
+  readonly key: string;
+  readonly useId: string;
+  readonly kind: string;
+  readonly at: number;
+  readonly payload: unknown;
 }
 
 type Step =
@@ -232,12 +257,14 @@ function subField(field: { name: string; type?: string }): RulesOwnedField {
  * The uses of a type across its versions, each with the owned columns the
  * layout rule gives it, its declared operations, and its sub-tables, each
  * <the type's table>_<member in snake case>_<table in snake case> with
- * <type in snake case>_id; and whether any arms deadlines.
+ * <type in snake case>_id; whether any arms deadlines; and whether any
+ * declares events (D104).
  */
-function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUse[]; armsDeadlines: boolean } {
+function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUse[]; armsDeadlines: boolean; emitsEvents: boolean } {
   const declarations = core().declarations();
   const uses = new Map<string, RulesUse>();
   let armsDeadlines = false;
+  let emitsEvents = false;
   for (const version of type.versions) {
     for (const use of version.uses ?? []) {
       const anchor = use.anchor === undefined || use.anchor === 'type' ? undefined : use.anchor.field;
@@ -246,6 +273,7 @@ function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUs
       const declaration = declarations.find(d => d.name === use.behavior);
       if (declaration === undefined) throw new Error(`the core declares no behavior ${use.behavior}`);
       armsDeadlines ||= declaration.armsDeadlines === true;
+      emitsEvents ||= (declaration.events ?? []).length > 0;
       const member = anchor ?? camelOfKey(storageKey(use.behavior));
       const fields: RulesOwnedField[] = (declaration.fields ?? [])
         .filter(field => field.type !== undefined)
@@ -270,7 +298,7 @@ function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUs
       uses.set(id, { id, behavior: use.behavior, member, ...(anchor !== undefined ? { anchor } : {}), fields, operations, ...(tables.length > 0 ? { tables } : {}) });
     }
   }
-  return { uses: [...uses.values()], armsDeadlines };
+  return { uses: [...uses.values()], armsDeadlines, emitsEvents };
 }
 
 /** SQLite's default of a UUID column, sqlmigrate's sqliteUUIDDefault: a version 4 UUID in its lowercase text. */
@@ -306,9 +334,12 @@ for (const { file, floor } of TRANSCRIPTS) {
           const tableOf = (database: string, typeName: string, spec?: CoreTypeSpec): RulesTable => {
             const type = scenario.types.find(t => t.name === typeName);
             const name = `s${index}_d${databases.indexOf(database)}_${snake(typeName)}`;
-            const { uses, armsDeadlines } = type ? usesOf(type, name) : { uses: [], armsDeadlines: false };
+            const { uses, armsDeadlines, emitsEvents } = type ? usesOf(type, name) : { uses: [], armsDeadlines: false, emitsEvents: false };
             const deadlines: RulesDeadlines | undefined = armsDeadlines
               ? { queue: `${typeName}Deadline`, table: `${name}_deadline_queue`, rowKey: 'row_key', use: 'use_id', name: 'name', at: 'at', payload: 'payload' }
+              : undefined;
+            const events: RulesEvents | undefined = emitsEvents
+              ? { queue: `${typeName}Event`, table: `${name}_event_queue`, rowKey: 'row_key', use: 'use_id', kind: 'kind', at: 'at', payload: 'payload' }
               : undefined;
             return {
               type: typeName,
@@ -318,11 +349,12 @@ for (const { file, floor } of TRANSCRIPTS) {
               own: (type?.fields ?? []).map(field => ({ field: field.name, column: field.name, type: irType(field.type) })),
               uses,
               ...(deadlines ? { deadlines } : {}),
+              ...(events ? { events } : {}),
               spec: spec ?? type?.versions[0] ?? { name: typeName, uses: [] },
             };
           };
 
-          /** The table, its uses' sub-tables and its deadline queue, created the first time a step needs them. */
+          /** The table, its uses' sub-tables, its deadline queue and its event queue, created the first time a step needs them. */
           const ensure = async (table: RulesTable): Promise<void> => {
             if (created.has(table.table)) return;
             created.add(table.table);
@@ -330,7 +362,7 @@ for (const { file, floor } of TRANSCRIPTS) {
             const t = columnTypes(db.dialect);
             const columns = [`id ${t.key}`, ...[...table.own, ...table.uses.flatMap(use => use.fields)].map(column => `"${column.column}" ${sqlType(db.dialect, column)}`), `_version ${t.version}`];
             await db.exec(`CREATE TABLE "${table.table}" (${columns.join(', ')})`);
-            if (pg) for (const ddl of bumpVersion(table.table)) await db.exec(ddl);
+            for (const ddl of bumpVersion(table.table, db.dialect)) await db.exec(ddl);
             for (const sub of table.uses.flatMap(use => use.tables ?? [])) {
               const subColumns = [
                 `"${sub.row}" ${t.text} NOT NULL REFERENCES "${table.table}" (id) ON DELETE CASCADE`,
@@ -360,6 +392,28 @@ for (const { file, floor } of TRANSCRIPTS) {
     updated_at ${now} NOT NULL
   )`);
               await db.exec(`CREATE UNIQUE INDEX "${q.table}_live" ON "${q.table}" ("${q.rowKey}", "${q.use}", "${q.name}") WHERE state IN ('ready', 'claimed')`);
+            }
+            const e = table.events;
+            if (e !== undefined) {
+              // As sqlgen writes a table's event queue (D104): a keyed,
+              // serialized queue of the D53 lifecycle.
+              const now = pg ? 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP' : "TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+              await db.exec(`CREATE TABLE "${e.table}" (
+    id ${pg ? 'UUID DEFAULT gen_random_uuid()' : `TEXT DEFAULT ${SQLITE_UUID}`} NOT NULL PRIMARY KEY,
+    "${e.rowKey}" TEXT NOT NULL,
+    "${e.use}" TEXT NOT NULL,
+    "${e.kind}" TEXT NOT NULL,
+    "${e.at}" ${t.integer} NOT NULL,
+    "${e.payload}" ${t.json},
+    state TEXT DEFAULT 'ready' NOT NULL,
+    attempts INTEGER DEFAULT 0 NOT NULL,
+    due_at ${now} NOT NULL,
+    claim_expires_at ${t.timestamp},
+    claim_token ${pg ? 'UUID' : 'TEXT'},
+    last_error TEXT,
+    created_at ${now} NOT NULL,
+    updated_at ${now} NOT NULL
+  )`);
             }
           };
 
@@ -432,7 +486,10 @@ for (const { file, floor } of TRANSCRIPTS) {
                 }
               }
               values.push(step.key);
-              compare(step, 'raw.changes', 1, await db.exec(`UPDATE "${table.table}" SET ${sets.join(', ')} WHERE id = ${p(values.length)}`, values));
+              // The rows the statement itself wrote, which RETURNING counts
+              // and SQLite's count of changes would not (it adds the
+              // @optimistic trigger's write).
+              compare(step, 'raw.changes', 1, (await db.rows(`UPDATE "${table.table}" SET ${sets.join(', ')} WHERE id = ${p(values.length)} RETURNING id`, values)).length);
               continue;
             }
             const layout = layoutOf(step.database, step.type, type.versions[step.version]!);
@@ -492,6 +549,23 @@ for (const { file, floor } of TRANSCRIPTS) {
                 compare(step, 'deadlines', step.expect.deadlines, undefined);
               }
             }
+            // The events the step wrote, each type's read from its event
+            // queue in the order written and compared with the step's of
+            // that type, then deleted, so the next step reads its own; a
+            // type whose table keeps no event queue is held to none.
+            const expected = step.expect.events ?? [];
+            for (const known of Object.values(layout.types)) {
+              const want = expected.filter(event => event.type === known.type);
+              if (known.events === undefined) {
+                if (want.length > 0) compare(step, `events of ${known.type}`, want, []);
+                continue;
+              }
+              const read = await db.transaction(store => readQueuedEvents(host(store), known.type));
+              compare(step, `events of ${known.type}`, want, read.map(event => ({ type: known.type, key: event.key, useId: event.useId, kind: event.kind, at: event.at, payload: event.payload })));
+              if (read.length > 0) await db.exec(`DELETE FROM "${known.events.table}"`);
+            }
+            const strays = expected.filter(event => layout.types[event.type] === undefined);
+            if (strays.length > 0) compare(step, 'events', strays, []);
           }
           expect(mismatches).toEqual([]);
         });

@@ -268,23 +268,31 @@ const BehaviorQueueDeadlines = "deadlines"
 // makes it, which the table's change trigger writes.
 const BehaviorQueueChanges = "changes"
 
+// BehaviorQueueEvents is the kind of the queue a table whose behaviors emit
+// events is given (D104): one message per event a behavior emits about a
+// row, written in the command's own transaction, which a behavior worker
+// hands to the project's handler.
+const BehaviorQueueEvents = "events"
+
 // BehaviorQueue marks a queue the loader adds for a table's behaviors
 // (D103): the queue of the deadlines they arm ([BehaviorQueueDeadlines]),
-// or of the writes of its rows they hear ([BehaviorQueueChanges]), which a
+// of the writes of its rows they hear ([BehaviorQueueChanges]), or of the
+// events they emit about its rows ([BehaviorQueueEvents], D104), which a
 // @behaviorWorker of an API over the table's database runs.
 type BehaviorQueue struct {
 	// Row is the table's type: Ticket.
 	Row string `json:"row" yaml:"row"`
 
-	// Kind is what the queue holds: [BehaviorQueueDeadlines] or
-	// [BehaviorQueueChanges].
+	// Kind is what the queue holds: [BehaviorQueueDeadlines],
+	// [BehaviorQueueChanges] or [BehaviorQueueEvents].
 	Kind string `json:"kind" yaml:"kind"`
 
 	// Behaviors are the behaviors of the table's uses whose messages it
 	// holds, each once in list order, which a generator's refusal of the
 	// worker that runs them names: on a deadline queue those that arm
 	// deadlines (Timers), on a change queue those that hear the table's
-	// writes (Timers, Reactions).
+	// writes (Timers, Reactions), on an event queue those that emit events
+	// (Schedules).
 	Behaviors []string `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
 
 	// HeardBy are the tables of the schema whose behaviors hear the table's

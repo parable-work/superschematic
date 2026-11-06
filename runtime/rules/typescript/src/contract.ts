@@ -239,7 +239,12 @@ export interface SubRowWrite {
   readonly change: SubRowChange;
 }
 
-/** An event a behavior emits, which the host writes to the outbox in the change set's transaction. */
+/**
+ * An event a behavior emits about a row (Cx::emit, D104), which the host
+ * writes to the event queue of its row's table in the change set's
+ * transaction: a kind the use's declaration does not list is the core's
+ * defect.
+ */
 export interface OutboxEvent {
   readonly row: RowRef;
   readonly kind: string;
@@ -294,6 +299,18 @@ export interface DeclaredOperation {
 }
 
 /**
+ * An event a behavior declares it emits about a row (D104), as its
+ * declaration file has it: its kind, which names it in its table's event
+ * queue and names the Workers method of the API that takes it, what it
+ * says, and the JSON Schema of its payload, an object schema.
+ */
+export interface DeclaredEvent {
+  readonly kind: string;
+  readonly description?: string;
+  readonly payloadSchema?: unknown;
+}
+
+/**
  * A registered behavior's declaration file, as the compiler registers it
  * (internal/registry/behaviors) and the core reads it in place: the shape
  * of registry.BehaviorDeclaration.
@@ -317,6 +334,8 @@ export interface BehaviorDeclaration {
   /** The JSON Schema of the entry a caller presents the behavior as a command's precondition (D16, D104); absent for a behavior that takes none. */
   readonly preconditionSchema?: unknown;
   readonly operations?: readonly DeclaredOperation[];
+  /** The events the behavior emits about a row (D104): a table that composes it keeps them in an event queue, which a behavior worker hands to the project's handler. Only a behavior the core alone implements declares any; absent for none. */
+  readonly events?: readonly DeclaredEvent[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;
 }

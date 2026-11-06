@@ -23,10 +23,12 @@
 use std::sync::OnceLock;
 {{ if .HasBehaviorOperations }}
 use axum::http::StatusCode;
+{{- end }}
+{{- if or .HasBehaviorOperations .EmitsEvents }}
 use serde::de::DeserializeOwned;
 {{- end }}
 use serde::Serialize;
-{{- if .HasBehaviorPreconditions }}
+{{- if or .HasBehaviorPreconditions .EmitsEvents }}
 use serde_json::{Map, Value};
 {{- else }}
 use serde_json::Value;
@@ -258,6 +260,79 @@ fn internal(err: impl std::fmt::Display) -> ApiError {
 }
 {{- end }}
 
+{{- if .EmitsEvents }}
+
+/// What an event handler of the API's Workers runs in (D104): the
+/// transaction of {{ .BehaviorDatabase }} its event's message is spent in, which
+/// commits with what the handler writes once it returns `Ok`, and the caller
+/// of the behavior worker that claimed it, as which `operation` runs a
+/// behavior operation in that transaction.
+pub struct EventRun<'a> {
+    tx: &'a tokio_postgres::Transaction<'a>,
+    caller: Caller,
+}
+
+impl EventRun<'_> {
+    /// The transaction, for the handler's own statements, which commit with
+    /// the event's completion.
+    pub fn client(&self) -> &tokio_postgres::Transaction<'_> {
+        self.tx
+    }
+
+    /// The caller the worker's commands run as.
+    pub fn caller(&self) -> &Caller {
+        &self.caller
+    }
+
+    /// Runs `operation` of the use `use_id` on the row of `type_name` whose
+    /// key is `key`, with `params`, in the transaction, as the worker, and
+    /// returns its result: the adapter's `run_operation` with the module's
+    /// core and layout. The key goes to the core in its wire form, its JSON
+    /// string. A refusal leaves the transaction going on, nothing of the
+    /// operation written.
+    pub async fn operation<K, P, R>(
+        &self,
+        type_name: &str,
+        key: &K,
+        use_id: &str,
+        operation: &str,
+        params: &P,
+    ) -> Result<R, Error>
+    where
+        K: Serialize + ?Sized,
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let key = match serde_json::to_value(key).map_err(unconverted)? {
+            Value::String(key) => key,
+            other => other.to_string(),
+        };
+        let params = serde_json::to_value(params).map_err(unconverted)?;
+        let host = Host::new(core(), layout());
+        let result = postgres::run_operation(
+            &host,
+            self.tx,
+            type_name,
+            &key,
+            use_id,
+            operation,
+            params,
+            self.caller.clone(),
+        )
+        .await?;
+        serde_json::from_value(result).map_err(unconverted)
+    }
+}
+
+/// A key, params or a result of an event handler's operation that does not
+/// convert to or from JSON, refused as the adapter refuses a defect.
+fn unconverted(err: serde_json::Error) -> Error {
+    Error::from(Refusal::internal(format!(
+        "rules: a behavior operation's value does not convert: {err}"
+    )))
+}
+{{- end }}
+
 {{- range $w := .BehaviorWorkers }}
 
 /// The caller {{ $w.Name }}'s commands run as (D103): the worker, not a user,
@@ -266,7 +341,76 @@ fn {{ $w.CallerFunc }}() -> Caller {
 {{ $w.BehaviorWorkerCaller }}
 }
 {{- range $q := $w.BehaviorQueues }}
-{{- if $q.Changes }}
+{{- if $q.Events }}
+
+/// The event queue of the behavior worker {{ $w.Name }} (D104),
+/// {{ $.BehaviorDatabase }}'s {{ $q.Queue }}, on `pool`, a pool of {{ $.BehaviorDatabase }}:
+/// a queue whose handler, `{{ $q.Handler }}`, completes each message
+/// itself, which `worker::run_worker` runs.
+{{ $q.FuncSignature }}
+    let definition = QueueDefinition::parse({{ $q.Const }})?;
+    let queue = PostgresQueue::new(pool.clone(), definition);
+    Ok(SelfCompleting::new(queue))
+}
+
+/// Spends a claimed event of {{ $w.Behavior.Table }} in a transaction of the pool and
+/// hands it to the Workers method of its use and kind, as the worker, then
+/// commits both (D104): the method's writes and the message's completion
+/// commit together or not at all. A claim lost runs nothing, which it logs;
+/// the method's error, an event no method takes and a failure of the
+/// database roll the transaction back and fail the message, which the queue
+/// retries after its backoff until its retries are spent.
+{{ $q.EventHandlerSignature }}
+    let claim = Claim {
+        id: claimed.id.clone(),
+        token: claimed.token.clone(),
+    };
+    let mut client = pool.get().await?;
+    let tx = client.transaction().await?;
+    let host = Host::new(core(), layout());
+{{ $w.SpendEventCall }}
+    if !spent.ran() {
+        tracing::info!(
+            message = claimed.id.as_str(),
+            why = spent.why(),
+            "event ran nothing"
+        );
+        return Ok(());
+    }
+    let run = EventRun {
+        tx: &tx,
+        caller: {{ $w.CallerFunc }}(),
+    };
+    {{ $w.EventDispatchFunc }}(workers, &run, &claimed.message).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Hands an event of {{ $w.Behavior.Table }}'s event queue to the Workers method of its use
+/// and kind (D104), the event read as the method's type through serde_json.
+/// An event no method takes fails its message, which is dead after its
+/// retries, for an operator.
+async fn {{ $w.EventDispatchFunc }}(
+    workers: &dyn crate::Workers,
+    run: &EventRun<'_>,
+    message: &{{ $q.Queue }},
+) -> Result<(), BoxError> {
+    let event = event_of(message)?;
+    match (event.use_id.as_str(), event.kind.as_str()) {
+{{- range $w.EventHandlers }}
+        ({{ rustString .Use }}, {{ rustString .Kind }}) => {
+            let typed = serde_json::from_value(event.event)?;
+            workers.{{ .Fn }}(typed, run).await
+        }
+{{- end }}
+        (use_id, kind) => Err(format!(
+            "behavior worker {{ $w.Name }}: no Workers method takes event {kind} of {use_id} on {{ $w.Behavior.Table }} {} (D104)",
+            event.key
+        )
+        .into()),
+    }
+}
+{{- else if $q.Changes }}
 
 /// The change queue of the behavior worker {{ $w.Name }} (D103),
 /// {{ $.BehaviorDatabase }}'s {{ $q.Queue }}, on `pool`, a pool of {{ $.BehaviorDatabase }}:
@@ -375,6 +519,58 @@ fn deadline_of<M: Serialize>(message: &M) -> Result<Deadline, BoxError> {
         name,
         at,
         payload: fields.remove("payload").unwrap_or(Value::Null),
+    })
+}
+{{- end }}
+{{- if .EmitsEvents }}
+
+/// An event a message of an event queue holds (D104): the use that emitted
+/// it, its kind, its row's key in its wire form, and the event a Workers
+/// method takes, `{ key, at, payload }`: the row's key, the time of the
+/// command that emitted it in epoch milliseconds, and what it says.
+struct EventMessage {
+    use_id: String,
+    kind: String,
+    key: String,
+    event: Value,
+}
+
+fn event_of<M: Serialize>(message: &M) -> Result<EventMessage, BoxError> {
+    let Value::Object(mut fields) = serde_json::to_value(message)? else {
+        return Err("an event's message is no object".into());
+    };
+    let mut text = |name: &str| -> Result<String, BoxError> {
+        match fields.remove(name) {
+            Some(Value::String(text)) => Ok(text),
+            Some(other) if !other.is_null() => Ok(other.to_string()),
+            _ => Err(format!("an event's message has no {name}").into()),
+        }
+    };
+    let (use_id, kind) = (text("useId")?, text("kind")?);
+    let row_key = fields
+        .remove("rowKey")
+        .filter(|key| !key.is_null())
+        .ok_or("an event's message has no rowKey")?;
+    let at = fields
+        .remove("at")
+        .filter(Value::is_number)
+        .ok_or("an event's message has no at")?;
+    let key = match &row_key {
+        Value::String(key) => key.clone(),
+        other => other.to_string(),
+    };
+    let mut event = Map::new();
+    event.insert("key".to_owned(), row_key);
+    event.insert("at".to_owned(), at);
+    event.insert(
+        "payload".to_owned(),
+        fields.remove("payload").unwrap_or(Value::Null),
+    );
+    Ok(EventMessage {
+        use_id,
+        kind,
+        key,
+        event: Value::Object(event),
     })
 }
 {{- end }}

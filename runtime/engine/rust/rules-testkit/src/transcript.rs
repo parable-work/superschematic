@@ -105,6 +105,15 @@
 //! "others": [{"type": "Project", "key": "p1", "row": {"own": {"title": "Launch"}, "owned": {"Workflow": {"status": "active", "enteredAt": 1001000}}}}]
 //! ```
 //!
+//! A command whose change set wrote events about rows (D104,
+//! `superschematic_rules::Cx::emit`) lists them in `events`, in the change
+//! set's order, each the row's type and key, the use that emitted it, its
+//! kind, the command's time and its payload; absent when it wrote none:
+//!
+//! ```json
+//! "events": [{"type": "Problem", "key": "p1", "useId": "Schedules", "kind": "run", "at": 1772323500000, "payload": {"name": "nudge", "run": 1, "attempt": 1, "kind": "after", "spec": "300000", "dueAt": 1772323500000, "firedAt": 1772323500000}}]
+//! ```
+//!
 //! A transcript written from a hand-written scenario file
 //! ([`hand_written_transcript`], `runtime/engine/testdata/rules/scenarios`,
 //! D104), which holds cases the engine recorded none of, also holds each
@@ -135,8 +144,9 @@
 //!    are `workflow_status` and `workflow_entered_at`; a hand-written file's
 //!    may be anchored on fields, `"anchor": {"field": "observed"}`, whose
 //!    value is the field's own column and whose other owned columns it
-//!    prefixes: `observed`, `observed_observed_at`), and `_version`. For
-//!    each use of any version whose behavior declares sub-tables (the
+//!    prefixes: `observed`, `observed_observed_at`), and `_version`, with
+//!    sqlgen's `@optimistic` trigger, which moves it on every update, a raw
+//!    one among them. For each use of any version whose behavior declares sub-tables (the
 //!    core's `declarations`, `tables`), create a sub-table `<the type's
 //!    table>_<member in snake case>_<table in snake case>`, the member being
 //!    the use's field, or its behavior's storage key for a type anchor
@@ -149,7 +159,11 @@
 //!    (D103), its `row_key` TEXT and its `id` with the dialect's UUID
 //!    default (Postgres `gen_random_uuid()`, SQLite the expression of
 //!    `internal/sqlmigrate/sqlite_types.go`'s `sqliteUUIDDefault`), since an
-//!    arm's insert names no `id`.
+//!    arm's insert names no `id`. When any use's behavior declares events
+//!    (`events`), create `<the type's table>_event_queue`: `id` (the
+//!    dialect's UUID default), `row_key` TEXT, `use_id` TEXT, `kind` TEXT,
+//!    `at` integer, `payload` JSON, and the D53 lifecycle columns, as the
+//!    deadline queue's.
 //! 2. Run each step in order. A `command` runs its command, as written
 //!    (its `now` and `request` too), through the host loop on the table,
 //!    with the type's `versions[version]` as the spec, and compares: the
@@ -157,7 +171,11 @@
 //!    result, a create's key, and the row the command named, read back from
 //!    the table after the step (its own and owned fields; absent after a
 //!    delete), its sub-table rows and armed deadlines, and the other rows it
-//!    wrote (`others`). A field with no
+//!    wrote (`others`). After each command, read each of the scenario's
+//!    types' event queues (readQueuedEvents), compare for each type the
+//!    list read with the step's `events` of that type, in order, delete the
+//!    messages read, and hold that no queue holds an event `events` lacks.
+//!    A field with no
 //!    value is absent in `row`, and an adapter reads a NULL column as
 //!    absent. A `deadline` command runs only while its deadline is armed at
 //!    its `at`, which the adapter reads before each run, and its unit
@@ -169,7 +187,8 @@
 //!    refusal. A `raw`
 //!    step writes the owned columns it names with SQL of the adapter's
 //!    test's own, past the host loop, as the escape hatch D103 keeps open,
-//!    and expects nothing.
+//!    and expects nothing; the trigger moves the row's version on, as the
+//!    host's raw write does, so a later step's `version` holds it.
 //! 3. A scenario's `skipped` steps are not in `steps`; they are listed with
 //!    the replayer's reasons, or the writer's for a step the replayer
 //!    checked that no adapter step maps (an `open`, a read of the host's),
@@ -185,7 +204,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use superschematic_engine_testkit::ScenarioFile;
-use superschematic_rules::{Action, Command, Core, Refusal, RowWrite, SubRow, TypeSpec};
+use superschematic_rules::{
+    Action, Command, Core, OutboxEvent, Refusal, RowWrite, SubRow, TypeSpec,
+};
 
 use crate::host::{Applied, Store, StoredRow};
 use crate::replay::replay_recording;
@@ -353,6 +374,11 @@ pub struct TranscriptExpect {
     /// absent when it was deleted); absent when none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub others: Vec<TranscriptOther>,
+    /// The events the command's change set wrote, in its order (D104): each
+    /// the row's type and key, the use, the kind, the command's time and the
+    /// payload; absent when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<TranscriptEvent>,
     /// The row's version after the step, as the host holds it: written for
     /// a hand-written transcript's commands (D104), whose repeats are held
     /// to writing nothing; absent in a recording's, and after a delete.
@@ -371,6 +397,22 @@ pub struct TranscriptOther {
     /// The row after the step; absent when the step deleted it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row: Option<TranscriptRow>,
+}
+
+/// An event a command's change set wrote to its row's table's event queue
+/// (D104): the row's type and key, the use that emitted it, its kind, the
+/// command's time in epoch milliseconds, and its payload.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptEvent {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    pub key: String,
+    pub use_id: String,
+    pub kind: String,
+    pub at: i64,
+    #[serde(default)]
+    pub payload: Value,
 }
 
 /// A deadline armed on a row: its use, its name, the time it falls due,
@@ -779,6 +821,7 @@ impl Recorded {
                 sub_rows,
                 deadlines,
                 others: others_of(type_name, &applied.key, &applied.changes.rows, store),
+                events: events_of(&applied.key, &command, &applied.changes.events),
                 version: row_version,
             },
         };
@@ -840,6 +883,23 @@ fn others_of(type_name: &str, key: &str, rows: &[RowWrite], store: &Store) -> Ve
         });
     }
     others
+}
+
+// events_of is the events a change set wrote, in its order, each with the
+// command's time; a row with no key is the command's own create's, whose
+// key the host gave.
+fn events_of(key: &str, command: &Command, events: &[OutboxEvent]) -> Vec<TranscriptEvent> {
+    events
+        .iter()
+        .map(|event| TranscriptEvent {
+            type_name: event.row.type_name.clone(),
+            key: event.row.key.clone().unwrap_or_else(|| key.to_owned()),
+            use_id: event.use_id.clone(),
+            kind: event.kind.clone(),
+            at: command.now,
+            payload: event.payload.clone(),
+        })
+        .collect()
 }
 
 // row_of is a row as an adapter reads it back: each field with no value
