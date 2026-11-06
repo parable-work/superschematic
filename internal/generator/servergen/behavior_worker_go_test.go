@@ -182,9 +182,20 @@ func planGoBehaviorWorker(t *testing.T, o *apigen.APIOutput, root, stack, name, 
 		t.Fatal(err)
 	}
 	implPackage := strings.ReplaceAll(api, "-", "") + "impl"
-	for _, unwanted := range []string{"NewWorkers(", "Deps)", implPackage} {
-		if strings.Contains(string(main), unwanted) {
-			t.Errorf("main.go names %s: a behavior worker builds no Deps and calls no implementation", unwanted)
+	if s.EventWorker() {
+		// A behavior worker whose table's behaviors emit events builds the
+		// API's Deps and the implementation's Workers, whose methods its
+		// events go to (D104).
+		for _, wanted := range []string{implPackage + ".NewWorkers(", "Deps{", implPackage + " \"" + impl + "\""} {
+			if !strings.Contains(string(main), wanted) {
+				t.Errorf("main.go names no %s: a behavior worker whose table emits events hands them to the implementation's Workers", wanted)
+			}
+		}
+	} else {
+		for _, unwanted := range []string{"NewWorkers(", "Deps)", implPackage} {
+			if strings.Contains(string(main), unwanted) {
+				t.Errorf("main.go names %s: a behavior worker builds no Deps and calls no implementation", unwanted)
+			}
 		}
 	}
 	docker, err := os.ReadFile(filepath.Join(in.Dir, servergen.DockerFile))

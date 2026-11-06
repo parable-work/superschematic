@@ -237,6 +237,15 @@ func writeBehaviorModules(t *testing.T, api, db *ir.Schema) string {
 // directory.
 func writeFixtureModules(t *testing.T, f behaviorFixtures, api, db *ir.Schema) string {
 	t.Helper()
+	dir, _ := writeFixtureModulesWith(t, f, api, db, nil)
+	return dir
+}
+
+// writeFixtureModulesWith is writeFixtureModules with deps, when given,
+// setting what the dispatch layer adds to the API's Deps, and returns the
+// API's output beside its module's directory.
+func writeFixtureModulesWith(t *testing.T, f behaviorFixtures, api, db *ir.Schema, deps func(*apigen.APIOutput)) (string, *apigen.APIOutput) {
+	t.Helper()
 	behaviorDB, behaviorAPI := f.db, f.api
 	paths := testpaths.Local(t)
 	root := t.TempDir()
@@ -295,6 +304,9 @@ func writeFixtureModules(t *testing.T, f behaviorFixtures, api, db *ir.Schema) s
 	}
 
 	output := generatePairAPI(t, f, api, db)
+	if deps != nil {
+		deps(output)
+	}
 	output.AddIndirectModules([]string{dbTypesModule})
 	if err := apigen.SetReplacePaths(output, paths, apiDir); err != nil {
 		t.Fatal(err)
@@ -305,5 +317,5 @@ func writeFixtureModules(t *testing.T, f behaviorFixtures, api, db *ir.Schema) s
 	if err := apigen.WriteAPI(output, apiDir); err != nil {
 		t.Fatalf("write api: %v", err)
 	}
-	return apiDir
+	return apiDir, output
 }

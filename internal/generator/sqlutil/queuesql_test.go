@@ -27,6 +27,13 @@ func TestQueueSpecOfReadsTheKey(t *testing.T) {
 	if spec := QueueSpecOf(change, "task_change_queue", nil, false); !spec.InOrder || !spec.Serializes() || spec.Dedupes() {
 		t.Errorf("QueueSpecOf of a change queue = %+v", spec)
 	}
+	// So does its event queue (D104): one row's events reach the app in
+	// the order the core wrote them.
+	events := &ir.TypeDef{Name: "ProblemEvent", Queue: &ir.QueueDef{Key: "rowKey", Serialize: true},
+		BehaviorQueue: &ir.BehaviorQueue{Row: "Problem", Kind: ir.BehaviorQueueEvents}}
+	if spec := QueueSpecOf(events, "problem_event_queue", nil, false); !spec.InOrder || !spec.Serializes() || spec.Dedupes() {
+		t.Errorf("QueueSpecOf of an event queue = %+v", spec)
+	}
 	deadlines := &ir.TypeDef{Name: "TicketDeadline", Queue: &ir.QueueDef{Key: "rowKey", OnDuplicate: ir.QueueOnDuplicateReplace},
 		BehaviorQueue: &ir.BehaviorQueue{Row: "Ticket", Kind: ir.BehaviorQueueDeadlines}}
 	if spec.InOrder || QueueSpecOf(deadlines, "ticket_deadline_queue", nil, false).InOrder {

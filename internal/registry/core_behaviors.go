@@ -77,6 +77,7 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"payments", CommercePackage},
 	{"seats", RulesPackage},
 	{"reconcile", RulesPackage},
+	{"schedules", RulesPackage},
 }
 
 // EngineImplements reports whether an engine implements the behavior:
@@ -106,15 +107,16 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // engine's order of the first six, then the work queue's order of the
 // four D104's step 2 ported in its second batch (Lease, Presence, Budget,
 // Retries), then Seats and Reconcile, which D104's step 3 built on the core
-// alone (RulesPackage), so a build-time table may compose them. Of these, a
-// table implements one that names no value field (implements Timers<T, C>,
-// and Constants, StateRules and Approvals since D104's step 2, Lease,
-// Presence, Budget and Retries since its second batch, and Seats since its
-// step 3) and carries one that does on a field (status: Workflow<C>, and
-// observed: Reconcile<C> beside it since D104's step 3). A test holds the
-// list to the behaviors each transcript of runtime/engine/testdata/rules
-// records.
-var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile"}
+// alone (RulesPackage), so a build-time table may compose them, then
+// Schedules, D104's step 3's second part. Of these, a table implements one
+// that names no value field (implements Timers<T, C>, and Constants,
+// StateRules and Approvals since D104's step 2, Lease, Presence, Budget and
+// Retries since its second batch, Seats since its step 3, and Schedules
+// since its second part) and carries one that does on a field (status:
+// Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3). A
+// test holds the list to the behaviors each transcript of
+// runtime/engine/testdata/rules records.
+var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules"}
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name
 // (RulesBehaviors).

@@ -105,7 +105,7 @@ func TestBehaviorWorkerRefusals(t *testing.T) {
 			db.Types["Ticket"].Behaviors = db.Types["Ticket"].FieldBehaviors()
 			delete(db.Types, "TicketDeadline")
 			delete(db.Types, "TicketChange")
-		}, "TicketTimers: @behaviorWorker names Ticket, whose behaviors arm no deadlines and hear no writes, so the worker has nothing to run (D103)"},
+		}, "TicketTimers: @behaviorWorker names Ticket, whose behaviors arm no deadlines, hear no writes and emit no events, so the worker has nothing to run (D103, D104)"},
 		{"a second worker", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `, ` + worker("OtherTimers") + `]}`, nil,
 			"OtherTimers: @behaviorWorker names Ticket, which TicketTimers names too: an API runs a table's behaviors from one worker"},
 	} {

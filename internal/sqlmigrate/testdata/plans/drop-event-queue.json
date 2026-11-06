@@ -1,0 +1,142 @@
+{
+  "dialect": "postgres",
+  "expanded": "565a4d19fa3abea1ca81ac8a709c7ae94544fa3682e1b6fcbceb83d42226e62d",
+  "from": "a28ec3dfa559d2d5462960090e89dd09770c667fc6575486ceccc735ede17476",
+  "hash": "a5f1cc422350585d41ee7fec76df08106e4f180a7e576bfb4ac2d9fde0521677",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_bump_version ON product"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_changes ON product"
+      ],
+      "subject": "trigger/product/trg_product_changes",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION product_bump_version()"
+      ],
+      "subject": "function/product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION product_changes()"
+      ],
+      "subject": "function/product_changes",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product/column/_version",
+          "reason": "Dropping product._version deletes its values.",
+          "subject": "table/product/column/_version"
+        }
+      ],
+      "index": 5,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE product DROP COLUMN _version"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_change_queue",
+          "reason": "Dropping table product_change_queue deletes its rows (ProductChange).",
+          "subject": "table/product_change_queue"
+        }
+      ],
+      "index": 6,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product_change_queue"
+      ],
+      "subject": "table/product_change_queue",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_deadline_queue",
+          "reason": "Dropping table product_deadline_queue deletes its rows (ProductDeadline).",
+          "subject": "table/product_deadline_queue"
+        }
+      ],
+      "index": 7,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product_deadline_queue"
+      ],
+      "subject": "table/product_deadline_queue",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_event_queue",
+          "reason": "Dropping table product_event_queue deletes its rows (ProductEvent).",
+          "subject": "table/product_event_queue"
+        }
+      ],
+      "index": 8,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product_event_queue"
+      ],
+      "subject": "table/product_event_queue",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_schedules_schedules",
+          "reason": "Dropping table product_schedules_schedules deletes its rows (ProductSchedulesSchedules).",
+          "subject": "table/product_schedules_schedules"
+        }
+      ],
+      "index": 9,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product_schedules_schedules"
+      ],
+      "subject": "table/product_schedules_schedules",
+      "transactional": true
+    }
+  ],
+  "to": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,22 @@
+# fixture-schedules-api in TypeScript on the local target (D104): its
+# default server serves the operations of fixture-schedules-db's Problem,
+# and its behavior worker ProblemWakeUps, the deployable
+# fixture-schedules-api-problem-wake-ups, runs each problem's wake-ups as
+# they fall due, the writes of its rows its Schedules hears, and the events
+# its wake-ups emit, each handed to the implementation's Workers method
+# problemWakeUpsSchedulesRun, through the database's repositories.
+kind: Stack
+types:
+  Schedules:
+    name: Schedules
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-schedules-api, kind: API }
+      expose:
+        - service: { name: fixture-schedules-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

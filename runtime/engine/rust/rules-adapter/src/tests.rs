@@ -22,8 +22,9 @@ use crate::convert::{iso_of_millis, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
     Action, Caller, ChangeRun, Changes, Claim, Code, Column, Command, Convert, Core, CreateOptions,
-    Deadline, DeadlineRun, Deadlines, Error, ExecuteOptions, Host, Layout, Live, Operation,
-    OwnedField, Refusal, SubTable, Table, TableChange, TypeSpec, Use, MAX_ATTEMPTS,
+    Deadline, DeadlineRun, Deadlines, Error, EventRun, Events, ExecuteOptions, Host, Layout, Live,
+    Operation, OwnedField, QueuedEvent, Refusal, SubTable, Table, TableChange, TypeSpec, Use,
+    MAX_ATTEMPTS,
 };
 
 /// A UUID key in its two forms: base62 on the wire and in the core,
@@ -86,6 +87,7 @@ pub(crate) fn order_table() -> Table {
         }],
         deadlines: None,
         changes: None,
+        events: None,
         spec: TypeSpec::new("Order").with(UseSpec::on_field("status", "Workflow", flow())),
     }
 }
@@ -157,6 +159,8 @@ impl Behavior for Toy {
             .operation("walk", false)
             .operation("mint", true)
             .operation("holding", false)
+            .event("created")
+            .event("paid")
             .preconditions()
     }
 
@@ -235,8 +239,18 @@ impl Behavior for Toy {
                 "ghost": cx.read_spec("Ghost")?.is_none(),
                 "invoice": cx.read_spec("Invoice")?.map(|spec| spec.name.clone()),
             })),
+            // Emits its event paid, with params' payload when they give
+            // one, after a note when they ask for one and before an arm of
+            // expire when they ask for one (D104).
             "emit" => {
-                cx.emit("paid", json!({}))?;
+                if params.get("note") == Some(&Value::Bool(true)) {
+                    cx.insert_row("notes", "n1", Map::new())?;
+                }
+                let payload = params.get("payload").cloned().unwrap_or(json!({}));
+                cx.emit("paid", payload)?;
+                if params.get("arm") == Some(&Value::Bool(true)) {
+                    cx.arm("expire", cx.now() + 1000, Value::Null)?;
+                }
                 Ok(Value::Null)
             }
             // A sub-table row: inserted with the values params give, or
@@ -1338,7 +1352,7 @@ fn a_read_of_whether_a_type_has_rows_and_of_its_spec_answer_from_the_store_and_t
 }
 
 #[test]
-fn an_outbox_event_the_adapter_does_not_take_yet_and_a_run_that_never_settles_refuse_the_command_as_internal(
+fn a_change_set_with_an_event_on_a_table_with_no_event_queue_and_a_run_that_never_settles_refuse_the_command_as_internal(
 ) {
     let core = toy();
     let layout = Layout::new([toy_table()]);
@@ -1357,7 +1371,7 @@ fn an_outbox_event_the_adapter_does_not_take_yet_and_a_run_that_never_settles_re
     };
     assert_eq!(
         refused_by("emit"),
-        Refusal::internal("rules: emit of Order writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)")
+        Refusal::internal(format!("rules: emit of Order emits paid of Toy on Order {KEY}, and Order's table order keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)"))
     );
     assert_eq!(
         refused_by("walk").message,
@@ -1467,6 +1481,247 @@ fn a_sub_table_row_write_is_one_statement_after_the_rows_held_to_one_row_its_val
         );
         assert!(store.applied().is_empty());
     }
+}
+
+/// The event queue of the toy's table, `order_event_queue`, as the
+/// generator writes a table's whose behaviors emit events (D104).
+fn toy_events() -> Events {
+    Events {
+        queue: "OrderEvent".into(),
+        table: "order_event_queue".into(),
+        row_key: "row_key".into(),
+        use_id: "use_id".into(),
+        kind: "kind".into(),
+        at: "at".into(),
+        payload: "payload".into(),
+    }
+}
+
+/// The toy's table with its event queue.
+fn emitting_toy_table() -> Table {
+    Table {
+        events: Some(toy_events()),
+        ..toy_table()
+    }
+}
+
+/// The statements of the toy's emit on a store of `dialect` holding the
+/// toy's row, over the toy's table with its event queue.
+fn emitted(dialect: Dialect, params: Value) -> Vec<Statement> {
+    let core = toy();
+    let layout = Layout::new([emitting_toy_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 9000);
+    let store = MemoryStore::new(dialect, Some(draft_row_of_toy()));
+    block(run::execute(
+        &host,
+        &store,
+        "Order",
+        toy_op("emit", params),
+        &ExecuteOptions::default(),
+    ))
+    .expect("applied");
+    let mut applied = store.applied();
+    assert_eq!(applied.len(), 1, "one unit");
+    applied.remove(0)
+}
+
+#[test]
+fn an_event_is_an_insert_of_its_tables_event_queue_after_the_sub_table_rows_and_before_the_deadlines_with_the_commands_time(
+) {
+    let insert = |sql: &str, payload: Bind| Statement {
+        text: sql.into(),
+        values: vec![
+            text(KEY_COLUMN),
+            text("Toy"),
+            text("paid"),
+            Bind::Int(2000),
+            payload,
+        ],
+        expect: None,
+        check: false,
+    };
+    // On Postgres its due_at and created_at are clock_timestamp(), statement
+    // by statement, and its payload JSON; the time is the command's, not the
+    // host's clock.
+    assert_eq!(
+        emitted(
+            Dialect::Postgres,
+            json!({"payload": {"n": 1, "word": "hi"}})
+        ),
+        [
+            toy_row_write(Dialect::Postgres),
+            insert(
+                r#"INSERT INTO "order_event_queue" ("row_key", "use_id", "kind", "at", "payload", "due_at", "created_at") VALUES ($1, $2, $3, $4, $5::jsonb, clock_timestamp(), clock_timestamp())"#,
+                text(r#"{"n":1,"word":"hi"}"#)
+            )
+        ]
+    );
+    // On SQLite the table's defaults stamp them; a null payload is NULL.
+    assert_eq!(
+        emitted(Dialect::Sqlite, json!({"payload": null})),
+        [
+            toy_row_write(Dialect::Sqlite),
+            insert(
+                r#"INSERT INTO "order_event_queue" ("row_key", "use_id", "kind", "at", "payload") VALUES (?1, ?2, ?3, ?4, ?5)"#,
+                Bind::Null
+            )
+        ]
+    );
+    // After the sub-table rows, before the deadlines: each statement's
+    // table, its first quoted name.
+    let unit = emitted(Dialect::Postgres, json!({"note": true, "arm": true}));
+    let tables: Vec<&str> = unit
+        .iter()
+        .map(|statement| statement.text.split('"').nth(1).unwrap_or_default())
+        .collect();
+    assert_eq!(
+        tables,
+        [
+            "order",
+            "order_toy_notes",
+            "order_event_queue",
+            "order_deadline_queue",
+            "order_deadline_queue"
+        ],
+        "{unit:#?}"
+    );
+}
+
+#[test]
+fn spend_event_deletes_the_claimed_message_by_its_id_and_token_and_a_claim_lost_spends_nothing() {
+    let core = toy();
+    let layout = Layout::new([emitting_toy_table()]);
+    let host = Host::new(&core, &layout);
+    let claim = Claim {
+        id: "m1".into(),
+        token: "t1".into(),
+    };
+    let spend = |dialect: Dialect, applies: &[bool]| {
+        let store = MemoryStore::new(dialect, None).applying(applies);
+        let run = block(run::spend_event(&host, &store, "Order", Some(&claim))).expect("spent");
+        (run, store.applied())
+    };
+    let (run, applied) = spend(Dialect::Postgres, &[true]);
+    assert_eq!((run, run.ran(), run.why()), (EventRun::Spent, true, ""));
+    assert_eq!(
+        applied,
+        [[write(
+            r#"DELETE FROM "order_event_queue" WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'"#,
+            vec![text("m1"), text("t1")]
+        )]]
+    );
+    let (run, applied) = spend(Dialect::Sqlite, &[false]);
+    assert_eq!(
+        (run, run.ran(), run.why()),
+        (EventRun::ClaimLost, false, "claim lost")
+    );
+    assert_eq!(
+        applied[0][0].text,
+        r#"DELETE FROM "order_event_queue" WHERE "id" = ?1 AND "claim_token" = ?2 AND "state" = 'claimed'"#
+    );
+
+    // Without a claim nothing is spent, and the handler runs.
+    let store = MemoryStore::new(Dialect::Postgres, None);
+    let run = block(run::spend_event(&host, &store, "Order", None)).expect("ran");
+    assert_eq!(run, EventRun::Spent);
+    assert!(store.applied().is_empty());
+
+    // A table with no event queue is refused as internal.
+    let plain = Layout::new([toy_table()]);
+    let refused = refusal(block(run::spend_event(
+        &Host::new(&core, &plain),
+        &store,
+        "Order",
+        Some(&claim),
+    )));
+    assert_eq!(
+        refused,
+        Refusal::internal("rules: a claim spends a message of Order's event queue, and the behaviors' layout gives Order no event queue (D104)")
+    );
+}
+
+#[test]
+fn read_queued_events_reads_a_tables_event_queue_in_the_order_written_its_key_in_the_cores_form() {
+    let core = toy();
+    let layout = Layout::new([emitting_toy_table()]);
+    let host = Host::new(&core, &layout);
+    let store = MemoryStore::new(Dialect::Postgres, None).responding(
+        r#"SELECT to_jsonb("row_key")"#,
+        vec![
+            vec![
+                Cell::Json(json!(KEY_COLUMN)),
+                Cell::Json(json!("Toy")),
+                Cell::Json(json!("paid")),
+                Cell::Json(json!(2000)),
+                Cell::Json(json!({"n": 1})),
+            ],
+            vec![
+                Cell::Json(json!(KEY_COLUMN)),
+                Cell::Json(json!("Toy")),
+                Cell::Json(json!("paid")),
+                Cell::Json(json!(3000)),
+                Cell::Null,
+            ],
+        ],
+    );
+    let events = block(run::read_queued_events(&host, &store, "Order")).expect("read");
+    assert_eq!(
+        events,
+        [
+            QueuedEvent {
+                key: KEY.into(),
+                use_id: "Toy".into(),
+                kind: "paid".into(),
+                at: 2000,
+                payload: json!({"n": 1}),
+            },
+            QueuedEvent {
+                key: KEY.into(),
+                use_id: "Toy".into(),
+                kind: "paid".into(),
+                at: 3000,
+                payload: Value::Null,
+            }
+        ]
+    );
+    assert_eq!(
+        store.queries(),
+        [(
+            r#"SELECT to_jsonb("row_key"), to_jsonb("use_id"), to_jsonb("kind"), to_jsonb("at"), to_jsonb("payload") FROM "order_event_queue" ORDER BY "created_at", "id""#.to_owned(),
+            Vec::new()
+        )]
+    );
+
+    // SQLite reads each column as it is stored, its payload's JSON text,
+    // in the order its rows were inserted.
+    let store = MemoryStore::new(Dialect::Sqlite, None).responding(
+        r#"SELECT "row_key""#,
+        vec![vec![
+            Cell::Text(KEY_COLUMN.into()),
+            Cell::Text("Toy".into()),
+            Cell::Text("paid".into()),
+            Cell::Int(2000),
+            Cell::Text(r#"{"n":1}"#.into()),
+        ]],
+    );
+    let events = block(run::read_queued_events(&host, &store, "Order")).expect("read");
+    assert_eq!(events[0].payload, json!({"n": 1}));
+    assert_eq!(events[0].key, KEY);
+    assert_eq!(
+        store.queries()[0].0,
+        r#"SELECT "row_key", "use_id", "kind", "at", "payload" FROM "order_event_queue" ORDER BY "created_at", rowid"#
+    );
+
+    // A table with no event queue has none.
+    let plain = Layout::new([toy_table()]);
+    let store = MemoryStore::new(Dialect::Postgres, None);
+    let events = block(run::read_queued_events(
+        &Host::new(&core, &plain),
+        &store,
+        "Order",
+    ))
+    .expect("read");
+    assert!(events.is_empty() && store.queries().is_empty());
 }
 
 #[test]
@@ -2223,6 +2478,7 @@ pub(crate) fn ddl(postgres: bool) -> Vec<String> {
         format!("CREATE TABLE order_toy_notes (order_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT, at {timestamp}, PRIMARY KEY (order_id, key))"),
         format!("CREATE TABLE order_deadline_queue (id {uuid} NOT NULL PRIMARY KEY, row_key TEXT NOT NULL, use_id TEXT NOT NULL, name TEXT NOT NULL, at BIGINT NOT NULL, payload {json}, state TEXT DEFAULT 'ready' NOT NULL, attempts INTEGER DEFAULT 0 NOT NULL, due_at {timestamp} DEFAULT {now} NOT NULL, claim_expires_at {timestamp}, claim_token {}, last_error TEXT)", if postgres { "UUID" } else { "TEXT" }),
         "CREATE UNIQUE INDEX order_deadline_queue_live ON order_deadline_queue (row_key, use_id, name) WHERE state IN ('ready', 'claimed')".to_owned(),
+        format!("CREATE TABLE toy_event_queue (id {uuid} NOT NULL PRIMARY KEY, row_key TEXT NOT NULL, use_id TEXT NOT NULL, kind TEXT NOT NULL, at BIGINT NOT NULL, payload {json}, state TEXT DEFAULT 'ready' NOT NULL, attempts INTEGER DEFAULT 0 NOT NULL, due_at {timestamp} DEFAULT {now} NOT NULL, claim_expires_at {timestamp}, claim_token {}, last_error TEXT, created_at {timestamp} DEFAULT {now} NOT NULL, updated_at {timestamp} DEFAULT {now} NOT NULL)", if postgres { "UUID" } else { "TEXT" }),
     ];
     for table in ["order", "ticket", "toy"] {
         if postgres {
@@ -2258,10 +2514,26 @@ pub(crate) fn db_layout() -> Layout {
         Table {
             type_name: "Toy".into(),
             table: "toy".into(),
+            events: Some(Events {
+                table: "toy_event_queue".into(),
+                ..toy_events()
+            }),
             spec: TypeSpec::new("Toy").with(UseSpec::on_type("Toy", json!({"lock": true}))),
             ..toy_table()
         },
     ])
+}
+
+/// The command of the toy's emit on Toy's row of [`KEY`] (D104), with
+/// params' payload.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(crate) fn emit_on_toy(payload: Value) -> Command {
+    command(Action::Operation {
+        key: KEY.into(),
+        use_id: "Toy".into(),
+        operation: "emit".into(),
+        params: json!({ "payload": payload }),
+    })
 }
 
 /// Workflow, and the toy.
@@ -2326,6 +2598,7 @@ fn probe_table() -> Table {
             before: "before".into(),
             after: "after".into(),
         }),
+        events: None,
         spec: TypeSpec::new("Probe").with(UseSpec::on_type("Toy", None)),
     }
 }

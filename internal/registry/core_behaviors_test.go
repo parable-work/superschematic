@@ -16,7 +16,7 @@ import (
 
 // coreBehaviorNames are the behaviors New registers, sorted.
 var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering",
-	"Payments", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
+	"Payments", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements, commerceBehaviorNames the ones @superschematic/engine-commerce
@@ -25,7 +25,7 @@ var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branch
 var (
 	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
 	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
-	rulesOnlyBehaviorNames = []string{"Reconcile", "Seats"}
+	rulesOnlyBehaviorNames = []string{"Reconcile", "Schedules", "Seats"}
 )
 
 // A registry with no extension declares the behaviors the engine, the
@@ -1048,6 +1048,66 @@ func TestSeatsAndReconcileAreTheCoresAlone(t *testing.T) {
 	if !slices.Equal(fields, []string{"observed:string:true", "observedAt:Temporal.DateTime:false", "drift:Generic.JSON:false", "reconciledAt:Temporal.DateTime:false"}) ||
 		reconcile.Value != "observed" || !reconcile.ArmsDeadlines || !slices.Equal(reconcile.Requires, []string{"Workflow"}) || len(reconcile.Operations) != 1 || reconcile.Operations[0].Name != "observe" {
 		t.Errorf("Reconcile: fields %v, value %q, arms deadlines %v, requires %v, operations %v", fields, reconcile.Value, reconcile.ArmsDeadlines, reconcile.Requires, reconcile.Operations)
+	}
+}
+
+// Schedules is a behavior the behaviors' core alone implements (D104): its
+// package is RulesPackage, it keeps the sub-table schedules keyed by name
+// and no field, arms deadlines and hears its table's writes, adds five
+// writing operations and one read, emits one event, run, whose payload is a
+// closed object, and names five vetoes.
+func TestSchedulesIsTheCoresAlone(t *testing.T) {
+	reg := New(naming.Default())
+	finalizeWithCoreGenerators(t, reg)
+	schedules, ok := reg.Behavior("Schedules")
+	if !ok || schedules.Package != RulesPackage || EngineImplements(schedules) || !RunsOnTheCore("Schedules") || !schedules.ConfigRequired() {
+		t.Fatalf("Schedules: registered %v, package %q, engine implements %v, runs on the core %v, config required %v", ok, schedules.Package, EngineImplements(schedules), RunsOnTheCore("Schedules"), schedules.ConfigRequired())
+	}
+	table, ok := schedules.Table("schedules")
+	var fields []string
+	for _, field := range table.Fields {
+		fields = append(fields, field.Name+":"+field.Type)
+	}
+	if !ok || table.Key != "name" || len(schedules.Fields) != 0 || schedules.Value != "" || !schedules.ArmsDeadlines || !schedules.HearsChanges || len(schedules.Requires) != 0 ||
+		!slices.Equal(fields, []string{"name:string", "kind:string", "spec:string", "timeZone:string", "state:string", "setAt:Temporal.DateTime", "nextAt:Temporal.DateTime", "retryAt:Temporal.DateTime", "runs:Generic.Int64", "attempt:Generic.Int64", "lastAt:Temporal.DateTime", "lastOutcome:string", "finishedAt:Temporal.DateTime", "endedBy:string"}) {
+		t.Errorf("Schedules: table %v keyed by %q with fields %v, fields %v, value %q, arms deadlines %v, hears changes %v, requires %v", ok, table.Key, fields, schedules.Fields, schedules.Value, schedules.ArmsDeadlines, schedules.HearsChanges, schedules.Requires)
+	}
+	var ops, vetoes, kinds []string
+	for _, op := range schedules.Operations {
+		ops = append(ops, fmt.Sprintf("%s:%v", op.Name, op.Writes))
+	}
+	for _, veto := range schedules.Vetoes {
+		vetoes = append(vetoes, veto.Code)
+	}
+	for _, event := range schedules.Events {
+		kinds = append(kinds, event.Kind)
+	}
+	if !slices.Equal(ops, []string{"setSchedule:true", "pauseSchedule:true", "resumeSchedule:true", "cancelSchedule:true", "reportRun:true", "listSchedules:false"}) ||
+		!slices.Equal(vetoes, []string{"no_schedule", "schedule_limit", "schedule_finished", "schedules_ended", "no_run"}) || !slices.Equal(kinds, []string{"run"}) {
+		t.Errorf("Schedules operations %v, vetoes %v, events %v", ops, vetoes, kinds)
+	}
+	var payload struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(schedules.Events[0].PayloadSchema, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(payload.Required, []string{"name", "run", "attempt", "kind", "spec", "setAt", "dueAt", "firedAt"}) || len(payload.Properties) != 10 {
+		t.Errorf("Schedules run payload: required %v, %d properties", payload.Required, len(payload.Properties))
+	}
+	for _, config := range []string{
+		`{"max":10,"kinds":["after","every","cron"],"outcomes":["told"]}`,
+		`{"max":10,"minMs":60000,"maxMs":2592000000,"kinds":["cron"],"timeZone":"America/New_York","outcomes":["told","missed"],"retry":{"outcome":"missed","afterMs":300000},"endOn":{"enters":["done"]},"status":"status","permission":"problems.schedule"}`,
+	} {
+		if err := schedules.ValidateConfig(json.RawMessage(config)); err != nil {
+			t.Errorf("Schedules config %s: %v", config, err)
+		}
+	}
+	for _, config := range []string{`{"kinds":["every"],"outcomes":["told"]}`, `{"max":101,"kinds":["every"],"outcomes":["told"]}`, `{"max":1,"kinds":["weekly"],"outcomes":["told"]}`, `{"max":1,"kinds":[],"outcomes":["told"]}`, `{"max":1,"kinds":["every"],"outcomes":["Told"]}`, `{"max":1,"kinds":["every"],"outcomes":["told"],"every":60000}`} {
+		if err := schedules.ValidateConfig(json.RawMessage(config)); err == nil {
+			t.Errorf("Schedules config %s: no error", config)
+		}
 	}
 }
 

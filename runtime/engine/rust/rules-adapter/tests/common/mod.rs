@@ -13,8 +13,8 @@ use superschematic_rules::{
     Refusal, UseSpec, Veto, View,
 };
 use superschematic_rules_adapter::{
-    Changes, Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table,
-    TypeSpec, Use,
+    Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SubTable,
+    Table, TypeSpec, Use,
 };
 
 /// The variable that names the Postgres the tests run against; the
@@ -230,6 +230,46 @@ pub fn change_queue_ddl(postgres: bool, table: &str, row_key_type: &str) -> Vec<
     ]
 }
 
+/// An event queue's table in a dialect (D104), as sqlgen writes the queue
+/// the loader adds for a table whose behaviors emit events: its message's
+/// columns (`row_key` of `row_key_type`, the row table's key's), the
+/// queue's own, and an `id` with the dialect's UUID default, since an
+/// event's insert names none.
+pub fn event_queue_ddl(postgres: bool, table: &str, row_key_type: &str) -> Vec<String> {
+    let t = column_types(postgres);
+    let (uuid, now) = if postgres {
+        ("UUID DEFAULT gen_random_uuid()", "CURRENT_TIMESTAMP")
+    } else {
+        (
+            "TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        )
+    };
+    let token = if postgres { "UUID" } else { "TEXT" };
+    vec![
+        format!(
+            "CREATE TABLE \"{table}\" (id {uuid} NOT NULL PRIMARY KEY, row_key {row_key_type} NOT NULL, use_id TEXT NOT NULL, kind TEXT NOT NULL, at BIGINT NOT NULL, payload {json}, state TEXT DEFAULT 'ready' NOT NULL, attempts INTEGER DEFAULT 0 NOT NULL, due_at {timestamp} DEFAULT {now} NOT NULL, claim_expires_at {timestamp}, claim_token {token}, last_error TEXT, created_at {timestamp} DEFAULT {now} NOT NULL, updated_at {timestamp} DEFAULT {now} NOT NULL)",
+            json = t.json,
+            timestamp = t.timestamp,
+        ),
+        format!("CREATE INDEX \"{table}_row\" ON \"{table}\" (row_key)"),
+    ]
+}
+
+/// The layout's event queue of a type's table `<table>_event_queue`, its
+/// columns as behaviorlayout names them (D104).
+pub fn events_of(type_name: &str, table: &str) -> Events {
+    Events {
+        queue: format!("{type_name}Event"),
+        table: format!("{table}_event_queue"),
+        row_key: "row_key".into(),
+        use_id: "use_id".into(),
+        kind: "kind".into(),
+        at: "at".into(),
+        payload: "payload".into(),
+    }
+}
+
 /// A table's change trigger in a dialect (D103), as the contract of sqlgen
 /// writes it: on Postgres a function and an AFTER INSERT OR UPDATE OR
 /// DELETE trigger, on SQLite a trigger per write, each inserting a message
@@ -354,6 +394,7 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
         }],
         deadlines: None,
         changes: None,
+        events: None,
         spec: TypeSpec::new(type_name).with(UseSpec::on_field("status", "Workflow", flow())),
     }
 }
@@ -394,6 +435,7 @@ pub fn question_table() -> Table {
             before: "before".into(),
             after: "after".into(),
         }),
+        events: None,
         spec: TypeSpec::new("Question")
             .with(UseSpec::on_field("status", "Workflow", flow))
             .with_field(FieldSpec::new("prompt", "string"))
@@ -551,6 +593,7 @@ pub fn task_table() -> Table {
         ],
         deadlines: None,
         changes: None,
+        events: None,
         spec,
     }
 }
@@ -761,6 +804,7 @@ pub fn job_table() -> Table {
         uses: vec![lease, retries, finder, workflow],
         deadlines: Some(deadlines_of("Job", "job")),
         changes: None,
+        events: None,
         spec,
     }
 }
@@ -925,6 +969,7 @@ pub fn store_layout_in(room: &str) -> Layout {
         uses: Vec::new(),
         deadlines: None,
         changes: None,
+        events: None,
         spec: TypeSpec::new("Booking").with(UseSpec::on_type("OneRoom", json!({"room": room}))),
     };
     let loud = Table {
@@ -964,6 +1009,27 @@ pub fn store_layout_in(room: &str) -> Layout {
             .with(UseSpec::on_type("Hold", json!({}))),
         ..booking.clone()
     };
+    // Shout (D104): its behavior emits events, which its table's event
+    // queue keeps.
+    let shout = Table {
+        type_name: "Shout".into(),
+        table: "shout".into(),
+        uses: vec![Use {
+            id: "Shout".into(),
+            behavior: "Shout".into(),
+            member: "shout".into(),
+            anchor: None,
+            fields: Vec::new(),
+            operations: vec![Operation {
+                name: "say".into(),
+                writes: true,
+            }],
+            tables: Vec::new(),
+        }],
+        events: Some(events_of("Shout", "shout")),
+        spec: TypeSpec::new("Shout").with(UseSpec::on_type("Shout", json!({}))),
+        ..booking.clone()
+    };
     Layout::new([
         order_table("Order", "order"),
         ticket,
@@ -972,6 +1038,7 @@ pub fn store_layout_in(room: &str) -> Layout {
         loud,
         timed,
         held,
+        shout,
         probe_table(),
     ])
 }
@@ -1024,6 +1091,7 @@ pub fn probe_table() -> Table {
             before: "before".into(),
             after: "after".into(),
         }),
+        events: None,
         spec: TypeSpec::new("Probe")
             .with(UseSpec::on_type("Echo", json!({})))
             .with(UseSpec::on_type(
@@ -1052,14 +1120,14 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
             t.key, t.text, t.text, t.timestamp, t.version
         ));
     }
-    for table in ["booking", "loud", "timed", "held"] {
+    for table in ["booking", "loud", "timed", "held", "shout"] {
         ddl.push(format!(
             "CREATE TABLE \"{table}\" (id {}, _version {})",
             t.key, t.version
         ));
     }
     for table in [
-        "order", "ticket", "item", "booking", "loud", "timed", "held",
+        "order", "ticket", "item", "booking", "loud", "timed", "held", "shout",
     ] {
         if postgres {
             ddl.extend(postgres_bump(table));
@@ -1070,6 +1138,7 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
     ddl.extend(deadline_queue_ddl(postgres, "timed_deadline_queue", "TEXT"));
     ddl.push(timers_deadlines_ddl(postgres, "held", "held_id"));
     ddl.extend(deadline_queue_ddl(postgres, "held_deadline_queue", "TEXT"));
+    ddl.extend(event_queue_ddl(postgres, "shout_event_queue", "TEXT"));
     let uuid = if postgres { "UUID" } else { "TEXT" };
     ddl.push(format!(
         "CREATE TABLE \"probe\" (id {}, title {} NOT NULL, due {ts}, owner_id {uuid}, done {}, data {}, echo_heard {}, deleted_at {ts}, _version {})",
@@ -1104,7 +1173,7 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
 /// rows, and lets its row be created only when there is none, refusing
 /// `conflict` otherwise. Only the row it creates is written, so only the
 /// lock holds two such commands apart. A config of `{"emit": true}` emits
-/// an event on a create instead, a write the adapter does not take yet, and
+/// its event `created` on a create instead (D104), and
 /// one of `{"arm": true}` arms the deadline `expire` a second after the
 /// create, which, when it falls due with the payload `{"again": true}`,
 /// arms itself again a second later.
@@ -1114,7 +1183,9 @@ impl Behavior for OneRoom {
     type Config = Value;
 
     fn declaration(&self) -> Declaration {
-        Declaration::new("OneRoom").arms_deadlines()
+        Declaration::new("OneRoom")
+            .arms_deadlines()
+            .event("created")
     }
 
     fn deadline(&self, cx: &Cx<'_, Value>, name: &str, payload: &Value) -> Hook<()> {
@@ -1238,6 +1309,37 @@ impl Behavior for Finder {
     }
 }
 
+/// A behavior of the tests' own that emits events about its row (D104):
+/// its create emits `said` with `{"word": "hello"}`, and its operation
+/// `say` emits `said` once per word of params' `words`, in their order.
+pub struct Shout;
+
+impl Behavior for Shout {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Shout")
+            .operation("say", true)
+            .event("said")
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn initialize(&self, cx: &Cx<'_, Value>, _params: &Value) -> Hook<()> {
+        cx.emit("said", json!({"word": "hello"}))
+    }
+
+    fn operation(&self, cx: &Cx<'_, Value>, _name: &str, params: &Value) -> Hook<Value> {
+        let words = params.get("words").and_then(Value::as_array);
+        for word in words.into_iter().flatten() {
+            cx.emit("said", json!({ "word": word }))?;
+        }
+        Ok(Value::Null)
+    }
+}
+
 /// The core's behaviors and the toys.
 pub fn core() -> superschematic_rules::Core {
     superschematic_rules_behaviors::core()
@@ -1245,6 +1347,7 @@ pub fn core() -> superschematic_rules::Core {
         .with(Hold)
         .with(Echo)
         .with(Finder)
+        .with(Shout)
 }
 
 #[cfg(feature = "sqlite")]

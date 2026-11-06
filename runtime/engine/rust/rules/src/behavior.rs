@@ -133,6 +133,12 @@ pub struct Declaration {
     pub computed: Vec<String>,
     #[serde(default)]
     pub operations: Vec<OperationDecl>,
+    /// The kinds of the events it emits about a row ([`crate::Cx::emit`],
+    /// D104), as a declaration file's `events` lists them: a table that
+    /// composes it gets an event queue, which a worker of the API hands to
+    /// the project's handler. One that declares none emits none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
     #[serde(default)]
     pub vetoes: Vec<String>,
     /// Whether a create gives the behavior parameters, as a declaration
@@ -292,6 +298,20 @@ impl Declaration {
             writes,
         });
         self
+    }
+
+    /// The declaration with the kind of an event it emits, kept once.
+    pub fn event(mut self, kind: impl Into<String>) -> Self {
+        let kind = kind.into();
+        if !self.has_event(&kind) {
+            self.events.push(kind);
+        }
+        self
+    }
+
+    /// Whether it declares an event of a kind.
+    pub fn has_event(&self, kind: &str) -> bool {
+        self.events.iter().any(|known| known == kind)
     }
 
     /// The declaration with a veto code.
@@ -958,11 +978,21 @@ mod tests {
         let written = serde_json::to_value(&declaration).unwrap();
         assert_eq!(written["hearsChanges"], json!(true));
         assert_eq!(written["computed"], json!(["deadlines"]));
-        // A declaration that hears nothing and computes nothing writes
-        // neither member.
+        // A declaration that hears nothing, computes nothing and emits
+        // nothing writes none of the three members.
         let plain = serde_json::to_value(Declaration::new("Workflow")).unwrap();
         assert!(plain.get("hearsChanges").is_none());
         assert!(plain.get("computed").is_none());
+        assert!(plain.get("events").is_none());
+        // One that emits lists each kind once (D104).
+        let emitting = Declaration::new("Schedules").event("run").event("run");
+        assert_eq!(emitting.events, ["run"]);
+        assert!(emitting.has_event("run"));
+        assert!(!emitting.has_event("ran"));
+        assert_eq!(
+            serde_json::to_value(&emitting).unwrap()["events"],
+            json!(["run"])
+        );
         assert_eq!(
             serde_json::to_value(Listen::new("Task", "project")).unwrap(),
             json!({"type": "Task", "link": "project"})

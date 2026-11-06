@@ -1,0 +1,5412 @@
+{
+  "name": "core-schedules",
+  "description": "Schedules on a table beside its Workflow, D104: setSchedule arms a schedule after a delay, at an interval or on a cron line in a time zone, bounded by minMs and maxMs, at most max of them live; a due one fires on the worker as the deadline it armed, records its run, emits the event run and arms the next from the time it fired, so an overdue one fires once; a cron line's local time a daylight-saving change skips runs at the gap's first instant, its first minute among them, and one it repeats runs once; pause, resume and cancel; a replace and a finished name set again count the name's runs on; reportRun records an outcome and the retry outcome tries the run again as its next attempt, and a late report of an earlier attempt or of a replaced schedule's run changes nothing; endOn finishes a row's schedules when its Workflow enters a listed state, through a transition and through a raw write its change queue carries; finished schedules beyond max go; a new version's narrower config holds new sets alone; with each one's define refusals. Cases written by hand in the recorded format, since no engine implements Schedules. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, a refusal whole, in the core's words, and the events each step's commands wrote (events); what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D104): runtime/engine/testdata/rules/scenarios/core-schedules.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Schedules > setSchedule arms an after, an every and a cron schedule at each one's next run, a cron line in the config's time zone; a repeat answers unchanged; listSchedules reads them by name; each parameter is checked before the permission, and the permission before the row",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": [
+            "problems.schedule"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 3,
+                        "minMs": 120000,
+                        "maxMs": 2592000000,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "timeZone": "America/New_York",
+                        "outcomes": [
+                          "told",
+                          "resumed",
+                          "held",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "missed",
+                          "afterMs": 300000
+                        },
+                        "endOn": {
+                          "enters": [
+                            "done",
+                            "dropped"
+                          ]
+                        },
+                        "permission": "problems.schedule"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772323200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "nudge",
+              "after": 300000
+            }
+          ],
+          "expect": {
+            "name": "nudge",
+            "kind": "after",
+            "spec": "300000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772323500000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "morning",
+              "cron": "0 9 * * MON-FRI"
+            }
+          ],
+          "expect": {
+            "name": "morning",
+            "kind": "cron",
+            "spec": "0 9 * * MON-FRI",
+            "timeZone": "America/New_York",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772460000000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "now": 1772323201000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0,
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "morning",
+              "cron": "0  9 * *   MON-FRI",
+              "timeZone": "america/new_york"
+            }
+          ],
+          "now": 1772323201000,
+          "expect": {
+            "name": "morning",
+            "kind": "cron",
+            "spec": "0 9 * * MON-FRI",
+            "timeZone": "America/New_York",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772460000000,
+            "runs": 0,
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "hourly",
+                "kind": "every",
+                "spec": "3600000",
+                "state": "active",
+                "setAt": 1772323200000,
+                "nextAt": 1772326800000,
+                "runs": 0
+              },
+              {
+                "name": "morning",
+                "kind": "cron",
+                "spec": "0 9 * * MON-FRI",
+                "timeZone": "America/New_York",
+                "state": "active",
+                "setAt": 1772323200000,
+                "nextAt": 1772460000000,
+                "runs": 0
+              },
+              {
+                "name": "nudge",
+                "kind": "after",
+                "spec": "300000",
+                "state": "active",
+                "setAt": 1772323200000,
+                "nextAt": 1772323500000,
+                "runs": 0
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: names none of after, every and cron: a schedule is one of them",
+            "details": {
+              "issues": [
+                {
+                  "path": "",
+                  "message": "names none of after, every and cron: a schedule is one of them"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "after": 300000,
+              "every": 600000
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: names after and every: a schedule is one of after, every and cron",
+            "details": {
+              "issues": [
+                {
+                  "path": "",
+                  "message": "names after and every: a schedule is one of after, every and cron"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "after": 60000
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /after: 60000 is outside minMs..maxMs (120000..2592000000): a delay lies between them",
+            "details": {
+              "issues": [
+                {
+                  "path": "/after",
+                  "message": "60000 is outside minMs..maxMs (120000..2592000000): a delay lies between them"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "every": 2592000001
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /every: 2592000001 is outside minMs..maxMs (120000..2592000000): an interval lies between them",
+            "details": {
+              "issues": [
+                {
+                  "path": "/every",
+                  "message": "2592000001 is outside minMs..maxMs (120000..2592000000): an interval lies between them"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "cron": "0 0 9 * * *"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /cron: a cron line names five fields, minute hour day-of-month month day-of-week, and \"0 0 9 * * *\" names 6: a seconds field is not taken",
+            "details": {
+              "issues": [
+                {
+                  "path": "/cron",
+                  "message": "a cron line names five fields, minute hour day-of-month month day-of-week, and \"0 0 9 * * *\" names 6: a seconds field is not taken"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "cron": "* * * * *"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /cron: its runs come 60000 ms apart at their closest, under minMs (120000): a schedule's runs are at least minMs apart",
+            "details": {
+              "issues": [
+                {
+                  "path": "/cron",
+                  "message": "its runs come 60000 ms apart at their closest, under minMs (120000): a schedule's runs are at least minMs apart"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "cron": "0 12 29 2 *"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /cron: its next run, 2028-02-29T17:00:00.000Z, is more than maxMs (2592000000 ms) away: a schedule's next run is within maxMs when it is set",
+            "details": {
+              "issues": [
+                {
+                  "path": "/cron",
+                  "message": "its next run, 2028-02-29T17:00:00.000Z, is more than maxMs (2592000000 ms) away: a schedule's next run is within maxMs when it is set"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "cron": "0 9 * * 1",
+              "timeZone": "Mars/Olympus"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /timeZone: \"Mars/Olympus\" is not a time zone of the IANA database the core bundles",
+            "details": {
+              "issues": [
+                {
+                  "path": "/timeZone",
+                  "message": "\"Mars/Olympus\" is not a time zone of the IANA database the core bundles"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "every": 600000,
+              "timeZone": "UTC"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /timeZone: names the zone a cron line is read in, and an every schedule reads none",
+            "details": {
+              "issues": [
+                {
+                  "path": "/timeZone",
+                  "message": "names the zone a cron line is read in, and an every schedule reads none"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "bad name",
+              "after": 300000
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /name: must match pattern \"^[A-Za-z][A-Za-z0-9_-]*$\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/name",
+                  "message": "must match pattern \"^[A-Za-z][A-Za-z0-9_-]*$\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "guest",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "after": 300000
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "guest may not set a schedule of Problem p1: it needs permission problems.schedule"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "guest",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {}
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "guest may not list the schedules of Problem p1: it needs permission problems.schedule"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "after": 300000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes setSchedule of Problem p1: it holds 3 live schedules (hourly, morning, nudge), and its max is 3: cancel one to set another",
+            "details": {
+              "behavior": "Schedules",
+              "action": "setSchedule",
+              "reason": "it holds 3 live schedules (hourly, morning, nudge), and its max is 3: cancel one to set another",
+              "vetoCode": "schedule_limit",
+              "vetoDetails": {
+                "max": 3,
+                "live": [
+                  "hourly",
+                  "morning",
+                  "nudge"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "x",
+              "after": 60000
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /after: 60000 is outside minMs..maxMs (120000..2592000000): a delay lies between them",
+            "details": {
+              "issues": [
+                {
+                  "path": "/after",
+                  "message": "60000 is outside minMs..maxMs (120000..2592000000): a delay lies between them"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "pauseSchedule",
+            {
+              "name": "ghost"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes pauseSchedule of Problem p1: it has no schedule named \"ghost\" (its schedules: hourly, morning, nudge)",
+            "details": {
+              "behavior": "Schedules",
+              "action": "pauseSchedule",
+              "reason": "it has no schedule named \"ghost\" (its schedules: hourly, morning, nudge)",
+              "vetoCode": "no_schedule",
+              "vetoDetails": {
+                "name": "ghost",
+                "schedules": [
+                  "hourly",
+                  "morning",
+                  "nudge"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules > a due schedule fires once on the worker: it records the run, emits run with its name, run, attempt, kind, spec and times, and arms the next; an every overdue by many runs fires once, at the next point of its grid; an after finishes after its run; a finished name set again counts its runs on, under a later setAt",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": [
+            "problems.schedule"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 3,
+                        "minMs": 120000,
+                        "maxMs": 2592000000,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "timeZone": "America/New_York",
+                        "outcomes": [
+                          "told",
+                          "resumed",
+                          "held",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "missed",
+                          "afterMs": 300000
+                        },
+                        "endOn": {
+                          "enters": [
+                            "done",
+                            "dropped"
+                          ]
+                        },
+                        "permission": "problems.schedule"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772323200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "nudge",
+              "after": 300000
+            }
+          ],
+          "expect": {
+            "name": "nudge",
+            "kind": "after",
+            "spec": "300000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772323500000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772323500000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772323500000,
+              "payload": {
+                "name": "nudge",
+                "run": 1,
+                "attempt": 1,
+                "kind": "after",
+                "spec": "300000",
+                "setAt": 1772323200000,
+                "dueAt": 1772323500000,
+                "firedAt": 1772323500000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "hourly",
+                "kind": "every",
+                "spec": "3600000",
+                "state": "active",
+                "setAt": 1772323200000,
+                "nextAt": 1772326800000,
+                "runs": 0
+              },
+              {
+                "name": "nudge",
+                "kind": "after",
+                "spec": "300000",
+                "state": "finished",
+                "setAt": 1772323200000,
+                "runs": 1,
+                "attempt": 1,
+                "lastAt": 1772323500000,
+                "finishedAt": 1772323500000,
+                "endedBy": "run"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772343000000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772343000000,
+              "payload": {
+                "name": "hourly",
+                "run": 1,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772326800000,
+                "firedAt": 1772343000000,
+                "nextAt": 1772344800000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772343000000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772344800000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772344800000,
+              "payload": {
+                "name": "hourly",
+                "run": 2,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772344800000,
+                "firedAt": 1772344800000,
+                "nextAt": 1772348400000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {
+              "name": "hourly"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "hourly",
+                "kind": "every",
+                "spec": "3600000",
+                "state": "active",
+                "setAt": 1772323200000,
+                "nextAt": 1772348400000,
+                "runs": 2,
+                "attempt": 1,
+                "lastAt": 1772344800000
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "pauseSchedule",
+            {
+              "name": "nudge"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes pauseSchedule of Problem p1: its schedule \"nudge\" is finished: set it again to run it",
+            "details": {
+              "behavior": "Schedules",
+              "action": "pauseSchedule",
+              "reason": "its schedule \"nudge\" is finished: set it again to run it",
+              "vetoCode": "schedule_finished",
+              "vetoDetails": {
+                "name": "nudge"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "resumeSchedule",
+            {
+              "name": "nudge"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes resumeSchedule of Problem p1: its schedule \"nudge\" is finished: set it again to run it",
+            "details": {
+              "behavior": "Schedules",
+              "action": "resumeSchedule",
+              "reason": "its schedule \"nudge\" is finished: set it again to run it",
+              "vetoCode": "schedule_finished",
+              "vetoDetails": {
+                "name": "nudge"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "nudge",
+              "after": 600000
+            }
+          ],
+          "now": 1772344800000,
+          "expect": {
+            "name": "nudge",
+            "kind": "after",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772344800000,
+            "nextAt": 1772345400000,
+            "runs": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772345400000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772345400000,
+              "payload": {
+                "name": "nudge",
+                "run": 2,
+                "attempt": 1,
+                "kind": "after",
+                "spec": "600000",
+                "setAt": 1772344800000,
+                "dueAt": 1772345400000,
+                "firedAt": 1772345400000
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Schedules > a cron line runs in its time zone: a local time the spring gap skips runs at the gap's first instant, its first minute among them, one the autumn repeats runs once, at its first occurrence, and a schedule set before the repeated hour runs none of it, and a schedule's own timeZone overrides the config's",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": [
+            "problems.schedule"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772884800000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 3,
+                        "minMs": 120000,
+                        "maxMs": 2592000000,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "timeZone": "America/New_York",
+                        "outcomes": [
+                          "told",
+                          "resumed",
+                          "held",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "missed",
+                          "afterMs": 300000
+                        },
+                        "endOn": {
+                          "enters": [
+                            "done",
+                            "dropped"
+                          ]
+                        },
+                        "permission": "problems.schedule"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772884800000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "early",
+              "cron": "30 2 * * *"
+            }
+          ],
+          "expect": {
+            "name": "early",
+            "kind": "cron",
+            "spec": "30 2 * * *",
+            "timeZone": "America/New_York",
+            "state": "active",
+            "setAt": 1772884800000,
+            "nextAt": 1772953200000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "nightly",
+              "cron": "0 2 * * *"
+            }
+          ],
+          "expect": {
+            "name": "nightly",
+            "kind": "cron",
+            "spec": "0 2 * * *",
+            "timeZone": "America/New_York",
+            "state": "active",
+            "setAt": 1772884800000,
+            "nextAt": 1772953200000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772953200000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772953200000,
+              "payload": {
+                "name": "early",
+                "run": 1,
+                "attempt": 1,
+                "kind": "cron",
+                "spec": "30 2 * * *",
+                "timeZone": "America/New_York",
+                "setAt": 1772884800000,
+                "dueAt": 1772953200000,
+                "firedAt": 1772953200000,
+                "nextAt": 1773037800000
+              }
+            },
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772953200000,
+              "payload": {
+                "name": "nightly",
+                "run": 1,
+                "attempt": 1,
+                "kind": "cron",
+                "spec": "0 2 * * *",
+                "timeZone": "America/New_York",
+                "setAt": 1772884800000,
+                "dueAt": 1772953200000,
+                "firedAt": 1772953200000,
+                "nextAt": 1773036000000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "early"
+            }
+          ],
+          "now": 1772953200000,
+          "expect": {
+            "name": "early",
+            "kind": "cron",
+            "spec": "30 2 * * *",
+            "timeZone": "America/New_York",
+            "state": "finished",
+            "setAt": 1772884800000,
+            "runs": 1,
+            "attempt": 1,
+            "lastAt": 1772953200000,
+            "finishedAt": 1772953200000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "nightly"
+            }
+          ],
+          "now": 1772953200000,
+          "expect": {
+            "name": "nightly",
+            "kind": "cron",
+            "spec": "0 2 * * *",
+            "timeZone": "America/New_York",
+            "state": "finished",
+            "setAt": 1772884800000,
+            "runs": 1,
+            "attempt": 1,
+            "lastAt": 1772953200000,
+            "finishedAt": 1772953200000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "london",
+              "cron": "30 1 * * *",
+              "timeZone": "Europe/London"
+            }
+          ],
+          "now": 1774699200000,
+          "expect": {
+            "name": "london",
+            "kind": "cron",
+            "spec": "30 1 * * *",
+            "timeZone": "Europe/London",
+            "state": "active",
+            "setAt": 1774699200000,
+            "nextAt": 1774746000000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1774746000000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1774746000000,
+              "payload": {
+                "name": "london",
+                "run": 1,
+                "attempt": 1,
+                "kind": "cron",
+                "spec": "30 1 * * *",
+                "timeZone": "Europe/London",
+                "setAt": 1774699200000,
+                "dueAt": 1774746000000,
+                "firedAt": 1774746000000,
+                "nextAt": 1774830600000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "london"
+            }
+          ],
+          "now": 1774746000000,
+          "expect": {
+            "name": "london",
+            "kind": "cron",
+            "spec": "30 1 * * *",
+            "timeZone": "Europe/London",
+            "state": "finished",
+            "setAt": 1774699200000,
+            "runs": 1,
+            "attempt": 1,
+            "lastAt": 1774746000000,
+            "finishedAt": 1774746000000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "late",
+              "cron": "30 1 * * *"
+            }
+          ],
+          "now": 1793448000000,
+          "expect": {
+            "name": "late",
+            "kind": "cron",
+            "spec": "30 1 * * *",
+            "timeZone": "America/New_York",
+            "state": "active",
+            "setAt": 1793448000000,
+            "nextAt": 1793511000000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1793511000000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1793511000000,
+              "payload": {
+                "name": "late",
+                "run": 1,
+                "attempt": 1,
+                "kind": "cron",
+                "spec": "30 1 * * *",
+                "timeZone": "America/New_York",
+                "setAt": 1793448000000,
+                "dueAt": 1793511000000,
+                "firedAt": 1793511000000,
+                "nextAt": 1793601000000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "halves",
+              "cron": "*/30 * * * *"
+            }
+          ],
+          "now": 1793511900000,
+          "expect": {
+            "name": "halves",
+            "kind": "cron",
+            "spec": "*/30 * * * *",
+            "timeZone": "America/New_York",
+            "state": "active",
+            "setAt": 1793511900000,
+            "nextAt": 1793516400000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1793514600000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1793516400000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1793516400000,
+              "payload": {
+                "name": "halves",
+                "run": 1,
+                "attempt": 1,
+                "kind": "cron",
+                "spec": "*/30 * * * *",
+                "timeZone": "America/New_York",
+                "setAt": 1793511900000,
+                "dueAt": 1793516400000,
+                "firedAt": 1793516400000,
+                "nextAt": 1793518200000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "halves"
+            }
+          ],
+          "now": 1793516400000,
+          "expect": {
+            "name": "halves",
+            "kind": "cron",
+            "spec": "*/30 * * * *",
+            "timeZone": "America/New_York",
+            "state": "finished",
+            "setAt": 1793511900000,
+            "runs": 1,
+            "attempt": 1,
+            "lastAt": 1793516400000,
+            "finishedAt": 1793516400000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {
+              "name": "late"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "late",
+                "kind": "cron",
+                "spec": "30 1 * * *",
+                "timeZone": "America/New_York",
+                "state": "active",
+                "setAt": 1793448000000,
+                "nextAt": 1793601000000,
+                "runs": 1,
+                "attempt": 1,
+                "lastAt": 1793511000000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules > pause keeps nextAt and clears the deadline; resume arms it again, and one resumed past its nextAt fires at once, once; cancel finishes it; each repeat answers unchanged; a finished name set again is a new schedule, and a live one is replaced unless its spec is the same, each counting the name's runs on",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": [
+            "problems.schedule"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 3,
+                        "minMs": 120000,
+                        "maxMs": 2592000000,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "timeZone": "America/New_York",
+                        "outcomes": [
+                          "told",
+                          "resumed",
+                          "held",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "missed",
+                          "afterMs": 300000
+                        },
+                        "endOn": {
+                          "enters": [
+                            "done",
+                            "dropped"
+                          ]
+                        },
+                        "permission": "problems.schedule"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772323200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "pauseSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "now": 1772323800000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "paused",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "pauseSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "paused",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0,
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772330400000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "resumeSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "now": 1772334000000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "resumeSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0,
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772334000000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772334000000,
+              "payload": {
+                "name": "hourly",
+                "run": 1,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772326800000,
+                "firedAt": 1772334000000,
+                "nextAt": 1772337600000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "now": 1772334060000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "finished",
+            "setAt": 1772323200000,
+            "runs": 1,
+            "attempt": 1,
+            "lastAt": 1772334000000,
+            "finishedAt": 1772334060000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "finished",
+            "setAt": 1772323200000,
+            "runs": 1,
+            "attempt": 1,
+            "lastAt": 1772334000000,
+            "finishedAt": 1772334060000,
+            "endedBy": "cancel",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "resumeSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes resumeSchedule of Problem p1: its schedule \"hourly\" is finished: set it again to run it",
+            "details": {
+              "behavior": "Schedules",
+              "action": "resumeSchedule",
+              "reason": "its schedule \"hourly\" is finished: set it again to run it",
+              "vetoCode": "schedule_finished",
+              "vetoDetails": {
+                "name": "hourly"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 1800000
+            }
+          ],
+          "now": 1772337600000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "1800000",
+            "state": "active",
+            "setAt": 1772337600000,
+            "nextAt": 1772339400000,
+            "runs": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 900000
+            }
+          ],
+          "now": 1772337660000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "900000",
+            "state": "active",
+            "setAt": 1772337660000,
+            "nextAt": 1772338560000,
+            "runs": 1,
+            "replaced": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "pauseSchedule",
+            {
+              "name": "hourly"
+            }
+          ],
+          "now": 1772337720000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "900000",
+            "state": "paused",
+            "setAt": 1772337660000,
+            "nextAt": 1772338560000,
+            "runs": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 900000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "900000",
+            "state": "paused",
+            "setAt": 1772337660000,
+            "nextAt": 1772338560000,
+            "runs": 1,
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 1200000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "1200000",
+            "state": "active",
+            "setAt": 1772337720000,
+            "nextAt": 1772338920000,
+            "runs": 1,
+            "replaced": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules > reportRun records the latest run's outcome, a repeat unchanged; missed tries the run again five minutes on as its next attempt, and another outcome cancels the try; a retry the next regular run would overtake is not armed; a report of an older run answers unchanged, of a run not had is no_run, and an outcome outcomes lacks is refused; an after's missed run is tried again; a late report of an earlier attempt, or of the latest run of a schedule a replace took the place of, answers unchanged, and the replace's runs count on",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": [
+            "problems.schedule"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 3,
+                        "minMs": 120000,
+                        "maxMs": 2592000000,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "timeZone": "America/New_York",
+                        "outcomes": [
+                          "told",
+                          "resumed",
+                          "held",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "missed",
+                          "afterMs": 300000
+                        },
+                        "endOn": {
+                          "enters": [
+                            "done",
+                            "dropped"
+                          ]
+                        },
+                        "permission": "problems.schedule"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772323200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "told"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes reportRun of Problem p1: its schedule \"hourly\" has had 0 runs, and no run 1 to report",
+            "details": {
+              "behavior": "Schedules",
+              "action": "reportRun",
+              "reason": "its schedule \"hourly\" has had 0 runs, and no run 1 to report",
+              "vetoCode": "no_run",
+              "vetoDetails": {
+                "name": "hourly",
+                "run": 1,
+                "runs": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772326800000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772326800000,
+              "payload": {
+                "name": "hourly",
+                "run": 1,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772326800000,
+                "firedAt": 1772326800000,
+                "nextAt": 1772330400000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "told"
+            }
+          ],
+          "now": 1772326801000,
+          "expect": {
+            "name": "hourly",
+            "run": 1,
+            "outcome": "told"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "told"
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "run": 1,
+            "outcome": "told",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "lost"
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation reportRun of behavior Schedules: /outcome: \"lost\" is not an outcome of Problem's Schedules (told, resumed, held, missed)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/outcome",
+                  "message": "\"lost\" is not an outcome of Problem's Schedules (told, resumed, held, missed)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "missed"
+            }
+          ],
+          "now": 1772326802000,
+          "expect": {
+            "name": "hourly",
+            "run": 1,
+            "outcome": "missed",
+            "retryAt": 1772327102000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772327102000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772327102000,
+              "payload": {
+                "name": "hourly",
+                "run": 1,
+                "attempt": 2,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772327102000,
+                "firedAt": 1772327102000,
+                "nextAt": 1772330400000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "missed"
+            }
+          ],
+          "now": 1772327160000,
+          "expect": {
+            "name": "hourly",
+            "run": 1,
+            "outcome": "missed",
+            "retryAt": 1772327460000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "held"
+            }
+          ],
+          "now": 1772327200000,
+          "expect": {
+            "name": "hourly",
+            "run": 1,
+            "outcome": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {
+              "name": "hourly"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "hourly",
+                "kind": "every",
+                "spec": "3600000",
+                "state": "active",
+                "setAt": 1772323200000,
+                "nextAt": 1772330400000,
+                "runs": 1,
+                "attempt": 2,
+                "lastAt": 1772327102000,
+                "lastOutcome": "held"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772330400000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772330400000,
+              "payload": {
+                "name": "hourly",
+                "run": 2,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772330400000,
+                "firedAt": 1772330400000,
+                "nextAt": 1772334000000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 1,
+              "outcome": "told"
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "run": 1,
+            "outcome": "told",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 3,
+              "outcome": "told"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes reportRun of Problem p1: its schedule \"hourly\" has had 2 runs, and no run 3 to report",
+            "details": {
+              "behavior": "Schedules",
+              "action": "reportRun",
+              "reason": "its schedule \"hourly\" has had 2 runs, and no run 3 to report",
+              "vetoCode": "no_run",
+              "vetoDetails": {
+                "name": "hourly",
+                "run": 3,
+                "runs": 2
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 2,
+              "outcome": "missed"
+            }
+          ],
+          "now": 1772333900000,
+          "expect": {
+            "name": "hourly",
+            "run": 2,
+            "outcome": "missed"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "nudge",
+              "after": 300000
+            }
+          ],
+          "now": 1772333900000,
+          "expect": {
+            "name": "nudge",
+            "kind": "after",
+            "spec": "300000",
+            "state": "active",
+            "setAt": 1772333900000,
+            "nextAt": 1772334200000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772334200000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772334200000,
+              "payload": {
+                "name": "hourly",
+                "run": 3,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "3600000",
+                "setAt": 1772323200000,
+                "dueAt": 1772334000000,
+                "firedAt": 1772334200000,
+                "nextAt": 1772337600000
+              }
+            },
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772334200000,
+              "payload": {
+                "name": "nudge",
+                "run": 1,
+                "attempt": 1,
+                "kind": "after",
+                "spec": "300000",
+                "setAt": 1772333900000,
+                "dueAt": 1772334200000,
+                "firedAt": 1772334200000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "nudge",
+              "run": 1,
+              "outcome": "missed"
+            }
+          ],
+          "now": 1772334250000,
+          "expect": {
+            "name": "nudge",
+            "run": 1,
+            "outcome": "missed",
+            "retryAt": 1772334550000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772334550000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772334550000,
+              "payload": {
+                "name": "nudge",
+                "run": 1,
+                "attempt": 2,
+                "kind": "after",
+                "spec": "300000",
+                "setAt": 1772333900000,
+                "dueAt": 1772334550000,
+                "firedAt": 1772334550000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {
+              "name": "nudge"
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "nudge",
+                "kind": "after",
+                "spec": "300000",
+                "state": "finished",
+                "setAt": 1772333900000,
+                "runs": 1,
+                "attempt": 2,
+                "lastAt": 1772334550000,
+                "finishedAt": 1772334550000,
+                "endedBy": "run"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "nudge",
+              "run": 1,
+              "attempt": 1,
+              "outcome": "missed"
+            }
+          ],
+          "now": 1772334560000,
+          "expect": {
+            "name": "nudge",
+            "run": 1,
+            "outcome": "missed",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "nudge",
+              "run": 1,
+              "attempt": 2,
+              "outcome": "told"
+            }
+          ],
+          "now": 1772334600000,
+          "expect": {
+            "name": "nudge",
+            "run": 1,
+            "outcome": "told"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 1800000
+            }
+          ],
+          "now": 1772334700000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "1800000",
+            "state": "active",
+            "setAt": 1772334700000,
+            "nextAt": 1772336500000,
+            "runs": 3,
+            "replaced": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "reportRun",
+            {
+              "name": "hourly",
+              "run": 3,
+              "outcome": "missed"
+            }
+          ],
+          "now": 1772334800000,
+          "expect": {
+            "name": "hourly",
+            "run": 3,
+            "outcome": "missed",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772336500000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772336500000,
+              "payload": {
+                "name": "hourly",
+                "run": 4,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "1800000",
+                "setAt": 1772334700000,
+                "dueAt": 1772336500000,
+                "firedAt": 1772336500000,
+                "nextAt": 1772338300000
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Schedules > endOn: a row whose Workflow enters a state endOn names finishes every live schedule, through a transition and through a raw write its change queue carries; a finished row takes no schedule",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": [
+            "problems.schedule"
+          ]
+        },
+        "guest": {
+          "subject": "guest",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 3,
+                        "minMs": 120000,
+                        "maxMs": 2592000000,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "timeZone": "America/New_York",
+                        "outcomes": [
+                          "told",
+                          "resumed",
+                          "held",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "missed",
+                          "afterMs": 300000
+                        },
+                        "endOn": {
+                          "enters": [
+                            "done",
+                            "dropped"
+                          ]
+                        },
+                        "permission": "problems.schedule"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772323200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Slow build"
+            },
+            {
+              "id": "p2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p2",
+            "data": {
+              "title": "Slow build"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "open",
+                "enteredAt": 1772323200000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772326800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "nudge",
+              "after": 600000
+            }
+          ],
+          "expect": {
+            "name": "nudge",
+            "kind": "after",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772323800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "pauseSchedule",
+            {
+              "name": "nudge"
+            }
+          ],
+          "expect": {
+            "name": "nudge",
+            "kind": "after",
+            "spec": "600000",
+            "state": "paused",
+            "setAt": 1772323200000,
+            "nextAt": 1772323800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "now": 1772323260000,
+          "expect": {
+            "from": "open",
+            "to": "working"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "now": 1772323320000,
+          "expect": {
+            "from": "working",
+            "to": "done"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "hourly",
+                "kind": "every",
+                "spec": "3600000",
+                "state": "finished",
+                "setAt": 1772323200000,
+                "runs": 0,
+                "finishedAt": 1772323320000,
+                "endedBy": "endOn"
+              },
+              {
+                "name": "nudge",
+                "kind": "after",
+                "spec": "600000",
+                "state": "finished",
+                "setAt": 1772323200000,
+                "runs": 0,
+                "finishedAt": 1772323320000,
+                "endedBy": "endOn"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "again",
+              "after": 300000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes setSchedule of Problem p1: its status is done, which ends its schedules (endOn): it takes no live schedule",
+            "details": {
+              "behavior": "Schedules",
+              "action": "setSchedule",
+              "reason": "its status is done, which ends its schedules (endOn): it takes no live schedule",
+              "vetoCode": "schedules_ended",
+              "vetoDetails": {
+                "status": "done"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "resumeSchedule",
+            {
+              "name": "nudge"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes resumeSchedule of Problem p1: its status is done, which ends its schedules (endOn): it takes no live schedule",
+            "details": {
+              "behavior": "Schedules",
+              "action": "resumeSchedule",
+              "reason": "its status is done, which ends its schedules (endOn): it takes no live schedule",
+              "vetoCode": "schedules_ended",
+              "vetoDetails": {
+                "status": "done"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p2",
+            "setSchedule",
+            {
+              "name": "hourly",
+              "every": 3600000
+            }
+          ],
+          "now": 1772323320000,
+          "expect": {
+            "name": "hourly",
+            "kind": "every",
+            "spec": "3600000",
+            "state": "active",
+            "setAt": 1772323320000,
+            "nextAt": 1772326920000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "storage.run",
+          "args": [
+            "UPDATE engine_instances SET bhv_workflow__status = 'dropped' WHERE schema = 'Problem' AND id = 'p2'"
+          ],
+          "dialect": "sqlite",
+          "expect": {
+            "changes": 1
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772323380000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p2",
+            "listSchedules",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "hourly",
+                "kind": "every",
+                "spec": "3600000",
+                "state": "finished",
+                "setAt": 1772323320000,
+                "runs": 0,
+                "finishedAt": 1772323380000,
+                "endedBy": "endOn"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules > max counts the live schedules: a cancelled one frees its place, and the finished ones beyond max go, those finished longest ago first; a new version's dropped kind, lowered max and narrower bounds hold new sets alone, and a schedule of a dropped kind runs",
+      "behaviors": [
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 2,
+                        "kinds": [
+                          "after",
+                          "every",
+                          "cron"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "a",
+              "every": 600000
+            }
+          ],
+          "expect": {
+            "name": "a",
+            "kind": "every",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772323200000,
+            "nextAt": 1772323800000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "b",
+              "every": 600000
+            }
+          ],
+          "now": 1772323201000,
+          "expect": {
+            "name": "b",
+            "kind": "every",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772323201000,
+            "nextAt": 1772323801000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "c",
+              "every": 600000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes setSchedule of Problem p1: it holds 2 live schedules (a, b), and its max is 2: cancel one to set another",
+            "details": {
+              "behavior": "Schedules",
+              "action": "setSchedule",
+              "reason": "it holds 2 live schedules (a, b), and its max is 2: cancel one to set another",
+              "vetoCode": "schedule_limit",
+              "vetoDetails": {
+                "max": 2,
+                "live": [
+                  "a",
+                  "b"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "a"
+            }
+          ],
+          "now": 1772323202000,
+          "expect": {
+            "name": "a",
+            "kind": "every",
+            "spec": "600000",
+            "state": "finished",
+            "setAt": 1772323200000,
+            "runs": 0,
+            "finishedAt": 1772323202000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "c",
+              "every": 600000
+            }
+          ],
+          "now": 1772323203000,
+          "expect": {
+            "name": "c",
+            "kind": "every",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772323203000,
+            "nextAt": 1772323803000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "b"
+            }
+          ],
+          "now": 1772323204000,
+          "expect": {
+            "name": "b",
+            "kind": "every",
+            "spec": "600000",
+            "state": "finished",
+            "setAt": 1772323201000,
+            "runs": 0,
+            "finishedAt": 1772323204000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "cancelSchedule",
+            {
+              "name": "c"
+            }
+          ],
+          "now": 1772323205000,
+          "expect": {
+            "name": "c",
+            "kind": "every",
+            "spec": "600000",
+            "state": "finished",
+            "setAt": 1772323203000,
+            "runs": 0,
+            "finishedAt": 1772323205000,
+            "endedBy": "cancel"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "b",
+                "kind": "every",
+                "spec": "600000",
+                "state": "finished",
+                "setAt": 1772323201000,
+                "runs": 0,
+                "finishedAt": 1772323204000,
+                "endedBy": "cancel"
+              },
+              {
+                "name": "c",
+                "kind": "every",
+                "spec": "600000",
+                "state": "finished",
+                "setAt": 1772323203000,
+                "runs": 0,
+                "finishedAt": 1772323205000,
+                "endedBy": "cancel"
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "d",
+              "after": 600000
+            }
+          ],
+          "now": 1772323206000,
+          "expect": {
+            "name": "d",
+            "kind": "after",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772323206000,
+            "nextAt": 1772323806000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "e",
+              "every": 600000
+            }
+          ],
+          "now": 1772323207000,
+          "expect": {
+            "name": "e",
+            "kind": "every",
+            "spec": "600000",
+            "state": "active",
+            "setAt": 1772323207000,
+            "nextAt": 1772323807000,
+            "runs": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "minMs": 300000,
+                        "outcomes": [
+                          "told"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "agent",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 2,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "f",
+              "every": 600000
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Schedules vetoes setSchedule of Problem p1: it holds 2 live schedules (d, e), and its max is 1: cancel one to set another",
+            "details": {
+              "behavior": "Schedules",
+              "action": "setSchedule",
+              "reason": "it holds 2 live schedules (d, e), and its max is 1: cancel one to set another",
+              "vetoCode": "schedule_limit",
+              "vetoDetails": {
+                "max": 1,
+                "live": [
+                  "d",
+                  "e"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "d",
+              "after": 600000
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /after: Problem's Schedules takes no after schedule: its kinds are every",
+            "details": {
+              "issues": [
+                {
+                  "path": "/after",
+                  "message": "Problem's Schedules takes no after schedule: its kinds are every"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "setSchedule",
+            {
+              "name": "e",
+              "every": 120000
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation setSchedule of behavior Schedules: /every: 120000 is outside minMs..maxMs (300000..2592000000): an interval lies between them",
+            "details": {
+              "issues": [
+                {
+                  "path": "/every",
+                  "message": "120000 is outside minMs..maxMs (300000..2592000000): an interval lies between them"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1772323807000,
+          "expect": {
+            "failed": 0
+          },
+          "events": [
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772323807000,
+              "payload": {
+                "name": "d",
+                "run": 1,
+                "attempt": 1,
+                "kind": "after",
+                "spec": "600000",
+                "setAt": 1772323206000,
+                "dueAt": 1772323806000,
+                "firedAt": 1772323807000
+              }
+            },
+            {
+              "schema": "Problem",
+              "id": "p1",
+              "use": "Schedules",
+              "kind": "run",
+              "at": 1772323807000,
+              "payload": {
+                "name": "e",
+                "run": 1,
+                "attempt": 1,
+                "kind": "every",
+                "spec": "600000",
+                "setAt": 1772323207000,
+                "dueAt": 1772323807000,
+                "firedAt": 1772323807000,
+                "nextAt": 1772324407000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Problem",
+            "p1",
+            "listSchedules",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "name": "d",
+                "kind": "after",
+                "spec": "600000",
+                "state": "finished",
+                "setAt": 1772323206000,
+                "runs": 1,
+                "attempt": 1,
+                "lastAt": 1772323807000,
+                "finishedAt": 1772323807000,
+                "endedBy": "run"
+              },
+              {
+                "name": "e",
+                "kind": "every",
+                "spec": "600000",
+                "state": "active",
+                "setAt": 1772323207000,
+                "nextAt": 1772324407000,
+                "runs": 1,
+                "attempt": 1,
+                "lastAt": 1772323807000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules > define refuses a config of the wrong shape, minMs over maxMs, an unknown time zone or one with no cron kind, a retry outcome outcomes lacks or a retry outside the bounds, a status with no endOn, an endOn on a type with no Workflow or naming no state of it",
+      "behaviors": [
+        "Workflow",
+        "Schedules"
+      ],
+      "principals": {
+        "agent": {
+          "subject": "agent",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1: must match \"then\" schema; /types/Problem/behaviors/1/config: must have required property 'max'",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "must have required property 'max'"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "weekly"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1: must match \"then\" schema; /types/Problem/behaviors/1/config/kinds/0: must be one of \"after\", \"every\", \"cron\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/1/config/kinds/0",
+                  "message": "must be one of \"after\", \"every\", \"cron\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [],
+                        "outcomes": [
+                          "told"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1: must match \"then\" schema; /types/Problem/behaviors/1/config/kinds: must NOT have fewer than 1 items",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/1/config/kinds",
+                  "message": "must NOT have fewer than 1 items"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told",
+                          "told"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1: must match \"then\" schema; /types/Problem/behaviors/1/config/outcomes: must NOT have duplicate items (items ## 1 and 0 are identical)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/1/config/outcomes",
+                  "message": "must NOT have duplicate items (items ## 1 and 0 are identical)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "every": 60000
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1: must match \"then\" schema; /types/Problem/behaviors/1/config: unknown key \"every\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "unknown key \"every\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "minMs": 600000,
+                        "maxMs": 300000
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: minMs (600000) is more than maxMs (300000): no delay or interval lies between them",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: minMs (600000) is more than maxMs (300000): no delay or interval lies between them"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "cron"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "timeZone": "Mars/Olympus"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: timeZone \"Mars/Olympus\" is not a time zone of the IANA database the core bundles",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: timeZone \"Mars/Olympus\" is not a time zone of the IANA database the core bundles"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "timeZone": "UTC"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: timeZone names the zone a cron line is read in, and kinds leaves out cron",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: timeZone names the zone a cron line is read in, and kinds leaves out cron"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told",
+                          "missed"
+                        ],
+                        "retry": {
+                          "outcome": "lost",
+                          "afterMs": 300000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: retry.outcome \"lost\" is not one of outcomes (told, missed)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: retry.outcome \"lost\" is not one of outcomes (told, missed)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "retry": {
+                          "outcome": "told",
+                          "afterMs": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: retry.afterMs (1000) is outside minMs..maxMs (60000..2592000000): a retry is held to the bounds a schedule is",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: retry.afterMs (1000) is outside minMs..maxMs (60000..2592000000): a retry is held to the bounds a schedule is"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "status": "Workflow"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: status names the Workflow endOn reads, and the config gives no endOn",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: status names the Workflow endOn reads, and the config gives no endOn"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "endOn": {
+                          "enters": [
+                            "done"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/0/config: type Problem: behavior Schedules config: it reads the status of Workflow, which the type does not list",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/0/config",
+                  "message": "type Problem: behavior Schedules config: it reads the status of Workflow, which the type does not list"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "agent",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "from": "working",
+                            "to": "done"
+                          },
+                          {
+                            "from": "working",
+                            "to": "open"
+                          },
+                          {
+                            "from": "open",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "working",
+                            "to": "dropped"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Schedules",
+                      "config": {
+                        "max": 1,
+                        "kinds": [
+                          "every"
+                        ],
+                        "outcomes": [
+                          "told"
+                        ],
+                        "endOn": {
+                          "enters": [
+                            "closed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Problem/behaviors/1/config: type Problem: behavior Schedules config: endOn.enters names \"closed\", which is not a state of the type's Workflow (open, working, done, dropped)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Problem/behaviors/1/config",
+                  "message": "type Problem: behavior Schedules config: endOn.enters names \"closed\", which is not a state of the type's Workflow (open, working, done, dropped)"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

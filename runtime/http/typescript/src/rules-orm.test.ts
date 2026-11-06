@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import pg from 'pg';
 import { NotFoundError, ormOf, type Clauses, type Orm, type OrmDefinition, type TableDefinition, type WriteOptions } from './orm';
-import { RulesRefusal, withRulesCore, type RulesCallOptions, type RulesLayout } from './rules';
+import { RulesRefusal, withRulesCore, type BehaviorEvents, type RulesCallOptions, type RulesLayout } from './rules';
 import { bumpVersion, rulesCore, rulesDsn } from './rules.testing';
 import { uuidToDb } from './uuid';
 
@@ -13,7 +13,10 @@ import { uuidToDb } from './uuid';
 // holds through the core's update, and orm.order.status holds Workflow's
 // operations; and over a table that implements Constants and StateRules
 // beside its Workflow, with no sub-table and a unique key, whose upserts
-// are held to the rules those uses hold an update to (D104). Postgres
+// are held to the rules those uses hold an update to (D104); and a
+// repository's runEvent, which spends a worker's claim of a message of the
+// table's event queue, written here by hand as the adapter writes one, and
+// runs the project's handler in one transaction with it (D104). Postgres
 // alone, the ORM's one dialect. Skipped without
 // SUPERSCHEMATIC_RULES_TEST_DATABASE_URL; the generated package's own
 // end-to-end test runs the generated definition itself.
@@ -156,6 +159,7 @@ const rules: { types: Record<string, RulesLayout['types'][string]> } = {
           operations: [{ name: 'transition', writes: true }],
         },
       ],
+      events: { queue: 'OrderEvent', table: 'order_event_queue', rowKey: 'row_key', use: 'use_id', kind: 'kind', at: 'at', payload: 'payload' },
       spec: { name: 'Order', uses: [{ behavior: 'Workflow', config: flow, anchor: { field: 'status' } }] },
     },
   },
@@ -194,7 +198,7 @@ interface Repositories {
     deleteOne(id: string): Promise<void>;
     readonly status: { transition(key: string, params: { to: string }, options?: RulesCallOptions): Promise<{ from: string; to: string }> };
   };
-  readonly order: {
+  readonly order: BehaviorEvents & {
     createOne(input: { id?: string; title: string }): Promise<OrderRow>;
     createMany(inputs: readonly { id?: string; title: string }[]): Promise<OrderRow[]>;
     getOne(id: string): Promise<OrderRow>;
@@ -235,6 +239,22 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
   _version BIGINT DEFAULT 1 NOT NULL
 )`);
     for (const ddl of bumpVersion('ticket')) await pool.query(ddl);
+    await pool.query(`CREATE TABLE order_event_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  row_key UUID NOT NULL,
+  use_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  at BIGINT NOT NULL,
+  payload JSONB,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+)`);
     orm = ormOf<Repositories>(pool, definition, withRulesCore(null, () => rulesCore!));
   });
   afterAll(async () => {
@@ -384,6 +404,50 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
       })
     ).rejects.toThrow('roll back');
     await expect(orm.order.getOne(kept!)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  test("runEvent spends a claimed event and runs the handler in one transaction: a handler that writes commits with the spend, and one that fails rolls the spend back", async () => {
+    const row = await orm.order.createOne({ title: 'Bell' });
+    // A message of the table's event queue as the adapter writes one, and a
+    // worker's claim of it as its claim statement makes one.
+    const queued = async (): Promise<string> =>
+      (await pool.query(`INSERT INTO order_event_queue (row_key, use_id, kind, at, payload) VALUES ($1, 'status', 'rang', 1, '{"n": 1}') RETURNING id::text AS id`, [uuidToDb(row.id)])).rows[0].id;
+    const claimed = async (id: string) => {
+      const token = crypto.randomUUID();
+      await pool.query(`UPDATE order_event_queue SET state = 'claimed', claim_token = $1, attempts = attempts + 1 WHERE id = $2`, [token, id]);
+      return { id, token };
+    };
+    const messages = async () => (await pool.query(`SELECT id::text AS id, state FROM order_event_queue WHERE row_key = $1 ORDER BY created_at, id`, [uuidToDb(row.id)])).rows;
+    const event = { rowKey: row.id, useId: 'status', kind: 'rang', at: 1, payload: { n: 1 } };
+
+    const first = await claimed(await queued());
+    const run = await orm.transaction(tx => tx.order.runEvent(event, { claim: first }, async () => void (await tx.order.updateOne(row.id, { title: 'Rung' }))));
+    expect(run).toEqual({ ran: true });
+    expect(await messages()).toEqual([]);
+    expect(await orm.order.getOne(row.id)).toMatchObject({ title: 'Rung', _version: 2 });
+
+    // A handler that fails rolls back its writes and the spend: the message
+    // stays claimed, for the worker to fail.
+    const second = await claimed(await queued());
+    await expect(
+      orm.transaction(tx =>
+        tx.order.runEvent(event, { claim: second }, async () => {
+          await tx.order.updateOne(row.id, { title: 'Lost' });
+          throw new Error('the agent was not told');
+        })
+      )
+    ).rejects.toThrow('the agent was not told');
+    expect(await messages()).toEqual([{ id: second.id, state: 'claimed' }]);
+    expect(await orm.order.getOne(row.id)).toMatchObject({ title: 'Rung', _version: 2 });
+
+    // A claim another worker holds runs nothing; the one that holds it
+    // spends it, in a transaction runEvent opens.
+    let handled = 0;
+    expect(await orm.order.runEvent(event, { claim: { id: second.id, token: crypto.randomUUID() } }, async () => void handled++)).toEqual({ ran: false, why: 'claim lost' });
+    expect(handled).toBe(0);
+    expect(await orm.order.runEvent(event, { claim: second }, async () => void handled++)).toEqual({ ran: true });
+    expect(handled).toBe(1);
+    expect(await messages()).toEqual([]);
   });
 
   test('a raw SQL write of an owned column is never refused', async () => {

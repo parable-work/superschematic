@@ -1,0 +1,907 @@
+{
+  "name": "Schedules",
+  "description": "Named schedules on the row, each one run a delay after it is set (after), a run at each whole interval from when it is set (every), or a run at each time a cron line names in a time zone (cron), bounded by minMs and maxMs, at most max of them live at once. An active schedule's next run is a deadline: its fire records the run, emits the event run, which the API's behavior worker hands to the project's handler, and arms the next run from the time it fired, so a schedule overdue by many runs fires once. reportRun records a run's outcome, and the config's retry outcome tries the run again afterMs on. Pausing keeps the next run, and a row whose Workflow enters a state endOn names finishes every live schedule. The behaviors' core alone implements it, on a table; no engine type composes it.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "endOn": {
+        "additionalProperties": false,
+        "description": "The states of the Workflow status names whose entry finishes every live schedule of the row; a row in one takes no live schedule.",
+        "properties": {
+          "enters": {
+            "description": "The states, each a state of that Workflow.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "enters"
+        ],
+        "type": "object"
+      },
+      "kinds": {
+        "description": "The kinds a schedule may be: after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names.",
+        "items": {
+          "enum": [
+            "after",
+            "every",
+            "cron"
+          ]
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "max": {
+        "description": "How many schedules a row holds live, active or paused, at once.",
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "maxMs": {
+        "description": "The greatest delay of an after schedule and interval of an every one, and how far off a cron line's next run may be when it is set, in milliseconds; 2592000000, thirty days, when absent.",
+        "minimum": 1000,
+        "type": "integer"
+      },
+      "minMs": {
+        "description": "The least delay of an after schedule and interval of an every one, and the least gap between two runs of a cron line, read across its times of day and the dates its day fields name, in milliseconds; 60000, a minute, when absent.",
+        "minimum": 1000,
+        "type": "integer"
+      },
+      "outcomes": {
+        "description": "The outcomes reportRun records of a run.",
+        "items": {
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "type": "string"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "permission": {
+        "description": "The permission a caller needs for every operation of Schedules; any caller when absent.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "retry": {
+        "additionalProperties": false,
+        "description": "The outcome that tries a run again, and how long after its report: the try is the run's next attempt, armed unless the schedule's next regular run comes first.",
+        "properties": {
+          "afterMs": {
+            "description": "How long after the report the run is tried again, in milliseconds, between minMs and maxMs.",
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "outcome": {
+            "description": "One of outcomes.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "afterMs"
+        ],
+        "type": "object"
+      },
+      "status": {
+        "description": "The field of the type whose Workflow endOn reads; a Workflow anchored on the type is named Workflow. Implied when the type has one Workflow. Needs endOn.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "timeZone": {
+        "description": "The IANA time zone a cron line is read in when setSchedule names none; UTC when absent. Needs cron among kinds.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "max",
+      "kinds",
+      "outcomes"
+    ],
+    "type": "object"
+  },
+  "tables": [
+    {
+      "name": "schedules",
+      "description": "One row per schedule of the row, keyed by its name: its kind and spec, its time zone, its state, when it was set, its next run and the retry of its latest one, how many runs it has had and which attempt of the latest fired last and when, the outcome reported of it, and when and why it finished. A finished schedule stays until its name is set again, or until the row keeps more than max finished ones, when those finished longest ago go.",
+      "key": "name",
+      "fields": [
+        {
+          "name": "name",
+          "description": "The schedule's name, its key on the row.",
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "description": "after, every or cron.",
+          "type": "string"
+        },
+        {
+          "name": "spec",
+          "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+          "type": "string"
+        },
+        {
+          "name": "timeZone",
+          "description": "The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every.",
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "description": "active, paused or finished.",
+          "type": "string"
+        },
+        {
+          "name": "setAt",
+          "description": "When it was set, in epoch milliseconds: an every schedule's runs fall at whole intervals from it.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "nextAt",
+          "description": "When its next regular run falls due, in epoch milliseconds; absent once it has none.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "retryAt",
+          "description": "When its latest run is tried again, before nextAt, in epoch milliseconds; absent unless a retry is armed.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "runs",
+          "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "attempt",
+          "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "lastAt",
+          "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "lastOutcome",
+          "description": "The outcome reported of its latest attempt; absent until one is.",
+          "type": "string"
+        },
+        {
+          "name": "finishedAt",
+          "description": "When it finished, in epoch milliseconds; absent while it is live.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "endedBy",
+          "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "armsDeadlines": true,
+  "hearsChanges": true,
+  "operations": [
+    {
+      "name": "setSchedule",
+      "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "description": "One run this many milliseconds from now.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "cron": {
+            "description": "A run at each time this cron line names: five fields, minute hour day-of-month month day-of-week, or a macro: @yearly, @annually, @monthly, @weekly, @daily, @midnight or @hourly.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "every": {
+            "description": "A run at each whole interval of this many milliseconds from now.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The schedule's name: a letter, then letters, digits, _ and -.",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The IANA time zone the cron line is read in; the config's timeZone, else UTC, when absent. A cron schedule's alone.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "enum": [
+              "run",
+              "cancel",
+              "endOn"
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "after, every or cron.",
+            "enum": [
+              "after",
+              "every",
+              "cron"
+            ]
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "type": "integer"
+          },
+          "replaced": {
+            "description": "True when it replaced a live schedule of the name; absent otherwise.",
+            "type": "boolean"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "description": "active, paused or finished.",
+            "enum": [
+              "active",
+              "paused",
+              "finished"
+            ]
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when a live schedule of the name had the same kind, spec and time zone, so nothing was written; absent otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "spec",
+          "state",
+          "setAt",
+          "runs"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "pauseSchedule",
+      "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The schedule to pause.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "enum": [
+              "run",
+              "cancel",
+              "endOn"
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "after, every or cron.",
+            "enum": [
+              "after",
+              "every",
+              "cron"
+            ]
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "description": "active, paused or finished.",
+            "enum": [
+              "active",
+              "paused",
+              "finished"
+            ]
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when it was paused already, so nothing was written; absent otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "spec",
+          "state",
+          "setAt",
+          "runs"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "resumeSchedule",
+      "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The schedule to resume.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "enum": [
+              "run",
+              "cancel",
+              "endOn"
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "after, every or cron.",
+            "enum": [
+              "after",
+              "every",
+              "cron"
+            ]
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "description": "active, paused or finished.",
+            "enum": [
+              "active",
+              "paused",
+              "finished"
+            ]
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when it was active already, so nothing was written; absent otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "spec",
+          "state",
+          "setAt",
+          "runs"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "cancelSchedule",
+      "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The schedule to cancel.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+            "type": "integer"
+          },
+          "endedBy": {
+            "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+            "enum": [
+              "run",
+              "cancel",
+              "endOn"
+            ]
+          },
+          "finishedAt": {
+            "description": "When it finished, in epoch milliseconds; absent while it is live.",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "after, every or cron.",
+            "enum": [
+              "after",
+              "every",
+              "cron"
+            ]
+          },
+          "lastAt": {
+            "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+            "type": "integer"
+          },
+          "lastOutcome": {
+            "description": "The outcome reported of its latest attempt; absent until one is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "nextAt": {
+            "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "type": "integer"
+          },
+          "retryAt": {
+            "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When it was set, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+            "type": "string"
+          },
+          "state": {
+            "description": "active, paused or finished.",
+            "enum": [
+              "active",
+              "paused",
+              "finished"
+            ]
+          },
+          "timeZone": {
+            "description": "The IANA time zone a cron line is read in; absent for after and every.",
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "True when it was finished already, so nothing was written; absent otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "spec",
+          "state",
+          "setAt",
+          "runs"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "reportRun",
+      "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "description": "The attempt of the run, its number in the event run's payload; when given, a report of an attempt other than the latest is answered unchanged.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The schedule whose run it reports.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "outcome": {
+            "description": "One of the config's outcomes.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "run": {
+            "description": "The run, its number in the event run's payload.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "run",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The schedule.",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "The outcome reported.",
+            "type": "string"
+          },
+          "retryAt": {
+            "description": "When the run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+            "type": "integer"
+          },
+          "run": {
+            "description": "The run reported.",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "True when the run was older than the latest, the latest of a schedule the name's current one replaced, or another attempt than the latest, or its outcome was recorded already, so nothing was written; absent otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "run",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "listSchedules",
+      "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Only this schedule.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The schedules, by name.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "attempt": {
+                  "description": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+                  "type": "integer"
+                },
+                "endedBy": {
+                  "description": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+                  "enum": [
+                    "run",
+                    "cancel",
+                    "endOn"
+                  ]
+                },
+                "finishedAt": {
+                  "description": "When it finished, in epoch milliseconds; absent while it is live.",
+                  "type": "integer"
+                },
+                "kind": {
+                  "description": "after, every or cron.",
+                  "enum": [
+                    "after",
+                    "every",
+                    "cron"
+                  ]
+                },
+                "lastAt": {
+                  "description": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+                  "type": "integer"
+                },
+                "lastOutcome": {
+                  "description": "The outcome reported of its latest attempt; absent until one is.",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "The schedule's name.",
+                  "type": "string"
+                },
+                "nextAt": {
+                  "description": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+                  "type": "integer"
+                },
+                "retryAt": {
+                  "description": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+                  "type": "integer"
+                },
+                "runs": {
+                  "description": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+                  "type": "integer"
+                },
+                "setAt": {
+                  "description": "When it was set, in epoch milliseconds.",
+                  "type": "integer"
+                },
+                "spec": {
+                  "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+                  "type": "string"
+                },
+                "state": {
+                  "description": "active, paused or finished.",
+                  "enum": [
+                    "active",
+                    "paused",
+                    "finished"
+                  ]
+                },
+                "timeZone": {
+                  "description": "The IANA time zone a cron line is read in; absent for after and every.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "spec",
+                "state",
+                "setAt",
+                "runs"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "events": [
+    {
+      "kind": "run",
+      "description": "A run of a schedule fell due and fired: its name, which run and which attempt of it, its kind and spec, the time zone of a cron line, when the schedule was set, when the run was due and when it fired, and the schedule's next regular run when it has one. Delivery is at least once, so a handler is idempotent by the row's key, the name, setAt, the run and the attempt, which no two fires share, and reports the run's outcome with reportRun, naming the run and the attempt.",
+      "payloadSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "run",
+          "attempt",
+          "kind",
+          "spec",
+          "setAt",
+          "dueAt",
+          "firedAt"
+        ],
+        "properties": {
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
+          "run": {
+            "description": "Which run of the name it is, from 1, counted on across a replace and a finished name set again.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "attempt": {
+            "description": "Which attempt of the run it is: 1, and one more for each retry.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "description": "after, every or cron.",
+            "enum": [
+              "after",
+              "every",
+              "cron"
+            ]
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line.",
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The time zone a cron line is read in; absent for after and every.",
+            "type": "string"
+          },
+          "setAt": {
+            "description": "When the schedule whose run it is was set, in epoch milliseconds: a name pruned and set again has a later one.",
+            "type": "integer"
+          },
+          "dueAt": {
+            "description": "When the run, or its retry, was due, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "firedAt": {
+            "description": "When it fired, in epoch milliseconds: the later of its due time and the worker's clock.",
+            "type": "integer"
+          },
+          "nextAt": {
+            "description": "When the schedule's next regular run falls due, in epoch milliseconds; absent when it has none.",
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "no_schedule",
+      "description": "pauseSchedule, resumeSchedule, cancelSchedule or reportRun of a name the row has no schedule of; details give the name and the row's schedules."
+    },
+    {
+      "code": "schedule_limit",
+      "description": "setSchedule of a name with no live schedule while the row holds max live ones; details give max and the live schedules' names."
+    },
+    {
+      "code": "schedule_finished",
+      "description": "pauseSchedule or resumeSchedule of a finished schedule, which setSchedule sets again; details give the name."
+    },
+    {
+      "code": "schedules_ended",
+      "description": "setSchedule or resumeSchedule while the row's Workflow is in a state endOn names; details give the status."
+    },
+    {
+      "code": "no_run",
+      "description": "reportRun of a run the schedule has not had; details give the name, the run and its runs."
+    }
+  ]
+}

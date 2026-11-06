@@ -27,7 +27,8 @@
 {{- if .HasBackgroundWork }}
 //!
 //! It also declares {{ if .HasJobs }}`Jobs`, a method per job of {{ .SchemaName }}{{ if .HasWorkers }}, and {{ end }}{{ end }}{{ if .HasWorkers }}`Workers`,
-//! a method per worker of {{ .SchemaName }}{{ end }} (D52, D53, D65; sections 8.7 and
+//! a method per worker of {{ .SchemaName }}{{ if .EventHandlers }} and per event its behavior workers
+//! hand on{{ end }}{{ end }} (D52, D53, D65{{ if .EventHandlers }}, D104{{ end }}; sections 8.7 and
 //! 8.8). The implementation's crate declares
 //!
 //! ```ignore
@@ -209,12 +210,23 @@ pub trait Jobs: Send + Sync {
 /// is over, the entrypoint drops the futures that still run and gives their
 /// messages back. A message may come again after a worker dies holding it,
 /// so a method is idempotent.
+{{- if .EventHandlers }}
+///
+/// It also has a method per event its behavior workers' tables' behaviors
+/// emit (D104), which the behavior worker that runs the table's event queue
+/// calls once per event it claims, in the transaction that spends its
+/// message.
+{{- end }}
 #[async_trait]
 pub trait Workers: Send + Sync {
 {{- range .Workers }}
     /// Handles a message of the queue {{ .Queue }}, {{ if eq .Concurrency 1 }}one at a time{{ else }}{{ .Concurrency }} at a time{{ end }} unless an
     /// environment changes the worker's concurrency.
 {{ $.WorkerSignature . }}
+{{- end }}
+{{- range .EventHandlers }}
+{{ .EventHandlerDoc "    " }}
+{{ $.EventSignature . }}
 {{- end }}
 }
 {{- end }}

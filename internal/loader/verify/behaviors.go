@@ -26,9 +26,10 @@ import (
 // implements and those anchored on its fields (D103), are held to
 // checkTableUses as well, and a behavior it implements is one the
 // behaviors' core runs and that names no value field. A behavior no engine
-// implements (registry.EngineImplements: Seats and Reconcile, D104) is
-// refused on an engine type, naming the table form. A declaration's own
-// field and operation names are checked when it registers.
+// implements (registry.EngineImplements: Seats, Reconcile and Schedules,
+// D104) is refused on an engine type, naming the table form. A
+// declaration's own field and operation names are checked when it
+// registers.
 func checkBehaviors(schema *ir.Schema, reg *registry.Registry, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
@@ -85,9 +86,10 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			continue
 		}
 		if !ref.Implements && !ref.FieldAnchored() && !registry.EngineImplements(behavior) {
-			// Seats and Reconcile are the behaviors' core's alone (D104):
-			// no engine registers them, so an engine type cannot compose
-			// either, and the build names the table form.
+			// Seats, Reconcile and Schedules are the behaviors' core's
+			// alone (D104): no engine registers them, so an engine type
+			// cannot compose any of them, and the build names the table
+			// form.
 			r.errorf(td.Owner, "%s", engineRefusal(td, behavior))
 			continue
 		}
@@ -242,8 +244,10 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // fields, moves, waits and the tables it reads to the table, its Workflow
 // and its database (checkLeaseConfig, checkRetriesConfig,
 // checkPresenceConfig, checkBudgetConfig, D104), a Seats use's seats to
-// the table's fields (checkSeatsConfig, D104), and a Reconcile use's status
-// and unreachable to the table's Workflow (checkReconcileConfig, D104).
+// the table's fields (checkSeatsConfig, D104), a Reconcile use's status
+// and unreachable to the table's Workflow (checkReconcileConfig, D104), and
+// a Schedules use's bounds, retry, status and endOn to its config and the
+// table's Workflow (checkSchedulesConfig, D104).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -333,13 +337,15 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
 				}
-			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior:
+			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {
 					break
 				}
 				switch ref.Name {
 				case seatsBehavior:
 					checkSeatsConfig(schema, td, ref, uses, r)
+				case schedulesBehavior:
+					checkSchedulesConfig(schema, td, ref, uses, r)
 				case constantsBehavior:
 					checkConstantsConfig(schema, td, ref, uses, r)
 				case stateRulesBehavior:
@@ -393,14 +399,15 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 
 // checkTableStorage holds what td's uses keep beside the table (D103):
 // the sub-tables their behaviors declare, the deadline queue of a table
-// whose behaviors arm deadlines and the change queue of a table whose
+// whose behaviors arm deadlines, the event queue of a table whose
+// behaviors emit events (D104) and the change queue of a table whose
 // writes are heard, by its own behaviors or another table's through a
 // relation of it (behaviorfields.HeardBy). Their rows and messages name
 // the row by its key, so td has one key field, and the types the loader
 // adds for them take no name of a type or a table the schema declares. A
 // type the loader added, as an IR read back holds it, is the one it adds.
 func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.Behavior, r *Result) {
-	var keeping, arming, hearing []string
+	var keeping, arming, emitting, hearing []string
 	for _, ref := range td.TableBehaviors() {
 		behavior, ok := uses[ref.UseID()]
 		if !ok {
@@ -412,6 +419,9 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		if behavior.ArmsDeadlines && !slices.Contains(arming, ref.Name) {
 			arming = append(arming, ref.Name)
 		}
+		if len(behavior.Events) > 0 && !slices.Contains(emitting, ref.Name) {
+			emitting = append(emitting, ref.Name)
+		}
 		if behavior.HearsChanges && !slices.Contains(hearing, ref.Name) {
 			hearing = append(hearing, ref.Name)
 		}
@@ -419,7 +429,7 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 	for _, table := range behaviorfields.HeardBy(schema)[td.Name] {
 		hearing = append(hearing, table+"'s Reactions")
 	}
-	if len(keeping) == 0 && len(arming) == 0 && len(hearing) == 0 {
+	if len(keeping) == 0 && len(arming) == 0 && len(emitting) == 0 && len(hearing) == 0 {
 		return
 	}
 	var keys []string
@@ -432,6 +442,10 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		names := keeping
 		if len(names) == 0 {
 			names = arming
+		}
+		if len(names) == 0 && len(emitting) > 0 {
+			r.errorf(td.Owner, "type %s: its behaviors emit events (%s), and %s's key is %d fields (%s): a table whose behaviors emit events has one @key field, which its event queue's messages name (D104)", td.Name, strings.Join(emitting, ", "), td.Name, len(keys), strings.Join(keys, ", "))
+			return
 		}
 		if len(names) == 0 {
 			r.errorf(td.Owner, "type %s: its writes are heard (%s), and %s's key is %d fields (%s): a table whose writes are heard has one @key field, which its change queue's messages name (D103)", td.Name, strings.Join(hearing, ", "), td.Name, len(keys), strings.Join(keys, ", "))
@@ -480,6 +494,12 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		name := behaviorlayout.DeadlineQueueTypeName(td.Name)
 		if sql, taken := queueTaken(name); taken {
 			r.errorf(td.Owner, "type %s: its behaviors arm deadlines (%s), whose queue the build adds as %s (%s), which the schema also declares; rename that type (D103)", td.Name, strings.Join(arming, ", "), name, sql)
+		}
+	}
+	if len(emitting) > 0 {
+		name := behaviorlayout.EventQueueTypeName(td.Name)
+		if sql, taken := queueTaken(name); taken {
+			r.errorf(td.Owner, "type %s: its behaviors emit events (%s), whose queue the build adds as %s (%s), which the schema also declares; rename that type (D104)", td.Name, strings.Join(emitting, ", "), name, sql)
 		}
 	}
 	if len(hearing) > 0 {

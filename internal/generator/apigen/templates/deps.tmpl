@@ -11,9 +11,16 @@
 {{- end }}
 {{- if .HasWorkers }}
 //
+{{- if .HasWorkerEvents }}
+// It also defines Workers, a method per worker of {{ .SchemaName }} and per
+// event its behavior workers hand on (D104), and WorkersConstructor, the
+// signature of the implementation's constructor of its workers (section
+// 8.8).
+{{- else }}
 // It also defines Workers, a method per worker of {{ .SchemaName }}, and
 // WorkersConstructor, the signature of the implementation's constructor of
 // its workers (section 8.8).
+{{- end }}
 {{- end }}
 {{- if .HasManualRoutes }}
 //
@@ -32,8 +39,11 @@ import (
 {{- if .Deps.Database }}
 	orm "{{ .Deps.ORMModule }}"
 {{- end }}
-{{- if .HasWorkers }}
+{{- if .HasOrdinaryWorkers }}
 	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
+{{- end }}
+{{- if .HasWorkerEvents }}
+	types "{{ .TypesModule }}"
 {{- end }}
 {{- range .Deps.Calls }}
 	{{ .Alias }} "{{ .Module }}"
@@ -134,6 +144,9 @@ type JobsConstructor func(deps Deps) (Jobs, error)
 {{- end }}
 {{- if .HasWorkers }}
 
+{{- if .HasWorkerEvents }}
+{{ .WorkersDoc }}
+{{- else }}
 // Workers are the workers of {{ .SchemaName }}, a method per @worker class,
 // each of which handles one message of its queue. A worker's entrypoint
 // calls its method once per message it claims, with a context that ends
@@ -141,11 +154,16 @@ type JobsConstructor func(deps Deps) (Jobs, error)
 // the method returns nil; an error, or a panic, fails it, and the queue
 // retries it after its backoff until its retries are spent. A message may
 // come again after a worker dies holding it, so a method is idempotent.
+{{- end }}
 type Workers interface {
 {{- range .OrdinaryWorkers }}
 	// {{ .Method }} handles a message of the queue {{ .Queue }}, {{ if eq .Concurrency 1 }}one at a time{{ else }}{{ .Concurrency }} at a time{{ end }}
 	// unless an environment changes the worker's concurrency.
 	{{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error
+{{- end }}
+{{- range .WorkerEvents }}
+{{ .Doc }}
+	{{ .Method }}(ctx context.Context, tx orm.TxInterface, event types.{{ .Event }}) error
 {{- end }}
 }
 

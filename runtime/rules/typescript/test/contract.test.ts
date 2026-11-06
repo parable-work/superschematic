@@ -13,6 +13,7 @@ import {
   type BehaviorDeclaration,
   type Caller,
   type Command,
+  type DeclaredEvent,
   type ReadRequest,
   type Refusal,
   type Row,
@@ -252,7 +253,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -343,6 +344,27 @@ test('declarations are the registered files, each field typed and the value fiel
   ]);
   expect(reconcile.operations?.map(o => [o.name, o.writes === true])).toEqual([['observe', true]]);
   expect(declarations.filter(d => d.fields?.some(f => f.optional === true)).map(d => d.name)).toEqual(['Reconcile']);
+  // Schedules, which only the core implements, keeps a row per schedule in
+  // a sub-table keyed by its name and owns no field; it arms each live
+  // schedule's next run, hears its row's writes (endOn), and emits the
+  // event run, an object payload, which its table's event queue carries
+  // (D104). No other behavior declares an event.
+  const schedules = byName('Schedules');
+  expect([schedules.fields, schedules.value, schedules.armsDeadlines, schedules.hearsChanges]).toEqual([undefined, undefined, true, true]);
+  expect(schedules.tables?.map(t => `${t.name} by ${t.key}`)).toEqual(['schedules by name']);
+  expect(schedules.operations?.map(o => [o.name, o.writes === true])).toEqual([
+    ['setSchedule', true],
+    ['pauseSchedule', true],
+    ['resumeSchedule', true],
+    ['cancelSchedule', true],
+    ['reportRun', true],
+    ['listSchedules', false],
+  ]);
+  const events: readonly DeclaredEvent[] = schedules.events ?? [];
+  expect(events.map(e => e.kind)).toEqual(['run']);
+  expect(events[0]!.payloadSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['name', 'run', 'attempt', 'kind', 'spec', 'setAt', 'dueAt', 'firedAt'] });
+  expect(schedules.vetoes?.map(v => v.code)).toEqual(['no_schedule', 'schedule_limit', 'schedule_finished', 'schedules_ended', 'no_run']);
+  expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules']);
 });
 
 test('check is each spec define check: null for one the core takes, its refusal for one it refuses', () => {

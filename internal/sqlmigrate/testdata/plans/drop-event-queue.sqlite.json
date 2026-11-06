@@ -1,0 +1,148 @@
+{
+  "dialect": "sqlite",
+  "expanded": "0cd35c5b4620f92194b3c4efe7960456100e19c54176ed00c1cfb9a7b615fc7e",
+  "from": "9efdfd7e68e30d4764f6bcf3c5052901eac21dd06b389553fa246413a0b86849",
+  "hash": "0ca535e4abbf6cf0003c5dcbb58e206ae771e481c1e6917f2a9ffe75f4911914",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_bump_version\""
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_changes_delete\""
+      ],
+      "subject": "trigger/product/trg_product_changes_delete",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_changes_insert\""
+      ],
+      "subject": "trigger/product/trg_product_changes_insert",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_changes_update\""
+      ],
+      "subject": "trigger/product/trg_product_changes_update",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product/column/_version",
+          "reason": "Dropping product._version deletes its values.",
+          "subject": "table/product/column/_version"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/product/column/_version",
+          "reason": "SQLite rewrites product to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/product/column/_version"
+        }
+      ],
+      "index": 5,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"product\" DROP COLUMN \"_version\""
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_change_queue",
+          "reason": "Dropping table product_change_queue deletes its rows (ProductChange).",
+          "subject": "table/product_change_queue"
+        }
+      ],
+      "index": 6,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"product_change_queue\""
+      ],
+      "subject": "table/product_change_queue",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_deadline_queue",
+          "reason": "Dropping table product_deadline_queue deletes its rows (ProductDeadline).",
+          "subject": "table/product_deadline_queue"
+        }
+      ],
+      "index": 7,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"product_deadline_queue\""
+      ],
+      "subject": "table/product_deadline_queue",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_event_queue",
+          "reason": "Dropping table product_event_queue deletes its rows (ProductEvent).",
+          "subject": "table/product_event_queue"
+        }
+      ],
+      "index": 8,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"product_event_queue\""
+      ],
+      "subject": "table/product_event_queue",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_schedules_schedules",
+          "reason": "Dropping table product_schedules_schedules deletes its rows (ProductSchedulesSchedules).",
+          "subject": "table/product_schedules_schedules"
+        }
+      ],
+      "index": 9,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"product_schedules_schedules\""
+      ],
+      "subject": "table/product_schedules_schedules",
+      "transactional": true
+    }
+  ],
+  "to": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "toModel": null,
+  "version": 1
+}

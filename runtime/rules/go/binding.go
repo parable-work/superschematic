@@ -230,6 +230,18 @@ type Declaration struct {
 	ArmsDeadlines bool                `json:"armsDeadlines,omitempty"`
 	HearsChanges  bool                `json:"hearsChanges,omitempty"`
 	Operations    []DeclaredOperation `json:"operations,omitempty"`
+	// Events are the events the behavior emits about a row (D104), which
+	// its table's event queue carries to the API's behavior worker.
+	Events []DeclaredEvent `json:"events,omitempty"`
+}
+
+// DeclaredEvent is an event a behavior declares (D104): its kind, which
+// names it in its table's event queue, what it says, and the JSON Schema of
+// its payload as the declaration writes it.
+type DeclaredEvent struct {
+	Kind          string          `json:"kind"`
+	Description   string          `json:"description,omitempty"`
+	PayloadSchema json.RawMessage `json:"payloadSchema,omitempty"`
 }
 
 // DeclaredTable is a sub-table a behavior declares: its name, the field

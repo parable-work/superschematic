@@ -13,7 +13,8 @@
     "Budget",
     "Retries",
     "Seats",
-    "Reconcile"
+    "Reconcile",
+    "Schedules"
   ],
   "scenarios": [
     {

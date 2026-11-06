@@ -72,7 +72,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pinned", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -405,6 +405,67 @@ func TestRegisterBehaviorPackage(t *testing.T) {
 	}
 }
 
+// A behavior of the core's package declares the events it emits (D104),
+// each a camelCase kind declared once with a closed object payloadSchema
+// that compiles; any other behavior, an extension's or a core one an
+// engine runs, is refused events, since an engine's declaration parser
+// refuses the key.
+func TestRegisterBehaviorEvents(t *testing.T) {
+	closedPayload := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"name": map[string]any{"type": "string"}}}
+	event := func(kind string, payload any) map[string]any {
+		e := map[string]any{"kind": kind}
+		if payload != nil {
+			e["payloadSchema"] = payload
+		}
+		return e
+	}
+	for _, test := range []struct {
+		name      string
+		extension string
+		pkg       string
+		events    []any
+		want      string
+	}{
+		{"an extension's", "acme", "", []any{event("run", closedPayload)}, `registry: behavior acme.Clock declares events (run), which only a behavior the behaviors' core alone implements (package @superschematic/rules) declares: an engine's declaration parser refuses the key`},
+		{"a core one an engine runs", "", EnginePackage, []any{event("run", closedPayload), event("missed", closedPayload)}, `registry: behavior Clock declares events (run, missed), which only a behavior the behaviors' core alone implements (package @superschematic/rules) declares: an engine's declaration parser refuses the key`},
+		{"a core one of no package", "", "", []any{event("run", closedPayload)}, `registry: behavior Clock declares events (run), which only a behavior the behaviors' core alone implements`},
+		{"kind not camelCase", "", RulesPackage, []any{event("Run", closedPayload)}, `registry: behavior Clock event kind "Run" is not camelCase: a letter a-z, then letters and digits`},
+		{"kind snake case", "", RulesPackage, []any{event("run_due", closedPayload)}, `registry: behavior Clock event kind "run_due" is not camelCase: a letter a-z, then letters and digits`},
+		{"kind empty", "", RulesPackage, []any{event("", closedPayload)}, `registry: behavior Clock event kind "" is not camelCase`},
+		{"kind twice", "", RulesPackage, []any{event("run", closedPayload), event("run", closedPayload)}, `registry: behavior Clock declares event "run" twice`},
+		{"no payload schema", "", RulesPackage, []any{event("run", nil)}, `registry: behavior Clock event run has no payloadSchema`},
+		{"payload does not compile", "", RulesPackage, []any{event("run", map[string]any{"type": 7})}, `registry: behavior Clock event run payloadSchema: `},
+		{"payload not an object", "", RulesPackage, []any{event("run", map[string]any{"type": "integer"})}, `registry: behavior Clock event run payloadSchema must be an object schema ("type": "object")`},
+		{"payload a boolean schema", "", RulesPackage, []any{event("run", true)}, `registry: behavior Clock event run payloadSchema must be an object schema ("type": "object")`},
+		{"payload open", "", RulesPackage, []any{event("run", map[string]any{"type": "object"})}, `registry: behavior Clock event run payloadSchema must set "additionalProperties": false, so no member of a payload goes untyped`},
+		{"event unknown key", "", RulesPackage, []any{map[string]any{"kind": "run", "payloadSchema": closedPayload, "schema": closedPayload}}, `unknown field "schema"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			name := "Clock"
+			if test.extension != "" {
+				name = test.extension + ".Clock"
+			}
+			err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: test.extension, Package: test.pkg, Declaration: declaration(name, map[string]any{"events": test.events})})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+		})
+	}
+	reg := New(naming.Default())
+	decl := declaration("Clock", map[string]any{"events": []any{map[string]any{"kind": "run", "description": "A run fired.", "payloadSchema": closedPayload}, event("missedRun", closedPayload)}})
+	if err := reg.RegisterBehavior(BehaviorSpec{Package: RulesPackage, Declaration: decl}); err != nil {
+		t.Fatalf("the events of a behavior of the core's package: %v", err)
+	}
+	clock, _ := reg.Behavior("Clock")
+	run, ok := clock.Event("run")
+	if len(clock.Events) != 2 || !ok || run.Description != "A run fired." || !strings.Contains(string(run.PayloadSchema), `"additionalProperties":false`) {
+		t.Errorf("Clock events %+v", clock.Events)
+	}
+	if _, ok := clock.Event("ghost"); ok {
+		t.Errorf("Clock.Event(ghost) found an event")
+	}
+}
+
 // An extension's spec may name the Rust crate that implements its
 // behavior (D58), which the registered behavior carries for the
 // projectengine generator; a core behavior names none, and a crate name,
@@ -615,7 +676,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Reconcile, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},
@@ -761,15 +822,23 @@ func TestRegisterBehaviorTables(t *testing.T) {
 	if !ok || deadlines.Key != "name" || !timers.ArmsDeadlines || len(deadlines.Fields) != 7 {
 		t.Errorf("Timers = tables %+v, armsDeadlines %v", timers.Tables, timers.ArmsDeadlines)
 	}
-	// Timers and Reactions hear their table's writes (D103), and no other
-	// core behavior does.
-	var hearing []string
+	// Timers and Reactions hear their table's writes (D103), and so does
+	// Schedules (D104), and no other core behavior does; Schedules alone
+	// emits events of its own.
+	var hearing, emitting []string
 	for _, name := range core.BehaviorNames() {
-		if b, _ := core.Behavior(name); b.HearsChanges {
+		b, _ := core.Behavior(name)
+		if b.HearsChanges {
 			hearing = append(hearing, name)
 		}
+		if len(b.Events) > 0 {
+			emitting = append(emitting, name)
+		}
 	}
-	if strings.Join(hearing, ",") != "Reactions,Timers" {
-		t.Errorf("the behaviors that hear changes = %v, want Reactions and Timers", hearing)
+	if strings.Join(hearing, ",") != "Reactions,Schedules,Timers" {
+		t.Errorf("the behaviors that hear changes = %v, want Reactions, Schedules and Timers", hearing)
+	}
+	if strings.Join(emitting, ",") != "Schedules" {
+		t.Errorf("the behaviors that emit events = %v, want Schedules", emitting)
 	}
 }

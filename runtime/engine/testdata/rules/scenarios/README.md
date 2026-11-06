@@ -46,6 +46,22 @@ writes them, and `test/corpus.test.ts` does not list them.
   step, the stale deadline to unreachable and back, and each one's define
   refusals. Its Workflow and Reconcile are anchored on fields (`field`).
   No engine implements either.
+- `core-schedules.json` (D104, step 3): Schedules' named schedules on a
+  row: setSchedule after a delay, at an interval and on a cron line in a
+  time zone, bounded by minMs and maxMs and held to max, a repeat answered
+  unchanged and a live name replaced, a replace and a finished name set
+  again counting the name's runs on; a due one firing once on the runner,
+  its event run, an overdue every at the next point of its grid and an
+  after finishing; a cron line's spring gap, its first minute among it,
+  and autumn fold in America/New_York and Europe/London, and a schedule
+  set just before the repeated hour; pause, resume past its time and
+  cancel; reportRun's outcomes, an older run, no_run, the retry outcome
+  trying a run again as its next attempt, an after revived for it, and a
+  late report of an earlier attempt or of a replaced schedule's run;
+  endOn through a transition and through a raw write of the status its
+  change queue carries; max, the finished schedules beyond it pruned, and a
+  new version's narrower config; with each one's define refusals. No
+  engine implements Schedules.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
@@ -56,6 +72,10 @@ behavior entry that names a `field` (`{ "name": "Reconcile", "field":
 "observed", "config": { ... } }`, the IR's `BehaviorRef.field`) is a use
 anchored on that field, whose owned fields a record holds under the
 field's name (`behaviors.observed`); one without is anchored on the type.
+A step may carry `events`, the events its command, or every command a
+`runner.runDue` ran, wrote about rows, in order, each `{ schema, id, use,
+kind, at, payload }` (D104). The replayer compares them for every step of
+every file, the recordings' too; a step without the member wrote none.
 A test behavior a file composes is the test kit's fixture
 (`runtime/engine/rust/rules-testkit/src/fixtures.rs`), registered for the file by its name.
 
@@ -63,14 +83,17 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/freezes_and_sign_offs_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/retries_waits_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/periods_and_presence_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/seats_scenarios.rs` and
-`runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs` replay each file on
+`runtime/engine/rust/rules-testkit/tests/seats_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with
 `hand_written_transcript`, which also holds each command's row version
 after the step (`expect.version`), so an adapter holds a command that
-writes nothing to leaving the row's `_version` where it was. Rewrite the
-transcript after changing a file:
+writes nothing to leaving the row's `_version` where it was, and a raw
+write to moving it on by one, as `@optimistic`'s trigger does; and each
+command's events (`expect.events`), which an adapter reads back from its
+event queues after the step. Rewrite the transcript after changing a file:
 
 ```
 UPDATE_TRANSCRIPTS=1 cargo test -p superschematic-rules-testkit --test transcript

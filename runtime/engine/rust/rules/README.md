@@ -20,7 +20,9 @@ as JSON.
 `superschematic-rules-behaviors` (`../rules-behaviors`) holds the behaviors
 ported onto it, in the engine's order: Workflow, Reactions, Constants,
 StateRules, Approvals, Timers, Lease, Presence, Budget and Retries, then
-Seats and Reconcile, which no engine implements (D104);
+Seats, Reconcile and Schedules, which no engine implements (D104), and the
+calendar Schedules reads its cron lines with, in a zone of the IANA
+database jiff bundles (`calendar`);
 `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
@@ -326,10 +328,15 @@ host keys and gives to every entry that names it so):
 - `sub_rows`: `SubRowWrite { row, use_id, table, key, change }`, the change
   `Insert { values }`, `Update { values }` or `Delete`, in order.
 - `events`: `OutboxEvent { row, kind, use_id, payload }`, the events a
-  behavior emitted of its own (`Cx::emit`), which the event stream will
-  take (D103). No ported behavior emits one, and every adapter refuses a
-  change set that holds one as `internal`; a row's writes reach the
-  behaviors that hear them through the table's change queue, not these.
+  behavior emitted of its own about a row (`Cx::emit`), each of a kind its
+  declaration's `events` lists (D104: an emit of another kind is a defect,
+  `emit(x): it declares no event x (its events: run)`), which the host
+  writes to the event queue of its row's table in the change set's
+  transaction, and the table's behavior worker hands to a method of the
+  API's Workers. Schedules' fire emits one (`run`); a row's writes reach
+  the behaviors that hear them through the table's change queue, not
+  these. The core holds no payload to its kind's `payloadSchema`: each
+  behavior's tests do.
 - `deadlines`: `DeadlineChange::Arm { row, use_id, name, at, payload }` or
   `Clear { row, use_id, name }`, in order; a later entry for the same row,
   use and name replaces an earlier one.
@@ -629,8 +636,13 @@ the declarations, so a behavior adds no code to any of them (D103):
   core's names as it maps a row read, and the table's behavior worker runs
   as a change command; a table gets one when one of its behaviors hears
   changes, or another table's listens to it;
-- an outbox event of a behavior's own (`Cx::emit`) to nothing yet: the event
-  stream takes them later (D103);
+- an event a behavior emits about a row (`Cx::emit`, a kind its
+  declaration's `events` lists, D104) to a message of its row's table's
+  event queue (`<table>_event_queue`, the layout's `events`: the row's key,
+  the use, the kind, the command's time and the payload), written in the
+  change set's transaction after the sub-table rows and kept when the row
+  is deleted, which the table's behavior worker hands to a method of the
+  API's Workers;
 - a lock key to an advisory lock, or, on SQLite and D1, to a check in the
   change set's batch of each read made under it.
 
@@ -725,8 +737,11 @@ writes. For each command:
    deadline messages are deleted unless a live row of its key exists, and
    its sub-table rows unless any row of its key does, so a soft-deleted
    row keeps its sub-table rows and a row that came back keeps everything.
-   An outbox event of a behavior's own it refuses as `internal`: a table's
-   change queue holds its writes, and the event stream comes later (D103).
+   It writes each event of the change set to its row's table's event queue
+   (the layout's `events`), in the change set's order, after the sub-table
+   rows and before the deadline changes, with the command's time, a deleted
+   row's included (D104); it refuses as `internal`, with nothing applied, an
+   event of a row whose table keeps no event queue.
    No change set writes an audit column: one that names `createdBy` among
    a write's own fields is refused as `internal`, as any field the layout
    holds no own column for is. A change set with no writes, an operation
@@ -866,7 +881,11 @@ only the core implements (D104, step 3), `core-seats` to 88 steps, 22
 checks and 66 commands, four of them repeats, in 7 scenarios, and
 `core-reconcile` to 58 steps, 22 checks and 36 commands, two of them
 repeats and two the stale deadline, in 7 scenarios whose Workflow and
-Reconcile are anchored on fields. Every transcript's `behaviors` lists the
+Reconcile are anchored on fields, and `core-schedules` to 161 steps, 29
+checks, 13 of them refused defines, 131 commands, 10 of them repeats and
+late reports answered unchanged, 19 deadlines and 10 changes a runner
+ran, and one raw write, in 8 scenarios, each fire with the events it
+wrote (`expect.events`). Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to
@@ -1070,12 +1089,15 @@ on any other action, read by a guard of the command's own write and by no
 call), a holding read, `read_fields_at`, and another row's sub-table rows as
 the run has them (D104); and a call made as the caller's own request, told
 so and presented the command's preconditions, from a handler and from a
-deadline's (D104, step 3).
+deadline's (D104, step 3); and an emit of a kind the declaration lists
+landing in the change set with its row, use and payload, and one of a
+kind it does not list, by a behavior that declares events and by one that
+declares none, a defect (D104, step 3's second part).
 `rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18),
 `tests/reactions.rs` (16), `tests/constants.rs` (11), `tests/staterules.rs`
 (11), `tests/approvals.rs` (14), `tests/lease.rs` (16) and
-`tests/retries.rs` (14), and `tests/seats.rs` (19) and `tests/reconcile.rs`
-(12), hold each behavior to its declaration's schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
+`tests/retries.rs` (14), and `tests/seats.rs` (19), `tests/reconcile.rs`
+(12) and `tests/schedules.rs` (18), hold each behavior to its declaration's schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
 field with no value, `by` with a permission, `overridePermission`, a call
 held to `by`, `repeat` and `from`, and its config checks; Timers'
 starts, its `then`'s four outcomes, `until` in both forms, reset, snooze,
@@ -1119,7 +1141,26 @@ settled before any guard, drift on each use's veto and on `forbidden`,
 each step the observer's own request, `no_path` and `no_status`, the stale
 deadline armed, moved, cleared, fired, armed again past a raw write and
 vetoed, the worker's stale moves, a Workflow on the type and one of two
-fields.
+fields; and Schedules' config checks in order, its parameters, each
+settle refusal in its order, a set of each kind with its deadline, a
+repeat, a replace and a finished name set again, pause, resume past its
+time and cancel, the fire of each kind (an overdue every once at its grid,
+an after finishing, a cron line with no next run), a stale fire, a due a
+raw write moved, a retry before and after the next run, dropped and
+cancelled, a revived after and its refusal at max, an older run and a run
+not had, a name's runs counted on across a replace and a set again and a
+late report of a replaced schedule's run or of an earlier attempt
+changing nothing, endOn through a transition, a heard write and a fire,
+pruning, and every `run` payload held to the declaration's payloadSchema.
+`tests/calendar.rs` (17) holds the calendar to Vixie cron's fields, names,
+steps and day rule, its macros and each refusal, the spring gap, its
+first minute, and the autumn fold in America/New_York and Europe/London,
+a gap's first minute in four zones more, a leap day, a month without the
+day, a line that never runs, its closest runs around the clock and across
+the dates its day fields name, the zones' names, and a source that reads
+no clock; `tests/calendar_zones.rs` (1) holds a zone to the bundled
+database whatever `TZDIR` holds, which CI runs again with jiff's
+`tzdb-zoneinfo` on, as a project's Cargo graph may build it.
 
 `superschematic-rules-testkit`'s `tests/workflow_scenarios.rs`,
 `tests/timers_scenarios.rs`, `tests/reactions_scenarios.rs`,
@@ -1155,7 +1196,13 @@ one target is a to-one relation, its link and unlink updates of it; what a
 table cannot express (a link that holds a list, holds and revised, the value
 store, a runner's depth limit) is skipped, each with its reason, and
 `core-reactions-holds-revised.json` waits for step 4. `tests/changes.rs`
-holds the outbox to the core. `cargo test -p superschematic-rules-testkit`
+holds the outbox to the core. The reference host keeps each event a
+change set writes with its command's time (`Outboxed.at`), the replayer
+holds every step, of every file, to the events its commands wrote (a
+step's `events`, D104), and a transcript holds them as each command's
+`expect.events`; `tests/schedules_scenarios.rs` replays the hand-written
+`core-schedules.json` (D104, step 3) with a floor of 159, its one raw write
+applied and not compared. `cargo test -p superschematic-rules-testkit`
 runs them, and `tests/transcript.rs` with them.
 
 TypeScript's binding and adapter:
@@ -1166,8 +1213,9 @@ cd runtime/http/typescript && bun test src/rules*.test.ts
 ```
 
 The first builds the module with the workspace's `dist` profile (one
-codegen unit, LTO, no symbol table: about 530 KB, 180 KB gzipped, against
-785 KB from a release build), copies it into `dist/`, and runs the loader's
+codegen unit, LTO, no symbol table: about 2.1 MB, 640 KB gzipped, since
+Schedules' calendar bundles the IANA time zone database, D104; 1.66 MB
+before), copies it into `dist/`, and runs the loader's
 and the contract's tests under Bun and a smoke under Node. The second runs
 the adapter over an in-memory transaction, over bun:sqlite and Postgres, and
 the transcript's replay on both; its Postgres cases read

@@ -28,7 +28,12 @@
 // its row. A table whose behaviors arm deadlines gets one plain queue
 // (ir.TypeDef.BehaviorQueue, TicketDeadline, ticket_deadline_queue), each
 // live message a deadline armed on a row, which a @behaviorWorker of an API
-// over the database runs (D53). A table whose writes are heard, by a
+// over the database runs (D53). A table whose behaviors emit events of
+// their own (Schedules' run, D104) gets its event queue (TicketEvent,
+// ticket_event_queue): a D80 queue keyed by the row's key and serialized,
+// one message per event, which the adapters write in the command's
+// transaction and the same worker hands to the project's handler. A table
+// whose writes are heard, by a
 // behavior of its own that hears changes (Timers, Reactions) or by another
 // table's through a relation of it (Reactions' allTerminal over
 // task.project), gets its change queue (TicketChange,
@@ -66,8 +71,9 @@ var builtins = []string{"string", "number", "boolean"}
 // behavior sets it. Each such table is given @optimistic's _version unless
 // it is @versioned, the version the core's change sets hold each row to.
 // Each use's declared sub-tables join the schema as tables, a table
-// whose behaviors arm deadlines gets its deadline queue, and a table whose
-// writes are heard gets its change queue after it. Expand returns the
+// whose behaviors arm deadlines gets its deadline queue, a table whose
+// behaviors emit events its event queue (D104), and a table whose writes
+// are heard gets its change queue after them. Expand returns the
 // scalars the added fields name, which the loader hydrates from the
 // registry.
 //
@@ -75,8 +81,8 @@ var builtins = []string{"string", "number", "boolean"}
 // (verify.CheckBehaviors, checkTableUses among them): each behavior is
 // registered, names its value field and types its fields, no added field
 // or column is one the table already has, no added type's name is taken,
-// a table that keeps sub-tables, arms deadlines or whose writes are heard
-// has one key field, and a listen's relation is a to-one relation of the
+// a table that keeps sub-tables, arms deadlines, emits events or whose
+// writes are heard has one key field, and a listen's relation is a to-one relation of the
 // table heard to the listening one (checkReactionsConfig). A field or type
 // already added, as an IR read back holds it, is kept, so Expand may run
 // again on its own output.
@@ -105,6 +111,11 @@ func Expand(schema *ir.Schema, reg *registry.Registry) ([]string, error) {
 			if added, err = expandStorage(schema, td, reg); err != nil {
 				return nil, err
 			}
+			emitted, err := expandEvents(schema, td, reg)
+			if err != nil {
+				return nil, err
+			}
+			added = append(added, emitted...)
 		}
 		heard, err := expandChanges(schema, td, reg, heardBy[name])
 		if err != nil {
@@ -313,6 +324,77 @@ func Hearing(td *ir.TypeDef, reg *registry.Registry) []string {
 		}
 	}
 	return out
+}
+
+// Emitting are the behaviors of td's table uses whose declarations list
+// events (registry.BehaviorDeclaration.Events), each once in list order
+// (D104): what its event queue's marker names.
+func Emitting(td *ir.TypeDef, reg *registry.Registry) []string {
+	var out []string
+	for _, use := range td.TableBehaviors() {
+		if behavior, ok := reg.Behavior(use.Name); ok && len(behavior.Events) > 0 && !slices.Contains(out, use.Name) {
+			out = append(out, use.Name)
+		}
+	}
+	return out
+}
+
+// expandEvents adds td's event queue to schema's types when its behaviors
+// emit events (Emitting, D104), and returns the scalars the queue's fields
+// name. A queue already added for the same marker is kept.
+func expandEvents(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) ([]string, error) {
+	emitting := Emitting(td, reg)
+	if len(emitting) == 0 {
+		return nil, nil
+	}
+	key := keyField(td)
+	if key == nil {
+		return nil, fmt.Errorf("type %s: its behaviors emit events (%s), and it has no single key field", td.Name, strings.Join(emitting, ", "))
+	}
+	queue := eventQueue(td, key, emitting)
+	if existing := schema.Types[queue.Name]; existing != nil {
+		if !existing.BehaviorQueue.Same(queue.BehaviorQueue) {
+			return nil, fmt.Errorf("type %s: its behaviors emit events (%s), whose queue the build adds as %s, which the schema also declares", td.Name, strings.Join(emitting, ", "), queue.Name)
+		}
+		return nil, nil
+	}
+	schema.Types[queue.Name] = queue
+	var scalars []string
+	for _, fd := range queue.Fields {
+		if !slices.Contains(builtins, fd.TypeRef.Name) && !slices.Contains(scalars, fd.TypeRef.Name) {
+			scalars = append(scalars, fd.TypeRef.Name)
+		}
+	}
+	return scalars, nil
+}
+
+// eventQueue is the queue of the events td's behaviors emit about its rows
+// (D104), emitting the behaviors that emit them: a D80 queue keyed by the
+// row's key and serialized, its line kept in the order written
+// (sqlutil.QueueSpec.InOrder, which an event queue's statements take from
+// its BehaviorQueue's kind), so one row's events reach the app in the order
+// the core wrote them and a failing one holds its row's later ones;
+// appended, since an event is never folded into another; and pruned at
+// once, its work done. An adapter writes one message per event of a change
+// set, in the command's transaction, and leaves a row's messages when the
+// row is deleted; a behavior worker hands each to the project's handler.
+func eventQueue(td *ir.TypeDef, key *ir.FieldDef, emitting []string) *ir.TypeDef {
+	return &ir.TypeDef{
+		Name:          behaviorlayout.EventQueueTypeName(td.Name),
+		Owner:         td.Owner,
+		Comment:       "The events " + td.Name + "'s behaviors emit about its rows, one message per event, written in the command's transaction, which a behavior worker hands to the project's handler (D104).",
+		Role:          ir.RoleEmbeddedStruct,
+		Origin:        ir.OriginBehavior,
+		BehaviorQueue: &ir.BehaviorQueue{Row: td.Name, Kind: ir.BehaviorQueueEvents, Behaviors: slices.Clone(emitting)},
+		Queue:         &ir.QueueDef{Key: behaviorlayout.EventRowKeyField, Serialize: true, Retain: "0s"},
+		Fields: []*ir.FieldDef{
+			{Name: behaviorlayout.EventRowKeyField, Description: "The key of the " + td.Name + " row the event is about.", TypeRef: ir.TypeRef{Name: key.TypeRef.Name}, Required: true},
+			{Name: behaviorlayout.EventUseField, Description: "The id of the use that emitted it: its anchor field, or the behavior's name for a use the table implements.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: behaviorlayout.EventKindField, Description: "The event's kind, as its behavior declares it.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: behaviorlayout.EventAtField, Description: "The time of the command that emitted it, in epoch milliseconds.", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true},
+			{Name: behaviorlayout.EventPayloadField, Description: "What the event says, as its kind's payloadSchema types it.", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
+		},
+	}
 }
 
 // expandChanges adds td's change queue to schema's types when its writes

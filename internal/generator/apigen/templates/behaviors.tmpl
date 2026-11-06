@@ -14,15 +14,24 @@
 // {{ if .HasBehaviorEndpoints }}It also holds{{ else }}This file holds{{ end }} the queues of {{ .SchemaName }}'s behavior workers (D103), each
 // a table's behavior queues, whose messages its handler runs through the ORM
 // of {{ .Deps.Database }} as they fall due: a worker's main runs them with
-// worker.RunAll. No implementation method serves them either.
+// worker.RunAll. No implementation method serves them either
+{{- if .HasWorkerEvents }}, but for the
+// events a table's behaviors emit, each of which a worker hands to the
+// method of the implementation's Workers its use and kind name (D104)
+{{- end }}.
 {{- end }}
 
 package {{ toPackageName .SchemaName }}
 
 import (
 	"context"
-{{- if .HasBehaviorEndpoints }}
+{{- if or .HasBehaviorEndpoints .HasWorkerEvents }}
 	"encoding/json"
+{{- end }}
+{{- if .HasWorkerEvents }}
+	"fmt"
+{{- end }}
+{{- if .HasBehaviorEndpoints }}
 	gohttp "net/http"
 	"slices"
 {{- end }}
@@ -40,6 +49,10 @@ import (
 {{- end }}
 	rules "{{ $.Naming.RulesGoModule }}"
 	orm "{{ .Deps.ORMModule }}"
+{{- if .HasWorkerEvents }}
+	types "{{ .TypesModule }}"
+	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
+{{- end }}
 {{- if .HasBehaviorWorkers }}
 	"go.uber.org/zap"
 {{- end }}
@@ -178,7 +191,7 @@ func respondBehaviorError(w gohttp.ResponseWriter, r *gohttp.Request, err error)
 {{- $w := . }}
 
 {{ .QueuesDoc $.Deps.Database }}
-func {{ .QueuesFunc }}(db *orm.Database, logger *zap.Logger) []worker.Queue {
+func {{ .QueuesFunc }}(db *orm.Database, {{ if .Behavior.Emits }}workers Workers, {{ end }}logger *zap.Logger) []worker.Queue {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -260,6 +273,81 @@ func {{ .QueuesFunc }}(db *orm.Database, logger *zap.Logger) []worker.Queue {
 		Prune:    changes.Prune,
 	})
 {{- end }}
+{{- if .Behavior.Emits }}
+{{- with .Behavior.EventQueue }}
+	events := db.{{ . }}Queue()
+	queues = append(queues, worker.Queue{
+		Name:  {{ printf "%q" . }},
+		Lease: orm.{{ . }}Lease,
+		Claim: func(ctx context.Context, n int, lease time.Duration) ([]worker.Message, error) {
+			claims, err := events.Claim(ctx, n, lease)
+			if err != nil {
+				return nil, err
+			}
+			messages := make([]worker.Message, len(claims))
+			for i, claim := range claims {
+				messages[i] = worker.Message{
+					ID:      claim.ID,
+					Token:   claim.Token,
+					Attempt: claim.Attempt,
+					Handle: func(ctx context.Context) error {
+						run, err := db.Get{{ $w.Behavior.Table }}Repository().RunEvent(orm.WithBehaviorCaller(ctx, caller), claim.Message, &rules.Claim{ID: claim.ID, Token: claim.Token}, func(ctx context.Context, tx orm.TxInterface) error {
+							return {{ $w.EventFunc }}(ctx, workers, tx, claim.Message)
+						})
+						if err != nil {
+							return err
+						}
+						if !run.Ran {
+							logger.Info("event ran nothing", zap.String("queue", {{ printf "%q" . }}), zap.String("message", claim.ID), zap.String("why", run.Why))
+						}
+						return nil
+					},
+				}
+			}
+			return messages, nil
+		},
+		Extend: events.Extend,
+		// The handler completes its message in the transaction that runs it.
+		Complete: func(context.Context, string, string) error { return nil },
+		Fail:     events.Fail,
+		Release:  events.Release,
+		Prune:    events.Prune,
+	})
+{{- end }}
+{{- end }}
 	return queues
+}
+{{- if .Behavior.Emits }}
+
+{{ .EventFuncDoc }}
+func {{ .EventFunc }}(ctx context.Context, workers Workers, tx orm.TxInterface, message {{ $.Deps.DatabaseTypesAlias }}.{{ .Behavior.EventQueue }}) error {
+	switch {
+{{- range .Behavior.Events }}
+	case message.{{ $w.EventField "useId" }} == {{ printf "%q" .Use }} && message.{{ $w.EventField "kind" }} == {{ printf "%q" .Kind }}:
+		event, err := behaviorEventOf[types.{{ .Event }}](message.{{ $w.EventField "rowKey" }}, message.{{ $w.EventField "at" }}, message.{{ $w.EventField "payload" }})
+		if err != nil {
+			return fmt.Errorf("behavior worker {{ $w.Name }}: event {{ .Kind }} of {{ .Use }} on {{ $w.Behavior.Table }} %v: %w", message.{{ $w.EventField "rowKey" }}, err)
+		}
+		return workers.{{ .Method }}(ctx, tx, event)
+{{- end }}
+	}
+	return fmt.Errorf("behavior worker {{ .Name }}: no Workers method takes event %s of %s on {{ .Behavior.Table }} %v (D104)", message.{{ $w.EventField "kind" }}, message.{{ $w.EventField "useId" }}, message.{{ $w.EventField "rowKey" }})
+}
+{{- end }}
+{{- end }}
+{{- if .HasWorkerEvents }}
+
+// behaviorEventOf is an event of a behavior worker's event queue as the API
+// type its Workers method takes (D104): the row's key, the command's time and
+// the payload, read through encoding/json, whose wire shape the queue's
+// message and the API type share.
+func behaviorEventOf[E any](key, at, payload any) (E, error) {
+	var event E
+	data, err := json.Marshal(map[string]any{"key": key, "at": at, "payload": payload})
+	if err != nil {
+		return event, err
+	}
+	err = json.Unmarshal(data, &event)
+	return event, err
 }
 {{- end }}

@@ -291,10 +291,12 @@ type RustWorker struct {
 	Message    string
 	Descriptor string
 
-	// Behavior is set for a @behaviorWorker (D103): main.rs builds no Deps
-	// and calls no create_workers, and runs each of Queues, the table's
-	// behavior queues, deadlines first, with the handler the API crate's
-	// behaviors module holds, together. Method, Message and Descriptor are
+	// Behavior is set for a @behaviorWorker (D103): main.rs runs each of
+	// Queues, the table's behavior queues (deadlines, then changes, then
+	// events), with the handler the API crate's behaviors module holds,
+	// together. It builds no Deps and calls no create_workers unless the
+	// table's behaviors emit events (D104), whose handler hands each to the
+	// implementation's Workers method. Method, Message and Descriptor are
 	// empty then. Nil for an ordinary worker.
 	Behavior *apigen.BehaviorWorkerInfo
 	Queues   []rustrestgen.BehaviorQueue
@@ -302,6 +304,21 @@ type RustWorker struct {
 	// API is the alias main.rs uses the API crate under, which a behavior
 	// worker's queues and handlers are named through.
 	API string
+}
+
+// Emits reports whether the behavior worker runs an event queue whose
+// handler hands each event to the implementation's Workers (D104): its
+// main.rs then builds the API's Deps and calls create_workers, as a
+// worker's does.
+func (w *RustWorker) Emits() bool {
+	return w != nil && w.Behavior != nil && w.Behavior.Emits()
+}
+
+// bare reports whether the worker is a behavior worker that builds no
+// Deps and calls no implementation (D103): one whose table's behaviors
+// emit no events.
+func (w *RustWorker) bare() bool {
+	return w != nil && w.Behavior != nil && !w.Behavior.Emits()
 }
 
 // QueueNames are the behavior worker's queues, as its log names them.
@@ -321,14 +338,27 @@ func (w *RustWorker) QueueLet(q rustrestgen.BehaviorQueue) string {
 
 // HandlerBlock is the async block of a behavior queue's handler, which
 // calls the function the API crate's behaviors module holds, as rustfmt
-// lays it out inside the handler's closure.
+// lays it out inside the handler's closure. An event queue's handler takes
+// the implementation's Workers too (D104), a clone of the Arc main.rs
+// holds them in.
 func (w *RustWorker) HandlerBlock(q rustrestgen.BehaviorQueue) string {
 	const indent = "        "
-	call := w.API + "::behaviors::" + q.Handler + "(&pool, claimed).await"
-	if line := indent + "async move { " + call + " }"; len(line) <= rustWidth {
-		return line
+	args := "&pool, claimed"
+	prefix := ""
+	if q.Events() {
+		args = "&pool, &*workers, claimed"
+		prefix = indent + "let workers = Arc::clone(&workers);\n"
 	}
-	return indent + "async move {\n" + indent + "    " + call + "\n" + indent + "}"
+	fn := w.API + "::behaviors::" + q.Handler
+	call := fn + "(" + args + ").await"
+	if line := indent + "async move { " + call + " }"; len(line) <= rustWidth {
+		return prefix + line
+	}
+	if len(indent)+4+len(call) <= rustWidth {
+		return prefix + indent + "async move {\n" + indent + "    " + call + "\n" + indent + "}"
+	}
+	inner := indent + "    "
+	return prefix + indent + "async move {\n" + inner + fn + "(\n" + inner + "    " + args + ",\n" + inner + ")\n" + inner + ".await\n" + indent + "}"
 }
 
 // QueueVar is the variable main.rs holds a behavior queue in, named after
@@ -785,8 +815,11 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	}
 	stores := map[string]*RustMemoryStore{}
 	// A behavior worker opens the API's database alone: it builds no Deps,
-	// so it opens no client, bucket, memory store or engine (D103).
+	// so it opens no client, bucket, memory store or engine (D103), unless
+	// its table's behaviors emit events, whose handler hands each to the
+	// implementation's Workers, which its Deps build (D104).
 	behaviorWorker := s.Worker != nil && s.Worker.Behavior != nil
+	bare := s.Worker.bare()
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := rustStem(o.SchemaName)
@@ -883,7 +916,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Identity = taken.take(stem + "_identity")
 		}
 		for _, call := range o.Deps.Calls {
-			if behaviorWorker {
+			if bare {
 				break
 			}
 			c := clients[call.Service]
@@ -908,7 +941,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Calls = append(api.Calls, RustCall{Field: call.Field, Client: c})
 		}
 		for _, b := range o.Deps.Buckets {
-			if behaviorWorker {
+			if bare {
 				break
 			}
 			h := buckets[b.Service]
@@ -929,7 +962,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
 		}
 		for _, m := range o.Deps.MemoryStores {
-			if behaviorWorker {
+			if bare {
 				break
 			}
 			h := stores[m.Service]
@@ -1186,8 +1219,10 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 			return err
 		}
 		// A behavior worker builds no Deps and calls no implementation:
-		// its handlers are the API crate's (D103).
-		if s.Worker != nil && s.Worker.Behavior != nil {
+		// its handlers are the API crate's (D103), unless its table's
+		// behaviors emit events, which go to the implementation's Workers
+		// (D104).
+		if s.Worker.bare() {
 			continue
 		}
 		if local[a.Implementation.Crate], err = pathDep(MirrorDir(in.OutputRoot, a.Output.SchemaName)); err != nil {
@@ -1680,8 +1715,9 @@ func (s *RustServer) CrateUses() []string {
 	var uses []string
 	for _, a := range s.APIs {
 		uses = append(uses, "use "+crateIdent(a.Crate)+" as "+a.Alias+";")
-		// A behavior worker calls no implementation (D103).
-		if s.Worker == nil || s.Worker.Behavior == nil {
+		// A behavior worker calls no implementation (D103) but the
+		// Workers of the events its table's behaviors emit (D104).
+		if !s.Worker.bare() {
 			uses = append(uses, "use "+a.ImplLib+" as "+a.ImplAlias+";")
 		}
 	}

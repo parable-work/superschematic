@@ -417,11 +417,21 @@ func (o *ORMOutput) HasChanges() bool {
 	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.ChangeQueue != "" })
 }
 
+// HasEvents reports whether a table's behaviors emit events, its event
+// queue's messages, whose repository's RunEvent spends one a worker claimed
+// in the transaction its handler runs in (D104).
+func (o *ORMOutput) HasEvents() bool {
+	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.EventQueue != "" })
+}
+
 // HasBehaviorQueues reports whether a table has a behavior queue, a
-// deadline queue or a change queue, whose repository's RunDeadline or
-// RunChange interfaces.go declares with the rules module's types (D103).
+// deadline queue, a change queue or an event queue, whose repository's
+// RunDeadline, RunChange or RunEvent interfaces.go declares with the rules
+// module's types (D103, D104).
 func (o *ORMOutput) HasBehaviorQueues() bool {
-	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.DeadlineQueue != "" || r.ChangeQueue != "" })
+	return slices.ContainsFunc(o.Repositories, func(r Repository) bool {
+		return r.DeadlineQueue != "" || r.ChangeQueue != "" || r.EventQueue != ""
+	})
 }
 
 // OperationsUseRawJSON reports whether an operation of a use of any
@@ -476,7 +486,7 @@ var repositoryMethods = []string{
 	"CreateOne", "CreateMany", "UpsertOne", "UpsertOneResult", "UpsertMany",
 	"UpdateOne", "UpdateOneIfVersion", "UpdateMany", "DeleteOne", "DeleteOneIfVersion",
 	"DeleteMany", "HardDeleteOne", "GetVersion", "ListVersions", "GetAsOf",
-	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt", "RunDeadline", "RunChange",
+	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt", "RunDeadline", "RunChange", "RunEvent",
 }
 
 // repositoryTypeSuffixes are the suffixes of the names the ORM declares for
@@ -596,6 +606,9 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 	}
 	if table.Changes != nil {
 		repo.ChangeQueue = table.Changes.Queue
+	}
+	if table.Events != nil {
+		repo.EventQueue = table.Events.Queue
 	}
 
 	for _, column := range table.Own {

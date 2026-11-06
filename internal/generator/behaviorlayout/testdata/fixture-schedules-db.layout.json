@@ -1,0 +1,287 @@
+{
+  "types": {
+    "Problem": {
+      "type": "Problem",
+      "table": "problem",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Schedules",
+          "behavior": "Schedules",
+          "member": "schedules",
+          "fields": [],
+          "operations": [
+            {
+              "name": "setSchedule",
+              "writes": true
+            },
+            {
+              "name": "pauseSchedule",
+              "writes": true
+            },
+            {
+              "name": "resumeSchedule",
+              "writes": true
+            },
+            {
+              "name": "cancelSchedule",
+              "writes": true
+            },
+            {
+              "name": "reportRun",
+              "writes": true
+            },
+            {
+              "name": "listSchedules",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "schedules",
+              "table": "problem_schedules_schedules",
+              "row": "problem_id",
+              "key": {
+                "name": "name",
+                "field": "name",
+                "column": "name",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "spec",
+                  "field": "spec",
+                  "column": "spec",
+                  "type": "string"
+                },
+                {
+                  "name": "timeZone",
+                  "field": "timeZone",
+                  "column": "time_zone",
+                  "type": "string"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "setAt",
+                  "field": "setAt",
+                  "column": "set_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "nextAt",
+                  "field": "nextAt",
+                  "column": "next_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "retryAt",
+                  "field": "retryAt",
+                  "column": "retry_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "runs",
+                  "field": "runs",
+                  "column": "runs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lastAt",
+                  "field": "lastAt",
+                  "column": "last_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "lastOutcome",
+                  "field": "lastOutcome",
+                  "column": "last_outcome",
+                  "type": "string"
+                },
+                {
+                  "name": "finishedAt",
+                  "field": "finishedAt",
+                  "column": "finished_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "endedBy",
+                  "field": "endedBy",
+                  "column": "ended_by",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "deadlines": {
+        "queue": "ProblemDeadline",
+        "table": "problem_deadline_queue",
+        "rowKey": "row_key",
+        "use": "use_id",
+        "name": "name",
+        "at": "at",
+        "payload": "payload"
+      },
+      "changes": {
+        "queue": "ProblemChange",
+        "table": "problem_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "events": {
+        "queue": "ProblemEvent",
+        "table": "problem_event_queue",
+        "rowKey": "row_key",
+        "use": "use_id",
+        "kind": "kind",
+        "at": "at",
+        "payload": "payload"
+      },
+      "spec": {
+        "name": "Problem",
+        "uses": [
+          {
+            "behavior": "Schedules",
+            "config": {
+              "endOn": {
+                "enters": [
+                  "done",
+                  "dropped"
+                ]
+              },
+              "kinds": [
+                "after",
+                "every",
+                "cron"
+              ],
+              "max": 10,
+              "maxMs": 2592000000,
+              "minMs": 60000,
+              "outcomes": [
+                "told",
+                "resumed",
+                "held",
+                "missed"
+              ],
+              "permission": "problems.schedule",
+              "retry": {
+                "afterMs": 300000,
+                "outcome": "missed"
+              },
+              "timeZone": "America/New_York"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "open",
+                "working",
+                "done",
+                "dropped"
+              ],
+              "transitions": [
+                {
+                  "from": "open",
+                  "to": "working"
+                },
+                {
+                  "from": "working",
+                  "to": "done"
+                },
+                {
+                  "from": "working",
+                  "to": "open"
+                },
+                {
+                  "from": "open",
+                  "to": "dropped"
+                },
+                {
+                  "from": "working",
+                  "to": "dropped"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -428,6 +428,53 @@ func (db *DB) ChangeQueue(table, rowKey string) []string {
 	return []string{fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoted, columns)}
 }
 
+// EventQueue is the DDL of a table's event queue (D104) as sqlgen writes
+// one in the dialect: a plain queue's columns and the message's row key (of
+// the SQL type rowKey, the row table's key's), use id, kind, time and
+// payload, and the index of its ready messages by row key D80 gives a
+// keyed queue. Its id takes the dialect's UUID default, as an event's
+// insert names none.
+func (db *DB) EventQueue(table, rowKey string) []string {
+	quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+	var columns string
+	if db.Dialect == rules.DialectPostgres {
+		columns = fmt.Sprintf(`id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  row_key %s NOT NULL,
+  use_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  at BIGINT NOT NULL,
+  payload JSONB,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL`, rowKey)
+	} else {
+		now := "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+		columns = fmt.Sprintf(`id TEXT DEFAULT %s NOT NULL PRIMARY KEY,
+  row_key %s NOT NULL,
+  use_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  payload TEXT,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TEXT DEFAULT %s NOT NULL,
+  claim_expires_at TEXT,
+  claim_token TEXT,
+  last_error TEXT,
+  created_at TEXT DEFAULT %s NOT NULL,
+  updated_at TEXT DEFAULT %s NOT NULL`, sqliteUUIDDefault, rowKey, now, now, now)
+	}
+	return []string{
+		fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoted, columns),
+		fmt.Sprintf(`CREATE INDEX "idx_%s_ready_key" ON %s (row_key, created_at, id) WHERE state = 'ready'`, table, quoted),
+	}
+}
+
 // Now is the database's clock, read past the adapter: Postgres's now() of
 // a statement of its own, SQLite's 'now'.
 func (db *DB) Now(t testing.TB) time.Time {

@@ -220,9 +220,10 @@ type WorkerInfo struct {
 
 	// Behavior is set for a @behaviorWorker (D103): the worker runs its
 	// table's behavior queues through the behaviors' core, by functions
-	// src/behaviors.rs holds, so the Workers trait has no method for it
-	// and Method is empty. BehaviorQueues are those queues as
-	// src/behaviors.rs names them, deadlines first.
+	// src/behaviors.rs holds, so Method is empty, and the Workers trait has
+	// no method for it but one per event its event queue carries (D104).
+	// BehaviorQueues are those queues as src/behaviors.rs names them:
+	// deadlines, then changes, then events.
 	Behavior       *apigen.BehaviorWorkerInfo
 	BehaviorQueues []BehaviorQueue
 }
@@ -237,22 +238,32 @@ type BehaviorQueue struct {
 	Const string
 
 	// Kind is what the queue holds: ir.BehaviorQueueDeadlines, the
-	// table's deadlines, or ir.BehaviorQueueChanges, the writes of its
-	// rows its behaviors hear.
+	// table's deadlines, ir.BehaviorQueueChanges, the writes of its rows
+	// its behaviors hear, or ir.BehaviorQueueEvents, the events they emit
+	// about its rows (D104).
 	Kind string
 
 	// Func is the function that opens the queue on a pool of the
 	// database, and Handler the one that runs a message claimed from it
 	// (ticket_timers_deadlines and run_ticket_timers_deadline,
-	// ticket_timers_changes and run_ticket_timers_change), which the
+	// ticket_timers_changes and run_ticket_timers_change,
+	// problem_wake_ups_events and run_problem_wake_ups_event), which the
 	// worker's main hands to the HTTP runtime's claim loop.
 	Func    string
 	Handler string
 }
 
 // Changes reports whether the queue is a table's change queue, whose
-// handler runs the core's change command, rather than its deadline queue.
+// handler runs the core's change command.
 func (q BehaviorQueue) Changes() bool { return q.Kind == ir.BehaviorQueueChanges }
+
+// Events reports whether the queue is a table's event queue (D104), whose
+// handler hands each event to a method of the API's Workers.
+func (q BehaviorQueue) Events() bool { return q.Kind == ir.BehaviorQueueEvents }
+
+// Deadlines reports whether the queue is a table's deadline queue, whose
+// handler runs the core's deadline command.
+func (q BehaviorQueue) Deadlines() bool { return q.Kind == ir.BehaviorQueueDeadlines }
 
 // CallerFunc is the function of src/behaviors.rs that gives the caller a
 // behavior worker's commands run as: ticket_timers_caller.
@@ -290,9 +301,9 @@ func jobsOf(schema *ir.Schema) ([]JobInfo, error) {
 
 // workersOf reads the API's workers, sorted by name: its @worker classes,
 // and apart its @behaviorWorker classes (D103), whose handlers
-// src/behaviors.rs holds, each with its table's deadline queue and change
-// queue, deadlines first, and the behaviors that arm and hear them from
-// its database among deps (apigen.BehaviorWorkerOf).
+// src/behaviors.rs holds, each with its table's deadline queue, change
+// queue and event queue (D104), in that order, and the behaviors that arm
+// and hear them from its database among deps (apigen.BehaviorWorkerOf).
 func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behaviorWorkers []WorkerInfo, err error) {
 	for _, w := range schema.Workers {
 		if w == nil {
@@ -313,7 +324,7 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behavior
 			info.Method = ""
 			info.Behavior = apigen.BehaviorWorkerOf(schema, deps, w)
 			if info.Behavior == nil || len(info.Behavior.Queues) == 0 {
-				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s's behaviors (D103), and the loader gave it no queue: load the schema with its verification, which adds %s's deadline and change queues", w.Name, b.Type, b.Type)
+				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s's behaviors (D103), and the loader gave it no queue: load the schema with its verification, which adds %s's deadline, change and event queues", w.Name, b.Type, b.Type)
 			}
 			stem := rustutil.ToSnakeCase(w.Name)
 			for _, queue := range info.Behavior.Queues {
@@ -323,10 +334,15 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behavior
 					q.Kind, q.Func, q.Handler = ir.BehaviorQueueDeadlines, stem+"_deadlines", "run_"+stem+"_deadline"
 				case info.Behavior.ChangeQueue:
 					q.Kind, q.Func, q.Handler = ir.BehaviorQueueChanges, stem+"_changes", "run_"+stem+"_change"
+				case info.Behavior.EventQueue:
+					q.Kind, q.Func, q.Handler = ir.BehaviorQueueEvents, stem+"_events", "run_"+stem+"_event"
 				default:
-					return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s, which is neither %s's deadline queue nor its change queue (D103)", w.Name, queue, b.Type)
+					return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s, which is none of %s's deadline queue, its change queue and its event queue (D103, D104)", w.Name, queue, b.Type)
 				}
 				info.BehaviorQueues = append(info.BehaviorQueues, q)
+			}
+			if info.Behavior.EventQueue == "" && info.Behavior.Emits() {
+				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s hands %s's events to the API's Workers (D104), and the loader gave it no event queue: load the schema with its verification, which adds %s's event queue", w.Name, b.Type, b.Type)
 			}
 			behaviorWorkers = append(behaviorWorkers, info)
 			continue
@@ -343,9 +359,12 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behavior
 // declares Jobs and the scaffold create_jobs.
 func (o *APIOutput) HasJobs() bool { return o.Deps != nil && len(o.Jobs) > 0 }
 
-// HasWorkers reports whether the API declares a worker, for which deps.rs
-// declares Workers and the scaffold create_workers.
-func (o *APIOutput) HasWorkers() bool { return o.Deps != nil && len(o.Workers) > 0 }
+// HasWorkers reports whether deps.rs declares Workers and the scaffold
+// create_workers: the API declares a worker, or a behavior worker whose
+// table's behaviors emit events, each handed to a method of Workers (D104).
+func (o *APIOutput) HasWorkers() bool {
+	return o.Deps != nil && (len(o.Workers) > 0 || len(o.EventHandlers()) > 0)
+}
 
 // HasBackgroundWork reports whether deps.rs declares Jobs or Workers, and
 // BoxError, the error their methods return.
@@ -373,6 +392,13 @@ func (o *APIOutput) JobSignature(job JobInfo) string {
 // trait, its message typed by the database's Rust types.
 func (o *APIOutput) WorkerSignature(worker WorkerInfo) string {
 	return rustSignature("    ", "async fn "+worker.Method, []string{"&self", "message: " + o.Deps.DatabaseTypesCrateIdent() + "::" + worker.Queue}, "Result<(), BoxError>", ";")
+}
+
+// EventSignature is the signature of an event handler's method in the
+// Workers trait (D104): the event, typed by the API's types, and the
+// EventRun its behavior worker runs it in.
+func (o *APIOutput) EventSignature(h EventHandler) string {
+	return rustSignature("    ", "async fn "+h.Fn, []string{"&self", "event: crate::types::" + h.Event, "run: &crate::behaviors::EventRun<'_>"}, "Result<(), BoxError>", ";")
 }
 
 // ManualRoutesFunc is the function an implementation of an API with a
@@ -721,14 +747,30 @@ func (s ImplementationScaffold) CrateIdent() string {
 }
 
 // UsesTypes reports whether a method signature of the implementation names
-// the types crate.
+// the types crate: an endpoint's, or an event handler's (D104).
 func (s ImplementationScaffold) UsesTypes() bool {
 	for _, endpoint := range s.ImplementedEndpoints() {
 		if endpoint.UsesTypes() {
 			return true
 		}
 	}
-	return false
+	return s.HasWorkers() && len(s.EventHandlers()) > 0
+}
+
+// EventMethodSignature is the signature of an event handler's method in
+// the scaffold's impl of Workers (D104), its event named through the API
+// crate's types and its run through its behaviors module.
+func (s ImplementationScaffold) EventMethodSignature(h EventHandler) string {
+	return rustFn("    ", "async fn "+h.Fn, []string{"&self", "_event: types::" + h.Event, "_run: &EventRun<'_>"}, "Result<(), BoxError>")
+}
+
+// EventRunUse is the use declaration of the API crate's EventRun, which
+// the scaffold's event handlers take (D104); empty without one.
+func (s ImplementationScaffold) EventRunUse() string {
+	if !s.HasWorkers() || len(s.EventHandlers()) == 0 {
+		return ""
+	}
+	return "use " + s.CrateIdent() + "::behaviors::EventRun;"
 }
 
 // APIUse is the use declaration of what the implementation names from the
@@ -751,12 +793,14 @@ func (s ImplementationScaffold) APIUse() string {
 		names = append(names, "Jobs")
 	}
 	if s.HasWorkers() {
-		names = append(names, "Workers", DatabaseTypesModule)
+		names = append(names, "Workers")
+	}
+	// A worker's message is of the database's types; an event handler's
+	// event is of the API's (D104).
+	if len(s.Workers) > 0 && s.HasWorkers() || s.HasDerivers() {
+		names = append(names, DatabaseTypesModule)
 	}
 	if s.HasDerivers() {
-		if !s.HasWorkers() {
-			names = append(names, DatabaseTypesModule)
-		}
 		names = append(names, "DerivedAnswer", "DerivedItem", "Derivers")
 		for _, d := range s.Derivers {
 			names = append(names, d.Trait)

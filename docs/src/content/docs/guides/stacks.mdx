@@ -799,14 +799,19 @@ pool, scaled by hand to its instances ([Deploy to Google
 Cloud](#deploy-to-google-cloud)).
 
 A `@behaviorWorker(Ticket)` of an API is a worker too, named and settled
-the same way (`support-api-ticket-timers`), whose handler the build
+the same way (`support-api-ticket-timers`), whose handlers the build
 generates ([The worker](/superschematic/guides/api-routes/#the-worker),
 D103). It runs every behavior queue of its table, one claim loop each:
-the deadline queue a table that implements `Timers` keeps, and the change
+the deadline queue a table that implements `Timers` keeps, the change
 queue of a table whose writes a behavior hears (`Timers`, `Reactions`, or
 another table's `Reactions` through a relation of it), which its trigger
-writes on every write of a row, whoever makes it. `concurrency` applies to
-each queue. A table's change queue that no deployed worker runs keeps its
+writes on every write of a row, whoever makes it, and the event queue of
+a table whose behaviors emit events (`Schedules`), whose messages it hands
+to the API's `Workers` methods your implementation writes, so such a
+worker builds the API's `Deps` and calls the implementation's workers
+constructor as a `@worker`'s does
+([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers),
+D104). `concurrency` applies to each queue. A table's change queue that no deployed worker runs keeps its
 messages waiting: no rule runs and no raw write's deadline moves until one
 does, so run a behavior worker for each such table in every environment
 whose writes matter. No behavior worker claims on SQLite or D1 yet, so

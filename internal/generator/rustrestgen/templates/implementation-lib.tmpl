@@ -19,7 +19,12 @@
 {{- end }}
 {{- if .HasWorkers }}
 //!
+{{- if .Workers }}
 //! Each worker fails every message until you implement it.
+{{- end }}
+{{- if .EventHandlers }}
+//! Each event handler fails every event until you implement it.
+{{- end }}
 {{- end }}
 {{- if .HasDerivers }}
 //!
@@ -50,6 +55,9 @@ use http::request::Parts;
 {{- end }}
 {{- if .HasPages }}
 use {{ .CrateIdent }}::runtime;
+{{- end }}
+{{- with .EventRunUse }}
+{{ . }}
 {{- end }}
 {{- if .UsesTypes }}
 use {{ .CrateIdent }}::types;
@@ -215,6 +223,15 @@ impl Workers for {{ .WorkersStruct }} {
     /// Handles a message of the queue {{ .Queue }}.
 {{ $.WorkerMethodSignature . }}
         Err("worker {{ .Name }} is not implemented".into())
+    }
+{{- end }}
+{{- range $i, $h := .EventHandlers }}
+{{- if or $i $.Workers }}
+{{ end }}
+    /// Handles an event {{ .Kind }} of {{ .Table }}'s {{ .Use }}, which the behavior worker
+    /// {{ .Worker }} claims from {{ .Queue }} (D104).
+{{ $.EventMethodSignature . }}
+        Err("event handler {{ .Method }} is not implemented".into())
     }
 {{- end }}
 }

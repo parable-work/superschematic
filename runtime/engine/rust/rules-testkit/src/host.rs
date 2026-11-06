@@ -124,13 +124,15 @@ pub struct SubRowKey {
     pub sub_key: String,
 }
 
-/// An event in the outbox: the row it is about, its key filled in, and the
-/// event.
+/// An event in the outbox: the row it is about, its key filled in, the
+/// event, and the time of the command that emitted it, in epoch
+/// milliseconds, as a table's event queue keeps them (D104).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outboxed {
     pub type_name: String,
     pub key: String,
     pub event: OutboxEvent,
+    pub at: i64,
 }
 
 /// A deadline armed on a row, by its use and name.
@@ -388,8 +390,10 @@ impl Store {
     /// Sets fields a behavior owns on a row as a database writes them past
     /// the adapter at a time, in epoch milliseconds: an operator's repair,
     /// which nothing refuses (D103), or a test's raw SQL. Null clears a
-    /// field. The version stays where it was, as a raw write that leaves the
-    /// `@optimistic` column alone leaves it, the change log, which logs the
+    /// field. The version moves on by one, as `@optimistic`'s trigger moves
+    /// it on every update of a generated table, a raw one that leaves the
+    /// column alone among them (D104: a hand-written transcript holds a
+    /// row's version after a raw write), the change log, which logs the
     /// core's writes, gets no entry, and the type's change trigger, when its
     /// writes are heard, queues the update. Returns whether the row exists.
     pub fn write_owned(
@@ -408,6 +412,7 @@ impl Store {
         };
         let before = row.image();
         set_owned(&mut row.owned, owned);
+        row.version += 1;
         let after = row.image();
         self.queue(type_name, key, at, Some(before), Some(after));
         true
@@ -799,12 +804,14 @@ impl Store {
             };
             self.write_sub_row(at, &sub.change)?;
         }
-        // Every event is written, whatever rows the change set writes.
+        // Every event is written, whatever rows the change set writes, a
+        // deleted row's among them, with the command's time (D104).
         for event in &changes.events {
             self.outbox.push(Outboxed {
                 type_name: event.row.type_name.clone(),
                 key: keyed(&event.row)?,
                 event: event.clone(),
+                at: command.now,
             });
         }
         for change in &changes.deadlines {

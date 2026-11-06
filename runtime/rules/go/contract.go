@@ -933,15 +933,35 @@ func (c *DeadlineChange) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// OutboxEvent is an event a behavior emits about a row (Cx::emit, D104):
+// the row it is about, its kind, as the behavior's declaration lists it,
+// the use that emitted it, and what it says. The adapter writes it as a
+// message of the event queue of its row's table, in the command's unit.
+type OutboxEvent struct {
+	Row     RowRef          `json:"row"`
+	Kind    string          `json:"kind"`
+	UseID   string          `json:"useId"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// MarshalJSON writes an event as the core does, a nil payload as null.
+func (e OutboxEvent) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Row     RowRef          `json:"row"`
+		Kind    string          `json:"kind"`
+		UseID   string          `json:"useId"`
+		Payload json.RawMessage `json:"payload"`
+	}{e.Row, e.Kind, e.UseID, rawOr(e.Payload, json.RawMessage(`null`))})
+}
+
 // ChangeSet is everything one command changes: its row writes, its
-// sub-table rows and deadlines, which the adapter applies by the layout,
-// and its outbox events of a behavior's own, which stay raw until the
-// event stream gives them a table; the adapter refuses a change set
-// holding any (D103).
+// sub-table rows and deadlines, and the events its behaviors emit about
+// its rows (D104), which the adapter applies by the layout: an event as a
+// message of its row's table's event queue.
 type ChangeSet struct {
-	Rows      []RowWrite        `json:"rows"`
-	SubRows   []SubRowWrite     `json:"subRows"`
-	Events    []json.RawMessage `json:"events"`
-	Deadlines []DeadlineChange  `json:"deadlines"`
-	Result    json.RawMessage   `json:"result"`
+	Rows      []RowWrite       `json:"rows"`
+	SubRows   []SubRowWrite    `json:"subRows"`
+	Events    []OutboxEvent    `json:"events"`
+	Deadlines []DeadlineChange `json:"deadlines"`
+	Result    json.RawMessage  `json:"result"`
 }

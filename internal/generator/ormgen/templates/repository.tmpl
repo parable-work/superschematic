@@ -4753,6 +4753,22 @@ func (r *{{ $repo.Name }}) RunChange(ctx context.Context, change types.{{ $repo.
 	})
 }
 {{- end }}
+{{- with .EventQueue }}
+
+{{ docComment "" (printf "RunEvent hands an event of a %s row, a message of the queue %s, to handle in a transaction (D104), the repository's or one it opens when it has none: with claim, the worker's claim of the message, it first spends the message by its id and token, then runs handle with the transaction, so the handler's writes and the completion commit together or not at all; a lost claim runs nothing and says why, and handle's error is returned, for the worker to fail the message, and rolls back the transaction RunEvent opened, the spend with it. ctx reaches handle as it is, so the repositories' operations it runs act as the caller WithBehaviorCaller names, a behavior worker's. Without a claim nothing is spent." $repo.TypeName .) }}
+func (r *{{ $repo.Name }}) RunEvent(ctx context.Context, event types.{{ . }}, claim *rules.Claim, handle func(ctx context.Context, tx TxInterface) error) (*rules.EventRun, error) {
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*rules.EventRun, error) {
+		run, err := rules.SpendEvent(ctx, rulesHost(tx), {{ printf "%q" $repo.TypeName }}, claim)
+		if err != nil || !run.Ran {
+			return run, err
+		}
+		if err := handle(ctx, r.database().txOf(tx, 0)); err != nil {
+			return nil, err
+		}
+		return run, nil
+	})
+}
+{{- end }}
 
 {{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s" (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
 func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {

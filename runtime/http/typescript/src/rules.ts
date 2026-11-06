@@ -36,12 +36,10 @@ check its read changed, it applies nothing, forgets its answers and runs
 the command again from fresh state with the same request id, up to
 MAX_ATTEMPTS runs, and then refuses it as busy. A kind of read, write or
 change it does not know (the core's enums are open) refuses the command as
-internal, and so do a behavior's own outbox events (Cx::emit), which no
-ported behavior emits and the event stream comes later to carry (D103).
-An operation the core answers as no change (a Workflow repeat, D104, which
-its use settles before any guard) is a change set that writes nothing and
-carries its result: its unit is empty, so no version moves, no stamp is
-written and no change trigger fires.
+internal. An operation the core answers as no change (a Workflow repeat,
+D104, which its use settles before any guard) is a change set that writes
+nothing and carries its result: its unit is empty, so no version moves, no
+stamp is written and no change trigger fires.
 
 A row read holds a table's audit fields (the layout's audit, createdBy,
 D104) among its own fields, which a Workflow transition's by may name; no
@@ -86,6 +84,17 @@ that link to a row (the linked read) where a rule asks, and a row it finds
 gone purges its deadlines (the change set's gone). The unit spends the
 claimed message after the row writes, as a deadline's, so a raw SQL write
 is heard after its commit, and its deadlines reconcile then (D103).
+
+A table whose behaviors emit events (Cx::emit, D104) keeps an event queue
+(the layout's events): a change set's events are written to their row's
+table's event queue in the unit, after the sub-table rows, each a message
+with the use, the kind, the command's time and the payload, and a row's
+delete keeps them, since the app may still need to hear them; an event of
+a row whose table keeps no event queue refuses the command as internal. A
+worker claims a message, one row's in the order they were written, and
+spends it (spendEvent) in the transaction that runs the project's handler,
+so the handler's writes and the completion commit together or not at all
+(a repository's runEvent).
 
 The generated repositories call it (./orm): each use's operations are
 methods under the use's member (orm.order.status.transition(key, { to:
@@ -312,7 +321,7 @@ export interface CoreSubRowWrite {
   readonly change: { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'update'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'delete' };
 }
 
-/** An event a behavior emits to the outbox. */
+/** An event a behavior emits about a row (Cx::emit, D104), which the adapter writes to the event queue of the row's table in the change set's unit. */
 export interface CoreOutboxEvent {
   readonly row: CoreRowRef;
   readonly kind: string;
@@ -455,6 +464,31 @@ export interface RulesChanges {
   readonly after: string;
 }
 
+/**
+ * The queue a table whose behaviors emit events keeps them in (D104), one
+ * message per event a behavior emits about a row, which the adapter writes
+ * in the command's unit and a behavior worker claims and hands to the
+ * project's handler: its table and the columns of its message's fields,
+ * each unquoted. The queue's own columns (id, state, due_at, claim_token,
+ * created_at) are every queue's.
+ */
+export interface RulesEvents {
+  /** The queue's type (ProblemEvent). */
+  readonly queue: string;
+  /** Its table. */
+  readonly table: string;
+  /** The column of the row's key, which binds as the row table's key binds. */
+  readonly rowKey: string;
+  /** The column of the id of the use that emitted it. */
+  readonly use: string;
+  /** The column of the event's kind, as its behavior declares it. */
+  readonly kind: string;
+  /** The column of the time of the command that emitted it, in epoch milliseconds. */
+  readonly at: string;
+  /** The column of the payload, JSON. */
+  readonly payload: string;
+}
+
 /** What a live row of a soft-deletable table holds: NULL in its deletedAt column. */
 export interface RulesLive {
   /** The deletedAt column, unquoted. */
@@ -497,6 +531,8 @@ export interface RulesTable {
   readonly deadlines?: RulesDeadlines;
   /** The queue the table's change trigger writes a message of for each write its behaviors hear; absent for a table nothing hears. */
   readonly changes?: RulesChanges;
+  /** The queue the events its behaviors emit are messages of (D104); absent for a table whose behaviors emit none. */
+  readonly events?: RulesEvents;
   /** The type as the core runs it. */
   readonly spec: CoreTypeSpec;
 }
@@ -937,6 +973,12 @@ function deadlinesOf(table: RulesTable): RulesDeadlines {
 function changesOf(table: RulesTable): RulesChanges {
   if (table.changes === undefined) throw internal(`${table.type} keeps no change queue in the behaviors' layout, and a worker's claim runs a change of it`);
   return table.changes;
+}
+
+/** The event queue of a table, or an internal refusal for a table whose layout keeps none. */
+function eventsOf(table: RulesTable): RulesEvents {
+  if (table.events === undefined) throw internal(`${table.type} keeps no event queue in the behaviors' layout, and a worker's claim spends an event of it`);
+  return table.events;
 }
 
 /** The condition on a deadline message that it is live: ready, or claimed by a worker that has not completed it. */
@@ -1488,6 +1530,53 @@ function payloadOf(dialect: RulesDialect, value: unknown): unknown {
   return dialect === 'sqlite' && typeof value === 'string' ? JSON.parse(value) : value;
 }
 
+/** What spending an event's claim came to (D104): spent, or nothing spent because the claim of its message was lost. */
+export type EventRun = { readonly ran: true } | { readonly ran: false; readonly why: 'claim lost' };
+
+/**
+ * Spends a worker's claim of a message of a type's event queue in the
+ * store's transaction (D104): deletes the claimed message by its id and
+ * token, which must delete one; a claim that no longer holds its message,
+ * which another worker took over after the claim's lease, is lost, and
+ * nothing is spent. Without a claim nothing is spent. A type whose table keeps no
+ * event queue is refused as internal. A repository's runEvent spends it in
+ * the transaction that runs the project's handler, so the two commit
+ * together or not at all.
+ */
+export async function spendEvent(host: RulesHost, type: string, claim?: DeadlineClaim): Promise<EventRun> {
+  const q = eventsOf(tableOf(host.layout, type));
+  if (claim === undefined) return { ran: true };
+  return (await host.store.apply([claimSpend(host, q.table, claim)])) ? { ran: true } : { ran: false, why: 'claim lost' };
+}
+
+/** A message of a table's event queue as an adapter reads it back: the row's key in the core's wire form, the use, the kind, the command's time and the payload, parsed. */
+export interface QueuedEvent {
+  readonly key: string;
+  readonly useId: string;
+  readonly kind: string;
+  readonly at: number;
+  readonly payload: unknown;
+}
+
+/**
+ * Every message of a type's event queue, whatever its state, in the order
+ * written: on Postgres the claim's order, created_at then id, each insert's
+ * created_at its own clock_timestamp(); on SQLite and D1, whose created_at
+ * a millisecond's inserts share and where no behavior worker claims (D53),
+ * created_at then rowid, the order of the inserts. None for a table with
+ * no event queue.
+ */
+export async function readQueuedEvents(host: RulesHost, type: string): Promise<QueuedEvent[]> {
+  const table = tableOf(host.layout, type);
+  const q = table.events;
+  if (q === undefined) return [];
+  const dialect = host.store.dialect;
+  const order = dialect === 'postgres' ? '"created_at", "id"' : '"created_at", rowid';
+  const text = `SELECT ${quote(q.rowKey)} AS k, ${quote(q.use)} AS u, ${quote(q.kind)} AS n, ${quote(q.at)} AS a, ${quote(q.payload)} AS p FROM ${quote(q.table)} ORDER BY ${order}`;
+  const rows = await host.store.query(text, []);
+  return rows.map(row => ({ key: wireKeyOf(table, row.k), useId: String(row.u), kind: String(row.n), at: Number(row.a), payload: payloadOf(dialect, row.p) }));
+}
+
 /**
  * The checks that hold a store whose locks are 'fenced' to the reads a
  * command made under a lock, each a condition the unit checks before its
@@ -1542,21 +1631,22 @@ function live(table: RulesTable): string {
  *  3. each sub-table row write, an insert that must add one row, an update
  *     of the values it names and a delete that must change one, a deleted
  *     row's left out;
- *  4. each deadline change, a deleted row's left out: an arm deletes the
+ *  4. each event a behavior emits (D104), in the change set's order, a
+ *     message of its row's table's event queue with the command's time, a
+ *     deleted row's among them (eventStatement);
+ *  5. each deadline change, a deleted row's left out: an arm deletes the
  *     key's messages, whatever their state, and inserts the new arming, due
  *     at its time, and a clear deletes them;
- *  5. for each row deleted, the messages of its deadlines, and on a hard
+ *  6. for each row deleted, the messages of its deadlines, and on a hard
  *     delete the rows of its uses' sub-tables, which SQLite holds to no
- *     foreign key unless its connection turned them on.
+ *     foreign key unless its connection turned them on. Its event messages
+ *     stay.
  *
- * A create of a key the table holds is refused as conflict; a behavior's
- * own outbox events, which have no table yet (D103), and a kind of write
- * the adapter does not know refuse the command as internal.
+ * A create of a key the table holds is refused as conflict; an event of a
+ * row whose table keeps no event queue, and a kind of write the adapter
+ * does not know, refuse the command as internal.
  */
 async function statementsOf(host: RulesHost, type: string, command: CoreCommand, changes: CoreChangeSet, options: ExecuteOptions, spend?: RulesStatement): Promise<RulesStatement[]> {
-  if ((changes.events ?? []).length > 0) {
-    throw internal(`${actionName(command.action)} of ${type} writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)`);
-  }
   const dialect = host.store.dialect;
   const commandKey = keyOfCommand(command);
   const statements: RulesStatement[] = [];
@@ -1644,6 +1734,16 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
     const table = tableOf(host.layout, write.row.type);
     statements.push(...subRowStatements(table, subTableOf(table, write.useId, write.table), dialect, key, write));
   }
+  for (const event of changes.events ?? []) {
+    const key = keyOfRow(event.row);
+    const table = tableOf(host.layout, event.row.type);
+    if (table.events === undefined) {
+      throw internal(
+        `${actionName(command.action)} of ${type} emits ${event.kind} of ${event.useId} on ${event.row.type} ${key}, and ${event.row.type}'s table ${table.table} keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)`
+      );
+    }
+    statements.push(eventStatement(table, table.events, dialect, key, event, command.now));
+  }
   for (const change of changes.deadlines ?? []) {
     const key = keyOfRow(change.row);
     if (deleted.has(rowId(change.row.type, key))) continue;
@@ -1703,6 +1803,27 @@ function subRowStatements(table: RulesTable, sub: RulesSubTable, dialect: RulesD
     default:
       throw internal(`the adapter takes no sub-table row change of this kind: ${JSON.stringify(change)}`);
   }
+}
+
+/**
+ * The statement of one event a behavior emits (D104): an insert of a
+ * message of the table's event queue, the row's key bound as the key
+ * column binds it, the use, the kind, the command's time in epoch
+ * milliseconds and the payload's JSON text, NULL for a null payload. On
+ * Postgres its due_at and created_at are clock_timestamp(), statement by
+ * statement, so one unit's events of a row keep their order in the
+ * queue's claim, by created_at and then id; on SQLite and D1 the table's
+ * defaults stamp them to the millisecond. An insert changes one row
+ * whatever else holds the table, so it has no fence.
+ */
+function eventStatement(table: RulesTable, q: RulesEvents, dialect: RulesDialect, key: string, event: CoreOutboxEvent, now: number): RulesStatement {
+  const payload = event.payload === null || event.payload === undefined ? null : JSON.stringify(event.payload);
+  const columns = [q.rowKey, q.use, q.kind, q.at, q.payload].map(quote);
+  const text =
+    dialect === 'postgres'
+      ? `INSERT INTO ${quote(q.table)} (${[...columns, '"due_at"', '"created_at"'].join(', ')}) VALUES ($1, $2, $3, $4, $5::jsonb, clock_timestamp(), clock_timestamp())`
+      : `INSERT INTO ${quote(q.table)} (${columns.join(', ')}) VALUES (?1, ?2, ?3, ?4, ?5)`;
+  return { text, values: [keyValue(table, key), event.useId, event.kind, now, payload] };
 }
 
 /**
@@ -1950,6 +2071,29 @@ export interface RunChangeOptions {
  */
 export interface BehaviorChanges<Key = string> {
   runChange(change: { readonly rowKey: Key; readonly write: string; readonly at: number | string; readonly before?: unknown; readonly after?: unknown }, options?: RunChangeOptions): Promise<ChangeRun>;
+}
+
+/** What a repository's runEvent takes beside the event and the handler. */
+export interface RunEventOptions {
+  /** The worker's claim of the event's message, which runEvent spends before it runs the handler; absent, nothing is spent. */
+  readonly claim?: DeadlineClaim;
+}
+
+/**
+ * The method a repository of a table whose behaviors emit events has
+ * (D104): spends a worker's claim of a message of the table's event queue
+ * and runs handle in the repository's transaction (one it opens when it
+ * has none), both or neither: handle's rejection rolls the spend back, for
+ * the worker to fail the message; a lost claim runs nothing. The event is
+ * the message as the worker claimed it, which the claim alone spends. The
+ * generated <Type>Repository adds it.
+ */
+export interface BehaviorEvents<Key = string> {
+  runEvent(
+    event: { readonly rowKey: Key; readonly useId: string; readonly kind: string; readonly at: number | string; readonly payload?: unknown },
+    options: RunEventOptions,
+    handle: () => Promise<void>
+  ): Promise<EventRun>;
 }
 
 /**

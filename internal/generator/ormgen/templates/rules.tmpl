@@ -31,6 +31,14 @@ table's behavior worker claims it, so the deadlines a raw write moves
 reconcile then, and a deadline that falls due first reconciles its row
 before it fires.
 {{- end }}
+{{- if .HasEvents }}
+
+A table whose behaviors emit events keeps an event queue, a message of
+which each event is, written in the transaction of the command that emitted
+it (D104) and kept when its row is deleted. A behavior worker claims each
+and hands it to RunEvent, which spends it and runs the project's handler in
+one transaction, so the handler's writes and the completion commit together.
+{{- end }}
 */
 
 // rulesLayoutJSON is the layout document of the tables that compose

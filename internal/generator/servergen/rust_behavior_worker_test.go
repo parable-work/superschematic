@@ -295,6 +295,33 @@ func (f rustBehaviorFixture) checkWorkerCompiles(t *testing.T, cargo, name, serv
 	repoRoot := testpaths.TempDir(t)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	timers := f.apiCrate(t, out, paths)
+	f.writeCrates(t, out, paths, timers)
+	in := f.workerInput(t, repoRoot, out, paths, timers, name, server)
+	s, err := servergen.PlanRust(in)
+	if err != nil {
+		t.Fatalf("PlanRust: %v", err)
+	}
+	if err := servergen.WriteRust(s, in.Dir); err != nil {
+		t.Fatal(err)
+	}
+	// The entrypoint is a member of the output root's workspace, which a
+	// build writes; here it is a workspace of its own.
+	appendManifest(t, in.Dir, "\n[workspace]\n\n"+testpaths.RustPatch(paths, names))
+	cargoCommand(t, cargo, in.Dir, rustTargetDir(t), "clippy", "--quiet", "--", "-D", "warnings")
+}
+
+// apiDirOf is the directory of the fixture's API crate under the output
+// root out.
+func apiDirOf(out string, timers rustTimers) string {
+	return generator.APIDir(out, timers.output.SchemaName)
+}
+
+// writeCrates writes the Rust types of the fixture's database and API, and
+// its API crate with its config, under the output root out, as a build
+// writes them, with this checkout's runtimes at paths.
+func (f rustBehaviorFixture) writeCrates(t *testing.T, out string, paths naming.LocalPaths, timers rustTimers) {
+	t.Helper()
+	names := naming.Default()
 	for _, service := range []struct {
 		schema *ir.Schema
 		deps   map[string]*ir.Schema
@@ -318,7 +345,7 @@ func (f rustBehaviorFixture) checkWorkerCompiles(t *testing.T, cargo, name, serv
 			t.Fatalf("rustgen.WriteTypes %s: %v", service.schema.Name, err)
 		}
 	}
-	apiDir := generator.APIDir(out, timers.output.SchemaName)
+	apiDir := apiDirOf(out, timers)
 	if err := rustrestgen.SetReplacePaths(timers.output, paths, apiDir); err != nil {
 		t.Fatal(err)
 	}
@@ -328,18 +355,6 @@ func (f rustBehaviorFixture) checkWorkerCompiles(t *testing.T, cargo, name, serv
 	if err := envgen.WriteRustConfig(timers.config, apiDir); err != nil {
 		t.Fatal(err)
 	}
-	in := f.workerInput(t, repoRoot, out, paths, timers, name, server)
-	s, err := servergen.PlanRust(in)
-	if err != nil {
-		t.Fatalf("PlanRust: %v", err)
-	}
-	if err := servergen.WriteRust(s, in.Dir); err != nil {
-		t.Fatal(err)
-	}
-	// The entrypoint is a member of the output root's workspace, which a
-	// build writes; here it is a workspace of its own.
-	appendManifest(t, in.Dir, "\n[workspace]\n\n"+testpaths.RustPatch(paths, names))
-	cargoCommand(t, cargo, in.Dir, rustTargetDir(t), "clippy", "--quiet", "--", "-D", "warnings")
 }
 
 // appendManifest appends text to the Cargo.toml in dir.

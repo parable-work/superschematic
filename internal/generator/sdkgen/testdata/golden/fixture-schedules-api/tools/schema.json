@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureSchedulesApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-schedules-api API",
+  "tools": [
+    {
+      "name": "problem.schedules.cancelSchedule",
+      "operationId": "ProblemSchedulesCancelScheduleHandler",
+      "title": "Problem schedules: cancel schedule",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem schedules: cancel schedule",
+        "handle": "problem_schedules_cancel_schedule",
+        "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.schedules.cancel-schedule",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+      "namespace": "problem",
+      "methodName": "schedules.cancelSchedule",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/schedules/cancel-schedule",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["id", "name"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSchedulesCancelScheduleResult object"
+      }
+    },
+    {
+      "name": "problem.schedules.listSchedules",
+      "operationId": "ProblemSchedulesListSchedulesHandler",
+      "title": "Problem schedules: list schedules",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem schedules: list schedules",
+        "handle": "problem_schedules_list_schedules",
+        "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.schedules.list-schedules",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+      "namespace": "problem",
+      "methodName": "schedules.listSchedules",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/schedules/list-schedules",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:13a101f4da5d4a069cda653bbba9c60545f69d0a35f8a6b6c568afaca0f5723c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSchedulesListSchedulesResult object"
+      }
+    },
+    {
+      "name": "problem.schedules.pauseSchedule",
+      "operationId": "ProblemSchedulesPauseScheduleHandler",
+      "title": "Problem schedules: pause schedule",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem schedules: pause schedule",
+        "handle": "problem_schedules_pause_schedule",
+        "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.schedules.pause-schedule",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+      "namespace": "problem",
+      "methodName": "schedules.pauseSchedule",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/schedules/pause-schedule",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["id", "name"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSchedulesPauseScheduleResult object"
+      }
+    },
+    {
+      "name": "problem.schedules.reportRun",
+      "operationId": "ProblemSchedulesReportRunHandler",
+      "title": "Problem schedules: report run",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem schedules: report run",
+        "handle": "problem_schedules_report_run",
+        "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.schedules.report-run",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+      "namespace": "problem",
+      "methodName": "schedules.reportRun",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/schedules/report-run",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:d5011b7e316721ca89a6f273f7685fc5d49e1426497babde76e1a75534cc655a",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","minLength":1,"type":"string"},
+          "outcome": {"description":"A ProblemSchedulesOutcome value","enum":["told","resumed","held","missed"],"type":"string"},
+          "run": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "name", "outcome", "run"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSchedulesReportRunResult object"
+      }
+    },
+    {
+      "name": "problem.schedules.resumeSchedule",
+      "operationId": "ProblemSchedulesResumeScheduleHandler",
+      "title": "Problem schedules: resume schedule",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem schedules: resume schedule",
+        "handle": "problem_schedules_resume_schedule",
+        "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.schedules.resume-schedule",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+      "namespace": "problem",
+      "methodName": "schedules.resumeSchedule",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/schedules/resume-schedule",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["id", "name"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSchedulesResumeScheduleResult object"
+      }
+    },
+    {
+      "name": "problem.schedules.setSchedule",
+      "operationId": "ProblemSchedulesSetScheduleHandler",
+      "title": "Problem schedules: set schedule",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem schedules: set schedule",
+        "handle": "problem_schedules_set_schedule",
+        "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.schedules.set-schedule",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+      "namespace": "problem",
+      "methodName": "schedules.setSchedule",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/schedules/set-schedule",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f6c4ec4020e6b835d383486c31d1568ac9ffced7c48c9c15c2063264ae378e69",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "after": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "cron": {"description":"A string value","minLength":1,"type":["string","null"]},
+          "every": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
+          "timeZone": {"description":"A string value","minLength":1,"type":["string","null"]}
+        },
+        "required": ["id", "name"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemSchedulesSetScheduleResult object"
+      }
+    },
+    {
+      "name": "problem.status.transition",
+      "operationId": "ProblemStatusTransitionHandler",
+      "title": "Problem status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Problem status: transition",
+        "handle": "problem_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "problem.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "problem",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/problem/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7bafe086511af0c2e31104c74a3173bfba4fd12be8f7ce5492d6e991ac96e16d",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A ProblemStatusState value","enum":["open","working","done","dropped",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A ProblemStatusState value","enum":["open","working","done","dropped"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ProblemStatusTransitionResult object"
+      }
+    }
+  ]
+}

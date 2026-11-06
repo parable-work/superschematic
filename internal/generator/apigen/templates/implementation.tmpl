@@ -15,7 +15,7 @@
 package {{ toPackageName .SchemaName }}
 
 import (
-{{- if or .Namespaces .HasEncryptedEndpoints .HasJobs }}
+{{- if or .Namespaces .HasEncryptedEndpoints .HasJobs .HasWorkers }}
 	"context"
 {{- end }}
 {{- if .HasEncryptedEndpoints }}
@@ -37,10 +37,13 @@ import (
 {{- end }}
 
 	api "{{ .ModulePath }}"
-{{- if .NeedsTypesImport }}
+{{- if .HasWorkerEvents }}
+	orm "{{ .Deps.ORMModule }}"
+{{- end }}
+{{- if or .NeedsTypesImport .HasWorkerEvents }}
 	types "{{ .TypesModule }}"
 {{- end }}
-{{- if .HasWorkers }}
+{{- if .HasOrdinaryWorkers }}
 	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
 {{- end }}
 )
@@ -128,6 +131,14 @@ type workers struct {
 // {{ .Method }} handles a message of the queue {{ .Queue }}.
 func (w *workers) {{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error {
 	return api.NotImplementedError("worker {{ .Name }}")
+}
+{{- end }}
+{{- range .WorkerEvents }}
+
+// {{ .Method }} handles an event {{ .Kind }} of {{ .Table }}'s {{ .Use }}, which the behavior
+// worker {{ .Worker }} hands it in the transaction tx, as {{ .Subject }}.
+func (w *workers) {{ .Method }}(ctx context.Context, tx orm.TxInterface, event types.{{ .Event }}) error {
+	return api.NotImplementedError("event handler {{ .Method }}")
 }
 {{- end }}
 {{- end }}

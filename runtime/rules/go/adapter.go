@@ -31,8 +31,16 @@ import (
 // runs the command again from fresh state with the same request id, up to
 // MaxAttempts runs, and then refuses it as busy. A kind of read, step or
 // write it does not know (the core's enums are open) refuses the command as
-// internal, and so do outbox events of a behavior's own (Cx::emit) until
-// the event stream gives them a table (D103, Left for later).
+// internal.
+//
+// A change set's events, those a behavior emits about a row (Cx::emit,
+// D104), are written to their row's table's event queue (the layout's
+// Events) in the unit, after the sub-table rows, each with the command's
+// time, and kept when the row is deleted, since the app may still need to
+// hear them; one of a row whose table keeps no event queue refuses the
+// command as internal. A behavior worker hands each message to the
+// project's handler, spending it in the handler's transaction
+// (SpendEvent).
 //
 // A change set's sub-table rows are rows of the tables the layout names
 // for each use's declared tables, and its deadlines messages of the
@@ -58,7 +66,8 @@ import (
 // its uses' initializers, guards and validation run, and binds in an
 // upsert's insert the owned fields the core's create of each row gives it
 // (PrepareCreate). A behavior worker's handler runs each due deadline with
-// RunDeadline and each change of its table with RunChange. A hand-written
+// RunDeadline and each change of its table with RunChange, and spends each
+// event it hands to the project's handler with SpendEvent. A hand-written
 // server runs Execute on a store of its own transaction. The owned columns
 // and the sub-tables are read-only in a repository's inputs; a raw SQL
 // write of one is never refused (D103), and the change queue hears it.
@@ -924,18 +933,16 @@ func live(table *Table) string {
 // key keeps (goneStatements). Then a deadline command's spend of its
 // arming (claim's message, or the message armed at the time it names), or
 // a change command's of claim's message; the sub-table row writes; the
+// events, each a message of its row's table's event queue (D104); the
 // deadline changes; and for each row deleted its deadline messages and,
-// hard, its sub-table rows. A sub-table row write
-// or a deadline change of a row the change set deletes is left out, and
-// each sub-table row write is held to change one row. The command's own
-// row binds its own columns from opts.OwnColumns when the caller encoded
-// them. A create of a key the table holds is refused as conflict; outbox
-// events, and a kind of write the adapter does not know, refuse the
-// command as internal.
+// hard, its sub-table rows. A sub-table row write or a deadline change of
+// a row the change set deletes is left out, and each sub-table row write
+// is held to change one row; a deleted row's events are written. The
+// command's own row binds its own columns from opts.OwnColumns when the
+// caller encoded them. A create of a key the table holds is refused as
+// conflict; an event of a row whose table keeps no event queue, and a kind
+// of write the adapter does not know, refuse the command as internal.
 func statementsOf(ctx context.Context, host Host, typeName string, command Command, changes *ChangeSet, opts *ExecuteOptions, claim *Claim) ([]Statement, error) {
-	if len(changes.Events) > 0 {
-		return nil, Internal("%s of %s writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)", command.Action.name(), typeName)
-	}
 	dialect := host.Store.Dialect()
 	commandKey := keyOfCommand(command)
 	var statements []Statement
@@ -1107,6 +1114,14 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 		if statement != nil {
 			statements = append(statements, *statement)
 		}
+	}
+
+	for _, event := range changes.Events {
+		statement, err := eventStatement(host.Layout, dialect, typeName, command, event)
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, statement)
 	}
 
 	for _, change := range changes.Deadlines {

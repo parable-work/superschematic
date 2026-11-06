@@ -2,7 +2,33 @@
 
 {{ $api := index .APIs 0 -}}
 {{ $db := .Worker.Database -}}
-{{- if .BehaviorWorker -}}
+{{- if .EventWorker -}}
+// Command {{ .Name }} is behavior worker {{ .Worker.Name }} of {{ $api.Service }}, in stack
+// {{ .Stack }} (D103, D104; docs/stack-model.md, section 8.8). superschematic writes it
+// on every build of the stack.
+//
+// It reads its whole configuration from the environment, as the API's server
+// does, opens {{ $db.Service }} and its ORM, builds the API's Deps as the server does,
+// and calls the implementation's NewWorkers. It runs {{ $db.Service }}'s {{ .Worker.Behavior.Table }}'s
+// behavior queues, {{ joinNames .Worker.Behavior.Queues }}, which {{ $api.Service }}'s generated
+// {{ .Worker.QueuesFunc }} returns, claiming each message as it falls due and running it
+// through the behaviors' core as {{ .Worker.Behavior.Subject }}, in one transaction
+// with the message's completion, and handing each event to the implementation's
+// Workers method of its use and kind in the transaction that completes it.
+// WORKER_CONCURRENCY, which the platform sets, says how many messages of each
+// queue it handles at a time: {{ .Worker.Concurrency }} unless it says otherwise. A message
+// whose run fails, or whose handler returns an error, is failed, and retried
+// after the queue's backoff until it is dead; a deadline whose fire a guard
+// vetoes is released, due again in a minute. As it starts and every five
+// minutes it prunes each queue's done messages. On SIGTERM or SIGINT it claims
+// no more, lets the running handlers finish for {{ .Worker.GraceSeconds }}s, cancels the rest and
+// gives their messages back, and exits 0. When the environment names an OTLP
+// endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
+//
+// The API's implementation is the package at the naming file's
+// [implementation_paths] go template (section 8.5): {{ $api.Import }}
+package main
+{{- else if .BehaviorWorker -}}
 // Command {{ .Name }} is behavior worker {{ .Worker.Name }} of {{ $api.Service }}, in stack
 // {{ .Stack }} (D103; docs/stack-model.md, section 8.8). superschematic writes it on
 // every build of the stack.
@@ -85,12 +111,20 @@ func run(logger *zap.Logger) error {
 {{- if .BehaviorWorker }}
 
 	// {{ $api.Service }}: the queues of its behavior worker, over the ORM of
-	// {{ $db.Service }} (D103).
+	// {{ $db.Service }} (D103){{ if .EventWorker }}, the events handed to its workers, built from its
+	// Deps (D104){{ end }}.
+{{- if .EventWorker }}
+{{- template "deps" $api }}
+	workers, err := {{ $api.Impl }}.NewWorkers({{ $api.Var }}Deps)
+	if err != nil {
+		return fmt.Errorf("workers of {{ $api.Service }}: %w", err)
+	}
+{{- end }}
 	concurrency, err := worker.Concurrency({{ .Worker.Concurrency }})
 	if err != nil {
 		return err
 	}
-	queues := {{ $api.Package }}.{{ .Worker.QueuesFunc }}({{ $db.Var }}, logger)
+	queues := {{ $api.Package }}.{{ .Worker.QueuesFunc }}({{ $db.Var }}, {{ if .EventWorker }}workers, {{ end }}logger)
 	names := make([]string, len(queues))
 	for i, q := range queues {
 		names[i] = q.Name

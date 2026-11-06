@@ -1,0 +1,41 @@
+{
+  "name": "fixture-schedules-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-schedules-db",
+      "types": [
+        "Problem"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-schedules-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "ProblemActions",
+      "comment": "A problem's wake-ups and status operations (D104), for any signed-in\ncaller: the core decides who may set a wake-up (problems.schedule) and when\nit runs.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Problem"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "ProblemWakeUps",
+      "comment": "Runs Problem's wake-ups as they fall due, the writes of its rows its\nSchedules hears, and the events its wake-ups emit, each handed to the\nproject's Workers method problemWakeUpsSchedulesRun (D104). The worker\nfixture-schedules-api-problem-wake-ups.",
+      "behaviorWorker": {
+        "type": "Problem",
+        "permissions": [
+          "problems.schedule"
+        ]
+      }
+    }
+  ]
+}

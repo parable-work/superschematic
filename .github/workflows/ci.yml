@@ -384,11 +384,14 @@ jobs:
           # SQL writes heard among them, the Constants, StateRules and
           # Approvals ones, D104's step 2, the Lease, Retries, Presence and
           # Budget ones, its second batch, a lease's fencing token presented
-          # as a precondition among them, and the Seats ones, its step 3, a
+          # as a precondition among them, the Seats ones, its step 3, a
           # row's seats named in by and a field that follows observations
-          # among them): the Go one over the rules archive staged above, the
-          # TypeScript one over the rules package built above, and the Rust
-          # one over the engine workspace's rules-adapter crate.
+          # among them, and the Schedules ones, its step 3's second part, a
+          # wake-up's run event handed to the project's Workers method from
+          # the worker's event queue among them): the Go one over the rules
+          # archive staged above, the TypeScript one over the rules package
+          # built above, and the Rust one over the engine workspace's
+          # rules-adapter crate.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # The tests of vector columns run on the pgvector container
           # (D84); the database is there, so a skip is a broken gate.
@@ -851,9 +854,9 @@ jobs:
           # above.
           SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
           # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
-          # Postgres above too, each in a schema of its own, deadlines and
-          # change queues among them, and the core's seventeen transcripts
-          # replayed there as on bun:sqlite.
+          # Postgres above too, each in a schema of its own, deadlines,
+          # change queues and event queues among them, and the core's
+          # eighteen transcripts replayed there as on bun:sqlite.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           bun install --frozen-lockfile
@@ -1221,6 +1224,14 @@ jobs:
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: cargo test --workspace --all-features
 
+      # Schedules' calendar as a project's Cargo graph may build it, jiff's
+      # tzdb-zoneinfo turned on by feature unification: a zone is still the
+      # bundled database's, never the host's zone files (TZDIR), so every
+      # host computes the same runs (D104).
+      - name: test (the calendar with jiff's host zone files on)
+        working-directory: runtime/engine/rust
+        run: cargo test -p superschematic-rules-behaviors --features jiff/tzdb-zoneinfo --test calendar_zones
+
   engine-go:
     name: engine-go (the engine's C ABI, Go binding, corpus replay and link check)
     if: github.event.pull_request.draft != true
@@ -1394,10 +1405,11 @@ jobs:
         # core-reactions-changes, 39 for core-constants, 76 for
         # core-staterules, 122 for core-approvals, 436 for core-lease, 141
         # for core-presence, 495 for core-budget, 250 for core-retries, and
-        # 92, 115, 158, 77, 88 and 58 for the hand-written
+        # 92, 115, 158, 77, 88, 58 and 161 for the hand-written
         # core-workflow-principals, core-freezes-and-sign-offs,
-        # core-retries-waits, core-periods-and-presence, core-seats and
-        # core-reconcile (D104).
+        # core-retries-waits, core-periods-and-presence, core-seats,
+        # core-reconcile and core-schedules (D104), whose events each
+        # replay reads back from the event queues after every command.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"

@@ -1,0 +1,1702 @@
+{
+  "name": "fixture-schedules-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-schedules-db",
+      "types": [
+        "Problem"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-schedules-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "ProblemSchedulesCancelScheduleInput": {
+      "name": "ProblemSchedulesCancelScheduleInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's schedules cancelSchedule.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "comment": "The schedule to cancel.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesCancelScheduleResult": {
+      "name": "ProblemSchedulesCancelScheduleResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's schedules cancelSchedule returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "endedBy",
+          "comment": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+          "typeRef": {
+            "name": "ProblemSchedulesEndedBy"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "finishedAt",
+          "comment": "When it finished, in epoch milliseconds; absent while it is live.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "kind",
+          "comment": "after, every or cron.",
+          "typeRef": {
+            "name": "ProblemSchedulesKind"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "lastAt",
+          "comment": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "lastOutcome",
+          "comment": "The outcome reported of its latest attempt; absent until one is.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "nextAt",
+          "comment": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "runs",
+          "comment": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "setAt",
+          "comment": "When it was set, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "spec",
+          "comment": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "active, paused or finished.",
+          "typeRef": {
+            "name": "ProblemSchedulesState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The IANA time zone a cron line is read in; absent for after and every.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when it was finished already, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesListSchedulesInput": {
+      "name": "ProblemSchedulesListSchedulesInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's schedules listSchedules.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "comment": "Only this schedule.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesListSchedulesResult": {
+      "name": "ProblemSchedulesListSchedulesResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's schedules listSchedules returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "items",
+          "comment": "The schedules, by name.",
+          "typeRef": {
+            "name": "ProblemSchedulesListSchedulesResultItems",
+            "isArray": true
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesListSchedulesResultItems": {
+      "name": "ProblemSchedulesListSchedulesResultItems",
+      "owner": "fixture-schedules-api",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "endedBy",
+          "comment": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+          "typeRef": {
+            "name": "ProblemSchedulesEndedBy"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "finishedAt",
+          "comment": "When it finished, in epoch milliseconds; absent while it is live.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "kind",
+          "comment": "after, every or cron.",
+          "typeRef": {
+            "name": "ProblemSchedulesKind"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "lastAt",
+          "comment": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "lastOutcome",
+          "comment": "The outcome reported of its latest attempt; absent until one is.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "nextAt",
+          "comment": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "runs",
+          "comment": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "setAt",
+          "comment": "When it was set, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "spec",
+          "comment": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "active, paused or finished.",
+          "typeRef": {
+            "name": "ProblemSchedulesState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The IANA time zone a cron line is read in; absent for after and every.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesPauseScheduleInput": {
+      "name": "ProblemSchedulesPauseScheduleInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's schedules pauseSchedule.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "comment": "The schedule to pause.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesPauseScheduleResult": {
+      "name": "ProblemSchedulesPauseScheduleResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's schedules pauseSchedule returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "endedBy",
+          "comment": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+          "typeRef": {
+            "name": "ProblemSchedulesEndedBy"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "finishedAt",
+          "comment": "When it finished, in epoch milliseconds; absent while it is live.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "kind",
+          "comment": "after, every or cron.",
+          "typeRef": {
+            "name": "ProblemSchedulesKind"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "lastAt",
+          "comment": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "lastOutcome",
+          "comment": "The outcome reported of its latest attempt; absent until one is.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "nextAt",
+          "comment": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "runs",
+          "comment": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "setAt",
+          "comment": "When it was set, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "spec",
+          "comment": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "active, paused or finished.",
+          "typeRef": {
+            "name": "ProblemSchedulesState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The IANA time zone a cron line is read in; absent for after and every.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when it was paused already, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesReportRunInput": {
+      "name": "ProblemSchedulesReportRunInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's schedules reportRun.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "The attempt of the run, its number in the event run's payload; when given, a report of an attempt other than the latest is answered unchanged.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule whose run it reports.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "outcome",
+          "comment": "One of the config's outcomes.",
+          "typeRef": {
+            "name": "ProblemSchedulesOutcome"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "run",
+          "comment": "The run, its number in the event run's payload.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesReportRunResult": {
+      "name": "ProblemSchedulesReportRunResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's schedules reportRun returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "name",
+          "comment": "The schedule.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "outcome",
+          "comment": "The outcome reported.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When the run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "run",
+          "comment": "The run reported.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the run was older than the latest, the latest of a schedule the name's current one replaced, or another attempt than the latest, or its outcome was recorded already, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesResumeScheduleInput": {
+      "name": "ProblemSchedulesResumeScheduleInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's schedules resumeSchedule.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "comment": "The schedule to resume.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesResumeScheduleResult": {
+      "name": "ProblemSchedulesResumeScheduleResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's schedules resumeSchedule returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "endedBy",
+          "comment": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+          "typeRef": {
+            "name": "ProblemSchedulesEndedBy"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "finishedAt",
+          "comment": "When it finished, in epoch milliseconds; absent while it is live.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "kind",
+          "comment": "after, every or cron.",
+          "typeRef": {
+            "name": "ProblemSchedulesKind"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "lastAt",
+          "comment": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "lastOutcome",
+          "comment": "The outcome reported of its latest attempt; absent until one is.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "nextAt",
+          "comment": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "runs",
+          "comment": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "setAt",
+          "comment": "When it was set, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "spec",
+          "comment": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "active, paused or finished.",
+          "typeRef": {
+            "name": "ProblemSchedulesState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The IANA time zone a cron line is read in; absent for after and every.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when it was active already, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesRunEvent": {
+      "name": "ProblemSchedulesRunEvent",
+      "owner": "fixture-schedules-api",
+      "comment": "An event run of Problem's Schedules, as the behavior worker ProblemWakeUps hands it to its handler (D104).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "key",
+          "comment": "The key of the Problem row the event is about.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "at",
+          "comment": "When the command that emitted it ran, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "payload",
+          "comment": "What it says.",
+          "typeRef": {
+            "name": "ProblemSchedulesRunPayload"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesRunPayload": {
+      "name": "ProblemSchedulesRunPayload",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's Schedules says in its event run.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt of the run it is: 1, and one more for each retry.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "dueAt",
+          "comment": "When the run, or its retry, was due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "firedAt",
+          "comment": "When it fired, in epoch milliseconds: the later of its due time and the worker's clock.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "kind",
+          "comment": "after, every or cron.",
+          "typeRef": {
+            "name": "ProblemSchedulesKind"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "nextAt",
+          "comment": "When the schedule's next regular run falls due, in epoch milliseconds; absent when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "run",
+          "comment": "Which run of the name it is, from 1, counted on across a replace and a finished name set again.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "setAt",
+          "comment": "When the schedule whose run it is was set, in epoch milliseconds: a name pruned and set again has a later one.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "spec",
+          "comment": "The delay or the interval in milliseconds, as its digits, or the cron line.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The time zone a cron line is read in; absent for after and every.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesSetScheduleInput": {
+      "name": "ProblemSchedulesSetScheduleInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's schedules setSchedule.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "after",
+          "comment": "One run this many milliseconds from now.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "cron",
+          "comment": "A run at each time this cron line names: five fields, minute hour day-of-month month day-of-week, or a macro: @yearly, @annually, @monthly, @weekly, @daily, @midnight or @hourly.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "every",
+          "comment": "A run at each whole interval of this many milliseconds from now.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name: a letter, then letters, digits, _ and -.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 64,
+          "validatePattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The IANA time zone the cron line is read in; the config's timeZone, else UTC, when absent. A cron schedule's alone.",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesSetScheduleResult": {
+      "name": "ProblemSchedulesSetScheduleResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's schedules setSchedule returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "attempt",
+          "comment": "Which attempt of its latest run fired last: 1, and one more for each retry; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "endedBy",
+          "comment": "What finished it: run, its last run fired; cancel, cancelSchedule; endOn, the row's Workflow entered a state endOn names. Absent while it is live.",
+          "typeRef": {
+            "name": "ProblemSchedulesEndedBy"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "finishedAt",
+          "comment": "When it finished, in epoch milliseconds; absent while it is live.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "kind",
+          "comment": "after, every or cron.",
+          "typeRef": {
+            "name": "ProblemSchedulesKind"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "lastAt",
+          "comment": "When its latest attempt fired, in epoch milliseconds; absent before its first run.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "lastOutcome",
+          "comment": "The outcome reported of its latest attempt; absent until one is.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "name",
+          "comment": "The schedule's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "nextAt",
+          "comment": "When its next regular run falls due, in epoch milliseconds; absent when it has none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "replaced",
+          "comment": "True when it replaced a live schedule of the name; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "retryAt",
+          "comment": "When its latest run is tried again, in epoch milliseconds; absent unless a retry is armed.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "runs",
+          "comment": "How many runs the name has had: a replace, and a finished name set again, count on from it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "setAt",
+          "comment": "When it was set, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "spec",
+          "comment": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "state",
+          "comment": "active, paused or finished.",
+          "typeRef": {
+            "name": "ProblemSchedulesState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "timeZone",
+          "comment": "The IANA time zone a cron line is read in; absent for after and every.",
+          "typeRef": {
+            "name": "string"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when a live schedule of the name had the same kind, spec and time zone, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemStatusTransitionInput": {
+      "name": "ProblemStatusTransitionInput",
+      "owner": "fixture-schedules-api",
+      "comment": "The parameters of Problem's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemStatusTransitionResult": {
+      "name": "ProblemStatusTransitionResult",
+      "owner": "fixture-schedules-api",
+      "comment": "What Problem's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "ProblemStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "ProblemSchedulesEndedBy": {
+      "name": "ProblemSchedulesEndedBy",
+      "owner": "fixture-schedules-api",
+      "comment": "What finished a schedule of Problem's Schedules.",
+      "values": [
+        {
+          "name": "Run",
+          "serializedAs": "run"
+        },
+        {
+          "name": "Cancel",
+          "serializedAs": "cancel"
+        },
+        {
+          "name": "EndOn",
+          "serializedAs": "endOn"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesKind": {
+      "name": "ProblemSchedulesKind",
+      "owner": "fixture-schedules-api",
+      "comment": "The kind of a schedule of Problem's Schedules: after, every or cron, whichever its config took when the schedule was set.",
+      "values": [
+        {
+          "name": "After",
+          "serializedAs": "after"
+        },
+        {
+          "name": "Every",
+          "serializedAs": "every"
+        },
+        {
+          "name": "Cron",
+          "serializedAs": "cron"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesOutcome": {
+      "name": "ProblemSchedulesOutcome",
+      "owner": "fixture-schedules-api",
+      "comment": "An outcome Problem's Schedules records of a run.",
+      "values": [
+        {
+          "name": "Told",
+          "serializedAs": "told"
+        },
+        {
+          "name": "Resumed",
+          "serializedAs": "resumed"
+        },
+        {
+          "name": "Held",
+          "serializedAs": "held"
+        },
+        {
+          "name": "Missed",
+          "serializedAs": "missed"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemSchedulesState": {
+      "name": "ProblemSchedulesState",
+      "owner": "fixture-schedules-api",
+      "comment": "The state of a schedule of Problem's Schedules.",
+      "values": [
+        {
+          "name": "Active",
+          "serializedAs": "active"
+        },
+        {
+          "name": "Paused",
+          "serializedAs": "paused"
+        },
+        {
+          "name": "Finished",
+          "serializedAs": "finished"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProblemStatusState": {
+      "name": "ProblemStatusState",
+      "owner": "fixture-schedules-api",
+      "comment": "A state of Problem's status Workflow.",
+      "values": [
+        {
+          "name": "Open",
+          "serializedAs": "open"
+        },
+        {
+          "name": "Working",
+          "serializedAs": "working"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Dropped",
+          "serializedAs": "dropped"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "ProblemActions",
+      "comment": "A problem's wake-ups and status operations (D104), for any signed-in\ncaller: the core decides who may set a wake-up (problems.schedule) and when\nit runs.",
+      "operations": [
+        {
+          "name": "schedulesSetSchedule",
+          "comment": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+          "docs": {
+            "title": "Problem schedules: set schedule",
+            "description": "Sets a schedule of the row by its name: exactly one of after, every and cron, of a kind the config's kinds take, within minMs and maxMs, a cron line read in timeZone. A live schedule of the name is replaced and its runs start again; one with the same kind, spec and time zone is answered unchanged. A new name needs room under max, and a row in a state endOn names takes none.",
+            "capability": "problem.schedules.set-schedule",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_schedules_set_schedule",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSchedulesSetScheduleResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSchedulesSetScheduleInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Schedules",
+            "behavior": "Schedules",
+            "operation": "setSchedule",
+            "writes": true,
+            "permissions": [
+              "problems.schedule"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/schedules/set-schedule",
+          "origin": "behavior"
+        },
+        {
+          "name": "schedulesPauseSchedule",
+          "comment": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+          "docs": {
+            "title": "Problem schedules: pause schedule",
+            "description": "Pauses an active schedule: it keeps its next run and the retry of its latest one, and its deadline is cleared until it resumes. A paused one is answered unchanged.",
+            "capability": "problem.schedules.pause-schedule",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_schedules_pause_schedule",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSchedulesPauseScheduleResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSchedulesPauseScheduleInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Schedules",
+            "behavior": "Schedules",
+            "operation": "pauseSchedule",
+            "writes": true,
+            "permissions": [
+              "problems.schedule"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/schedules/pause-schedule",
+          "origin": "behavior"
+        },
+        {
+          "name": "schedulesResumeSchedule",
+          "comment": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+          "docs": {
+            "title": "Problem schedules: resume schedule",
+            "description": "Resumes a paused schedule, arming its next run, or the retry of its latest, again: one past its time falls due at once and fires once. An active one is answered unchanged; a row in a state endOn names resumes none.",
+            "capability": "problem.schedules.resume-schedule",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_schedules_resume_schedule",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSchedulesResumeScheduleResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSchedulesResumeScheduleInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Schedules",
+            "behavior": "Schedules",
+            "operation": "resumeSchedule",
+            "writes": true,
+            "permissions": [
+              "problems.schedule"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/schedules/resume-schedule",
+          "origin": "behavior"
+        },
+        {
+          "name": "schedulesCancelSchedule",
+          "comment": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+          "docs": {
+            "title": "Problem schedules: cancel schedule",
+            "description": "Finishes a live schedule, clearing its deadline, so it no longer counts toward max; it stays, finished, for its latest run's report and a read. A finished one is answered unchanged.",
+            "capability": "problem.schedules.cancel-schedule",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_schedules_cancel_schedule",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSchedulesCancelScheduleResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSchedulesCancelScheduleInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Schedules",
+            "behavior": "Schedules",
+            "operation": "cancelSchedule",
+            "writes": true,
+            "permissions": [
+              "problems.schedule"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/schedules/cancel-schedule",
+          "origin": "behavior"
+        },
+        {
+          "name": "schedulesReportRun",
+          "comment": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+          "docs": {
+            "title": "Problem schedules: report run",
+            "description": "Records the outcome of a schedule's latest run, one of the config's outcomes. The config's retry outcome tries the run again afterMs on, as its next attempt, unless the next regular run comes first; another outcome cancels a retry armed for it. A report of an older run, of a replaced schedule's latest run, or of an attempt other than the latest, or a repeat of the outcome recorded, is answered unchanged.",
+            "capability": "problem.schedules.report-run",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_schedules_report_run",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSchedulesReportRunResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSchedulesReportRunInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Schedules",
+            "behavior": "Schedules",
+            "operation": "reportRun",
+            "writes": true,
+            "permissions": [
+              "problems.schedule"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/schedules/report-run",
+          "origin": "behavior"
+        },
+        {
+          "name": "schedulesListSchedules",
+          "comment": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+          "docs": {
+            "title": "Problem schedules: list schedules",
+            "description": "Lists the row's schedules by name in code point order, live and finished; with name, only that one.",
+            "capability": "problem.schedules.list-schedules",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "problem_schedules_list_schedules",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemSchedulesListSchedulesResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemSchedulesListSchedulesInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "Schedules",
+            "behavior": "Schedules",
+            "operation": "listSchedules",
+            "permissions": [
+              "problems.schedule"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/schedules/list-schedules",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Problem status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "problem.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "problem_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProblemStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Problem row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProblemStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-schedules-db",
+            "type": "Problem",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "problem/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Problem"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "ProblemWakeUps",
+      "comment": "Runs Problem's wake-ups as they fall due, the writes of its rows its\nSchedules hears, and the events its wake-ups emit, each handed to the\nproject's Workers method problemWakeUpsSchedulesRun (D104). The worker\nfixture-schedules-api-problem-wake-ups.",
+      "queue": "ProblemDeadline",
+      "queues": [
+        "ProblemDeadline",
+        "ProblemChange",
+        "ProblemEvent"
+      ],
+      "events": [
+        {
+          "use": "Schedules",
+          "member": "schedules",
+          "behavior": "Schedules",
+          "kind": "run",
+          "method": "ProblemWakeUpsSchedulesRun",
+          "event": "ProblemSchedulesRunEvent",
+          "payload": "ProblemSchedulesRunPayload",
+          "description": "A run of a schedule fell due and fired: its name, which run and which attempt of it, its kind and spec, the time zone of a cron line, when the schedule was set, when the run was due and when it fired, and the schedule's next regular run when it has one. Delivery is at least once, so a handler is idempotent by the row's key, the name, setAt, the run and the attempt, which no two fires share, and reports the run's outcome with reportRun, naming the run and the attempt."
+        }
+      ],
+      "behaviorWorker": {
+        "type": "Problem",
+        "permissions": [
+          "problems.schedule"
+        ]
+      },
+      "origin": "behavior"
+    }
+  ]
+}

@@ -2,8 +2,8 @@
 //! layout: each row it writes, by its type and key (a create, an update
 //! held to the version the host read it at, or a delete), the owned fields
 //! each use set and the own fields a patch sets, the sub-table rows to
-//! insert, update or delete, the outbox events the behaviors emit, the
-//! deadlines to arm or clear, and the value the call returns. A command
+//! insert, update or delete, the events the behaviors emit about their
+//! rows, the deadlines to arm or clear, and the value the call returns. A command
 //! writes more than one row when a use reaches another row through its
 //! operations or creates one (`Cx::call_on`, `Cx::create_row`), as a hold
 //! on a stock row or a booking on a calendar does; every entry names the
@@ -37,7 +37,11 @@ pub struct ChangeSet {
     /// Sub-table row writes, in the order the behaviors made them.
     #[serde(default)]
     pub sub_rows: Vec<SubRowWrite>,
-    /// Outbox events, in the order the behaviors emitted them.
+    /// The events the behaviors emitted about rows, in the order they
+    /// emitted them ([`crate::Cx::emit`], D104): the host writes each to the
+    /// event queue of its row's table in the change set's transaction, with
+    /// the command's time, the row's delete included, and refuses as
+    /// internal a change set with one for a table that keeps no event queue.
     #[serde(default)]
     pub events: Vec<OutboxEvent>,
     /// Deadlines to arm or clear, in order: a later entry for the same row,
@@ -289,9 +293,13 @@ pub enum SubRowChange {
     Delete,
 }
 
-/// An event a behavior emits, which the host writes to the outbox in the
-/// change set's transaction (D103): the row it is about, its kind, the use
-/// that emitted it and its payload.
+/// An event a behavior emits about a row, which the host writes to the
+/// event queue of the row's table in the change set's transaction (D103,
+/// D104), each message the row's key, the use, the kind, the command's time
+/// and the payload, for a worker of the API to hand to the project's
+/// handler: the row it is about, its kind, the use that emitted it and its
+/// payload. Its kind is one the behavior's declaration lists
+/// ([`crate::Declaration::events`]); the core refuses another as a defect.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboxEvent {

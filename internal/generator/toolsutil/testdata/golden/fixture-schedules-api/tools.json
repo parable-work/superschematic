@@ -1,0 +1,292 @@
+[
+  {
+    "name": "problem.schedulesCancelSchedule",
+    "inputSchemaDigest": "sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSchedulesCancelScheduleResult object"
+    }
+  },
+  {
+    "name": "problem.schedulesListSchedules",
+    "inputSchemaDigest": "sha256:13a101f4da5d4a069cda653bbba9c60545f69d0a35f8a6b6c568afaca0f5723c",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "description": "A string value",
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSchedulesListSchedulesResult object"
+    }
+  },
+  {
+    "name": "problem.schedulesPauseSchedule",
+    "inputSchemaDigest": "sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSchedulesPauseScheduleResult object"
+    }
+  },
+  {
+    "name": "problem.schedulesReportRun",
+    "inputSchemaDigest": "sha256:d5011b7e316721ca89a6f273f7685fc5d49e1426497babde76e1a75534cc655a",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "outcome": {
+          "type": "string",
+          "description": "A ProblemSchedulesOutcome value",
+          "enum": [
+            "told",
+            "resumed",
+            "held",
+            "missed"
+          ]
+        },
+        "run": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "outcome",
+        "run"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSchedulesReportRunResult object"
+    }
+  },
+  {
+    "name": "problem.schedulesResumeSchedule",
+    "inputSchemaDigest": "sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSchedulesResumeScheduleResult object"
+    }
+  },
+  {
+    "name": "problem.schedulesSetSchedule",
+    "inputSchemaDigest": "sha256:f6c4ec4020e6b835d383486c31d1568ac9ffced7c48c9c15c2063264ae378e69",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "after": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cron": {
+          "description": "A string value",
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "every": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "maxLength": 64
+        },
+        "timeZone": {
+          "description": "A string value",
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemSchedulesSetScheduleResult object"
+    }
+  },
+  {
+    "name": "problem.statusTransition",
+    "inputSchemaDigest": "sha256:7bafe086511af0c2e31104c74a3173bfba4fd12be8f7ce5492d6e991ac96e16d",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "A ProblemStatusState value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "open",
+            "working",
+            "done",
+            "dropped",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "to": {
+          "type": "string",
+          "description": "A ProblemStatusState value",
+          "enum": [
+            "open",
+            "working",
+            "done",
+            "dropped"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "to"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ProblemStatusTransitionResult object"
+    }
+  }
+]

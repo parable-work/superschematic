@@ -16,8 +16,8 @@ mod common;
 use serde_json::{json, Map, Value};
 use superschematic_rules::Code;
 use superschematic_rules_adapter::{
-    Caller, ChangeRun, Claim, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Host,
-    Layout, Owned, Refusal, Row, SubRow, TableChange,
+    Caller, ChangeRun, Claim, CreateOptions, Deadline, DeadlineRun, Error, EventRun,
+    ExecuteOptions, Host, Layout, Owned, QueuedEvent, Refusal, Row, SubRow, TableChange,
 };
 
 use common::{iso, p, Param};
@@ -825,6 +825,84 @@ impl Db {
         }
     }
 
+    /// A type's queued events, read through the adapter in a transaction of
+    /// their own (D104).
+    async fn events(&mut self, host: &Host<'_>, type_name: &str) -> Vec<QueuedEvent> {
+        let read: Result<Vec<QueuedEvent>, Error> = in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::read_queued_events(host, &tx, type_name),
+            superschematic_rules_adapter::postgres::read_queued_events(host, &tx, type_name).await
+        );
+        read.expect("the events read")
+    }
+
+    /// Spends a claim of a message of a type's event queue in a transaction
+    /// of its own (D104), committed when `commit` says so and rolled back
+    /// otherwise, as a handler that fails rolls back its spend.
+    async fn spend_event(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        claim: Option<&Claim>,
+        commit: bool,
+    ) -> EventRun {
+        let spent = match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let tx = conn.transaction().expect("a transaction");
+                let spent =
+                    superschematic_rules_adapter::sqlite::spend_event(host, &tx, type_name, claim);
+                if commit {
+                    tx.commit().expect("the transaction commits");
+                }
+                spent
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let tx = client.transaction().await.expect("a transaction");
+                let spent = superschematic_rules_adapter::postgres::spend_event(
+                    host, &tx, type_name, claim,
+                )
+                .await;
+                if commit {
+                    tx.commit().await.expect("the transaction commits");
+                } else {
+                    tx.rollback().await.expect("the transaction rolls back");
+                }
+                spent
+            }
+        };
+        spent.expect("the claim is spent or lost")
+    }
+
+    /// A row's messages of an event queue's table, each its kind and its
+    /// state, in the order written.
+    async fn event_states(&mut self, table: &str, row_key: &str) -> Vec<(String, String)> {
+        let text = format!(
+            "SELECT kind, state FROM \"{table}\" WHERE row_key = {} ORDER BY created_at, {}",
+            p(self.postgres(), 1),
+            if self.postgres() { "id" } else { "rowid" }
+        );
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let mut statement = conn.prepare(&text).expect("the read prepares");
+                let rows = statement
+                    .query_map([row_key], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .expect("the read runs");
+                rows.collect::<Result<_, _>>().expect("the messages read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => client
+                .query(&text, &[&row_key])
+                .await
+                .expect("the read runs")
+                .iter()
+                .map(|row| (row.get(0), row.get(1)))
+                .collect(),
+        }
+    }
+
     /// A transition the core vetoes, then one it takes, in one transaction:
     /// the first's failure leaves the caller's transaction going on.
     async fn vetoed_then_moved(&mut self, host: &Host<'_>, key: &str) -> Result<Value, Error> {
@@ -974,6 +1052,11 @@ on_each_dialect!(a_sub_table_with_no_queue_and_own_columns_read_as_the_core_hold
 on_each_dialect!(
     a_leased_row_keeps_its_token_its_sub_tables_and_its_deadline_and_a_write_presents_the_token
 );
+on_each_dialect!(an_event_is_written_to_its_rows_tables_event_queue_in_the_commands_unit_with_the_commands_time_and_its_payload_and_stays_when_the_row_is_deleted);
+on_each_dialect!(a_refused_or_moved_command_writes_no_event);
+on_each_dialect!(a_change_set_with_an_event_on_a_table_with_no_event_queue_is_refused_as_internal_naming_the_table_and_the_use);
+on_each_dialect!(spend_event_spends_a_claimed_message_and_a_lost_claim_spends_nothing);
+on_each_dialect!(read_queued_events_reads_one_rows_events_in_the_order_written);
 
 /// Creates Order o1, titled Desk, at `at`.
 async fn desk(
@@ -1625,7 +1708,7 @@ async fn a_create_with_no_id_gets_a_uuid_key_and_a_type_the_layout_lacks_is_inte
     );
     assert_eq!(
         unknown.message,
-        "rules: the behaviors' layout has no type Invoice; it holds Booking, Held, Item, Loud, Order, Probe, Ticket, Timed"
+        "rules: the behaviors' layout has no type Invoice; it holds Booking, Held, Item, Loud, Order, Probe, Shout, Ticket, Timed"
     );
 }
 
@@ -1713,8 +1796,9 @@ async fn soft_deletable_rows(mut db: Db) {
 
 /// A rule across rows decides under its lock, and of two creates that each
 /// take one room the second is refused; a create whose change set holds an
-/// outbox event is refused as internal with nothing written; one that arms
-/// a deadline writes its message; a prepared create applies nothing.
+/// event of a table with no event queue is refused as internal with nothing
+/// written (D104); one that arms a deadline writes its message; a prepared
+/// create applies nothing.
 async fn rules_across_rows_and_writes_taken_later(mut db: Db) {
     let core = common::core();
     let layout = common::store_layout();
@@ -1743,7 +1827,7 @@ async fn rules_across_rows_and_writes_taken_later(mut db: Db) {
     let loud = refusal(db.create(&host, "Loud", json!({}), Some("l1")).await);
     assert_eq!(
         loud,
-        Refusal::internal("rules: create of Loud writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)")
+        Refusal::internal("rules: create of Loud emits created of OneRoom on Loud l1, and Loud's table loud keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)")
     );
     assert!(db.ids("loud").await.is_empty());
     db.create(&host, "Timed", json!({}), Some("d1"))
@@ -2240,6 +2324,208 @@ on_each_dialect!(a_refused_change_leaves_its_message_claimed);
 on_each_dialect!(a_deadline_runs_on_its_claim_and_a_lost_claim_runs_nothing);
 on_each_dialect!(a_deadline_armed_again_survives_its_spend_and_a_rows_go_with_it);
 on_each_dialect!(a_vetoed_fire_is_released_counting_no_attempt);
+
+// ---- a behavior's own events (D104) ----
+
+/// The event Shout's create of s1 emits, at `at`.
+fn hello(at: i64) -> QueuedEvent {
+    said("s1", at, "hello")
+}
+
+/// An event `said` of Shout's row `key`, at `at`, of `word`.
+fn said(key: &str, at: i64, word: &str) -> QueuedEvent {
+    QueuedEvent {
+        key: key.into(),
+        use_id: "Shout".into(),
+        kind: "said".into(),
+        at,
+        payload: json!({ "word": word }),
+    }
+}
+
+/// Runs Shout's say of `words` on a row as alice at the host's time.
+async fn say(db: &mut Db, host: &Host<'_>, key: &str, words: &[&str]) -> Result<Value, Error> {
+    db.operate(
+        host,
+        "Shout",
+        key,
+        "Shout",
+        "say",
+        json!({ "words": words }),
+        alice(),
+    )
+    .await
+}
+
+/// A create's event is a message of its table's event queue, written in
+/// the command's unit with the command's time and its payload, ready for a
+/// worker to claim; a delete of the row leaves it there, for the app may
+/// still need to hear it.
+async fn an_event_is_written_to_its_rows_tables_event_queue_in_the_commands_unit_with_the_commands_time_and_its_payload_and_stays_when_the_row_is_deleted(
+    mut db: Db,
+) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 1_000);
+    db.create(&host, "Shout", json!({}), Some("s1"))
+        .await
+        .expect("created");
+    assert_eq!(db.events(&host, "Shout").await, [hello(1_000)]);
+    assert_eq!(
+        db.event_states("shout_event_queue", "s1").await,
+        [("said".to_owned(), "ready".to_owned())]
+    );
+    let later = Host::new(&core, &layout).with_clock(|| 2_000);
+    let deleted: Result<(), Error> = in_transaction!(
+        &mut db,
+        |tx| superschematic_rules_adapter::sqlite::run_delete(
+            &later,
+            &tx,
+            "Shout",
+            "s1",
+            alice(),
+            &ExecuteOptions::default()
+        ),
+        superschematic_rules_adapter::postgres::run_delete(
+            &later,
+            &tx,
+            "Shout",
+            "s1",
+            alice(),
+            &ExecuteOptions::default()
+        )
+        .await
+    );
+    deleted.expect("deleted");
+    assert!(db.ids("shout").await.is_empty());
+    assert_eq!(db.events(&host, "Shout").await, [hello(1_000)]);
+}
+
+/// A command the core or the adapter refuses writes no event: a create of
+/// a key the table holds, an operation on a row that is not there. A
+/// command whose row moved writes the event of the run that applies alone
+/// (the crate's own tests move the row under a command).
+async fn a_refused_or_moved_command_writes_no_event(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 1_000);
+    db.create(&host, "Shout", json!({}), Some("s1"))
+        .await
+        .expect("created");
+    assert_eq!(
+        code(db.create(&host, "Shout", json!({}), Some("s1")).await),
+        Code::Conflict
+    );
+    assert_eq!(
+        code(say(&mut db, &host, "s9", &["lost"]).await),
+        Code::NotFound
+    );
+    assert_eq!(db.events(&host, "Shout").await, [hello(1_000)]);
+}
+
+/// A change set whose event is of a table the layout gives no event queue
+/// is refused as internal, naming the command, the table and the use, and
+/// nothing of it is written.
+async fn a_change_set_with_an_event_on_a_table_with_no_event_queue_is_refused_as_internal_naming_the_table_and_the_use(
+    mut db: Db,
+) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 1_000);
+    let refused = refusal(db.create(&host, "Loud", json!({}), Some("l1")).await);
+    assert_eq!(
+        refused,
+        Refusal::internal("rules: create of Loud emits created of OneRoom on Loud l1, and Loud's table loud keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)")
+    );
+    assert!(db.ids("loud").await.is_empty());
+}
+
+/// A worker's claim of an event's message is spent in the transaction its
+/// handler runs in: rolled back, the message stays claimed; committed, it
+/// is gone, and the same claim again, or a claim whose token is not the
+/// message's, spends nothing. Without a claim nothing is spent.
+async fn spend_event_spends_a_claimed_message_and_a_lost_claim_spends_nothing(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 1_000);
+    db.create(&host, "Shout", json!({}), Some("s1"))
+        .await
+        .expect("created");
+    let claim = db.claim("shout_event_queue", "s1").await;
+    let stolen = Claim {
+        token: if db.postgres() {
+            "00000000-0000-4000-8000-000000000000".into()
+        } else {
+            "not-the-token".into()
+        },
+        ..claim.clone()
+    };
+    assert_eq!(
+        db.spend_event(&host, "Shout", Some(&stolen), true).await,
+        EventRun::ClaimLost
+    );
+    assert_eq!(
+        db.spend_event(&host, "Shout", Some(&claim), false).await,
+        EventRun::Spent
+    );
+    assert_eq!(
+        db.event_states("shout_event_queue", "s1").await,
+        [("said".to_owned(), "claimed".to_owned())],
+        "a spend rolled back with its handler leaves the message claimed"
+    );
+    assert_eq!(
+        db.spend_event(&host, "Shout", None, true).await,
+        EventRun::Spent
+    );
+    assert_eq!(
+        db.event_states("shout_event_queue", "s1").await.len(),
+        1,
+        "without a claim nothing is spent"
+    );
+    let spent = db.spend_event(&host, "Shout", Some(&claim), true).await;
+    assert_eq!(
+        (spent, spent.ran(), spent.why()),
+        (EventRun::Spent, true, "")
+    );
+    assert!(db.event_states("shout_event_queue", "s1").await.is_empty());
+    let again = db.spend_event(&host, "Shout", Some(&claim), true).await;
+    assert_eq!(
+        (again, again.ran(), again.why()),
+        (EventRun::ClaimLost, false, "claim lost")
+    );
+}
+
+/// One row's events come back in the order the core wrote them, one
+/// command's several among them, each with its command's time; another
+/// row's beside them.
+async fn read_queued_events_reads_one_rows_events_in_the_order_written(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 1_000);
+    db.create(&host, "Shout", json!({}), Some("s1"))
+        .await
+        .expect("created");
+    let later = Host::new(&core, &layout).with_clock(|| 2_000);
+    say(&mut db, &later, "s1", &["one", "two", "three"])
+        .await
+        .expect("said");
+    let latest = Host::new(&core, &layout).with_clock(|| 3_000);
+    db.create(&latest, "Shout", json!({}), Some("s2"))
+        .await
+        .expect("created");
+    say(&mut db, &latest, "s1", &["four"]).await.expect("said");
+    assert_eq!(
+        db.events(&host, "Shout").await,
+        [
+            hello(1_000),
+            said("s1", 2_000, "one"),
+            said("s1", 2_000, "two"),
+            said("s1", 2_000, "three"),
+            said("s2", 3_000, "hello"),
+            said("s1", 3_000, "four"),
+        ]
+    );
+}
 
 /// Of two creates that each take one room, in transactions of their own on
 /// two connections to one SQLite file, the second waits for the first and

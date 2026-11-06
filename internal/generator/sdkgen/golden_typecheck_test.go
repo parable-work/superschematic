@@ -112,6 +112,7 @@ var goldenSDKs = map[string]func(t *testing.T) goldenSDK{
 	approvalsAPI: approvalsAPIGolden,
 	agentsAPI:    agentsAPIGolden,
 	seatsAPI:     seatsAPIGolden,
+	schedulesAPI: schedulesAPIGolden,
 	sdktest.UnionListsService: func(t *testing.T) goldenSDK {
 		schema, apiOutput, parseable := loadUnionListsAPI(t)
 		return goldenSDK{apiOutput: apiOutput, parseable: parseable, clock: nestedArraysClock, types: apiTypes(sdktest.UnionListsService, schema)}

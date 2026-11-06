@@ -377,13 +377,13 @@ describe('the host loop on any core', () => {
     expect((await refusalOf([{ read: [{ kind: 'count', type: 'Order' } as never] }])).message).toContain('answers no read of this kind');
     expect((await refusalOf([{ wait: 1 } as never])).message).toContain("the core's step is of a kind");
     expect((await refusalOf([changed({ rows: [{ kind: 'touch', type: 'Order', key }] })])).message).toContain('takes no row write of this kind');
+    // An event of a row whose table keeps no event queue (D104).
     const events = await refusalOf([changed({ events: [{ row: { type: 'Order', key }, kind: 'paid', useId: 'status', payload: {} }] })]);
     expect(events).toEqual({
       code: 'internal',
       status: 500,
       class: 'Error',
-      message:
-        "rules: transition of Order writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)",
+      message: `rules: transition of Order emits paid of status on Order ${key}, and Order's table order keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)`,
     });
     const ref = { type: 'Order', key };
     expect((await refusalOf([changed({ subRows: [{ row: ref, useId: 'status', table: 'notes', key: 'n', change: { kind: 'delete' } }] })])).message).toBe(

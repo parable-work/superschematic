@@ -199,6 +199,10 @@ type Table struct {
 	// hears.
 	Changes *Changes `json:"changes,omitempty"`
 
+	// Events is the queue the events its behaviors emit are messages of
+	// (D104); absent for a table whose behaviors emit none.
+	Events *Events `json:"events,omitempty"`
+
 	// Spec is the type as the core runs it.
 	Spec TypeSpec `json:"spec"`
 }
@@ -249,6 +253,28 @@ type Changes struct {
 	// After is the column of the row's image after the write, JSON by
 	// column; null for a delete.
 	After string `json:"after"`
+}
+
+// Events is a table's event queue (D104), each column unquoted: one message
+// per event a behavior emits about a row, which an adapter writes in the
+// command's transaction and a behavior worker claims and hands to the
+// project's handler.
+type Events struct {
+	// Queue is the queue's type: TicketEvent.
+	Queue string `json:"queue"`
+	// Table is the queue's table: ticket_event_queue.
+	Table string `json:"table"`
+	// RowKey is the column of the key of the row the event is about, which
+	// binds as the row table's key binds.
+	RowKey string `json:"rowKey"`
+	// Use is the column of the id of the use that emitted it.
+	Use string `json:"use"`
+	// Kind is the column of the event's kind, as its behavior declares it.
+	Kind string `json:"kind"`
+	// At is the column of the command's time, epoch milliseconds.
+	At string `json:"at"`
+	// Payload is the column of the event's payload, JSON.
+	Payload string `json:"payload"`
 }
 
 // Live is the condition a live row of a soft-deletable table meets: its
@@ -494,6 +520,22 @@ func DeadlineQueueTypeName(row string) string {
 // whose table is ticket_change_queue.
 func ChangeQueueTypeName(row string) string { return row + "Change" }
 
+// EventQueueTypeName is the name of the queue the loader adds for the
+// events the behaviors of the table row emit about its rows (D104):
+// TicketEvent, whose table is ticket_event_queue.
+func EventQueueTypeName(row string) string { return row + "Event" }
+
+// The fields of the event queue's message (D104), by the core's names of an
+// outbox event: the key of the row it is about, the id of the use that
+// emitted it, its kind, the command's time and its payload.
+const (
+	EventRowKeyField  = "rowKey"
+	EventUseField     = "useId"
+	EventKindField    = "kind"
+	EventAtField      = "at"
+	EventPayloadField = "payload"
+)
+
 // The fields of the change queue's message (D103): the written row's key,
 // what the write did, when, and the row's image before and after it.
 const (
@@ -674,6 +716,13 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			return nil, err
 		}
 		t.Changes = changes
+	}
+	if queue := schema.BehaviorQueueOf(td.Name, ir.BehaviorQueueEvents); queue != nil {
+		events, err := eventsOf(td, queue)
+		if err != nil {
+			return nil, err
+		}
+		t.Events = events
 	}
 	return t, nil
 }
@@ -1043,6 +1092,29 @@ func changesOf(td *ir.TypeDef, queue *ir.TypeDef) (*Changes, error) {
 		fd := sqlutil.FieldNamed(queue, f.field)
 		if fd == nil {
 			return nil, fmt.Errorf("behaviorlayout: table %s: its change queue %s has no field %s", td.Name, queue.Name, f.field)
+		}
+		*f.into = sqlutil.ColumnName(fd)
+	}
+	return out, nil
+}
+
+// eventsOf is the layout of the event queue the loader added for td
+// (ir.TypeDef.BehaviorQueue of kind events, D104).
+func eventsOf(td *ir.TypeDef, queue *ir.TypeDef) (*Events, error) {
+	out := &Events{Queue: queue.Name, Table: sqlutil.QueueTableName(queue)}
+	for _, f := range []struct {
+		field string
+		into  *string
+	}{
+		{EventRowKeyField, &out.RowKey},
+		{EventUseField, &out.Use},
+		{EventKindField, &out.Kind},
+		{EventAtField, &out.At},
+		{EventPayloadField, &out.Payload},
+	} {
+		fd := sqlutil.FieldNamed(queue, f.field)
+		if fd == nil {
+			return nil, fmt.Errorf("behaviorlayout: table %s: its event queue %s has no field %s", td.Name, queue.Name, f.field)
 		}
 		*f.into = sqlutil.ColumnName(fd)
 	}

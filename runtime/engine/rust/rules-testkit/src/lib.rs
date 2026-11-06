@@ -20,9 +20,10 @@
 //!
 //! [`replay`] maps a recording's engine calls onto a host and compares what
 //! the core and its behaviors decide: a record's own and behavior fields,
-//! an operation's result, an event's change, and every refusal whole, the
-//! define and publish refusals of a behavior's config with them, written
-//! as the engine's error. It reads a file through the engine's test kit
+//! an operation's result, an event's change, the events a step's commands
+//! wrote about rows (D104), and every refusal whole, the define and publish
+//! refusals of a behavior's config with them, written as the engine's
+//! error. It reads a file through the engine's test kit
 //! ([`superschematic_engine_testkit::load`]), runs what a test wrote in
 //! TypeScript where [`fixtures`] ports it, skips what only the engine's
 //! store answers with its reason, and returns a [`Report`]. [`ported`] is
@@ -69,8 +70,9 @@ pub use host::{
 pub use replay::{replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped};
 pub use transcript::{
     hand_written_path, hand_written_transcript, transcript, transcript_path, Transcript,
-    TranscriptClock, TranscriptDeadline, TranscriptExpect, TranscriptField, TranscriptOther,
-    TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep, TranscriptType,
+    TranscriptClock, TranscriptDeadline, TranscriptEvent, TranscriptExpect, TranscriptField,
+    TranscriptOther, TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep,
+    TranscriptType,
 };
 
 use superschematic_rules::Core;

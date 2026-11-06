@@ -8,7 +8,7 @@
 //! and the engine embeds (`../behaviors/declarations`, and the work queue's
 //! `../../engine-workqueue/rust/declarations`), in place, so the engine and
 //! the core read one declaration while both exist; a behavior no engine
-//! implements (Seats, Reconcile) reads the copy `make behaviors` writes into
+//! implements (Seats, Reconcile, Schedules) reads the copy `make behaviors` writes into
 //! this crate (`declarations`). The core
 //! runs no JSON Schema, so a behavior holds its config and its operations'
 //! parameters to the declaration's schemas in its own code, in the words
@@ -42,6 +42,12 @@
 //! transition's and a StateRules state's `by` name as `seat:<name>`; and the
 //! state a row's provider last reported, which moves its Workflow there along
 //! the transitions it allows.
+//! [`Schedules`], the rest of step 3 for now: named schedules on a row,
+//! each a run after a delay, at an interval or on a cron line in a time
+//! zone, its next run a deadline whose fire emits the event `run`, which the
+//! table's event queue carries to the project's handler, and whose outcome
+//! a report records and tries again; [`calendar`] reads its cron lines and
+//! time zones, on jiff and the IANA database it bundles alone.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -68,6 +74,7 @@
 
 pub mod approvals;
 pub mod budget;
+pub mod calendar;
 pub mod constants;
 mod declared;
 mod flow;
@@ -79,6 +86,7 @@ pub mod presence;
 pub mod reactions;
 pub mod reconcile;
 pub mod retries;
+pub mod schedules;
 mod schema;
 pub mod seats;
 pub mod staterules;
@@ -104,6 +112,7 @@ pub use reconcile::{Reconcile, ReconcileConfig};
 pub use retries::{
     Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
+pub use schedules::{Schedules, SchedulesConfig, SchedulesKind, SchedulesRetry};
 pub use seats::{SeatRef, Seats, SeatsConfig, SeatsOnFull, SeatsSeat};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
 pub use timers::{
@@ -120,7 +129,7 @@ use superschematic_rules::Core;
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104).
-pub const NAMES: [&str; 12] = [
+pub const NAMES: [&str; 13] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -133,6 +142,7 @@ pub const NAMES: [&str; 12] = [
     retries::NAME,
     seats::NAME,
     reconcile::NAME,
+    schedules::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -140,7 +150,7 @@ pub const NAMES: [&str; 12] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 12] = [
+pub const DECLARATIONS: [&str; 13] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -153,6 +163,7 @@ pub const DECLARATIONS: [&str; 12] = [
     retries::DECLARATION,
     seats::DECLARATION,
     reconcile::DECLARATION,
+    schedules::DECLARATION,
 ];
 
 /// A core with every behavior ported so far, in the engine's order, and
@@ -172,6 +183,7 @@ pub fn core() -> Core {
         .with(Retries)
         .with(Seats)
         .with(Reconcile)
+        .with(Schedules)
 }
 
 #[cfg(test)]

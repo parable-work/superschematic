@@ -45,6 +45,8 @@ impl Behavior for Tally {
             .operation("note", true)
             .operation("addTo", true)
             .operation("later", true)
+            .event("added")
+            .event("reset")
             .veto("over_cap")
     }
 
@@ -331,6 +333,7 @@ fn a_change_set_applies_whole_all_or_nothing() {
     assert_eq!(entries, [("e2", json!({ "by": 2 }))]);
     assert_eq!(store.outbox().len(), 1);
     assert_eq!(store.outbox()[0].event.kind, "added");
+    assert_eq!(store.outbox()[0].at, NOW);
     assert_eq!(
         store.outbox()[0].event.payload,
         json!({ "by": 2, "count": 2 })

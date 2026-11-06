@@ -27,8 +27,8 @@ use tokio_postgres::GenericClient;
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
-    Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions,
-    Executed, Host, Owned, Row, SubRow, TableChange,
+    Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, EventRun,
+    ExecuteOptions, Executed, Host, Owned, QueuedEvent, Row, SubRow, TableChange,
 };
 
 /// The savepoint a change set applies in, named apart from a repository's
@@ -253,6 +253,35 @@ pub async fn run_change<C: GenericClient + Sync>(
     run::run_change(host, &PgStore { client }, type_name, change, caller, claim).await
 }
 
+/// Spends a worker's claim of a message of a type's event queue in
+/// `client`'s transaction (D104): the claimed message deleted by its id and
+/// its claim's token, in the transaction the project's handler of the event
+/// then runs in, so the handler's writes and the message's completion
+/// commit together or not at all. A claim that no longer holds its message
+/// spends nothing ([`EventRun::ClaimLost`]), and the handler is not to run.
+/// Without a claim nothing is spent. A type whose table keeps no event
+/// queue is refused as internal.
+pub async fn spend_event<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    claim: Option<&Claim>,
+) -> Result<EventRun, Error> {
+    run::spend_event(host, &PgStore { client }, type_name, claim).await
+}
+
+/// Reads every message of a type's event queue in `client`'s transaction,
+/// in the order written, its `created_at` then its `id` (D104): each its
+/// row's key in the core's form, the use, the kind, the command's time and
+/// the payload. None for a table with no event queue.
+pub async fn read_queued_events<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+) -> Result<Vec<QueuedEvent>, Error> {
+    run::read_queued_events(host, &PgStore { client }, type_name).await
+}
+
 /// The store over a client in a transaction.
 pub(crate) struct PgStore<'c, C> {
     pub(crate) client: &'c C,
@@ -458,7 +487,9 @@ mod tests {
     use tokio_postgres::{Client, NoTls, Transaction};
 
     use super::*;
-    use crate::tests::{alice, both, db_layout, own, refusal, transition, KEY, KEY_COLUMN};
+    use crate::tests::{
+        alice, both, db_layout, emit_on_toy, own, refusal, transition, KEY, KEY_COLUMN,
+    };
     use crate::{Code, TypeSpec, MAX_ATTEMPTS};
     use superschematic_rules::UseSpec;
 
@@ -856,6 +887,89 @@ mod tests {
                     format!("Desk{}", "!".repeat(1 + MAX_ATTEMPTS)),
                     3 + MAX_ATTEMPTS as i64
                 )
+            );
+            tx.commit().await.expect("committed");
+        })
+        .await;
+    }
+
+    /// An event of a command whose row moved is written by the run that
+    /// applies alone, the moved run's rolled back with its savepoint, and
+    /// none of a command that kept moving (D104).
+    #[tokio::test]
+    async fn an_event_of_a_command_whose_row_moved_is_written_once_and_none_of_one_that_kept_moving(
+    ) {
+        on_postgres(|url, schema| async move {
+            // The toy's create locks a key of the schema's own: an advisory
+            // lock is the whole database's.
+            let (core, mut layout) = (both(), db_layout());
+            if let Some(toy) = layout.types.get_mut("Toy") {
+                toy.spec = TypeSpec::new("Toy").with(UseSpec::on_type(
+                    "Toy",
+                    json!({"lock": format!("Stock/s1/{schema}")}),
+                ));
+            }
+            let host = Host::new(&core, &layout).with_clock(|| 5000);
+            let mut client = connect(&url, Some(&schema)).await;
+            let tx = client.transaction().await.expect("a transaction");
+            let options = CreateOptions {
+                id: Some(KEY.into()),
+                ..CreateOptions::default()
+            };
+            run_create(
+                &host,
+                &tx,
+                "Toy",
+                own(json!({"title": "Desk"})),
+                alice(),
+                &options,
+            )
+            .await
+            .expect("created");
+            let bump =
+                r#"UPDATE toy SET title = title || '!', _version = _version + 1 WHERE id = $1"#;
+            let moving = |moves: usize| Moving {
+                inner: PgStore { client: &tx },
+                write: bump.into(),
+                values: vec![Bind::Text(KEY_COLUMN.into())],
+                moves,
+                applies: AtomicUsize::new(0),
+            };
+            let executed = run::execute(
+                &host,
+                &moving(1),
+                "Toy",
+                emit_on_toy(json!({"n": 1})),
+                &ExecuteOptions::default(),
+            )
+            .await
+            .expect("applied");
+            assert_eq!(executed.attempts, 2);
+            let paid = QueuedEvent {
+                key: KEY.into(),
+                use_id: "Toy".into(),
+                kind: "paid".into(),
+                at: 2000,
+                payload: json!({"n": 1}),
+            };
+            assert_eq!(
+                read_queued_events(&host, &tx, "Toy").await.expect("read"),
+                std::slice::from_ref(&paid)
+            );
+            let refused = refusal(
+                run::execute(
+                    &host,
+                    &moving(MAX_ATTEMPTS),
+                    "Toy",
+                    emit_on_toy(json!({"n": 2})),
+                    &ExecuteOptions::default(),
+                )
+                .await,
+            );
+            assert_eq!(refused.code, Code::Busy);
+            assert_eq!(
+                read_queued_events(&host, &tx, "Toy").await.expect("read"),
+                [paid]
             );
             tx.commit().await.expect("committed");
         })

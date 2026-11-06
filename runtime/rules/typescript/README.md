@@ -69,9 +69,12 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   (`hearsChanges`), and the entry a caller presents it as a precondition
   (`preconditionSchema`), in the order Workflow, Reactions, Constants,
   StateRules, Approvals, Timers, Lease, Presence, Budget, Retries, Seats,
-  Reconcile. A value field the behavior does not set at a create says
-  `optional: true` (Reconcile's `observed`, `DeclaredField.optional`), and
-  its column takes NULL.
+  Reconcile, Schedules. A value field the behavior does not set at a
+  create says `optional: true` (Reconcile's `observed`,
+  `DeclaredField.optional`), and its column takes NULL. A behavior that
+  emits events about a row lists them (`events`, `DeclaredEvent`: each its
+  kind, description and payloadSchema, D104: Schedules' `run`), and a
+  table that composes it keeps an event queue.
 - `check(specs, { caller, now }?)` returns each spec's define check: null,
   or its refusal.
 - An input the module cannot read throws `RulesError` (`invalid_json`,

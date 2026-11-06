@@ -352,13 +352,13 @@ func TestAnEngineTypeRefusesSeatsAndReconcile(t *testing.T) {
 
 // TestAnEngineTypeNamingSeatsIsRefusedBeforeEnginedoc (D104): enginedoc,
 // engineclientgen and the engine's project generator read only engine types,
-// and registry.EngineImplements is false for Seats and Reconcile, so the
-// build refuses an engine type of a General schema that names either when
-// it loads, before any of them reads the schema: none of them names either
-// behavior.
+// and registry.EngineImplements is false for Seats, Reconcile and
+// Schedules, so the build refuses an engine type of a General schema that
+// names one when it loads, before any of them reads the schema: none of
+// them names any of these behaviors.
 func TestAnEngineTypeNamingSeatsIsRefusedBeforeEnginedoc(t *testing.T) {
 	reg := registry.New(naming.Default())
-	for _, name := range []string{"Seats", "Reconcile"} {
+	for _, name := range []string{"Seats", "Reconcile", "Schedules"} {
 		behavior, ok := reg.Behavior(name)
 		if !ok || registry.EngineImplements(behavior) || behavior.Package != registry.RulesPackage {
 			t.Fatalf("%s: package %q, engine implements %v; want %s and false", name, behavior.Package, registry.EngineImplements(behavior), registry.RulesPackage)

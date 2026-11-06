@@ -1064,12 +1064,16 @@ The class is a worker of the API, as a `@worker` class is
 ([Queues and workers](/superschematic/guides/queues/#write-a-worker)): a
 deployable of kind worker named after the API and the class,
 `support-api-ticket-timers`, with a worker's settings, `stack dev`
-process, image and gcp worker pool. Its handler is generated, so your
-implementation has no method for it and the API's `Workers` lists none: it
-claims each message of the table's deadline queue as it falls due, and each
+process, image and gcp worker pool. Its handlers of deadlines and changes
+are generated, so your implementation has no method for them: it claims
+each message of the table's deadline queue as it falls due, and each
 message of its change queue, and runs it through the behaviors' core in one
 transaction with the message's completion, one claim loop per queue, the
-deadlines first. It runs as the worker, the subject
+deadlines first. A table whose behaviors emit events (Schedules' runs)
+also has an event queue, its third, whose messages the worker hands to a
+method of the API's `Workers` that you write
+([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers));
+a table that emits none gives `Workers` no method. It runs as the worker, the subject
 `support-api/TicketTimers`, not as a user, holding the permissions the
 decorator gives it:
 
@@ -1098,8 +1102,8 @@ its dead message, so a retry of every dead message never meets a waiting
 one of the same deadline.
 
 One class runs a table's queues per API, and the build refuses one over a
-table whose behaviors arm no deadlines and hear no writes, which has
-nothing to run. Nothing refuses a table whose queues no worker runs: its
+table whose behaviors arm no deadlines, hear no writes and emit no events,
+which has nothing to run. Nothing refuses a table whose queues no worker runs: its
 deadlines fall due and its changes wait for one, and nothing that hears
 them runs until a worker does. An API that serves
 `@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
@@ -1457,6 +1461,100 @@ when no observation has reached a sandbox for `staleAfterMs`, it moves the
 row to `unreachable`, and a step its permissions or a rule refuse records
 drift. A table whose Reconcile gives no `staleAfterMs` still gets a
 deadline queue, which nothing arms, and Seats arms nothing.
+
+## A table's schedules and their events
+
+A table that implements Schedules
+([A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules))
+has its operations, which a `@behaviorOperations` set serves, and a
+deadline queue, a change queue and an event queue, which a
+`@behaviorWorker` runs (D104). The worker hands each run's event to your
+`Workers` method:
+
+```ts
+// schedules-api
+import { auth, behaviorOperations, behaviorWorker } from "@superschematic/api";
+import { Problem } from "@acme/schedules-db";
+
+@behaviorOperations(Problem)
+@auth
+export abstract class ProblemActions {}
+
+@behaviorWorker(Problem, { permissions: ["problems.schedule"] })
+export abstract class ProblemWakeUps {}
+```
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /api/problem/{id}/schedules/set-schedule` | `{ "name": "standup", "cron": "0 9 * * MON-FRI", "timeZone"?: "Europe/London" }`, or `"after"` or `"every"` in milliseconds | the schedule, `{ name, kind, spec, timeZone?, state, setAt, nextAt, runs, replaced?, unchanged? }` |
+| `POST /api/problem/{id}/schedules/pause-schedule` | `{ "name": "standup" }` | the schedule, `state: "paused"` |
+| `POST /api/problem/{id}/schedules/resume-schedule` | `{ "name": "standup" }` | the schedule, `state: "active"` |
+| `POST /api/problem/{id}/schedules/cancel-schedule` | `{ "name": "standup" }` | the schedule, `state: "finished"`, `endedBy: "cancel"` |
+| `POST /api/problem/{id}/schedules/report-run` | `{ "name": "standup", "run": 3, "attempt"?: 1, "outcome": "told" }` | `{ name, run, outcome, retryAt?, unchanged? }` |
+| `POST /api/problem/{id}/schedules/list-schedules` | `{ "name"?: "standup" }` | `{ items: [...] }`, by name; it writes nothing |
+
+The inputs are typed by the config: `setSchedule`'s input carries only
+the kinds `kinds` names (`timeZone` beside `cron`), and `reportRun`'s
+`outcome` is `ProblemSchedulesOutcome`, the config's outcomes. What a
+call answers keeps the declaration's types, so it reads a schedule that a
+later config narrowed: a schedule's `kind`, `state` and `endedBy` are
+enums of every value (`ProblemSchedulesKind`, `ProblemSchedulesState`,
+`ProblemSchedulesEndedBy`), as the event's `kind` is, and a schedule's
+`lastOutcome` and `reportRun`'s answered `outcome` are strings, since a
+schedule of a kind a new config dropped keeps running and an outcome it
+dropped stays recorded. The SDK methods and MCP tools follow the use:
+`sdk.problem.schedules.setSchedule(id, { name: "standup", cron: "0 9 * *
+MON-FRI" })`, `problem_schedules_set_schedule`. The core checks the
+config's `permission` against the caller's, so an `@auth` set admits any
+signed-in caller and the config decides the rest; the permission catalog
+lists it under each of the six operations.
+
+| Call | Answer |
+| --- | --- |
+| `setSchedule` of `{ "name": "nudge", "after": 300000 }` by a caller holding `problems.schedule` | 200, `state: "active"`, `nextAt` five minutes on, its deadline armed then |
+| the same again | 200, `unchanged: true`, nothing written |
+| `setSchedule` by a caller without `problems.schedule` | 403 `forbidden` |
+| a delay under `minMs`, two kinds at once, or a cron line with a seconds field | 400 `invalid_argument`, at `/after`, `""` or `/cron` |
+| an eleventh live name | 409 `vetoed`, `schedule_limit`, `details.vetoDetails` `{ "max": 10, "live": [...] }` |
+| `reportRun` of a run the schedule has not had | 409 `vetoed`, `no_run`, `{ "name": "nudge", "run": 2, "runs": 1 }` |
+| `reportRun` of an older run, or of the outcome recorded | 200, `unchanged: true` |
+| `reportRun` of `missed`, `retry`'s outcome | 200, `retryAt` five minutes on, the run armed again then as its next attempt |
+| `setSchedule` on a problem that is `done` | 409 `vetoed`, `schedules_ended`, `{ "status": "done" }` |
+| `pauseSchedule` of a finished schedule | 409 `vetoed`, `schedule_finished` |
+
+The worker runs each schedule's deadline as itself, the subject
+`schedules-api/ProblemWakeUps`, holding the permissions its decorator
+lists: it records the run, writes its event, and arms the next run, all in
+the deadline's transaction, and then claims the event from
+`problem_event_queue` and hands it to `problemWakeUpsSchedulesRun`
+(`ProblemWakeUpsSchedulesRun` in Go, `problem_wake_ups_schedules_run` in
+Rust) in the transaction that completes it. The method reports the run
+through that transaction as the worker, which `permissions` lets do so:
+
+```go
+func (w *workers) ProblemWakeUpsSchedulesRun(ctx context.Context, tx orm.TxInterface, event types.ProblemSchedulesRunEvent) error {
+	id, err := dbtypes.ParseIdentityUUID(event.Key.String())
+	if err != nil {
+		return err
+	}
+	_, err = tx.GetProblemRepository().Schedules().ReportRun(ctx, id, orm.ProblemSchedulesReportRunParams{
+		Name: event.Payload.Name, Run: int64(event.Payload.Run), Outcome: "told",
+	})
+	if rules.IsNotFound(err) {
+		return nil // the problem is gone: complete the event
+	}
+	return err
+}
+```
+
+A method's error fails the event, which is due again after the queue's
+backoff, the row's later events waiting behind it; a method that returns
+completes it, its writes with it. A table whose writes Schedules hears
+through its change queue has a raw SQL write of the status heard too:
+when it enters a state `endOn` names, the worker finishes the row's
+schedules. An API that serves `@behaviorOperations(Problem)` and declares
+no `@behaviorWorker(Problem)` is warned, naming what waits (`deadlines
+(Schedules), changes (Schedules) and events (Schedules: run)`).
 
 ## OpenAPI
 

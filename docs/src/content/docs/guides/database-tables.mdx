@@ -1051,10 +1051,11 @@ or Lease, Retries, Presence and Budget
 ([Rows a worker leases, retries, beats and meters](#rows-a-worker-leases-retries-beats-and-meters)),
 or Seats, or types a field as a Reconcile
 ([A row's seats, and a field that follows observations](#a-rows-seats-and-a-field-that-follows-observations)),
+or Schedules ([A row's schedules](#a-rows-schedules)),
 stays a table: the behavior's fields are its
-columns, its sub-tables, its deadline queue and its change queue are
-tables beside it, and its operations change them through the behaviors'
-core
+columns, its sub-tables, its deadline queue, its change queue and its
+event queue are tables beside it, and its operations change them through
+the behaviors' core
 ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations),
 [A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker),
 [A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)).
@@ -1067,7 +1068,12 @@ never refuses a write, and the API's `@behaviorWorker` of the table runs
 the messages after the commit, one row's in the order they were written.
 No behavior worker claims on SQLite or D1 yet, where the messages
 accumulate until one does. Such a table has no upserts when its behaviors
-keep sub-tables or arm deadlines.
+keep sub-tables or arm deadlines. A table whose behaviors emit events
+about its rows (Schedules' runs) gets an event queue,
+`<table>_event_queue`, one message per event, written in the command's
+transaction, which the API's `@behaviorWorker` hands to a method of the
+API's `Workers` that you write
+([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers)).
 
 ### Who may move a Workflow field's row
 
@@ -1819,3 +1825,183 @@ the status re-arms nothing until the stale deadline falls due, which arms
 itself again when `observed_observed_at` has moved past it. Prefer the
 operations: `seats.leaveSeat` by a caller holding `assign`, an observation
 newer than the last.
+
+### A row's schedules
+
+A table implements `Schedules` as it implements Seats, with the table
+itself as its first type argument (D104): named schedules on each row,
+each a run after a delay, at every interval, or at each time a cron line
+names, whose runs your code answers. The behaviors' core alone implements
+it: no engine does, so it composes on no engine type, and the build
+refuses `@behavior("Schedules", ...)` naming the table form.
+
+```ts
+// schedules-db
+export abstract class Problem
+  implements
+    Schedules<Problem, {
+      max: 10;
+      minMs: 60000;
+      maxMs: 2592000000;
+      kinds: ["after", "every", "cron"];
+      timeZone: "America/New_York";
+      outcomes: ["told", "resumed", "held", "missed"];
+      retry: { outcome: "missed"; afterMs: 300000 };
+      endOn: { enters: ["done", "dropped"] };
+      permission: "problems.schedule";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  status: Workflow<{
+    states: ["open", "working", "done", "dropped"];
+    transitions: [
+      { from: "open"; to: "working" },
+      { from: "working"; to: "done" },
+      { from: "working"; to: "open" },
+      { from: "open"; to: "dropped" },
+      { from: "working"; to: "dropped" }
+    ];
+  }>;
+}
+```
+
+Above, an agent sets wake-ups on its record: after a delay, at an
+interval, or on a cron line in New York's time, a minute to thirty days
+apart, at most ten live a record. Each wake reaches your handler, which
+tells the agent and reports told, resumed, held or missed; a missed one is
+tried again five minutes on, and a record that is done or dropped finishes
+its wake-ups.
+
+| Member | What it does |
+| --- | --- |
+| `max` | how many schedules a row holds live (active or paused) at once, 1 to 100; a finished one counts for none |
+| `minMs` | the least delay or interval, and the least gap between two runs of a cron line on the local clock, in milliseconds; a minute when absent |
+| `maxMs` | the greatest delay or interval, and how far off a cron line's next run may be when it is set; thirty days when absent |
+| `kinds` | the kinds a schedule may be: `after`, one run a delay after it is set; `every`, a run at each whole interval from when it is set; `cron`, a run at each time a cron line names |
+| `timeZone` | the IANA zone a cron line is read in when `setSchedule` names none; UTC when absent. Needs `cron` among `kinds` |
+| `outcomes` | the outcomes `reportRun` records of a run, lowercase words |
+| `retry` | `{ outcome, afterMs }`: reporting `outcome` tries the run again `afterMs` on, within `minMs` and `maxMs` |
+| `endOn` | `{ enters }`: the states of the table's Workflow whose entry finishes every live schedule of the row |
+| `status` | the Workflow field `endOn` reads; implied when the table has one, needed when it has several |
+| `permission` | the permission every operation needs; any caller the route admits when absent |
+
+The build adds the sub-table `problem_schedules_schedules`
+(`ProblemSchedulesSchedules`), one row per schedule, keyed by its `name`
+on the row, with `kind`, `spec`, `time_zone`, `state` (`active`,
+`paused` or `finished`), `set_at`, `next_at`, `retry_at`, `runs`,
+`attempt`, `last_at`, `last_outcome`, `finished_at` and `ended_by` (`run`,
+`cancel` or `endOn`), deleted with the row; the deadline queue
+`problem_deadline_queue`, where each live schedule arms the deadline of
+its name; the change queue `problem_change_queue` and its trigger, through
+which `endOn` hears a write of the status whoever makes it; and the event
+queue `problem_event_queue`, where each run's event waits for your
+handler. Its operations are `schedules.setSchedule({ name, after?, every?,
+cron?, timeZone? })`, `pauseSchedule({ name })`, `resumeSchedule({ name
+})`, `cancelSchedule({ name })`, each answering the schedule as it
+leaves it; `reportRun({ name, run, attempt?, outcome })`, which answers
+`{ name, run, outcome, retryAt? }`; and the read-only `listSchedules({
+name? })`, which answers `{ items: [...] }` by name, live and finished. A
+schedule reads as `{ name, kind, spec, timeZone?, state, setAt, nextAt?,
+retryAt?, runs, attempt?, lastAt?, lastOutcome?, finishedAt?, endedBy?
+}`, times in epoch milliseconds.
+
+- **Setting one.** `setSchedule` names exactly one of `after`, `every`
+  (each in milliseconds, within `minMs..maxMs`) and `cron`, of a kind the
+  config takes; `timeZone` goes with `cron` alone. A cron line's runs
+  must come at least `minMs` apart on the local clock, its times of day
+  and the days it names alike (`@weekly`'s a week, `0 1,23 * * MON`'s 22
+  hours), and its next run lie within `maxMs`. Each is 400
+  `invalid_argument` at its member otherwise (`operation setSchedule of
+  behavior Schedules: /after: 60000 is outside minMs..maxMs
+  (120000..2592000000): a delay lies between them`). A name
+  holds one live schedule: setting a live name with the same kind, spec
+  and zone answers it `unchanged: true` and writes nothing, whether it is
+  active or paused; another spec replaces it (`replaced: true`). A new
+  name needs room under `max`: 409 `vetoed`, `schedule_limit`, `{ max,
+  live }`, until one is cancelled. A finished name set again is a new
+  schedule. A replace and a finished name set again count the name's
+  `runs` on, so a run number names one run of the name.
+- **A run.** Each active schedule's deadline falls due at its `nextAt` on
+  the API's [behavior worker](/superschematic/guides/api-routes/#the-worker),
+  which records the run (`runs`, `lastAt`) and writes the event `run`,
+  `{ name, run, attempt, kind, spec, timeZone?, setAt, dueAt, firedAt,
+  nextAt? }`, to the event queue in the same transaction, then arms the
+  next run from the time it fired: an overdue schedule fires once, not
+  once per run it missed. An `every`'s runs fall on a grid from when it
+  was set, and the next is the grid's first point after the fire; a cron
+  line's is its first time after the fire; an `after` finishes after its
+  run (`endedBy: run`).
+- **Your handler.** The worker hands each event to the API's `Workers`
+  method of its use and kind, `problemWakeUpsSchedulesRun`, in the
+  transaction that completes it
+  ([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers)).
+  Report the run there with `reportRun`, through that transaction, so the
+  report and the completion commit together, and pass the event's
+  `attempt` too. An event may come twice: `name`, `setAt`, `run` and
+  `attempt` say which fire it is, and no two fires share them.
+- **Pause, resume, cancel.** `pauseSchedule` keeps `nextAt` and clears the
+  deadline; `resumeSchedule` arms it again, and one past its `nextAt`
+  fires at once, once. `cancelSchedule` finishes a schedule (`endedBy:
+  cancel`) rather than deleting it, so its last run's late report still
+  lands and its place under `max` frees at once. A repeat of each answers
+  `unchanged: true`; a pause or a resume of a finished schedule is 409
+  `vetoed`, `schedule_finished`, and each of them, and `reportRun`, of a
+  name the row holds no schedule of is `no_schedule`.
+- **Reporting a run.** `reportRun` records an outcome of `outcomes` for
+  the latest run, `lastOutcome`; another is 400 `invalid_argument`. A run
+  the schedule has not had is 409 `vetoed`, `no_run`; an older run, the
+  latest run of a schedule a replace took the place of, an `attempt`
+  other than the latest, and the outcome already recorded, answer
+  `unchanged: true`, since a handler may report twice or late. `retry`'s
+  outcome tries the run again `afterMs` on, as its next `attempt`, unless
+  the next regular run comes first; an `after`'s missed run is tried
+  again too. Another outcome cancels the try.
+- **endOn.** A row whose Workflow enters a state `endOn` names finishes
+  every live schedule (`endedBy: endOn`), on a transition through the core
+  and on any write of the status the change queue carries, a raw SQL one
+  among them, once the worker hears it. Such a row takes no live schedule:
+  `setSchedule` and `resumeSchedule` are 409 `vetoed`, `schedules_ended`.
+- **Cron lines.** Five fields, minute, hour, day of the month, month and
+  day of the week, each `*`, a number, a range (`9-17`), a step (`*/15`,
+  `9-17/2`) or a list of them, with month and day names in any case
+  (`JAN`, `MON-FRI`) and 0 or 7 for Sunday; when both day fields are
+  given, a day matches either, as in Vixie cron. `@yearly`, `@annually`,
+  `@monthly`, `@weekly`, `@daily`, `@midnight` and `@hourly` stand for
+  their lines. A seconds field, `@reboot`, `?`, `L`, `W`, `#` and `H` are
+  refused, each naming its field. A local time a DST change skips runs
+  at the first instant after the gap, the change itself (a nightly
+  `0 2 * * *` in New York runs at 03:00 on the spring day), and one it
+  repeats runs once, at its first occurrence. Zones are the IANA
+  database the core bundles, the same on every host; an unknown one is
+  400 `invalid_argument`. The build does not check the config's
+  `timeZone`: the core refuses an unknown one at the table's first
+  command.
+- **Who.** A caller without `permission` is 403 `forbidden` (`<caller>
+  may not set a schedule of Problem <id>: it needs permission
+  problems.schedule`) before anything of the row is read. A run fires as
+  the worker and calls no operation, so no other rule holds it, and the
+  handler's `reportRun` runs as the worker. On a table that also
+  implements Lease, the operations are writes another principal's active
+  lease holds: list them in Lease's `exempt`
+  (`"Schedules.reportRun"`) to let the handler's report land.
+- **Config changes.** Any change of the config is allowed. A dropped kind
+  and narrower bounds hold new sets alone, and a live schedule of a
+  dropped kind keeps running; a lowered `max` refuses new names until
+  fewer are live and finishes none; a schedule keeps the zone it was set
+  with. When a write finishes a schedule, the finished ones beyond `max`
+  go, those finished longest ago first, so a pruned one's late report is
+  `no_schedule`.
+
+It holds every write through the core: its operations, its deadlines,
+and the repositories' updates of one row by its key. It keeps a
+sub-table, so the table has no upserts. A write around the core runs none
+of its rules, and no trigger or check refuses one, so an operator can
+repair a row: a raw write of a `problem_schedules_schedules` row is read
+as it is at its schedule's next fire (a `next_at` moved later is armed
+again there; nothing re-arms for one moved earlier, which waits for the
+armed deadline), a deadline message moved with SQL fires when it falls
+due, and an event message deleted with SQL is never handed on. Prefer the
+operations: `pauseSchedule` and `resumeSchedule`, a `setSchedule` that
+replaces it, `cancelSchedule`.

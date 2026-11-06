@@ -824,7 +824,7 @@ type BehaviorRust struct {
 behavior in an engine, which the `behaviors` command's `--package` keeps
 (below). When set it must be an npm package name. A core behavior that no
 engine implements, which the behaviors' core alone runs on a table (D104:
-`Seats`, `Reconcile`), names `registry.RulesPackage`,
+`Seats`, `Reconcile`, `Schedules`), names `registry.RulesPackage`,
 `@superschematic/rules`, the npm package that ships the core;
 `registry.EngineImplements` is false for it alone. An extension's
 behavior runs in its engine, so `RegisterBehavior` refuses
@@ -908,6 +908,7 @@ shape is `BehaviorDeclaration`:
 | `armsDeadlines` | true for a behavior that arms deadlines: a table that composes it gets a deadline queue, `<Type>Deadline`, which an API's `@behaviorWorker` runs (D103) |
 | `hearsChanges` | true for a behavior that hears the writes of its table's rows: a table that composes it gets a change queue, `<Type>Change`, which its change trigger writes on every insert, update and delete, whoever makes it, and an API's `@behaviorWorker` runs (D103) |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, `schema` or `namespace`), `beside`, `log` and `asks` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `events` | the events it emits about a row (D104, `superschematic_rules::Cx::emit`): each `kind` (camelCase, unique among its events), `description` and `payloadSchema`, an object schema with `"additionalProperties": false`; a table that composes it gets an event queue, `<Type>Event`, whose messages an API's `@behaviorWorker` hands to a method of the API's `Workers`, one per kind (`ProblemWakeUpsSchedulesRun`). The core refuses an emit of a kind its declaration does not list. `RegisterBehavior` refuses the member on a behavior whose package is not `registry.RulesPackage`, an extension's among them, since an engine's declaration parser refuses the key |
 | `signals` | the messages about an instance an engine delivers to the event streams open on it and keeps nowhere (D77): `name` (camelCase, unique among its signals), `description`, `paramsSchema` (the JSON Schema of its data) and `access`, who may send it: `read` or `write`, a caller the policy lets read or write the schema, or `operation`, the behavior's own operations alone |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
@@ -1076,7 +1077,7 @@ own fields, and leaves out the fields the loader added and the
 
 A behavior the behaviors' core runs and whose declaration names no `value`
 (Timers, Reactions, Constants, StateRules, Approvals, Lease, Presence,
-Budget, Retries, Seats) is implemented by a DB table as a whole (D103, D104):
+Budget, Retries, Seats, Schedules) is implemented by a DB table as a whole (D103, D104):
 `export abstract
 class Ticket implements Timers<Ticket, { ... }>`, where `@superschematic/db`
 exports the carrier, which resolves to the empty object type as `User`
@@ -1210,15 +1211,16 @@ registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`,
 and the commerce behaviors the optional `@superschematic/engine-commerce`
 package implements (D70): `Stock`, `Calendar`, `Holds` and `Payments`.
-It declares the two behaviors the behaviors' core alone implements, on a
-table, which no engine registers (D104): `Seats`, which a table implements,
-and `Reconcile`, the second behavior a field anchors. Each spec names its
+It declares the three behaviors the behaviors' core alone implements, on a
+table, which no engine registers (D104): `Seats` and `Schedules`, which a
+table implements, and `Reconcile`, the second behavior a field anchors.
+Schedules is the first whose declaration lists `events` (`run`). Each spec names its
 package (`registry.EnginePackage`, `registry.WorkQueuePackage`,
 `registry.CommercePackage` or `registry.RulesPackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
-types the configs of every one an engine implements; it names neither
-`Seats` nor `Reconcile`, so an engine type's `@behavior("Seats", ...)`
+types the configs of every one an engine implements; it names none of
+`Seats`, `Reconcile` and `Schedules`, so an engine type's `@behavior("Seats", ...)`
 does not type-check, and the agent's behaviors catalog, which lists what
 an engine type composes, leaves them out. None names an invocation
 policy, since a distribution's policy need not have the core's values;
@@ -1227,7 +1229,7 @@ each operation takes the policy's default. Every
 `Dependencies` declare a `createParamsSchema`: a create's links by name
 and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
 `Workflow`, `Revisions`, `Dependencies`, `Links`, `Branches`, `Timers`,
-`StateRules`, `Approvals`, `Seats`
+`StateRules`, `Approvals`, `Seats`, `Schedules`
 and every work-queue behavior list the codes of their
 vetoes. `Constants` and `Variants` declare no field, operation,
 parameter, precondition or code: what they refuse is an issue at a field
@@ -1358,8 +1360,14 @@ seat's `fromField` is an own field that holds a subject, an `onFull`
 needs a `max`, a Workflow transition's or a StateRules state's `by`
 entry `seat:<name>` names a seat of the table's Seats, and Reconcile's
 `status` names a Workflow of the table, whose states hold its
-`unreachable` as the core's define check does. An engine type, of a DB or
-a General schema, that composes either is refused, naming the table form
+`unreachable` as the core's define check does. `Schedules` is too
+(`verify/behaviors_schedules.go`): `minMs` within `maxMs`, a `timeZone`
+with cron among its `kinds`, `retry`'s outcome one of `outcomes` and its
+`afterMs` within the bounds, `status` with `endOn`, and `endOn`'s states
+those of the Workflow it reads; the zone's name is the core's to check, at
+the table's first command, since the build links no zone database. An
+engine type, of a DB or a General schema, that composes any of them is
+refused, naming the table form
 (`write implements Seats<T, { ... }> on a DB table`), since no engine
 implements them; enginedoc, projectengine and engineclientgen read engine
 types alone, so they never meet one.

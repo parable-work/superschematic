@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "api": "fixture-schedules-api",
+  "permissions": [
+    {
+      "name": "problems.schedule",
+      "identity": false,
+      "operations": [
+        "ProblemSchedulesCancelScheduleHandler",
+        "ProblemSchedulesListSchedulesHandler",
+        "ProblemSchedulesPauseScheduleHandler",
+        "ProblemSchedulesReportRunHandler",
+        "ProblemSchedulesResumeScheduleHandler",
+        "ProblemSchedulesSetScheduleHandler"
+      ]
+    }
+  ]
+}
