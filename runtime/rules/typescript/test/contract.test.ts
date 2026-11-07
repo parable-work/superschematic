@@ -13,7 +13,9 @@ import {
   type BehaviorDeclaration,
   type Caller,
   type Command,
+  type DeclaredContract,
   type DeclaredEvent,
+  type KeyedRow,
   type ReadRequest,
   type Refusal,
   type Row,
@@ -253,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -364,7 +366,66 @@ test('declarations are the registered files, each field typed and the value fiel
   expect(events.map(e => e.kind)).toEqual(['run']);
   expect(events[0]!.payloadSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['name', 'run', 'attempt', 'kind', 'spec', 'setAt', 'dueAt', 'firedAt'] });
   expect(schedules.vetoes?.map(v => v.code)).toEqual(['no_schedule', 'schedule_limit', 'schedule_finished', 'schedules_ended', 'no_run']);
-  expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules']);
+  // Pool, which only the core implements, owns a member's availability,
+  // outUntil, outReason and checkedAt, arms its recheck and emits the event
+  // recheck; its pick is an operation of the table as a whole, scope
+  // schema, which reads; it asks the contract Capacity, which Budget
+  // implements (D104).
+  const pool = byName('Pool');
+  expect([pool.value, pool.armsDeadlines, pool.hearsChanges, pool.tables]).toEqual([undefined, true, undefined, undefined]);
+  expect(pool.fields?.map(f => `${f.name}: ${f.type}`)).toEqual(['availability: string', 'outUntil: Temporal.DateTime', 'outReason: string', 'checkedAt: Temporal.DateTime']);
+  expect(pool.operations?.map(o => [o.name, o.writes === true, o.scope ?? 'instance'])).toEqual([
+    ['markOut', true, 'instance'],
+    ['reportRoom', true, 'instance'],
+    ['pick', false, 'schema'],
+  ]);
+  expect((pool.events ?? []).map(e => e.kind)).toEqual(['recheck']);
+  expect(pool.vetoes?.map(v => v.code)).toEqual(['pool_too_large']);
+  const contracts = (name: string): readonly DeclaredContract[] => byName(name).contracts ?? [];
+  expect(contracts('Pool').map(c => [c.name, c.role])).toEqual([['Capacity', 'asks']]);
+  expect(contracts('Budget').map(c => [c.name, c.role])).toEqual([['Capacity', 'implements']]);
+  expect(declarations.filter(d => (d.contracts ?? []).length > 0).map(d => d.name)).toEqual(['Budget', 'Pool']);
+  // Lease's expireHolder runs on the table as a whole, which the core now
+  // runs as a command without a row.
+  expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');
+  expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool']);
+});
+
+test("an operation of the table as a whole runs on no row: it reads the table's rows, each own field equal names held to its value, and answers from them, writing nothing (D104)", () => {
+  const account: TypeSpec = {
+    name: 'Account',
+    uses: [{ behavior: 'Pool', config: { order: 'rank' } }],
+    fields: [
+      { name: 'name', type: 'string' },
+      { name: 'vendor', type: 'string' },
+      { name: 'rank', type: 'Generic.Int64' },
+    ],
+  };
+  const now = 1772323200000;
+  const pick: Command = { caller: alice, now, request: 'r9', action: { kind: 'tableOperation', useId: 'Pool', operation: 'pick', params: { match: { vendor: 'anthropic' } } } };
+  const rows: ReadRequest = { kind: 'rows', type: 'Account', equal: { vendor: 'anthropic' }, limit: 500 };
+  expect(core.run(account, pick)).toEqual({ read: [rows] });
+  const member = (key: string, rank: number, pool: Readonly<Record<string, unknown>>): KeyedRow => ({ key, row: { own: { name: key, vendor: 'anthropic', rank }, owned: { Pool: pool }, version: 1 } });
+  // a2 ranks first but is out until later; a1 is open; a3 is near.
+  const page: Answers = {
+    reads: [
+      {
+        request: rows,
+        answer: {
+          linked: {
+            rows: [member('a1', 2, { availability: 'open' }), member('a2', 1, { availability: 'out', outUntil: now + 60000, outReason: 'quota' }), member('a3', 0, { availability: 'near' })],
+            more: false,
+          },
+        },
+      },
+    ],
+  };
+  const picked: Step = { done: { changed: { rows: [], subRows: [], events: [], deadlines: [], result: { member: { key: 'a1', availability: 'open', order: 2, preferred: true } } } } };
+  expect(core.run(account, pick, page)).toEqual(picked);
+  // A table operation presents no precondition, and one of a row is no
+  // operation of the table.
+  expect(core.run(account, { ...pick, preconditions: { Pool: {} } })).toMatchObject({ done: { refused: { code: 'invalid_argument', class: 'PreconditionsError' } } });
+  expect(core.run(account, { ...pick, action: { kind: 'tableOperation', useId: 'Pool', operation: 'markOut', params: {} } })).toMatchObject({ done: { refused: { code: 'not_found' } } });
 });
 
 test('check is each spec define check: null for one the core takes, its refusal for one it refuses', () => {

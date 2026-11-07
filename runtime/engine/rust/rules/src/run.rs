@@ -33,6 +33,19 @@
 //! its own type's rules. Every row the run writes is in the change set,
 //! each held to its own version.
 //!
+//! An operation of the table as a whole ([`Action::TableOperation`], D104)
+//! runs on a frame that is no row: a placeholder of the type ([`Write::Table`])
+//! whose own and owned fields are empty, which the change set never writes.
+//! Its parameter check and its use's settle run as for any operation, then
+//! every use's guard in list order, asked with [`GuardRequest::Table`], then
+//! its handler; no validation, no after-change hook and no precondition. It
+//! reads rows through the reads across a table and the linked and holding
+//! reads, and reaches them only through [`crate::Cx::call_on`] and
+//! [`crate::Cx::create_row`], each row's guards, version and hooks running
+//! as for any call; a write of the frame's own state (an owned field, a
+//! sub-table row, an event, a deadline, a call on its row) is a defect. It
+//! takes no lock of its own. A run whose calls wrote nothing writes no row.
+//!
 //! A change command ([`Action::Change`]) runs on a write of a row the outbox
 //! hands the core (D103): the uses of the row's type whose declaration hears
 //! changes, on the row as it is now, and then each listener a relation of
@@ -50,8 +63,8 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::behavior::{
-    Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Heard, Hook, Listen,
-    OperationDecl, Stop, ValidationRequest,
+    Change, ConfigError, ConfigTarget, ContractQuery, Declaration, GuardRequest, Heard, Hook,
+    Listen, OperationDecl, Stop, ValidationRequest,
 };
 use crate::changes::{
     ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SubRowChange, SubRowWrite,
@@ -61,7 +74,9 @@ use crate::context::{listed, ConfigCx};
 use crate::core::{Core, Outcome, Registered, Step};
 use crate::erased::{AnyConfig, Scope};
 use crate::patch::merge_patch;
-use crate::reads::{key_of, Answer, Answers, LinkedRows, LockKey, ReadRequest, Row, SubRow};
+use crate::reads::{
+    key_of, Answer, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow, TableRef,
+};
 use crate::refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
 };
@@ -108,6 +123,9 @@ pub(crate) enum Write {
     Delete,
     /// A change command's row the host does not have.
     Gone,
+    /// The table as a whole, which an operation of the table runs on
+    /// (D104): no row, and nothing the change set writes.
+    Table,
 }
 
 /// The action a change command's hooks run under, as a veto names it.
@@ -165,6 +183,20 @@ impl Touched {
         }
     }
 
+    // table is the placeholder of a type's table as a whole, which an
+    // operation of the table runs on: no key, no fields, no version.
+    fn table(type_name: &str) -> Self {
+        Touched {
+            type_name: type_name.to_owned(),
+            key: None,
+            own: Map::new(),
+            owned: BTreeMap::new(),
+            version: None,
+            write: Write::Table,
+            set: BTreeMap::new(),
+        }
+    }
+
     fn row_ref(&self) -> RowRef {
         RowRef::new(&self.type_name, self.key.as_deref())
     }
@@ -175,7 +207,7 @@ impl Touched {
     fn into_write(self) -> Option<RowWrite> {
         let expected_version = self.version.unwrap_or_default();
         match self.write {
-            Write::Read => None,
+            Write::Read | Write::Table => None,
             Write::Create => Some(RowWrite::Create {
                 type_name: self.type_name,
                 key: self.key,
@@ -423,6 +455,31 @@ impl<'a> Run<'a> {
         &frame.uses[index].registered.declaration
     }
 
+    /// Whether a frame is the table as a whole, which an operation of the
+    /// table runs on (D104), rather than a row.
+    pub fn on_table(&self, frame: Frame<'_>) -> bool {
+        self.rows
+            .borrow()
+            .get(frame.row)
+            .is_some_and(|row| row.write == Write::Table)
+    }
+
+    /// Refuses a write of a frame's own state on the table as a whole, which
+    /// has none: what the hook names (`set(availability)`, `emit(recheck)`)
+    /// is a defect of its use's.
+    pub fn off_table(&self, frame: Frame<'_>, index: usize, what: &str) -> Hook<()> {
+        if self.on_table(frame) {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "{what}: a table operation runs on no row: it reaches rows through call_on and create_row"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn read(&self, request: &ReadRequest) -> Hook<&'a Answer> {
         if let Some(answer) = self.answers.get(request) {
             return Ok(answer);
@@ -499,6 +556,13 @@ impl<'a> Run<'a> {
     /// host's, with the run's writes of them so far applied in order, in
     /// key order. A row the run creates reads no host.
     pub fn sub_rows(&self, frame: Frame<'_>, index: usize, table: &str) -> Hook<Vec<SubRow>> {
+        if self.on_table(frame) {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!("sub_rows({table}): a table operation runs on no row"),
+            ));
+        }
         let declaration = self.declaration(frame, index);
         if !declaration.has_table(table) {
             return Err(self.defect_of(
@@ -639,7 +703,7 @@ impl<'a> Run<'a> {
             if let Some(field) = row.set.values().flat_map(|fields| fields.keys()).next() {
                 return Some(format!("set({field})"));
             }
-            if row.write != Write::Read {
+            if !matches!(row.write, Write::Read | Write::Table) {
                 return Some(format!(
                     "a write of {} {}",
                     row.type_name,
@@ -673,6 +737,110 @@ impl<'a> Run<'a> {
         } else {
             Ok(())
         }
+    }
+
+    /// The uses of a type whose behaviors' declarations implement a
+    /// contract (D104), in the type's list order: each use's id. The
+    /// command's own type reads no host; another's spec is read, and a type
+    /// no host has implements none.
+    pub fn implementers(&self, type_name: &str, contract: &str) -> Hook<Vec<String>> {
+        let Some(spec) = self.read_spec(type_name)? else {
+            return Ok(Vec::new());
+        };
+        Ok(spec
+            .uses
+            .iter()
+            .filter(|entry| {
+                self.core
+                    .declaration(&entry.behavior)
+                    .is_some_and(|declaration| declaration.implements(contract))
+            })
+            .map(|entry| entry.id().to_owned())
+            .collect())
+    }
+
+    /// The sub-tables a read across a type takes with each row so its uses
+    /// that implement a contract can answer about it: every sub-table each
+    /// such use's behavior declares, in list order and declaration order.
+    pub fn contract_tables(&self, type_name: &str, contract: &str) -> Hook<Vec<TableRef>> {
+        let Some(spec) = self.read_spec(type_name)? else {
+            return Ok(Vec::new());
+        };
+        let mut tables = Vec::new();
+        for entry in &spec.uses {
+            let Some(declaration) = self.core.declaration(&entry.behavior) else {
+                continue;
+            };
+            if declaration.implements(contract) {
+                tables.extend(
+                    declaration
+                        .tables
+                        .iter()
+                        .map(|table| TableRef::new(entry.id(), &table.name)),
+                );
+            }
+        }
+        Ok(tables)
+    }
+
+    /// Asks every use of a row's type that implements a contract a query
+    /// about the row (D104), as a read across the table gave it, at the
+    /// command's time: each implementer's use id and answer, in list order;
+    /// none when no use implements it. The asking use's declaration lists
+    /// the contract among those it asks, or the ask is its defect; an
+    /// implementer that answers no such query is the implementer's.
+    pub fn ask(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        type_name: &str,
+        row: &KeyedRow,
+        query: &ContractQuery<'_>,
+    ) -> Hook<Vec<(String, Value)>> {
+        let asker = self.declaration(frame, index);
+        if !asker.asks_contract(query.contract) {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "ask({contract}): it declares no contract {contract} it asks (its contracts asked: {})",
+                    listed(&asker.asks),
+                    contract = query.contract
+                ),
+            ));
+        }
+        self.on_type(type_name, |_, uses| {
+            let mut answers = Vec::new();
+            for bound in uses {
+                if !bound.registered.declaration.implements(query.contract) {
+                    continue;
+                }
+                let empty = BTreeMap::new();
+                let tables = row.tables.get(bound.spec.id()).unwrap_or(&empty);
+                let answer = bound
+                    .registered
+                    .behavior
+                    .answer(&*bound.config, query, &row.row, tables, self.command.now)
+                    .ok_or_else(|| {
+                        Stop::from(Refusal::defect(
+                            &bound.spec.behavior,
+                            CONFIG_OF_ANOTHER_TYPE,
+                        ))
+                    })?;
+                let Some(answer) = answer else {
+                    return Err(Refusal::defect(
+                        &bound.spec.behavior,
+                        format!(
+                            "it implements contract {} and answers no query {}",
+                            query.contract, query.query
+                        ),
+                    )
+                    .into());
+                };
+                answers.push((bound.spec.id().to_owned(), answer));
+            }
+            Ok(answers)
+        })
     }
 
     pub fn has_rows(&self, type_name: &str) -> Hook<bool> {
@@ -825,11 +993,14 @@ impl<'a> Run<'a> {
         *self.pending.borrow_mut() = saved.pending;
     }
 
-    // undoing runs a call and undoes its effects when it is refused.
+    // undoing runs a call and undoes its effects when it stops: refused, or
+    // waiting on a read or a lock, so a hook that goes on past it (D104,
+    // Stop::is_waiting) goes on from the state before it. The reads and
+    // locks it asked for stay asked for (missing).
     fn undoing<T>(&self, call: impl FnOnce() -> Hook<T>) -> Hook<T> {
         let saved = self.save();
         let result = call();
-        if matches!(result, Err(Stop::Refuse(_))) {
+        if result.is_err() {
             self.restore(saved);
         }
         result
@@ -873,6 +1044,7 @@ impl<'a> Run<'a> {
         operation: &str,
         params: &Value,
     ) -> Hook<Value> {
+        self.off_table(from, from_index, &format!("call({use_id}.{operation})"))?;
         let (index, declared) = self.find_operation(from, use_id, operation)?;
         if declared.writes && !writable {
             return Err(self.defect_of(
@@ -1124,6 +1296,11 @@ impl<'a> Run<'a> {
                 operation,
                 params,
             } => self.operation(key, use_id, operation, params),
+            Action::TableOperation {
+                use_id,
+                operation,
+                params,
+            } => self.table_operation(use_id, operation, params),
             Action::Deadline {
                 key,
                 use_id,
@@ -1231,6 +1408,16 @@ impl<'a> Run<'a> {
                 operation,
             )?;
         }
+        Ok(self.changes(invoked.result))
+    }
+
+    // table_operation runs an operation of the table as a whole on the
+    // table's placeholder frame: no row is read, and the change set holds the
+    // rows its calls wrote.
+    fn table_operation(&self, use_id: &str, operation: &str, params: &Value) -> Hook<ChangeSet> {
+        self.touch(Touched::table(&self.top.spec.name));
+        let (index, declared) = self.find_table_operation(self.top, use_id, operation)?;
+        let invoked = self.invoke(self.top, index, declared, params, Calling::default(), true)?;
         Ok(self.changes(invoked.result))
     }
 
@@ -1608,15 +1795,33 @@ impl<'a> Run<'a> {
         };
         let declaration = self.declaration(frame, index);
         let Some(declared) = declaration.find_operation(operation) else {
-            let names: Vec<String> = declaration
-                .operations
-                .iter()
-                .map(|op| op.name.clone())
-                .collect();
             return Err(Refusal::not_found(format!(
                 "{} has no operation {operation} of {use_id} (its operations: {})",
                 frame.spec.name,
-                listed(&names)
+                listed(&declaration.operation_names(false))
+            ))
+            .into());
+        };
+        Ok((index, declared))
+    }
+
+    // find_table_operation finds an operation of the table as a whole of a
+    // use of the frame's type (D104).
+    fn find_table_operation<'f>(
+        &self,
+        frame: Frame<'f>,
+        use_id: &str,
+        operation: &str,
+    ) -> Hook<(usize, &'f OperationDecl)> {
+        let Some((index, _)) = frame.spec.use_of(use_id) else {
+            return Err(self.no_use(frame, use_id));
+        };
+        let declaration = self.declaration(frame, index);
+        let Some(declared) = declaration.find_table_operation(operation) else {
+            return Err(Refusal::not_found(format!(
+                "{} has no operation {operation} of {use_id} on the table as a whole (its operations on the table: {})",
+                frame.spec.name,
+                listed(&declaration.operation_names(true))
             ))
             .into());
         };
@@ -1863,9 +2068,16 @@ impl<'a> Run<'a> {
                         settled: true,
                     });
                 }
-                self.guards(
-                    frame,
-                    &GuardRequest::Operation {
+                let request = if self.on_table(frame) {
+                    GuardRequest::Table {
+                        use_id: bound.spec.id(),
+                        behavior,
+                        operation: &declared.name,
+                        params,
+                        writes: declared.writes,
+                    }
+                } else {
+                    GuardRequest::Operation {
                         use_id: bound.spec.id(),
                         behavior,
                         operation: &declared.name,
@@ -1875,8 +2087,9 @@ impl<'a> Run<'a> {
                         caller_type,
                         fired,
                         as_caller,
-                    },
-                )?;
+                    }
+                };
+                self.guards(frame, &request)?;
                 // The handler of a caller's operation, not a call's, is the
                 // command's own, whose unchanged() the core honors.
                 let scope = Scope {

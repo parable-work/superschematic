@@ -63,7 +63,13 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // core-schedules', written by hand for Schedules (D104), whose schedules
 // are a sub-table of the row keyed by name, whose runs are deadlines of the
 // row's queue and whose every run is an event of its own, which the
-// adapter writes to the table's event queue. Each
+// adapter writes to the table's event queue; and core-pool's, written by
+// hand for Pool (D104), whose pick is a command without a row (an action
+// tableOperation, a step with no key, whose expect holds no row and whose
+// others are every row its change set wrote) that reads the table's rows
+// across it, with its Budget's meters for Capacity, and whose rechecks are
+// events of the table's queue; core-lease's holds expireHolder, the other
+// command without a row, whose calls expire each lease a holder holds. Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
 // and _version, and, for a use whose behavior declares tables, each
@@ -118,7 +124,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-staterules', floor: 76 },
   { file: 'core-approvals', floor: 122 },
   { file: 'core-freezes-and-sign-offs', floor: 115 },
-  { file: 'core-lease', floor: 436 },
+  { file: 'core-lease', floor: 449 },
   { file: 'core-presence', floor: 141 },
   { file: 'core-budget', floor: 495 },
   { file: 'core-retries', floor: 250 },
@@ -127,6 +133,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-seats', floor: 88 },
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
+  { file: 'core-pool', floor: 82 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
@@ -283,7 +290,11 @@ function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUs
           const convert = field.type === 'Temporal.DateTime' ? ({ convert: 'epochMillis' } as const) : {};
           return { name: field.name, field: camel(column), column, type: field.type!, ...(value ? { value: true } : {}), ...convert };
         });
-      const operations = (declaration.operations ?? []).map(operation => ({ name: operation.name, writes: operation.writes === true }));
+      // A use's operations of a row and of the table as a whole (D104), a
+      // namespace's left out, as the layout lists them.
+      const operations = (declaration.operations ?? [])
+        .filter(operation => operation.scope !== 'namespace')
+        .map(operation => ({ name: operation.name, writes: operation.writes === true, ...(operation.scope === 'schema' ? { table: true } : {}) }));
       const tables: RulesSubTable[] = (declaration.tables ?? []).map(declared => {
         const key = declared.fields.find(field => field.name === declared.key);
         if (key === undefined) throw new Error(`behavior ${use.behavior}'s table ${declared.name} has no key field ${declared.key}`);
@@ -513,6 +524,8 @@ for (const { file, floor } of TRANSCRIPTS) {
             compare(step, 'result', step.expect.result ?? null, refused ? null : result);
             if (step.expect.key !== undefined) compare(step, 'key', step.expect.key, key);
             const action = step.command.action;
+            // A command without a row (an operation of the table as a whole,
+            // D104) names no key: every row its change set wrote is another's.
             const rowKey = action.kind === 'create' ? action.id : 'key' in action ? action.key : undefined;
             // The other rows the change set wrote, a change command's
             // listener's move among them, each once in its order, read back;

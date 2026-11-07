@@ -10,10 +10,13 @@
 //! absent in a behavior's call), the guard's rule for a use's call of its
 //! own operation, the active field a read computes at its time, a row with
 //! no token reading as 0, the Workflow its moves name among two, a Timers
-//! fire the holder's lease vetoes; and the config, the operations'
-//! parameters and the precondition held to the declaration file's schemas.
+//! fire the holder's lease vetoes; expireHolder, an operation of the table
+//! as a whole run as a command without a row (D104), over a host of the
+//! table's rows; and the config, the operations' parameters and the
+//! precondition held to the declaration file's schemas.
 
 mod support;
+mod tables;
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
@@ -277,6 +280,7 @@ fn the_declaration_is_the_files() {
             .operation("expire", true)
             .operation("direct", true)
             .operation("acknowledge", true)
+            .table_operation("expireHolder", true)
             .operation("resetExpiries", true)
             .veto("held_by_another")
             .veto("held_by_caller")
@@ -1842,5 +1846,206 @@ fn a_timers_fire_meets_the_holders_lease() {
     assert_eq!(
         fired,
         [("respond".to_owned(), "held_by_another".to_owned())]
+    );
+}
+
+// ---- expireHolder, on the table as a whole (D104) ----
+
+// jobs is a host of three jobs, j1 and j2 leased by wren and j3 by otto,
+// each moved to running by its holder, under a config with an override.
+fn jobs(config: Value) -> tables::Host {
+    let mut host = tables::Host::new(core(), [job(config)]);
+    for (key, holder) in [("j1", wren()), ("j2", wren()), ("j3", otto())] {
+        changed(host.create("Job", &alice(), START, key, json!({"title": key})));
+        let acquired =
+            result(host.invoke("Job", &holder, START, key, "Lease", "acquire", json!({})));
+        changed(host.invoke_fenced(
+            "Job",
+            &holder,
+            START,
+            key,
+            "status",
+            "transition",
+            json!({"to": "running"}),
+            acquired["token"].as_i64().expect("a token"),
+        ));
+    }
+    host
+}
+
+fn expire_holder(host: &mut tables::Host, who: &Caller, now: i64, params: Value) -> Outcome {
+    host.run(
+        "Job",
+        who,
+        now,
+        Action::TableOperation {
+            use_id: "Lease".into(),
+            operation: lease::EXPIRE_HOLDER.into(),
+            params,
+        },
+    )
+}
+
+#[test]
+fn expire_holder_expires_a_holders_leases_and_spares_a_renewed_one() {
+    let config = json!({"ttlMs": 60_000, "overridePermission": "jobs.override",
+        "onExpiry": {"from": ["running"], "transition": "queued"}});
+    let mut host = jobs(config.clone());
+    // wren renews j2 later; a gone holder's lease not renewed after the
+    // time expires, the renewed one is spared and not written.
+    let token = host
+        .owned("Job", "j2", "Lease", "token")
+        .as_i64()
+        .expect("a token");
+    changed(host.invoke_fenced(
+        "Job",
+        &wren(),
+        START + 20_000,
+        "j2",
+        "Lease",
+        "heartbeat",
+        json!({}),
+        token,
+    ));
+    let j2_version = host.row("Job", "j2").version;
+    let changes = changed(expire_holder(
+        &mut host,
+        &boss(),
+        START + 30_000,
+        json!({"holder": "wren", "notRenewedAfter": START + 10_000}),
+    ));
+    assert_eq!(
+        changes.result,
+        json!({"expired": 1, "reasons": {"holder": 1}, "ids": ["j1"]})
+    );
+    let written: Vec<Option<&str>> = changes.rows.iter().map(|write| write.key()).collect();
+    assert_eq!(written, [Some("j1")]);
+    assert_eq!(host.owned("Job", "j1", "Lease", "holder"), Value::Null);
+    assert_eq!(host.owned("Job", "j1", "status", "status"), json!("queued"));
+    assert_eq!(host.row("Job", "j2").version, j2_version);
+    assert_eq!(host.owned("Job", "j3", "Lease", "holder"), json!("otto"));
+    // Without notRenewedAfter every lease the holder holds expires, a lapsed
+    // one by its lapse, an active one by its holder's name.
+    let changes = changed(expire_holder(
+        &mut host,
+        &boss(),
+        START + 81_000,
+        json!({"holder": "wren"}),
+    ));
+    assert_eq!(
+        changes.result,
+        json!({"expired": 1, "reasons": {"ttl": 1}, "ids": ["j2"]})
+    );
+    // A holder that holds none expires none and writes nothing.
+    let changes = changed(expire_holder(
+        &mut host,
+        &boss(),
+        START + 82_000,
+        json!({"holder": "wren"}),
+    ));
+    assert_eq!(
+        changes.result,
+        json!({"expired": 0, "reasons": {}, "ids": []})
+    );
+    assert!(changes.rows.is_empty());
+    // A row a guard vetoes is passed over, the rest expiring.
+    let mut host = jobs(config);
+    let spec = host.spec("Job").with(UseSpec::on_type("Gate", None));
+    host.tables.specs.insert("Job".into(), spec);
+    host.tables
+        .rows
+        .get_mut(&("Job".to_owned(), "j1".to_owned()))
+        .expect("j1")
+        .own
+        .insert("title".into(), json!("stuck"));
+    let changes = changed(expire_holder(
+        &mut host,
+        &boss(),
+        START + 1_000,
+        json!({"holder": "wren"}),
+    ));
+    assert_eq!(
+        changes.result,
+        json!({"expired": 1, "reasons": {"holder": 1}, "ids": ["j2"]})
+    );
+}
+
+#[test]
+fn expire_holder_expires_more_leases_than_the_host_loop_has_rounds() {
+    // A gone worker held 300 jobs, more than core::MAX_ROUNDS: a row whose
+    // call waits on a read goes on to the next, so the rounds go by how
+    // deep each row's reads go, not by how many rows the holder held.
+    let config = json!({"ttlMs": 60_000, "overridePermission": "jobs.override",
+        "onExpiry": {"from": ["running"], "transition": "queued"}});
+    let mut host = tables::Host::new(core(), [job(config)]);
+    let keys: Vec<String> = (0..300).map(|n| format!("j{n:03}")).collect();
+    for key in &keys {
+        changed(host.create("Job", &alice(), START, key, json!({"title": key})));
+        let acquired =
+            result(host.invoke("Job", &wren(), START, key, "Lease", "acquire", json!({})));
+        changed(host.invoke_fenced(
+            "Job",
+            &wren(),
+            START,
+            key,
+            "status",
+            "transition",
+            json!({"to": "running"}),
+            acquired["token"].as_i64().expect("a token"),
+        ));
+    }
+    assert!(keys.len() > superschematic_rules::MAX_ROUNDS);
+    let changes = changed(expire_holder(
+        &mut host,
+        &boss(),
+        START + 1_000,
+        json!({"holder": "wren"}),
+    ));
+    assert_eq!(
+        changes.result,
+        json!({"expired": 300, "reasons": {"holder": 300}, "ids": keys})
+    );
+    assert_eq!(changes.rows.len(), 300);
+    for key in ["j000", "j150", "j299"] {
+        assert_eq!(host.owned("Job", key, "Lease", "holder"), Value::Null);
+        assert_eq!(host.owned("Job", key, "status", "status"), json!("queued"));
+    }
+}
+
+#[test]
+fn expire_holder_needs_the_override_permission() {
+    let mut host = jobs(json!({"ttlMs": 60_000, "overridePermission": "jobs.override"}));
+    let versions: Vec<i64> = ["j1", "j2", "j3"]
+        .iter()
+        .map(|key| host.row("Job", key).version)
+        .collect();
+    assert_eq!(
+        refused(expire_holder(
+            &mut host,
+            &otto(),
+            START,
+            json!({"holder": "wren"})
+        )),
+        json!({"class": "EngineError", "code": "forbidden",
+            "message": "otto may not expire the leases of a holder on Job: it needs permission jobs.override"})
+    );
+    let after: Vec<i64> = ["j1", "j2", "j3"]
+        .iter()
+        .map(|key| host.row("Job", key).version)
+        .collect();
+    assert_eq!(after, versions);
+    let mut host = jobs(json!({"ttlMs": 60_000}));
+    assert_eq!(
+        refused(expire_holder(&mut host, &boss(), START, json!({"holder": "wren"})))["message"],
+        "boss may not expire the leases of a holder on Job: its Lease config names no overridePermission"
+    );
+    // Its parameters are checked first.
+    assert_eq!(
+        refused(expire_holder(&mut host, &otto(), START, json!({"holder": "", "x": 1})))["message"],
+        "operation expireHolder of behavior Lease: must NOT have additional properties: x; /holder: must NOT have fewer than 1 characters"
+    );
+    assert_eq!(
+        refused(expire_holder(&mut host, &otto(), START, json!({})))["message"],
+        "operation expireHolder of behavior Lease: must have required property 'holder'"
     );
 }

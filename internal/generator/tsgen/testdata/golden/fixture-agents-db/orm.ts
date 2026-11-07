@@ -47,6 +47,12 @@ behavior worker claimed it (runDeadline). A behavior's sub-table has no
 repository: only its operations write it. A raw SQL write of an owned
 column or a sub-table row is never refused, and arms or clears no deadline.
 
+An operation of a table as a whole (D104), a declaration's scope schema,
+takes no key: orm.job.lease.expireHolder({ holder }) runs it through the
+core as a command without a row, which reads the table's rows and writes
+only the rows its calls on each write, each held to its version, and
+takes no preconditions.
+
 A table one of whose uses takes a precondition (D16, D104) types what a
 write presents as <Type>Preconditions, each such use's entry by its use
 id: updateOne, deleteOne and each operation take it in their options ({
@@ -55,7 +61,7 @@ use's guard holds the write to.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
-import type { BehaviorDeadlines, BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
+import type { BehaviorDeadlines, BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, RulesLayout, StringFilter, TableDefinition, TableOperations, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -411,7 +417,7 @@ export interface JobPreconditions {
   readonly Lease?: { token: number };
 }
 
-/** The behaviors of Job (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
+/** The behaviors of Job (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes, or on the table as a whole for one that takes none (D104). */
 export interface JobUses {
   /** The operations of Lease, which Job implements. */
   readonly lease: UseOperations<{
@@ -450,7 +456,17 @@ export interface JobUses {
       params: Record<string, never>;
       result: { expiries: number };
     };
-  }, T.IdentityUUID, JobPreconditions>;
+  }, T.IdentityUUID, JobPreconditions> & TableOperations<{
+    /** Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none. */
+    expireHolder: {
+      params: { holder: string; notRenewedAfter?: number };
+      result: {
+        expired: number;
+        ids: string[];
+        reasons: { holder?: number; maxHold?: number; ttl?: number };
+      };
+    };
+  }>;
   /** The operations of Retries, which Job implements. */
   readonly retries: UseOperations<{
     /** Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission. */
@@ -1410,6 +1426,11 @@ export const fixtureAgentsDbRules: RulesLayout = {
             {
               "name": "acknowledge",
               "writes": true
+            },
+            {
+              "name": "expireHolder",
+              "writes": true,
+              "table": true
             },
             {
               "name": "resetExpiries",

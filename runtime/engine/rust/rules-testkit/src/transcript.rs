@@ -114,6 +114,26 @@
 //! "events": [{"type": "Problem", "key": "p1", "useId": "Schedules", "kind": "run", "at": 1772323500000, "payload": {"name": "nudge", "run": 1, "attempt": 1, "kind": "after", "spec": "300000", "dueAt": 1772323500000, "firedAt": 1772323500000}}]
 //! ```
 //!
+//! An operation of the table as a whole (D104), a recording's or a file's
+//! `instances.invokeSchema`, is a `command` step whose action is
+//! `tableOperation`, a command without a row: its `expect` holds its result
+//! or its refusal, the rows its change set wrote (`others`) and its
+//! `events`, and no `key`, `row`, `subRows`, `deadlines` or `version`, since
+//! it names no row (its step's `version` is the type's version index, as for
+//! any command):
+//!
+//! ```json
+//! {"kind": "command", "step": 9, "call": "instances.invokeSchema", "database": "e1", "type": "Account", "version": 0,
+//!  "command": {"caller": {"subject": "alice", "permissions": ["accounts.pool"]}, "now": 1772323200000, "request": "request-6",
+//!              "action": {"kind": "tableOperation", "useId": "Pool", "operation": "pick", "params": {}}},
+//!  "expect": {"result": {"member": {"key": "a1", "availability": "open", "order": 1, "preferred": true}}}}
+//! ```
+//!
+//! An adapter knows it by its action's kind: it runs it through its host
+//! loop with no row, compares the refusal whole or the result, reads back
+//! each of `others`, and reads its events from every event queue, as for
+//! any command.
+//!
 //! A transcript written from a hand-written scenario file
 //! ([`hand_written_transcript`], `runtime/engine/testdata/rules/scenarios`,
 //! D104), which holds cases the engine recorded none of, also holds each

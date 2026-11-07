@@ -2,6 +2,7 @@ package rules_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
@@ -43,6 +44,11 @@ func TestContractJSON(t *testing.T) {
 			{
 				rules.Action{Kind: rules.ActionOperation, Key: "o1", UseID: "status", Operation: "transition", Params: json.RawMessage(`{"to":"paid"}`)},
 				`{"kind":"operation","key":"o1","useId":"status","operation":"transition","params":{"to":"paid"}}`,
+			},
+			{rules.Action{Kind: rules.ActionTableOperation, UseID: "Pool", Operation: "pick"}, `{"kind":"tableOperation","useId":"Pool","operation":"pick","params":{}}`},
+			{
+				rules.Action{Kind: rules.ActionTableOperation, UseID: "Lease", Operation: "expireHolder", Params: json.RawMessage(`{"holder":"w"}`)},
+				`{"kind":"tableOperation","useId":"Lease","operation":"expireHolder","params":{"holder":"w"}}`,
 			},
 			{rules.Action{Kind: rules.ActionDeadline, Key: "o1", UseID: "timers", Name: "expire", At: 5000}, `{"kind":"deadline","key":"o1","useId":"timers","name":"expire","at":5000,"payload":null}`},
 			{rules.Action{Kind: rules.ActionDeadline, Key: "o1", UseID: "timers", Name: "expire", At: 5000, Payload: json.RawMessage(`{"n":1}`)}, `{"kind":"deadline","key":"o1","useId":"timers","name":"expire","at":5000,"payload":{"n":1}}`},
@@ -215,9 +221,32 @@ func TestContractJSON(t *testing.T) {
 			if got := marshal(t, holding); got != text {
 				t.Errorf("a holding read reads back as %s, want %s", got, text)
 			}
-			if again := holding; again != holding {
+			if again := holding; !reflect.DeepEqual(again, holding) {
 				t.Errorf("a holding read compares unequal to its copy")
 			}
+		}
+		// A read across a table (D104): its own fields' values and its
+		// sub-tables only when it names them, its limit always.
+		for _, text := range []string{
+			`{"kind":"rows","type":"Account","limit":500}`,
+			`{"kind":"rows","type":"Account","equal":{"owner":"6xYb","rank":null},"tables":[{"useId":"Budget","table":"meters"},{"useId":"Budget","table":"holds"}],"after":"a2","limit":500}`,
+			`{"kind":"rows","type":"Account","equal":{"vendor":"anthropic"},"limit":0}`,
+		} {
+			var rows rules.ReadRequest
+			if err := json.Unmarshal([]byte(text), &rows); err != nil {
+				t.Fatal(err)
+			}
+			if got := marshal(t, rows); got != text {
+				t.Errorf("a read across a table reads back as %s, want %s", got, text)
+			}
+		}
+		keyed := rules.Answer{Kind: rules.ReadKindLinked, Linked: &rules.LinkedRows{Rows: []rules.KeyedRow{
+			{Key: "a1", Row: rules.Row{Version: 1}, Tables: map[string]map[string][]rules.SubRow{"Budget": {"meters": {{Key: "tokens", Values: map[string]json.RawMessage{"used": json.RawMessage(`3`)}}}, "holds": {}}}},
+			{Key: "a2", Row: rules.Row{Version: 2}},
+		}}}
+		want := `{"linked":{"rows":[{"key":"a1","row":{"version":1},"tables":{"Budget":{"holds":[],"meters":[{"key":"tokens","values":{"used":3}}]}}},{"key":"a2","row":{"version":2}}],"more":false}}`
+		if got := marshal(t, keyed); got != want {
+			t.Errorf("a read across a table's answer = %s, want %s", got, want)
 		}
 		if _, err := json.Marshal(rules.ReadRequest{Kind: rules.ReadKindHolding, Type: "Job", UseID: "Lease", Field: "holder", Value: "{"}); err == nil {
 			t.Error("a holding read of a value that is no JSON marshalled")
@@ -229,7 +258,7 @@ func TestContractJSON(t *testing.T) {
 		if err := json.Unmarshal([]byte(`{"read":[{"kind":"row","type":"Order","key":"o1"},{"kind":"hasRows","type":"Order"}]}`), &read); err != nil {
 			t.Fatal(err)
 		}
-		if len(read.Read) != 2 || read.Read[1] != (rules.ReadRequest{Kind: rules.ReadKindHasRows, Type: "Order"}) || read.Lock != nil || read.Done != nil || read.Raw != nil {
+		if len(read.Read) != 2 || !reflect.DeepEqual(read.Read[1], rules.ReadRequest{Kind: rules.ReadKindHasRows, Type: "Order"}) || read.Lock != nil || read.Done != nil || read.Raw != nil {
 			t.Errorf("a read step = %+v", read)
 		}
 		var lock rules.Step

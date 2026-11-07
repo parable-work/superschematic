@@ -17,7 +17,9 @@ in the body of a behavior operation, and in the options of the
 repository's updateOne. A timeout waits a backoff before the job runs
 again, and then moves it from waiting back to queued; a lease the worker
 stops renewing expires at its deadline; a build failure is retried once per
-revision, its keyField. A Session is beaten by its device's principal and lives three
+revision, its keyField; and expireHolder, an operation of Job's table as a
+whole (D104) that takes no key, expires every lease a holder that is gone
+holds, for a caller holding jobs.override. A Session is beaten by its device's principal and lives three
 minutes past its last beat, fifteen while its agent is in a turn; a miss
 moves it to missing and expires the leases its device holds on jobs. An
 Account charges its meters, an hourly one and a rolling day's, and its
@@ -365,6 +367,47 @@ describe("a job's lease and retries on fixture-agents-api", () => {
     expect(response.status).toBe(400);
     await expect(sdk(WORKER).job.lease.heartbeat(id, { preconditions: { Lease: { token: -1 } } })).rejects.toThrow('Validation failed');
     expect((await job(id))._version).toBe(before._version);
+  });
+
+  test('expireHolder expires every lease a gone holder holds, for a caller holding jobs.override, and is forbidden without it', async () => {
+    // A holder of its own, w, which leases two jobs and moves them to
+    // running; WORKER leases a third, which expireHolder of w leaves alone.
+    const w = subject();
+    const held: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const id = await newJob();
+      expect(await sdk(w).job.lease.acquire(id, {})).toMatchObject({ token: 1 });
+      expect(await sdk(w).job.status.transition(id, { to: 'running', ...token(1) })).toMatchObject({ from: 'queued', to: 'running' });
+      held.push(id);
+    }
+    const { id: other } = await runningJob();
+    const versions = async () => Promise.all([...held, other].map(async id => (await job(id))._version));
+    const before = await versions();
+    expect(await refusal(sdk(OTHER).job.lease.expireHolder({ holder: w }))).toEqual({
+      status: 403,
+      code: 'forbidden',
+      detail: `${OTHER} may not expire the leases of a holder on Job: it needs permission jobs.override`,
+      details: undefined,
+    });
+    expect(await versions()).toEqual(before);
+
+    const expired = await sdk(`${OTHER}:jobs.override`).job.lease.expireHolder({ holder: w });
+    expect({ ...expired, ids: [...expired.ids].sort() }).toEqual({ expired: 2, reasons: { holder: 2 }, ids: [...held].sort() });
+    for (const id of held) {
+      // onExpiry moves each back to queued, and its token advances.
+      expect(await job(id)).toMatchObject({ status: 'queued', leaseHolder: null, leaseToken: 2 });
+    }
+    expect(await job(other)).toMatchObject({ status: 'running', leaseHolder: WORKER, leaseToken: 1, _version: before[2] });
+
+    // The MCP tool takes the operation's input, with no id, and a holder
+    // that holds no lease now expires none.
+    const { tools } = (await mcp(`${OTHER}:jobs.override`, 'tools/list')).result;
+    const tool = tools.find((t: { name: string }) => t.name === 'job_lease_expire_holder');
+    expect(tool).toBeDefined();
+    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['holder', 'notRenewedAfter']);
+    const called = (await mcp(`${OTHER}:jobs.override`, 'tools/call', { name: 'job_lease_expire_holder', arguments: { holder: w } })).result;
+    expect(called.isError).toBeFalsy();
+    expect(called.structuredContent).toEqual({ expired: 0, reasons: {}, ids: [] });
   });
 });
 

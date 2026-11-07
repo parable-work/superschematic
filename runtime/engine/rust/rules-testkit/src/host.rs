@@ -12,7 +12,9 @@
 //! It runs the host loop the core's README describes: it gives each
 //! command a request id, calls the core, answers its reads from memory (a
 //! row, whether a type has rows, a type's live version, a row's sub-table
-//! rows, the rows of a type whose own field holds a key), grants its lock
+//! rows, the rows of a type whose own field holds a key, whose use's owned
+//! field holds a value, or whose own fields hold the values a read across
+//! the table names, with the sub-table rows it names, D104), grants its lock
 //! keys (nothing to take in memory, where one writer holds), and applies the
 //! change set all or nothing. It runs the queued changes as the API's worker
 //! runs a table's change queue, each a change command of its own, first in
@@ -36,9 +38,10 @@ use serde_json::{Map, Value};
 use superschematic_rules::{
     key_of, merge_patch, Action, Answer, Answers, Caller, ChangeSet, Code, Command, Core,
     DeadlineChange, KeyedRow, LinkedRows, LockKey, OutboxEvent, Outcome, ReadRequest, Refusal, Row,
-    RowChange, RowImage, RowRef, RowWrite, Step, SubRow, SubRowChange, TypeSpec, WriteKind,
-    MAX_ROUNDS,
+    RowChange, RowImage, RowRef, RowWrite, Step, SubRow, SubRowChange, TableRef, TypeSpec,
+    WriteKind, MAX_ROUNDS,
 };
+use superschematic_rules_behaviors::subjects::canonical_subject;
 
 /// How many times the host runs a command whose row moved before it
 /// refuses the command as `busy`.
@@ -624,8 +627,87 @@ impl Store {
                 after.as_deref(),
                 *limit,
             ))),
+            ReadRequest::Rows {
+                type_name,
+                equal,
+                tables,
+                after,
+                limit,
+            } => Some(Answer::Linked(self.table_rows(
+                type_name,
+                equal,
+                tables,
+                after.as_deref(),
+                *limit,
+            ))),
             _ => None,
         }
+    }
+
+    /// The live rows of a type whose own fields hold the values `equal`
+    /// names, compared as JSON, an absent field and a null one value, two
+    /// numbers by their value and a UUID field's strings in either form (a
+    /// hyphenated UUID or its base62 wire form), each with the rows of the sub-tables `tables`
+    /// names (an empty list for a row that has none), in key order (by code
+    /// point), after `after` when given, at most `limit`, and whether more
+    /// follow: a read across a table's answer (D104).
+    pub fn table_rows(
+        &self,
+        type_name: &str,
+        equal: &Map<String, Value>,
+        tables: &[TableRef],
+        after: Option<&str>,
+        limit: usize,
+    ) -> LinkedRows {
+        // A UUID field's values compare in either written form, as an
+        // adapter binds both against its uuid column.
+        let uuid_fields: BTreeSet<&str> = self
+            .live(type_name)
+            .map(|spec| {
+                spec.fields
+                    .iter()
+                    .filter(|field| UUID_TYPES.contains(&field.type_name.as_str()))
+                    .map(|field| field.name.as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut rows: Vec<KeyedRow> = self
+            .rows
+            .get(type_name)
+            .into_iter()
+            .flatten()
+            .filter(|(row_key, row)| {
+                equal.iter().all(|(field, value)| {
+                    let held = row.own.get(field);
+                    match (held, value) {
+                        (Some(Value::String(held)), Value::String(value))
+                            if uuid_fields.contains(field.as_str()) =>
+                        {
+                            canonical_subject(held) == canonical_subject(value)
+                        }
+                        _ => same_value(held, value),
+                    }
+                }) && after.is_none_or(|after| row_key.as_str() > after)
+            })
+            .take(limit + 1)
+            .map(|(row_key, row)| {
+                let mut keyed = KeyedRow::new(row_key.clone(), row.as_row());
+                for table in tables {
+                    keyed
+                        .tables
+                        .entry(table.use_id.clone())
+                        .or_default()
+                        .insert(
+                            table.table.clone(),
+                            self.sub_table(type_name, row_key, &table.use_id, &table.table),
+                        );
+                }
+                keyed
+            })
+            .collect();
+        let more = rows.len() > limit;
+        rows.truncate(limit);
+        LinkedRows { rows, more }
     }
 
     /// The rows of a type whose use's owned field holds a value, compared
@@ -652,10 +734,7 @@ impl Store {
                     .is_some_and(|held| !held.is_null() && held == value)
                     && after.is_none_or(|after| row_key.as_str() > after)
             })
-            .map(|(row_key, row)| KeyedRow {
-                key: row_key.clone(),
-                row: row.as_row(),
-            })
+            .map(|(row_key, row)| KeyedRow::new(row_key.clone(), row.as_row()))
             .collect();
         let more = rows.len() > limit;
         rows.truncate(limit);
@@ -682,10 +761,7 @@ impl Store {
                 row.own.get(field).and_then(key_of).as_deref() == Some(key)
                     && after.is_none_or(|after| row_key.as_str() > after)
             })
-            .map(|(row_key, row)| KeyedRow {
-                key: row_key.clone(),
-                row: row.as_row(),
-            })
+            .map(|(row_key, row)| KeyedRow::new(row_key.clone(), row.as_row()))
             .collect();
         let more = rows.len() > limit;
         rows.truncate(limit);
@@ -974,6 +1050,23 @@ impl Store {
             other => return Err(ApplyError::Refused(unknown("deadline change", other))),
         }
         Ok(())
+    }
+}
+
+// UUID_TYPES are the IR types of an own field an adapter binds against a
+// uuid column, which takes a UUID in either written form.
+const UUID_TYPES: [&str; 2] = ["Identity.UUID", "Identity.UserID"];
+
+// same_value is whether an own field holds a value as a read across a table
+// compares it: an absent field and a null are one value, two numbers are
+// equal by their value, and anything else by its JSON.
+fn same_value(held: Option<&Value>, value: &Value) -> bool {
+    let held = held.filter(|held| !held.is_null());
+    match (held, value) {
+        (None, Value::Null) => true,
+        (None, _) | (Some(_), Value::Null) => false,
+        (Some(Value::Number(a)), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Some(held), value) => held == value,
     }
 }
 

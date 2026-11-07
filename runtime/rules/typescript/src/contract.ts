@@ -70,6 +70,8 @@ export type Action =
   | { readonly kind: 'update'; readonly key: string; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'delete'; readonly key: string }
   | { readonly kind: 'operation'; readonly key: string; readonly useId: string; readonly operation: string; readonly params?: unknown }
+  /** An operation of a use on the table as a whole (D104), one its declaration's scope schema gives: no row, so no key, and no preconditions; it reads rows through the read across a table and writes them only through its calls on each. */
+  | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
   | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
   /** A write of a row the table's change queue hands the core (D103): the row's key and the change. */
   | { readonly kind: 'change'; readonly key: string; readonly change: RowChange };
@@ -117,7 +119,29 @@ export type ReadRequest =
   /** The rows of a type whose own field holds a key (Answer linked), in the host's key order, at most limit (the core asks for its LINKED_PAGE, 500), after the key after when given; a soft-deletable table's live rows alone (D103). */
   | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number }
   /** The rows of a type whose use's owned field holds a value (Answer linked), in the host's key order, at most limit, after the key after when given, the value compared as the column holds it; a soft-deletable table's live rows alone, and none of a type the host does not have (D104). */
-  | { readonly kind: 'holding'; readonly type: string; readonly useId: string; readonly field: string; readonly value: unknown; readonly after?: string; readonly limit: number };
+  | { readonly kind: 'holding'; readonly type: string; readonly useId: string; readonly field: string; readonly value: unknown; readonly after?: string; readonly limit: number }
+  /**
+   * The live rows of a type (Answer linked, the read across a table, D104):
+   * each own field equal names holding its value (a null: the field holds
+   * none), each row with the rows of the sub-tables tables names, in the
+   * host's key order, at most limit (the core asks for its LINKED_PAGE,
+   * 500), after the key after when given; a soft-deletable table's live rows
+   * alone, and none of a type the host does not have.
+   */
+  | {
+      readonly kind: 'rows';
+      readonly type: string;
+      readonly equal?: Readonly<Record<string, unknown>>;
+      readonly tables?: readonly TableRef[];
+      readonly after?: string;
+      readonly limit: number;
+    };
+
+/** One sub-table of a use, as a read across a table names it (superschematic_rules::TableRef, D104): the use's id and the sub-table's declared name. */
+export interface TableRef {
+  readonly useId: string;
+  readonly table: string;
+}
 
 /** One row as the host read it: its own fields, each use's owned fields by use id then declared name, and its version. */
 export interface Row {
@@ -132,10 +156,12 @@ export interface SubRow {
   readonly values?: Readonly<Record<string, unknown>>;
 }
 
-/** A row a linked read answers, with its key (superschematic_rules::KeyedRow). */
+/** A row a linked, holding or table read answers, with its key (superschematic_rules::KeyedRow). */
 export interface KeyedRow {
   readonly key: string;
   readonly row: Row;
+  /** With a read across a table (D104), the rows of each sub-table it names, by use id and then the table's declared name, each table's in key order, an empty list for a row that has none; absent for a linked or a holding read. */
+  readonly tables?: Readonly<Record<string, Readonly<Record<string, readonly SubRow[]>>>>;
 }
 
 /** The rows a linked read asks for, and whether more follow (superschematic_rules::LinkedRows). */
@@ -311,6 +337,19 @@ export interface DeclaredEvent {
 }
 
 /**
+ * A contract between behaviors a declaration names (D103, D104): its name,
+ * one the behaviors' core defines (Capacity), whether the behavior answers
+ * its queries (implements) or asks them of other uses (asks), and what it
+ * means here. The core resolves a type's implementers by these, never by a
+ * behavior's name.
+ */
+export interface DeclaredContract {
+  readonly name: string;
+  readonly role: 'implements' | 'asks';
+  readonly description?: string;
+}
+
+/**
  * A registered behavior's declaration file, as the compiler registers it
  * (internal/registry/behaviors) and the core reads it in place: the shape
  * of registry.BehaviorDeclaration.
@@ -336,6 +375,8 @@ export interface BehaviorDeclaration {
   readonly operations?: readonly DeclaredOperation[];
   /** The events the behavior emits about a row (D104): a table that composes it keeps them in an event queue, which a behavior worker hands to the project's handler. Only a behavior the core alone implements declares any; absent for none. */
   readonly events?: readonly DeclaredEvent[];
+  /** The contracts between behaviors it implements or asks (D104): Budget implements Capacity, which Pool asks; absent for none. */
+  readonly contracts?: readonly DeclaredContract[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;
 }

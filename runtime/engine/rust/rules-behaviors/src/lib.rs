@@ -8,7 +8,7 @@
 //! and the engine embeds (`../behaviors/declarations`, and the work queue's
 //! `../../engine-workqueue/rust/declarations`), in place, so the engine and
 //! the core read one declaration while both exist; a behavior no engine
-//! implements (Seats, Reconcile, Schedules) reads the copy `make behaviors` writes into
+//! implements (Seats, Reconcile, Schedules, Pool) reads the copy `make behaviors` writes into
 //! this crate (`declarations`). The core
 //! runs no JSON Schema, so a behavior holds its config and its operations'
 //! parameters to the declaration's schemas in its own code, in the words
@@ -48,6 +48,15 @@
 //! table's event queue carries to the project's handler, and whose outcome
 //! a report records and tries again; [`calendar`] reads its cron lines and
 //! time zones, on jiff and the IANA database it bundles alone.
+//! [`Pool`], the last of step 3: a table's rows the members of a pool, each
+//! open, near its limit or out until a time, among which `pick`, an
+//! operation of the table as a whole run as a command without a row,
+//! chooses one; an out member opens only through a check with room made
+//! after its time, rechecked through the event `recheck` the project's
+//! handler answers; and a member whose Budget has no room counts as out,
+//! read through [`capacity`], the first contract between behaviors, which a
+//! declaration names and the core resolves by declarations. Lease's
+//! `expireHolder` runs as a command without a row too.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -75,6 +84,7 @@
 pub mod approvals;
 pub mod budget;
 pub mod calendar;
+pub mod capacity;
 pub mod constants;
 mod declared;
 mod flow;
@@ -82,6 +92,7 @@ pub mod lease;
 mod moves;
 mod paging;
 mod periods;
+pub mod pool;
 pub mod presence;
 pub mod reactions;
 pub mod reconcile;
@@ -103,6 +114,7 @@ pub use constants::{
 };
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
+pub use pool::{Pool, PoolConfig};
 pub use presence::{Presence, PresenceConfig};
 pub use reactions::{
     Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule, ReactionsTerminal,
@@ -129,7 +141,7 @@ use superschematic_rules::Core;
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104).
-pub const NAMES: [&str; 13] = [
+pub const NAMES: [&str; 14] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -143,6 +155,7 @@ pub const NAMES: [&str; 13] = [
     seats::NAME,
     reconcile::NAME,
     schedules::NAME,
+    pool::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -150,7 +163,7 @@ pub const NAMES: [&str; 13] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 13] = [
+pub const DECLARATIONS: [&str; 14] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -164,7 +177,13 @@ pub const DECLARATIONS: [&str; 13] = [
     seats::DECLARATION,
     reconcile::DECLARATION,
     schedules::DECLARATION,
+    pool::DECLARATION,
 ];
+
+/// The contracts between behaviors the core defines (D104), each a name a
+/// declaration's `contracts` may give: what one behavior asks of the uses
+/// that implement it, resolved by their declarations.
+pub const CONTRACTS: [&str; 1] = [capacity::NAME];
 
 /// A core with every behavior ported so far, in the engine's order, and
 /// the default permission matcher: what a host runs, extended with its own
@@ -184,6 +203,7 @@ pub fn core() -> Core {
         .with(Seats)
         .with(Reconcile)
         .with(Schedules)
+        .with(Pool)
 }
 
 #[cfg(test)]
@@ -207,5 +227,41 @@ mod tests {
             })
             .collect();
         assert_eq!(named, NAMES);
+    }
+
+    /// Every contract a declaration names is one the core defines, and each
+    /// behavior that implements one answers each of its queries.
+    #[test]
+    fn every_declarations_contracts_are_the_cores() {
+        let core = core();
+        let mut implementers = Vec::new();
+        for name in NAMES {
+            let declaration = core.declaration(name).expect("registered");
+            for contract in declaration.contracts.iter().chain(&declaration.asks) {
+                assert!(
+                    CONTRACTS.contains(&contract.as_str()),
+                    "{name} names contract {contract}"
+                );
+            }
+            if declaration.implements(capacity::NAME) {
+                implementers.push(name);
+            }
+        }
+        assert_eq!(implementers, [budget::NAME]);
+        let config = BudgetConfig::default();
+        let params = serde_json::json!({});
+        let query =
+            superschematic_rules::ContractQuery::new(capacity::NAME, capacity::HAS_ROOM, &params);
+        use superschematic_rules::Behavior;
+        assert_eq!(
+            Budget.answer(
+                &config,
+                &query,
+                &superschematic_rules::Row::default(),
+                &Default::default(),
+                0
+            ),
+            Some(serde_json::json!({"room": true}))
+        );
     }
 }

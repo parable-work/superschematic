@@ -2056,6 +2056,51 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Pool"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "order": {
+                    "description": "The own number field whose value ranks the members, lowest first, a member with no value after every one with one, ties by key.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "outForMs": {
+                    "description": "How long markOut, and a check that finds no room, puts a member out when it names no time, in milliseconds; 1800000, thirty minutes, when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs for markOut and reportRoom; any caller the route admits when absent. pick needs none.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "recheckAfterMs": {
+                    "description": "How often an out member past its outUntil is rechecked until a check comes, in milliseconds, and the least time after a check without room before the next; 120000, two minutes, when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "order"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Presence"
               }
             }
@@ -3823,6 +3868,7 @@
             "Links",
             "Numbering",
             "Payments",
+            "Pool",
             "Presence",
             "Provenance",
             "Queue",

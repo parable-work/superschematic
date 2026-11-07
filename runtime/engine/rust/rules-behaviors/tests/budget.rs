@@ -13,17 +13,22 @@
 //! checkReserve's until, observe and its lapse, setLimit refused for a meter
 //! whose limit an own field holds; the define refusals in their order, the
 //! config change, and the config and the operations' parameters held to the
-//! declaration file's schemas.
+//! declaration file's schemas; and Capacity's hasRoom, Budget's answer to
+//! the contract Pool asks of it (D104).
 
 mod support;
 mod tables;
 
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
+
 use superschematic_rules::{
-    Action, Behavior, Caller, ConfigError, ConfigTarget, Declaration, FieldSpec, GuardRequest,
-    Hook, Outcome, TableDecl, TypeSpec, UseSpec, Veto, View,
+    Action, Behavior, Caller, ConfigError, ConfigTarget, ContractQuery, Declaration, FieldSpec,
+    GuardRequest, Hook, Outcome, SubRow, TableDecl, TypeSpec, UseSpec, Veto, View,
 };
-use superschematic_rules_behaviors::{budget, core, Budget, BudgetReset, INTEGER_SEGMENTS};
+use superschematic_rules_behaviors::{
+    budget, capacity, core, Budget, BudgetConfig, BudgetReset, INTEGER_SEGMENTS,
+};
 use support::{changed, define, refused, result, rule, shape, undescribed, veto_of};
 use tables::Host;
 
@@ -155,6 +160,7 @@ fn the_declaration_is_the_files() {
             .veto("below_committed")
             .veto("exceeds_reservation")
             .veto("not_configured")
+            .contract("Capacity")
     );
     assert_eq!(INTEGER_SEGMENTS, ["int", "int32", "int64", "integer"]);
 }
@@ -1842,5 +1848,185 @@ fn on_exceeded_directs_the_holder_of_the_active_lease_once_per_lease() {
     assert_eq!(
         host.sub_rows("Run", "r1", "Budget", "meters")[0]["values"]["directed"],
         1
+    );
+}
+
+// ---- Capacity (D104) ----
+
+// room asks a row's Budget Capacity's hasRoom at a time, over its meters,
+// holds and buckets as a read across the table gives them.
+fn room(host: &Host, type_name: &str, key: &str, now: i64) -> Value {
+    let spec = host.spec(type_name);
+    let (index, entry) = spec.use_of("Budget").expect("a Budget use");
+    let config = BudgetConfig::parse(&entry.config_or_empty(), &ConfigTarget::new(&spec, index))
+        .expect("its config");
+    let tables: BTreeMap<String, Vec<SubRow>> = [budget::METERS, budget::HOLDS, budget::BUCKETS]
+        .into_iter()
+        .map(|table| {
+            (
+                table.to_owned(),
+                host.tables.table(type_name, key, "Budget", table),
+            )
+        })
+        .collect();
+    let params = json!({});
+    Budget
+        .answer(
+            &config,
+            &ContractQuery::new(capacity::NAME, capacity::HAS_ROOM, &params),
+            host.row(type_name, key),
+            &tables,
+            now,
+        )
+        .expect("an answer")
+}
+
+#[test]
+fn capacity_answers_room_by_every_meter() {
+    // A meter with no limit always has room, and so does one with room for
+    // one more.
+    let mut host =
+        ledger_host(json!({"meters": {"calls": {}, "tokens": {"limit": 10, "reset": "hourly"}}}));
+    assert_eq!(room(&host, "Ledger", "l1", T0), json!({"room": true}));
+    changed(on_ledger(
+        &mut host,
+        T0 + MINUTE,
+        "recordUsage",
+        json!({"meter": "calls", "amount": 1000}),
+    ));
+    changed(on_ledger(
+        &mut host,
+        T0 + MINUTE,
+        "recordUsage",
+        json!({"meter": "tokens", "amount": 9}),
+    ));
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0 + MINUTE),
+        json!({"room": true})
+    );
+    // Full, until the hour rolls over.
+    changed(on_ledger(
+        &mut host,
+        T0 + MINUTE,
+        "recordUsage",
+        json!({"meter": "tokens", "amount": 1}),
+    ));
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0 + MINUTE),
+        json!({"room": false, "until": T0 + HOUR})
+    );
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0 + HOUR),
+        json!({"room": true})
+    );
+    // Any other query is none of Budget's.
+    let spec = host.spec("Ledger");
+    let config = BudgetConfig::parse(
+        &spec.uses[0].config_or_empty(),
+        &ConfigTarget::new(&spec, 0),
+    )
+    .expect("its config");
+    let params = json!({});
+    assert_eq!(
+        Budget.answer(
+            &config,
+            &ContractQuery::new(capacity::NAME, "depth", &params),
+            host.row("Ledger", "l1"),
+            &BTreeMap::new(),
+            T0
+        ),
+        None
+    );
+
+    // A provider's figure holds until it lapses, and with no reset and no
+    // resetsAt only a write gives room again.
+    let observer = caller("obs", &["keys.observe"]);
+    let mut host = ledger_host(keys());
+    let lapse = T0 + 30 * MINUTE;
+    changed(op(
+        &mut host,
+        "Ledger",
+        "l1",
+        &observer,
+        T0,
+        "observe",
+        json!({"meter": "tokens", "used": 1000, "resetsAt": lapse}),
+    ));
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0 + MINUTE),
+        json!({"room": false, "until": lapse})
+    );
+    let mut host = ledger_host(json!({"meters": {"seats": {"limit": 2}}}));
+    changed(on_ledger(
+        &mut host,
+        T0,
+        "recordUsage",
+        json!({"meter": "seats", "amount": 2}),
+    ));
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0 + DAY),
+        json!({"room": false})
+    );
+
+    // A rolling meter has room again when the bucket that fills it leaves
+    // the window, a period and a bucket after its start.
+    let mut host = ledger_host(
+        json!({"meters": {"calls": {"limit": 10, "reset": "hourly", "window": "rolling"}}}),
+    );
+    changed(on_ledger(
+        &mut host,
+        T0 + 30 * MINUTE,
+        "recordUsage",
+        json!({"meter": "calls", "amount": 10}),
+    ));
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0 + HOUR),
+        json!({"room": false, "until": T0 + 30 * MINUTE + 61 * MINUTE})
+    );
+
+    // With two meters out at different rollovers, the earliest time every
+    // one has room: the day's, not the hour's.
+    let mut host = ledger_host(json!({"meters": {
+        "hour": {"limit": 1, "reset": "hourly"},
+        "day": {"limit": 1, "reset": "daily"}
+    }}));
+    changed(on_ledger(
+        &mut host,
+        T0,
+        "recordUsage",
+        json!({"meter": "hour", "amount": 1}),
+    ));
+    changed(on_ledger(
+        &mut host,
+        T0,
+        "recordUsage",
+        json!({"meter": "day", "amount": 1}),
+    ));
+    assert_eq!(
+        room(&host, "Ledger", "l1", T0),
+        json!({"room": false, "until": T0 + 15 * HOUR})
+    );
+
+    // An ended lease's own reservation counts for nothing.
+    let mut host = leased_run(json!({"meters": {"cpu": {"limit": 10}}}));
+    let token = acquire(&mut host, "wren", T0);
+    assert_eq!(token, 1);
+    changed(on_run(
+        &mut host,
+        "wren",
+        T0,
+        "reserve",
+        json!({"meter": "cpu", "amount": 10}),
+    ));
+    // While the lease is active its reservation fills the meter, and only a
+    // write gives room again; once it has lapsed, the reservation is the
+    // ended lease's.
+    assert_eq!(
+        room(&host, "Run", "r1", T0 + 30_000),
+        json!({"room": false})
+    );
+    assert_eq!(
+        room(&host, "Run", "r1", T0 + 2 * MINUTE),
+        json!({"room": true})
     );
 }

@@ -146,6 +146,19 @@
       }
     },
     {
+      "name": "job.lease.expireHolder",
+      "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "holder": {"description":"A string value","minLength":1,"type":"string"},
+          "notRenewedAfter": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["holder"]
+      }
+    },
+    {
       "name": "job.lease.acknowledge",
       "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
       "input_schema": {

@@ -1,0 +1,4768 @@
+{
+  "file": "core-pool",
+  "source": "runtime/engine/testdata/rules/scenarios/core-pool.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool"
+  ],
+  "scenarios": [
+    {
+      "name": "Pool > pick answers the lowest-ranked open member; prefer tries its open members, then its near ones, then the others by rank; exclude leaves out the keys tried; match keeps the members it names, a null member absent; pick needs no permission",
+      "clock": {
+        "fixed": 1772323200000
+      },
+      "types": [
+        {
+          "name": "Account",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "vendor",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "rank",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Account",
+              "uses": [
+                {
+                  "behavior": "Pool",
+                  "config": {
+                    "order": "rank",
+                    "permission": "accounts.pool"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "vendor",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "rank",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a1",
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "a1",
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a2",
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "a2",
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a3",
+              "own": {
+                "name": "a3",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 3
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "a3",
+            "row": {
+              "own": {
+                "name": "a3",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 3
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "k1",
+              "own": {
+                "name": "k1",
+                "vendor": "anthropic",
+                "kind": "key",
+                "rank": 9
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "k1",
+            "row": {
+              "own": {
+                "name": "k1",
+                "vendor": "anthropic",
+                "kind": "key",
+                "rank": 9
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a4",
+              "own": {
+                "name": "a4",
+                "vendor": "openai",
+                "kind": "account"
+              },
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "key": "a4",
+            "row": {
+              "own": {
+                "name": "a4",
+                "vendor": "openai",
+                "kind": "account"
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a1",
+                "availability": "open",
+                "order": 1,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true,
+                "near": true
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "availability": "near",
+              "checkedAt": 1772323200000
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "near",
+                  "checkedAt": 1772323200000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "prefer": {
+                  "vendor": "anthropic",
+                  "kind": "account"
+                },
+                "exclude": [
+                  "a1"
+                ]
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a2",
+                "availability": "near",
+                "order": 2,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "prefer": {
+                  "vendor": "anthropic",
+                  "kind": "account"
+                },
+                "exclude": [
+                  "a1",
+                  "a2"
+                ]
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a3",
+                "availability": "open",
+                "order": 3,
+                "preferred": false
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "prefer": {
+                  "vendor": "openai"
+                },
+                "exclude": [
+                  "a3"
+                ]
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a4",
+                "availability": "open",
+                "order": null,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "match": {
+                  "kind": "key"
+                }
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "k1",
+                "availability": "open",
+                "order": 9,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "match": {
+                  "vendor": "nobody"
+                }
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "member": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "match": {
+                  "kind": "account"
+                },
+                "prefer": {
+                  "vendor": "openai"
+                },
+                "exclude": [
+                  "a3",
+                  "a4"
+                ]
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a1",
+                "availability": "open",
+                "order": 1,
+                "preferred": false
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "guest",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a1",
+                "availability": "open",
+                "order": 1,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "match": {
+                  "rank": null,
+                  "vendor": "openai"
+                }
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a3",
+                "availability": "open",
+                "order": 3,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "match": {
+                  "owner": "x"
+                }
+              }
+            },
+            "request": "request-16"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation pick of behavior Pool: /match/owner: Account has no own field owner (its own fields: name, vendor, kind, rank)",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/match/owner",
+                    "message": "Account has no own field owner (its own fields: name, vendor, kind, rank)"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Pool > markOut and reportRoom: an out member keeps the later until; it opens only through a check with room at or after its outUntil; near and back; a check without room puts it out until resetsAt or outForMs on; the permission after the parameters, and the row before both",
+      "clock": {
+        "fixed": 1772323200000
+      },
+      "types": [
+        {
+          "name": "Account",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "vendor",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "rank",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Account",
+              "uses": [
+                {
+                  "behavior": "Pool",
+                  "config": {
+                    "order": "rank",
+                    "permission": "accounts.pool"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "vendor",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "rank",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a1",
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "a1",
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a2",
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "a2",
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "reason": "rate limited"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772325000000,
+              "outReason": "rate limited"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772325000000,
+                  "outReason": "rate limited"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772325000000,
+                "payload": {
+                  "dueAt": 1772325000000
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772323800000,
+                "reason": "rate limited"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772325000000,
+              "outReason": "rate limited",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772325000000,
+                  "outReason": "rate limited"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772325000000,
+                "payload": {
+                  "dueAt": 1772325000000
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772326800000,
+                "reason": "quota"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772326800000,
+              "outReason": "quota"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772326800000,
+                  "outReason": "quota"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772326800000,
+                "payload": {
+                  "dueAt": 1772326800000
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a2",
+                "availability": "open",
+                "order": 2,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323260000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "checkedAt": 1772323260000,
+              "outUntil": 1772326800000,
+              "outReason": "quota"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772326800000,
+                  "outReason": "quota",
+                  "checkedAt": 1772323260000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772326800000,
+                "payload": {
+                  "dueAt": 1772326800000
+                }
+              }
+            ],
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323260000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a2",
+                "availability": "open",
+                "order": 2,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323260000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772324400000,
+                "reason": "overloaded"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772324400000,
+              "outReason": "overloaded"
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772324400000,
+                  "outReason": "overloaded"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772324400000,
+                "payload": {
+                  "dueAt": 1772324400000
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323260000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "member": null,
+              "until": 1772324400000
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "availability": "open",
+              "checkedAt": 1772324400000,
+              "opened": true
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a2",
+                "availability": "open",
+                "order": 2,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": false,
+                "resetsAt": 1772330400000
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "checkedAt": 1772324400000,
+              "outUntil": 1772330400000,
+              "outReason": "quota"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772330400000,
+                  "outReason": "quota",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772330400000,
+                "payload": {
+                  "dueAt": 1772330400000
+                }
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true,
+                "near": true
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "result": {
+              "availability": "near",
+              "checkedAt": 1772324400000
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "near",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "result": {
+              "availability": "open",
+              "checkedAt": 1772324400000
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": false
+              }
+            },
+            "request": "request-16"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "checkedAt": 1772324400000,
+              "outUntil": 1772326200000,
+              "outReason": "no room"
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "checkedAt": 1772324400000,
+                  "outUntil": 1772326200000,
+                  "outReason": "no room"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772326200000,
+                "payload": {
+                  "dueAt": 1772326200000
+                }
+              }
+            ],
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-17"
+          },
+          "expect": {
+            "result": {
+              "member": null,
+              "until": 1772326200000
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 22,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "reason": ""
+              }
+            },
+            "request": "request-18"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation markOut of behavior Pool: /reason: must NOT have fewer than 1 characters",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/reason",
+                    "message": "must NOT have fewer than 1 characters"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772330400000,
+                  "outReason": "quota",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772330400000,
+                "payload": {
+                  "dueAt": 1772330400000
+                }
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {}
+            },
+            "request": "request-19"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation reportRoom of behavior Pool: must have required property 'room'",
+              "details": {
+                "issues": [
+                  {
+                    "path": "",
+                    "message": "must have required property 'room'"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772330400000,
+                  "outReason": "quota",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772330400000,
+                "payload": {
+                  "dueAt": 1772330400000
+                }
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 24,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "guest",
+              "permissions": []
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "reason": "x"
+              }
+            },
+            "request": "request-20"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "guest may not mark Account a1 out: it needs permission accounts.pool"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772330400000,
+                  "outReason": "quota",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772330400000,
+                "payload": {
+                  "dueAt": 1772330400000
+                }
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 25,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "guest",
+              "permissions": []
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true
+              }
+            },
+            "request": "request-21"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "guest may not report a check of Account a1: it needs permission accounts.pool"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772330400000,
+                  "outReason": "quota",
+                  "checkedAt": 1772324400000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772330400000,
+                "payload": {
+                  "dueAt": 1772330400000
+                }
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324400000,
+            "action": {
+              "kind": "operation",
+              "key": "a9",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "reason": "x"
+              }
+            },
+            "request": "request-22"
+          },
+          "expect": {
+            "refused": {
+              "code": "not_found",
+              "status": 404,
+              "class": "EngineError",
+              "message": "Account a9 does not exist"
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 9,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Pool > the recheck: an out member is rechecked at its outUntil and every recheckAfterMs after until a check comes, each recheck the event recheck; a check without room moves it; one with room clears it; a later markOut moves it before it falls due",
+      "clock": {
+        "fixed": 1772323200000
+      },
+      "types": [
+        {
+          "name": "Account",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "vendor",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "rank",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Account",
+              "uses": [
+                {
+                  "behavior": "Pool",
+                  "config": {
+                    "order": "rank",
+                    "recheckAfterMs": 120000,
+                    "permission": "accounts.pool"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "vendor",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "rank",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "recheckAfterMs": 120000,
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "recheckAfterMs": 120000,
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a1",
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "a1",
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772323500000,
+                "reason": "rate limited"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772323500000,
+              "outReason": "rate limited"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772323500000,
+                  "outReason": "rate limited"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772323500000,
+                "payload": {
+                  "dueAt": 1772323500000
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "accounts.pool"
+              ]
+            },
+            "now": 1772323500000,
+            "action": {
+              "kind": "deadline",
+              "key": "a1",
+              "useId": "Pool",
+              "name": "recheck",
+              "at": 1772323500000,
+              "payload": {
+                "dueAt": 1772323500000
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772323500000,
+                  "outReason": "rate limited"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772323620000,
+                "payload": {
+                  "dueAt": 1772323620000
+                }
+              }
+            ],
+            "events": [
+              {
+                "type": "Account",
+                "key": "a1",
+                "useId": "Pool",
+                "kind": "recheck",
+                "at": 1772323500000,
+                "payload": {
+                  "outUntil": 1772323500000,
+                  "outReason": "rate limited",
+                  "dueAt": 1772323500000,
+                  "firedAt": 1772323500000
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323500000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "member": null,
+              "until": 1772323620000
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "accounts.pool"
+              ]
+            },
+            "now": 1772323620000,
+            "action": {
+              "kind": "deadline",
+              "key": "a1",
+              "useId": "Pool",
+              "name": "recheck",
+              "at": 1772323620000,
+              "payload": {
+                "dueAt": 1772323620000
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772323500000,
+                  "outReason": "rate limited"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772323740000,
+                "payload": {
+                  "dueAt": 1772323740000
+                }
+              }
+            ],
+            "events": [
+              {
+                "type": "Account",
+                "key": "a1",
+                "useId": "Pool",
+                "kind": "recheck",
+                "at": 1772323620000,
+                "payload": {
+                  "outUntil": 1772323500000,
+                  "outReason": "rate limited",
+                  "dueAt": 1772323620000,
+                  "firedAt": 1772323620000
+                }
+              }
+            ],
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323630000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": false,
+                "resetsAt": 1772324100000
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "checkedAt": 1772323630000,
+              "outUntil": 1772324100000,
+              "outReason": "rate limited"
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772324100000,
+                  "outReason": "rate limited",
+                  "checkedAt": 1772323630000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772324100000,
+                "payload": {
+                  "dueAt": 1772324100000
+                }
+              }
+            ],
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "accounts.pool"
+              ]
+            },
+            "now": 1772324100000,
+            "action": {
+              "kind": "deadline",
+              "key": "a1",
+              "useId": "Pool",
+              "name": "recheck",
+              "at": 1772324100000,
+              "payload": {
+                "dueAt": 1772324100000
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772324100000,
+                  "outReason": "rate limited",
+                  "checkedAt": 1772323630000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772324220000,
+                "payload": {
+                  "dueAt": 1772324220000
+                }
+              }
+            ],
+            "events": [
+              {
+                "type": "Account",
+                "key": "a1",
+                "useId": "Pool",
+                "kind": "recheck",
+                "at": 1772324100000,
+                "payload": {
+                  "outUntil": 1772324100000,
+                  "outReason": "rate limited",
+                  "checkedAt": 1772323630000,
+                  "dueAt": 1772324100000,
+                  "firedAt": 1772324100000
+                }
+              }
+            ],
+            "version": 6
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324105000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "availability": "open",
+              "checkedAt": 1772324105000,
+              "opened": true
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open",
+                  "checkedAt": 1772324105000
+                }
+              }
+            },
+            "version": 7
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324220000,
+            "action": {
+              "kind": "create",
+              "id": "a2",
+              "own": {
+                "name": "a2",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 2
+              },
+              "params": {}
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "key": "a2",
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324220000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772324300000,
+                "reason": "busy"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772324300000,
+              "outReason": "busy"
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772324300000,
+                  "outReason": "busy"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772324300000,
+                "payload": {
+                  "dueAt": 1772324300000
+                }
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772324220000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772324700000,
+                "reason": "busy"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772324700000,
+              "outReason": "busy"
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772324700000,
+                  "outReason": "busy"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772324700000,
+                "payload": {
+                  "dueAt": 1772324700000
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "accounts.pool"
+              ]
+            },
+            "now": 1772324700000,
+            "action": {
+              "kind": "deadline",
+              "key": "a2",
+              "useId": "Pool",
+              "name": "recheck",
+              "at": 1772324700000,
+              "payload": {
+                "dueAt": 1772324700000
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "openai",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772324700000,
+                  "outReason": "busy"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772324820000,
+                "payload": {
+                  "dueAt": 1772324820000
+                }
+              }
+            ],
+            "events": [
+              {
+                "type": "Account",
+                "key": "a2",
+                "useId": "Pool",
+                "kind": "recheck",
+                "at": 1772324700000,
+                "payload": {
+                  "outUntil": 1772324700000,
+                  "outReason": "busy",
+                  "dueAt": 1772324700000,
+                  "firedAt": 1772324700000
+                }
+              }
+            ],
+            "version": 4
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        },
+        {
+          "step": 13,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        },
+        {
+          "step": 17,
+          "call": "runner.runDue",
+          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
+        }
+      ]
+    },
+    {
+      "name": "Pool > Capacity: a member whose Budget meter has no room counts as out until the clock gives it room, its period's rollover or a provider's figure's lapse; an excluded open member counts toward no until",
+      "clock": {
+        "fixed": 1772325000000
+      },
+      "types": [
+        {
+          "name": "Account",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "vendor",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "rank",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Account",
+              "uses": [
+                {
+                  "behavior": "Pool",
+                  "config": {
+                    "order": "rank",
+                    "permission": "accounts.pool"
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Budget",
+                  "config": {
+                    "meters": {
+                      "tokens": {
+                        "limit": 100,
+                        "reset": "hourly"
+                      }
+                    },
+                    "observePermission": "accounts.observe"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "vendor",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "rank",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Budget",
+                "config": {
+                  "meters": {
+                    "tokens": {
+                      "limit": 100,
+                      "reset": "hourly"
+                    }
+                  },
+                  "observePermission": "accounts.observe"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Budget",
+                "config": {
+                  "meters": {
+                    "tokens": {
+                      "limit": 100,
+                      "reset": "hourly"
+                    }
+                  },
+                  "observePermission": "accounts.observe"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "create",
+              "id": "a1",
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "a1",
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "create",
+              "id": "a2",
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "a2",
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Budget",
+              "operation": "recordUsage",
+              "params": {
+                "meter": "tokens",
+                "amount": 100
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "meter": "tokens",
+              "used": 100,
+              "released": 0,
+              "overruns": [],
+              "directed": false
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "subRows": {
+              "Budget": {
+                "meters": [
+                  {
+                    "key": "tokens",
+                    "values": {
+                      "used": 100,
+                      "reserved": 0,
+                      "reservation": 0,
+                      "periodStart": 1772323200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a2",
+                "availability": "open",
+                "order": 2,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Budget",
+              "operation": "recordUsage",
+              "params": {
+                "meter": "tokens",
+                "amount": 100
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "meter": "tokens",
+              "used": 100,
+              "released": 0,
+              "overruns": [],
+              "directed": false
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "subRows": {
+              "Budget": {
+                "meters": [
+                  {
+                    "key": "tokens",
+                    "values": {
+                      "used": 100,
+                      "reserved": 0,
+                      "reservation": 0,
+                      "periodStart": 1772323200000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772325000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "member": null,
+              "until": 1772326800000
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772326800000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a1",
+                "availability": "open",
+                "order": 1,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772326800000,
+            "action": {
+              "kind": "operation",
+              "key": "a1",
+              "useId": "Budget",
+              "operation": "observe",
+              "params": {
+                "meter": "tokens",
+                "used": 100,
+                "resetsAt": 1772327400000
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "meter": "tokens",
+              "used": 100,
+              "limit": 100,
+              "resetsAt": 1772327400000
+            },
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "subRows": {
+              "Budget": {
+                "meters": [
+                  {
+                    "key": "tokens",
+                    "values": {
+                      "used": 0,
+                      "reserved": 0,
+                      "reservation": 0,
+                      "periodStart": 1772326800000,
+                      "observed": 100,
+                      "observedAt": 1772326800000,
+                      "observedUntil": 1772327400000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772326800000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "markOut",
+              "params": {
+                "until": 1772328600000,
+                "reason": "quota"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "availability": "out",
+              "outUntil": 1772328600000,
+              "outReason": "quota"
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772328600000,
+                  "outReason": "quota"
+                }
+              }
+            },
+            "subRows": {
+              "Budget": {
+                "meters": [
+                  {
+                    "key": "tokens",
+                    "values": {
+                      "used": 100,
+                      "reserved": 0,
+                      "reservation": 0,
+                      "periodStart": 1772323200000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772328600000,
+                "payload": {
+                  "dueAt": 1772328600000
+                }
+              }
+            ],
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772326800000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "result": {
+              "member": null,
+              "until": 1772327400000
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772327400000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {}
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "member": {
+                "key": "a1",
+                "availability": "open",
+                "order": 1,
+                "preferred": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772327400000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Budget",
+              "operation": "recordUsage",
+              "params": {
+                "meter": "tokens",
+                "amount": 100
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "meter": "tokens",
+              "used": 100,
+              "released": 0,
+              "overruns": [],
+              "directed": false
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "out",
+                  "outUntil": 1772328600000,
+                  "outReason": "quota"
+                }
+              }
+            },
+            "subRows": {
+              "Budget": {
+                "meters": [
+                  {
+                    "key": "tokens",
+                    "values": {
+                      "used": 100,
+                      "reserved": 0,
+                      "reservation": 0,
+                      "periodStart": 1772326800000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Pool",
+                "name": "recheck",
+                "at": 1772328600000,
+                "payload": {
+                  "dueAt": 1772328600000
+                }
+              }
+            ],
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772328600000,
+            "action": {
+              "kind": "operation",
+              "key": "a2",
+              "useId": "Pool",
+              "operation": "reportRoom",
+              "params": {
+                "room": true
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "result": {
+              "availability": "open",
+              "checkedAt": 1772328600000,
+              "opened": true
+            },
+            "row": {
+              "own": {
+                "name": "a2",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 2
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open",
+                  "checkedAt": 1772328600000
+                }
+              }
+            },
+            "subRows": {
+              "Budget": {
+                "meters": [
+                  {
+                    "key": "tokens",
+                    "values": {
+                      "used": 100,
+                      "reserved": 0,
+                      "reservation": 0,
+                      "periodStart": 1772326800000
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 5
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772328600000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "Pool",
+              "operation": "pick",
+              "params": {
+                "exclude": [
+                  "a1"
+                ]
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "result": {
+              "member": null,
+              "until": 1772330400000
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Pool > its define and publish refusals: order required and held to a number field of the type, the bounds of outForMs and recheckAfterMs, and Pool removed from a type that has rows",
+      "clock": {
+        "fixed": 1772323200000
+      },
+      "types": [
+        {
+          "name": "Account",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "vendor",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "rank",
+              "type": "object"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Account",
+              "uses": [
+                {
+                  "behavior": "Pool",
+                  "config": {
+                    "order": "rank",
+                    "permission": "accounts.pool"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "name": "vendor",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "rank",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {},
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Account: behavior Pool config: must have required property 'order'",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Pool",
+                    "index": 0,
+                    "behavior": "Pool",
+                    "kind": "schema",
+                    "path": "/config",
+                    "message": "must have required property 'order'"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "outForMs": 10
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Account: behavior Pool config: /outForMs: must be >= 1000",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Pool",
+                    "index": 0,
+                    "behavior": "Pool",
+                    "kind": "schema",
+                    "path": "/config/outForMs",
+                    "message": "must be >= 1000"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "recheckAfterMs": 0
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Account: behavior Pool config: /recheckAfterMs: must be >= 1000",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Pool",
+                    "index": 0,
+                    "behavior": "Pool",
+                    "kind": "schema",
+                    "path": "/config/recheckAfterMs",
+                    "message": "must be >= 1000"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": ""
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Account: behavior Pool config: /permission: must NOT have fewer than 1 characters",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Pool",
+                    "index": 0,
+                    "behavior": "Pool",
+                    "kind": "schema",
+                    "path": "/config/permission",
+                    "message": "must NOT have fewer than 1 characters"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "score"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Account: behavior Pool config: order \"score\" is not a field of Account (its fields: name, vendor, kind, rank)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Pool",
+                    "index": 0,
+                    "behavior": "Pool",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Account: behavior Pool config: order \"score\" is not a field of Account (its fields: name, vendor, kind, rank)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "name"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Account: behavior Pool config: order \"name\" is not a number field of Account: it ranks the members by a number (number, Generic.Int64 or Generic.Float64)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Pool",
+                    "index": 0,
+                    "behavior": "Pool",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Account: behavior Pool config: order \"name\" is not a number field of Account: it ranks the members by a number (number, Generic.Int64 or Generic.Float64)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [
+              {
+                "behavior": "Pool",
+                "config": {
+                  "order": "rank",
+                  "permission": "accounts.pool"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Account",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "a1",
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "a1",
+            "row": {
+              "own": {
+                "name": "a1",
+                "vendor": "anthropic",
+                "kind": "account",
+                "rank": 1
+              },
+              "owned": {
+                "Pool": {
+                  "availability": "open"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Account",
+            "uses": [],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "vendor",
+                "type": "string"
+              },
+              {
+                "name": "kind",
+                "type": "string"
+              },
+              {
+                "name": "rank",
+                "type": "Generic.Int64"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "accounts.pool",
+                "accounts.observe"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Account",
+                "uses": [
+                  {
+                    "behavior": "Pool",
+                    "config": {
+                      "order": "rank",
+                      "permission": "accounts.pool"
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "string"
+                  },
+                  {
+                    "name": "vendor",
+                    "type": "string"
+                  },
+                  {
+                    "name": "kind",
+                    "type": "string"
+                  },
+                  {
+                    "name": "rank",
+                    "type": "Generic.Int64"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "incompatible_change",
+              "status": 409,
+              "class": "IncompatibleChangeError",
+              "message": "type Account: behavior Pool cannot be removed from type Account, which has instances: the members' availability and their rechecks would stay behind",
+              "details": {
+                "changes": [
+                  {
+                    "path": "Account.behaviors.Pool",
+                    "message": "behavior Pool cannot be removed from type Account, which has instances: the members' availability and their rechecks would stay behind"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    }
+  ]
+}

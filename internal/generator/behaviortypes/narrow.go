@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -133,6 +134,7 @@ var coreNarrowers = map[string]narrower{
 	"Seats":        narrowSeats,
 	"Reconcile":    narrowReconcile,
 	"Schedules":    narrowSchedules,
+	"Pool":         narrowPool,
 	"Stock":        narrowStock,
 	"Calendar":     narrowCalendar,
 	"Holds":        narrowHolds,
@@ -1038,8 +1040,26 @@ var leaseEnds = []string{"release", "abandon", "ttl", "maxHold", "holder"}
 
 // Lease: the holder and the lease's times are absent while the instance is
 // free, and how the last lease ended while one is held and before the
-// first; the token, active and the expiries are always there.
-func narrowLease(n *Narrowing, _ map[string]any, _ Target) error {
+// first; the token, active and the expiries are always there. On a table,
+// expireHolder's count of each reason is the alias <Base>ExpireHolderReasons
+// (JobLeaseExpireHolderReasons), which the API and the repositories name
+// (D104); an engine type's keeps its declaration's shape.
+func narrowLease(n *Narrowing, _ map[string]any, target Target) error {
+	if target.Instance != nil && !target.Instance.IsEngineType() {
+		reasons, err := at(n.Results["expireHolder"], "properties", "reasons")
+		if err != nil {
+			return fmt.Errorf("operation expireHolder: %w", err)
+		}
+		name := target.Base + "ExpireHolderReasons"
+		alias := cloneSchema(reasons)
+		// An object alias's doc is its schema's description, which the
+		// types the API and the repositories add carry.
+		alias["description"] = fmt.Sprintf("How many leases %s's expireHolder expired for each reason expire gives, by reason; a reason none expired for is absent.", An(target.Base))
+		n.Aliases = append(n.Aliases, Alias{Name: name, Doc: alias["description"].(string), Schema: alias})
+		if err := setOperationProperty(n.Results, "expireHolder", nil, "reasons", ref(name, "")); err != nil {
+			return err
+		}
+	}
 	ended := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"reason", "at"},
 		"properties": map[string]any{
@@ -1297,6 +1317,111 @@ func narrowSchedules(n *Narrowing, config map[string]any, target Target) error {
 		return fmt.Errorf("event run: %w", err)
 	}
 	return nil
+}
+
+// poolAvailabilities are a Pool member's availabilities (D104): open, near
+// its limit, or out.
+var poolAvailabilities = []string{"open", "near", "out"}
+
+// poolMatchTypes are the IR types of an own field pick's match and prefer
+// compare (D104), by the JSON type a value of each holds: a string, a
+// boolean, a number, an integer and a UUID or a subject, as its wire form
+// gives it. An enum of the schema is a string.
+var poolMatchTypes = map[string]string{
+	"string": "string", "boolean": "boolean", "number": "number", "Generic.Int64": "integer", "Generic.Float64": "number",
+	"Identity.UUID": "string", "Identity.UserID": "string",
+}
+
+// Pool (D104): a member's availability is the alias <Base>Availability
+// (AccountPoolAvailability), which the field, markOut's and reportRoom's
+// results and pick's member name; outUntil and checkedAt are epoch
+// milliseconds, and every field is absent on a row from before the use.
+// On a table, pick's match and prefer are the alias <Base>Match
+// (AccountPoolMatch), an optional member per own field of the table the
+// core compares (behaviorlayout.SpecFields): a scalar of poolMatchTypes or
+// an enum of the schema, typed by the JSON value it holds, and not a list,
+// a map, JSON, a date-time or a field encrypted at rest. A member takes no
+// null: the core reads a null one as absent, as D12 has every optional
+// value and as every server and SDK but TypeScript's would send it; pick's
+// member is the alias <Base>PickMember
+// (AccountPoolPickMember), or null, whose order is an integer when the
+// config's order field is a Generic.Int64 and a number otherwise.
+func narrowPool(n *Narrowing, config map[string]any, target Target) error {
+	availability := target.Base + "Availability"
+	on := target.Base
+	if target.Instance != nil {
+		on = target.Instance.Name
+	}
+	n.Aliases = append(n.Aliases, Alias{Name: availability, Doc: fmt.Sprintf("A Pool member's availability on %s.", on), Schema: EnumOf(poolAvailabilities)})
+	if err := setFields(n,
+		typedField{"availability", ref(availability, ""), false},
+		typedField{"outUntil", integer(), false},
+		typedField{"outReason", map[string]any{"type": "string"}, false},
+		typedField{"checkedAt", integer(), false},
+	); err != nil {
+		return err
+	}
+	for _, op := range []string{"markOut", "reportRoom"} {
+		if err := setOperationProperty(n.Results, op, nil, "availability", ref(availability, "")); err != nil {
+			return err
+		}
+	}
+	if target.Instance == nil || target.Instance.IsEngineType() {
+		// No engine type composes Pool: the build refuses it there.
+		return nil
+	}
+	match := target.Base + "Match"
+	properties := map[string]any{}
+	for _, column := range behaviorlayout.SpecFields(target.Document, target.Instance) {
+		fd := OwnField(target.Instance, column.Field)
+		if fd != nil && (fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.EncryptedAtRest) {
+			continue
+		}
+		kind, ok := poolMatchTypes[column.Type]
+		if !ok && target.Document != nil && target.Document.Enums[column.Type] != nil {
+			kind, ok = "string", true
+		}
+		if !ok {
+			continue
+		}
+		description := fmt.Sprintf("The value %s's %s holds.", on, column.Field)
+		properties[column.Field] = map[string]any{"description": description, "type": kind}
+	}
+	// An object alias's doc is its schema's description, which the types
+	// the API and the repositories add carry.
+	matchDoc := fmt.Sprintf("The members of %s's Pool a pick keeps, or tries first, by the values own fields of %s hold; every member when absent.", on, on)
+	n.Aliases = append(n.Aliases, Alias{Name: match, Doc: matchDoc, Schema: map[string]any{
+		"description": matchDoc, "type": "object", "additionalProperties": false, "properties": properties,
+	}})
+	for _, member := range []string{"match", "prefer"} {
+		if err := setOperationProperty(n.Params, "pick", nil, member, ref(match, "")); err != nil {
+			return err
+		}
+	}
+	declared, err := at(n.Results["pick"], "properties", "member")
+	if err != nil {
+		return fmt.Errorf("operation pick: %w", err)
+	}
+	picked := target.Base + "PickMember"
+	member := cloneSchema(declared)
+	member["description"] = fmt.Sprintf("The member of %s's Pool a pick picked: its key in its wire form, its availability, its value of the order field and whether prefer keeps it.", on)
+	member["type"] = "object"
+	order := "number"
+	if name, _ := config["order"].(string); name != "" {
+		if fd := OwnField(target.Instance, name); fd != nil && fd.TypeRef.Name == "Generic.Int64" {
+			order = "integer"
+		}
+	}
+	if err := setProperty(member, "availability", ref(availability, "")); err != nil {
+		return fmt.Errorf("operation pick: member: %w", err)
+	}
+	if err := setProperty(member, "order", map[string]any{"type": []any{order, "null"}}); err != nil {
+		return fmt.Errorf("operation pick: member: %w", err)
+	}
+	n.Aliases = append(n.Aliases, Alias{Name: picked, Doc: member["description"].(string), Schema: member})
+	node := ref(picked, "")
+	node["nullable"] = true
+	return setOperationProperty(n.Results, "pick", nil, "member", node)
 }
 
 // reconcileStates are the states of the Workflow use of the target's table

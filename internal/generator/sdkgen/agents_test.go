@@ -34,7 +34,9 @@ func agentsAPIGolden(t *testing.T) goldenSDK {
 // use Job, Session and Account implement sit in a class of their own under
 // the use's member, sdk.job.lease.heartbeat(id, { preconditions: { Lease:
 // { token } } }) and sdk.account.budget.observe(id, { meter, used }), and
-// their tools are job.lease.heartbeat and account.budget.observe.
+// Lease's expireHolder, an operation of the table as a whole, takes no key,
+// sdk.job.lease.expireHolder({ holder }) (D104); their tools are
+// job.lease.heartbeat, job.lease.expireHolder and account.budget.observe.
 // TestEveryGoldenSDKTypeChecks type-checks it. Regenerate with:
 // go test ./internal/generator/sdkgen -run TestAgentsSDKGolden -update
 func TestAgentsSDKGolden(t *testing.T) {
@@ -59,6 +61,7 @@ func TestAgentsSDKGolden(t *testing.T) {
 	}
 	for _, want := range []string{
 		"job JobLeaseOperations.lease.heartbeat job.lease.heartbeat",
+		"job JobLeaseOperations.lease.expireHolder job.lease.expireHolder",
 		"job JobRetriesOperations.retries.recordAttempt job.retries.recordAttempt",
 		"job JobStatusOperations.status.transition job.status.transition",
 		"session SessionPresenceOperations.presence.beat session.presence.beat",
@@ -68,8 +71,8 @@ func TestAgentsSDKGolden(t *testing.T) {
 			t.Errorf("members = %v, want %s among them", members, want)
 		}
 	}
-	if len(members) != 22 {
-		t.Errorf("members = %d (%v), want 22", len(members), members)
+	if len(members) != 23 {
+		t.Errorf("members = %d (%v), want 23", len(members), members)
 	}
 	source, err := os.ReadFile(filepath.Join(outDir, "namespaces", "job.ts"))
 	if err != nil {
@@ -80,6 +83,8 @@ func TestAgentsSDKGolden(t *testing.T) {
 		"export class JobLeaseOperations {",
 		"public async heartbeat(",
 		"`/api/job/${encodeURIComponent(id)}/lease/heartbeat`",
+		"public async expireHolder(",
+		"`/api/job/lease/expire-holder`",
 	} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("namespaces/job.ts lacks %q", want)

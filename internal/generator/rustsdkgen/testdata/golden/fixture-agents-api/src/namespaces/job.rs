@@ -39,6 +39,26 @@ impl JobLeaseOperations {
     pub(crate) fn new(client: HttpClient) -> Self {
         Self { client }
     }
+    /// Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.
+    ///
+    /// Requires authentication.
+    ///
+    /// - `options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_hook`: optional request builder hook.
+    pub async fn expire_holder(
+        &self,
+        input: types::JobLeaseExpireHolderInput,
+        options: Option<&runtime::RequestOptions>,
+    ) -> Result<types::JobLeaseExpireHolderResult, SDKError> {
+        let path = "/api/job/lease/expire-holder";
+        let input_value = serde_json::to_value(&input)?;
+        runtime::validate_input("JobLeaseExpireHolderInput", &input_value)?;
+        let query_params: Vec<(String, String)> = Vec::new();
+        let body = Some(input_value);
+        self.client
+            .request_json("POST", path, &query_params, body, options)
+            .await
+    }
     /// Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.
     ///
     /// Requires authentication.

@@ -161,6 +161,35 @@ type JobLeaseAcknowledgeParams struct {
 	Ids []int64 `json:"ids"`
 }
 
+// JobLeaseExpireHolderParams are the parameters of lease's expireHolder.
+type JobLeaseExpireHolderParams struct {
+	// Holder is the principal whose leases to expire.
+	Holder string `json:"holder"`
+	// NotRenewedAfter is as expire's: an active lease acquired or renewed after
+	// this time is spared.
+	NotRenewedAfter *int64 `json:"notRenewedAfter,omitempty"`
+}
+
+// JobLeaseExpireHolderResult is what lease's expireHolder returns.
+type JobLeaseExpireHolderResult struct {
+	// Expired is how many leases expired.
+	Expired int64 `json:"expired"`
+	// Ids is the instances whose lease expired, by id.
+	Ids []string `json:"ids"`
+	// Reasons is how many expired for each reason expire gives, by reason; a
+	// reason none expired for is absent.
+	Reasons JobLeaseExpireHolderReasons `json:"reasons"`
+}
+
+// JobLeaseExpireHolderReasons is how many leases Job's expireHolder expired
+// for each reason expire gives, by reason; a reason none expired for is
+// absent.
+type JobLeaseExpireHolderReasons struct {
+	Holder  *int64 `json:"holder,omitempty"`
+	MaxHold *int64 `json:"maxHold,omitempty"`
+	Ttl     *int64 `json:"ttl,omitempty"`
+}
+
 // JobLeaseResetExpiriesResult is what lease's resetExpiries returns.
 type JobLeaseResetExpiriesResult struct {
 	// Expiries is the count before the reset.
@@ -168,8 +197,8 @@ type JobLeaseResetExpiriesResult struct {
 }
 
 // JobLeaseOperations are the operations of Job's lease, a Lease (D103), each
-// run through the behaviors' core on the row whose key it takes, in a
-// transaction.
+// run through the behaviors' core in a transaction: on the row whose key it
+// takes, or on the table as a whole, as a command without a row (D104).
 type JobLeaseOperations interface {
 	// Acquire takes the lease for the caller and returns its fencing token.
 	// Refused while a lease is active, the caller's own included (heartbeat
@@ -211,6 +240,12 @@ type JobLeaseOperations interface {
 	// delivering them. Only the holder, presenting the current token as Lease's
 	// precondition.
 	Acknowledge(ctx context.Context, id types.IdentityUUID, params JobLeaseAcknowledgeParams) (json.RawMessage, error)
+	// ExpireHolder expires every lease one principal holds on the schema's
+	// instances, active or not, as expire with that holder does on each: for a
+	// principal that is gone. With notRenewedAfter, an active lease renewed
+	// after that time is spared. Needs overridePermission; refused when the
+	// config names none.
+	ExpireHolder(ctx context.Context, params JobLeaseExpireHolderParams) (*JobLeaseExpireHolderResult, error)
 	// ResetExpiries sets the instance's count of expiries back to 0, so a lease
 	// can be acquired again after maxExpiries. Needs overridePermission; refused
 	// when the config names none.
@@ -331,6 +366,26 @@ func (o jobLeaseOperations) Acknowledge(ctx context.Context, id types.IdentityUU
 		}
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return out, fmt.Errorf("orm: the result of Job's lease acknowledge, %s: %w", raw, err)
+		}
+		return out, nil
+	})
+}
+
+// ExpireHolder runs lease's expireHolder on the table as a whole (D104), a
+// command without a row, in a transaction, and returns its result. It reads
+// the table's rows and writes them only through their own operations, each
+// held to its version, and presents no preconditions. It returns a refusal of
+// the core's as the *rules.Refusal it is.
+func (o jobLeaseOperations) ExpireHolder(ctx context.Context, params JobLeaseExpireHolderParams) (*JobLeaseExpireHolderResult, error) {
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*JobLeaseExpireHolderResult, error) {
+		var out *JobLeaseExpireHolderResult
+		raw, err := rules.RunTableOperation(ctx, rulesHost(tx), "Job", "Lease", "expireHolder", params, behaviorCaller(ctx), nil)
+		if err != nil {
+			return out, err
+		}
+		out = &JobLeaseExpireHolderResult{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return nil, fmt.Errorf("orm: the result of Job's lease expireHolder, %s: %w", raw, err)
 		}
 		return out, nil
 	})

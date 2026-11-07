@@ -1,0 +1,555 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-pool-api",
+  "sdkClassName": "FixturePoolApiSDK",
+  "tools": [
+    {
+      "toolName": "account.pool.pick",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "pick",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "exclude",
+          "required": false,
+          "kind": "input",
+          "target": "input.exclude"
+        },
+        {
+          "toolParameter": "match",
+          "required": false,
+          "kind": "input",
+          "target": "input.match"
+        },
+        {
+          "toolParameter": "prefer",
+          "required": false,
+          "kind": "input",
+          "target": "input.prefer"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["exclude", "match", "prefer"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.pool.markOut",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "markOut",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "reason",
+          "required": true,
+          "kind": "input",
+          "target": "input.reason"
+        },
+        {
+          "toolParameter": "until",
+          "required": false,
+          "kind": "input",
+          "target": "input.until"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["reason", "until"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.pool.reportRoom",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "reportRoom",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "near",
+          "required": false,
+          "kind": "input",
+          "target": "input.near"
+        },
+        {
+          "toolParameter": "reason",
+          "required": false,
+          "kind": "input",
+          "target": "input.reason"
+        },
+        {
+          "toolParameter": "resetsAt",
+          "required": false,
+          "kind": "input",
+          "target": "input.resetsAt"
+        },
+        {
+          "toolParameter": "room",
+          "required": true,
+          "kind": "input",
+          "target": "input.room"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["near", "reason", "resetsAt", "room"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.checkReserve",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "checkReserve",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": false,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "meter",
+          "required": false,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.observe",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "observe",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "input",
+          "target": "input.limit"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "resetsAt",
+          "required": false,
+          "kind": "input",
+          "target": "input.resetsAt"
+        },
+        {
+          "toolParameter": "used",
+          "required": true,
+          "kind": "input",
+          "target": "input.used"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["limit", "meter", "resetsAt", "used"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.recordUsage",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "recordUsage",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.recordUsageFor",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "recordUsageFor",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "input",
+          "target": "input.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "released",
+          "required": true,
+          "kind": "input",
+          "target": "input.released"
+        },
+        {
+          "toolParameter": "schema",
+          "required": true,
+          "kind": "input",
+          "target": "input.schema"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "id", "meter", "released", "schema"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.reserve",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "reserve",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": false,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "meter",
+          "required": false,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.reserveFor",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "reserveFor",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "input",
+          "target": "input.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "schema",
+          "required": true,
+          "kind": "input",
+          "target": "input.schema"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "id", "meter", "schema"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.setLimit",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "setLimit",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "limit",
+          "required": true,
+          "kind": "input",
+          "target": "input.limit"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["limit", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.settle",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "settle",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": false,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.settleFor",
+      "apiId": "fixture-pool-api",
+      "namespace": "account",
+      "methodName": "settleFor",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "input",
+          "target": "input.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "schema",
+          "required": true,
+          "kind": "input",
+          "target": "input.schema"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "id", "meter", "schema"]
+        }
+      ]
+    }
+  ]
+}

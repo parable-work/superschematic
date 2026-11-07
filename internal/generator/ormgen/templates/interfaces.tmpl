@@ -416,8 +416,11 @@ func (r *NoOp{{ $repoName }}) {{ .GoName }}() {{ .Interface }} {
 {{ docComment "" (printf "%s answers each operation of %s with ErrNotFound." .NoOp .Interface) }}
 type {{ .NoOp }} struct{}
 {{- range .Operations }}
-
+{{ if .Table }}
+func ({{ $use.NoOp }}) {{ .GoName }}(_ context.Context, _ {{ .Params }}) ({{ .ResultReturn }}, error) {
+{{- else }}
 func ({{ $use.NoOp }}) {{ .GoName }}(_ context.Context, _ {{ $keyType }}, _ {{ .Params }}) ({{ .ResultReturn }}, error) {
+{{- end }}
 	var none {{ .ResultReturn }}
 	return none, ErrNotFound
 }

@@ -15,11 +15,12 @@ binding.go           RunJSON, DeclarationsJSON, CheckJSON over the C ABI; Core, 
 contract.go          the core's JSON: TypeSpec, Command, Preconditions, Action, Answers, Step, Outcome, ChangeSet, RowWrite
 layout.go            the layout document internal/generator/behaviorlayout writes: Layout, ParseLayout, MustParseLayout
 store.go             Store, the caller's transaction: Dialect, LockMode, Statement
-adapter.go           Host, Execute, RunOperation, RunCreate, RunUpdate, RunDelete, PrepareCreate, ReadRow
+adapter.go           Host, Execute, RunOperation, RunTableOperation, RunCreate, RunUpdate, RunDelete, PrepareCreate, ReadRow
 subtables.go         a use's sub-table rows: the subRows read, the change set's writes, ReadSubRows
 deadlines.go         a table's deadline queue: arms and clears, the spend, RunDeadline, Deadline, Claim, ReadDeadlines
 changes.go           a table's change queue: RunChange, Change, ChangeRun, the trigger's images converted, the linked and holding reads, a gone row's deletes
 events.go            a table's event queue (D104): a change set's events written, SpendEvent, EventRun, ReadQueuedEvents, QueuedEvent
+rows.go              the read across a table (D104): one page of a type's live rows, each own field equal names held to its value, and each row's rows of the sub-tables it names
 convert.go           core JSON to column values and back, the UUID base62 codec (D79), TimeOfMillis
 refusal.go           Refusal, Code, AsRefusal, IsNotFound, Internal, BusyRefusal
 postgres/            package postgres: a Store over a pgx transaction
@@ -95,9 +96,15 @@ commands with.
   (D104) as a linked read, with one page of a type's rows whose use's
   owned field holds a value, by the layout's column of the use's field,
   the value bound as a command's value of it is, a use or field the
-  layout lacks refused as `internal`. On SQLite (fenced locks) a
-  `subRows`, `linked` or `holding` read made under a lock is refused as
-  `internal`: the unit has no check of it yet.
+  layout lacks refused as `internal`. It answers a `rows` read (D104) as a
+  linked read, with one page of a type's live rows each own field `equal`
+  names holding its value, bound as a command's own value of the field is,
+  `IS NULL` for a null, a UUID field's value that is no UUID matching no
+  row, each row with its rows of each sub-table `tables` names, read by one
+  query per sub-table per page, an empty list for a row that has none. On
+  SQLite (fenced locks) a `subRows`, `linked`, `holding` or `rows` read
+  made under a lock is refused as `internal`: the unit has no check of it
+  yet.
 - It hands the core a command's `Preconditions` (D16, D104), each use's
   entry by its use id (`{"Lease": {"token": 3}}`), as the command presents
   them, or as `ExecuteOptions.Preconditions` gives them to a command that
@@ -140,6 +147,10 @@ driver's error, wrapped, but one a store wraps as `ErrBusy` (SQLite's
 
 The wrappers build the command: `RunOperation` returns an operation's
 result, `RunCreate` the key, `RunUpdate` and `RunDelete` nothing.
+`RunTableOperation` returns the result of an operation of a table as a
+whole (D104), a command without a row, which names no key and presents no
+preconditions; each row its calls write is held to its version, and one
+that writes no row applies nothing.
 `ExecuteOptions.OwnColumns` binds a repository's encoding of the command's
 own row's own columns in place of the change set's (audit stamps among
 them), `SoftDelete` the columns a delete stamps in place of deleting, and
@@ -353,8 +364,14 @@ armed again in one change set
 the archive's core, a malformed precondition refused as
 `PreconditionsError` before the row is read, a stale token vetoed and the
 current one going through (`TestThePreconditionsReachTheCoresLease`), on
-SQLite and on Postgres. `transcript_test.go`
-replays the eighteen transcripts in `runtime/engine/testdata/rules` on SQLite
+SQLite and on Postgres; `rows_test.go` holds the read across a table
+(`TestTheCoreReadsATablesRows`: equality on a string, a UUID in either
+form and a null, a UUID field's value that is no UUID, paging, a
+soft-deleted row left out, sub-table rows with a row that has none, and
+the refusal under a lock on SQLite) and a command without a row
+(`TestATableOperationRunsWithNoRow`: a read-only one writing nothing and a
+writing one's rows fenced), on SQLite and on Postgres. `transcript_test.go`
+replays the nineteen transcripts in `runtime/engine/testdata/rules` on SQLite
 and on Postgres, as the TypeScript adapter does:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, one raw
 write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
@@ -366,10 +383,11 @@ steps (48 commands, 24 of them changes, and 12 checks);
 `core-staterules.transcript.json`, 76 steps (43 commands and 33 checks);
 `core-approvals.transcript.json`, 122 steps (93 commands, 71 of them
 operations and 5 changes, and 29 checks); the work queue's, on the core
-(D104): `core-lease.transcript.json`, 436 steps (323 commands, 3 of them
-deadlines and 84 presenting Lease's token as their precondition, and 113
-checks); `core-presence.transcript.json`, 141 steps (89 commands, 8 of
-them deadlines, and 52 checks); `core-budget.transcript.json`, 495 steps
+(D104): `core-lease.transcript.json`, 449 steps (334 commands, 3 of them
+deadlines, 84 presenting Lease's token as their precondition and 8
+expireHolder's commands without a row, and 115 checks);
+`core-presence.transcript.json`, 141 steps (89 commands, 8 of them
+deadlines, and 52 checks); `core-budget.transcript.json`, 495 steps
 (331 commands and 164 checks); `core-retries.transcript.json`, 250 steps
 (196 commands and 54 checks); and the hand-written
 `core-workflow-principals.transcript.json` (D104), 92 steps (58 commands,
@@ -390,7 +408,12 @@ them the stale deadline, each compared with its row's `expect.version`,
 and 22 checks), whose Workflow and Reconcile are anchored on fields, and
 `core-schedules.transcript.json` (D104), 161 steps (131 commands, 19 of
 them deadlines and 10 changes, each compared with its row's
-`expect.version`, 29 checks and one raw write), each command held to its
+`expect.version`, 29 checks and one raw write), and
+`core-pool.transcript.json` (D104), 82 steps (65 commands, 22 of them
+picks, commands without a row whose `expect` holds a result or a refusal,
+its others and its events, 4 of them recheck deadlines with their events
+and one a repeat answered unchanged, each command on a row compared with
+its row's `expect.version`, and 17 checks), each command held to its
 `expect.events` by reading every event queue of its database back after
 it and deleting what it read; each held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every

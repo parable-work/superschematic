@@ -386,12 +386,15 @@ jobs:
           # Budget ones, its second batch, a lease's fencing token presented
           # as a precondition among them, the Seats ones, its step 3, a
           # row's seats named in by and a field that follows observations
-          # among them, and the Schedules ones, its step 3's second part, a
+          # among them, the Schedules ones, its step 3's second part, a
           # wake-up's run event handed to the project's Workers method from
-          # the worker's event queue among them): the Go one over the rules
-          # archive staged above, the TypeScript one over the rules package
-          # built above, and the Rust one over the engine workspace's
-          # rules-adapter crate.
+          # the worker's event queue among them, and the Pool ones, the rest
+          # of its step 3, a pick of the table as a whole with no row,
+          # Budget's Capacity and a recheck the project's handler answers
+          # among them, and Lease's expireHolder in the Agents ones): the Go
+          # one over the rules archive staged above, the TypeScript one over
+          # the rules package built above, and the Rust one over the engine
+          # workspace's rules-adapter crate.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # The tests of vector columns run on the pgvector container
           # (D84); the database is there, so a skip is a broken gate.
@@ -855,8 +858,9 @@ jobs:
           SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
           # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
           # Postgres above too, each in a schema of its own, deadlines,
-          # change queues and event queues among them, and the core's
-          # eighteen transcripts replayed there as on bun:sqlite.
+          # change queues and event queues, the read across a table and a
+          # command without a row among them, and the core's nineteen
+          # transcripts replayed there as on bun:sqlite.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           bun install --frozen-lockfile
@@ -1216,7 +1220,9 @@ jobs:
       # their soaks, `make engine-rust-soak`, do not. The behaviors' Rust
       # adapter runs its store tests and replays the core's transcripts
       # (runtime/engine/testdata/rules) on rusqlite and on this Postgres
-      # through SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, in schemas of its own.
+      # through SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, in schemas of its own;
+      # the test kit replays the hand-written core-pool.json whole, and
+      # workqueue-lease.json's expireHolder steps among its 637 (D104).
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:
@@ -1403,13 +1409,15 @@ jobs:
         # below their floors, 96 steps for core-workflow, 139 for
         # core-timers, 586 for core-reactions, 60 for
         # core-reactions-changes, 39 for core-constants, 76 for
-        # core-staterules, 122 for core-approvals, 436 for core-lease, 141
-        # for core-presence, 495 for core-budget, 250 for core-retries, and
-        # 92, 115, 158, 77, 88, 58 and 161 for the hand-written
+        # core-staterules, 122 for core-approvals, 449 for core-lease
+        # (expireHolder's commands without a row among them), 141 for
+        # core-presence, 495 for core-budget, 250 for core-retries, and 92,
+        # 115, 158, 77, 88, 58, 161 and 82 for the hand-written
         # core-workflow-principals, core-freezes-and-sign-offs,
         # core-retries-waits, core-periods-and-presence, core-seats,
-        # core-reconcile and core-schedules (D104), whose events each
-        # replay reads back from the event queues after every command.
+        # core-reconcile, core-schedules and core-pool (D104), whose events
+        # each replay reads back from the event queues after every command,
+        # and core-pool's picks commands without a row.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"

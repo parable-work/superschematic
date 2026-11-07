@@ -233,6 +233,19 @@ type Declaration struct {
 	// Events are the events the behavior emits about a row (D104), which
 	// its table's event queue carries to the API's behavior worker.
 	Events []DeclaredEvent `json:"events,omitempty"`
+	// Contracts are the contracts between behaviors the behavior implements
+	// or asks of other uses (D104): Budget implements Capacity, which Pool
+	// asks. Only the core reads them.
+	Contracts []DeclaredContract `json:"contracts,omitempty"`
+}
+
+// DeclaredContract is a contract between behaviors a declaration names
+// (D103, D104): its name, whether the behavior implements it or asks it of
+// other uses (implements or asks), and what it means there.
+type DeclaredContract struct {
+	Name        string `json:"name"`
+	Role        string `json:"role"`
+	Description string `json:"description,omitempty"`
 }
 
 // DeclaredEvent is an event a behavior declares (D104): its kind, which
@@ -268,7 +281,10 @@ type DeclaredField struct {
 }
 
 // DeclaredOperation is an operation a behavior declares, with the schemas
-// of its parameters and its result as the declaration writes them.
+// of its parameters and its result as the declaration writes them, and its
+// scope: "" or instance for one of a row, schema for one of the table as a
+// whole (D104), which runs as a command without a row, and namespace for
+// one the core runs no command for.
 type DeclaredOperation struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`

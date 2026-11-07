@@ -13708,8 +13708,15 @@ their own: a row's seats, and what its provider last reported. Schedules
 named schedules; it is the first behavior whose own events reach the app
 (`Cx::emit`): a table whose uses declare events keeps an event queue,
 which its behavior worker runs third and hands, event by event, to a
-method of the API's `Workers` the project writes. The rest of step 4, and
-steps 5 to 7, are not built. The names and rules are
+method of the API's `Workers` the project writes. Pool (D104's step 3, in
+full) is the fourth, and passes it with each member's availability; it
+brought the core its first command without a row, an operation of a
+table as a whole (`Action::TableOperation`) that reads the table through
+a read across it (`ReadRequest::Rows`) and writes rows only through
+calls on them, and its first general contract between behaviors, the
+interfaces this entry's classes declare made a declaration member
+(`contracts`): Pool asks `Capacity`, which Budget implements. The rest of
+step 4, and steps 5 to 7, are not built. The names and rules are
 reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
@@ -14790,8 +14797,10 @@ reversible until the first release.
     the MCP handle follow the table, field and operation, and one whose
     handle passes 48 characters is refused; the SDK namespace follows the
     set's name.
-  - A behavior operation whose scope is the schema or a namespace, not a
-    row, and a table keyed by several fields.
+  - A behavior operation whose scope is a namespace, and a table keyed by
+    several fields. (An operation whose scope is the schema runs since
+    D104's step 3 as a command without a row, routed at `POST
+    <type>/<member>/<op>`.)
   - A non-writing behavior operation is a `POST` like the rest; a read
     that is a query, as a declared query (D86) and a `GET`, comes with the
     first behavior that declares one.
@@ -14869,7 +14878,7 @@ minutes.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Lease` stays a behavior a table implements (`implements Lease<Session, { ttlMs, onExpiry, ... }>`): its holder, token and times are the table's owned columns, its directives a sub-table, with the config, guards and fencing token D16's amendments gave it. A `@queue`'s claim keeps its own lease (D53), which is a message's. (Amended when step 2 was built: a table's lease expires at a deadline of its own, so its Lease takes no `sweepMs`; `directOn` waits for Revisions and Branches on the core, and `expireHolder`, an operation of the table as a whole, for a command without a row; and the token is the command's precondition, which an API's request presents in its body rather than in D16's header.) | The fold D103 records, which leaves a row no lease; a queue message per leased row, whose claim is a worker's and not the caller's who holds the row |
+| `Lease` stays a behavior a table implements (`implements Lease<Session, { ttlMs, onExpiry, ... }>`): its holder, token and times are the table's owned columns, its directives a sub-table, with the config, guards and fencing token D16's amendments gave it. A `@queue`'s claim keeps its own lease (D53), which is a message's. (Amended when step 2 was built: a table's lease expires at a deadline of its own, so its Lease takes no `sweepMs`; `directOn` waits for Revisions and Branches on the core, and `expireHolder`, an operation of the table as a whole, for a command without a row; and the token is the command's precondition, which an API's request presents in its body rather than in D16's header. Amended again when step 3 was built in full: `expireHolder` runs on the core, as the table's command without a row.) | The fold D103 records, which leaves a row no lease; a queue message per leased row, whose claim is a worker's and not the caller's who holds the row |
 | `Retries` stays a behavior a table implements, counting the row's attempts, with the time the section below gives it. D68's backoff stays the queue's, for its messages. | Counting a row's attempts as messages of a queue that no worker drains |
 | `Queue` folds as D103 has it. A claim of the next row is a declared read (D86) of the rows that may be claimed, in the order the app wants, and Lease's `acquire` on the one it picks; a claimer that loses the race meets `held_by_another` and reads again. | Keeping `Queue`'s `claimNext` as a behavior: its one transaction saves a retry under contention, which the app's claims, a handful a minute, never meet |
 
@@ -14980,11 +14989,11 @@ payment processors, SMS gateways or API credentials repeats it.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Pool` is a capability of the members' table: `implements Pool<Account, { order, outForMs, recheckAfterMs, permission }>`. Its owned fields are `availability` (`open`, `near` or `out`), `outUntil`, `outReason` and `checkedAt`. | A selector each app writes over its own columns |
-| `markOut({ until?, reason })` puts a member out until `until`, or `outForMs` from now. `reportRoom({ room, near?, resetsAt? })` records a check. An out member opens only through a check with room made after its `outUntil`: a breaker whose half-open probe is that check. | Opening at `outUntil` by the clock, which sends work to an account its provider still refuses |
-| `pick({ match?, prefer?, exclude? })`, a read across the table, takes the members `match` keeps, leaves out `exclude` (the keys the caller tried in this attempt), and answers the first by `order` of the open ones `prefer` keeps, then of its near ones, then of the other open and near ones. With none it answers `{ member: null, until }`, the soonest `outUntil` among the members `match` keeps, so a caller waits on a deadline of its own. | A pick that waits inside the core, which reads no clock and holds no connection |
-| A member out past its `outUntil` with no later check arms a deadline (D103, step 3) `recheckAfterMs` on, whose fire writes an outbox event the app's worker answers through `reportRoom` with the provider's figure. The core calls no provider. | Polling in each app, which is most of the code this behavior replaces |
-| A member whose table also implements `Budget` is read through a contract, `Capacity` (`hasRoom`), which `Budget` implements, as D70's `Supply` joins `Holds` to `Stock`: a member with no room in a meter counts as out until the meter's period rolls over. | Pool reading Budget's columns, which D103 rules out between behaviors |
+| `Pool` is a capability of the members' table: `implements Pool<Account, { order, outForMs, recheckAfterMs, permission }>`. Its owned fields are `availability` (`open`, `near` or `out`), `outUntil`, `outReason` and `checkedAt`. (Amended when step 3 was built in full: the config is `{ order, outForMs?, recheckAfterMs?, permission? }`: `order` names an own number field (`number`, `Generic.Int64` or `Generic.Float64`) whose value ranks the members, lowest first, one with no value after every one with one, ties by key, since one column a person edits reorders them and a date-time order (least recently used) would give `pick`'s answer an instant whose wire forms differ; `outForMs` is thirty minutes and `recheckAfterMs` two minutes when absent, each at least a second; and `permission` is the one `markOut` and `reportRoom` need.) | A selector each app writes over its own columns |
+| `markOut({ until?, reason })` puts a member out until `until`, or `outForMs` from now. `reportRoom({ room, near?, resetsAt? })` records a check. An out member opens only through a check with room made after its `outUntil`: a breaker whose half-open probe is that check. (Amended when step 3 was built in full: `reportRoom` takes `reason?` too, read without room, since a provider's check often says why; a check with room at `outUntil` itself opens, and one before it records `checkedAt` alone; an out member keeps the later of its `outUntil` and a new one, by `markOut` or a check without room, so its time only lengthens while it is out, and a `markOut` that moves neither its time nor its reason answers `unchanged`.) | Opening at `outUntil` by the clock, which sends work to an account its provider still refuses |
+| `pick({ match?, prefer?, exclude? })`, a read across the table, takes the members `match` keeps, leaves out `exclude` (the keys the caller tried in this attempt), and answers the first by `order` of the open ones `prefer` keeps, then of its near ones, then of the other open and near ones. With none it answers `{ member: null, until }`, the soonest `outUntil` among the members `match` keeps, so a caller waits on a deadline of its own. (Amended when step 3 was built in full: `pick` is an operation of the table as a whole, which the core runs as a command without a row, and answers `{ member: { key, availability, order, preferred } \| null, until? }`, `preferred` saying whether it fell back past `prefer`; `until` is also `recheckAfterMs` from now for a member past its `outUntil` awaiting a check, and the time Capacity gives a member room, the later of the two for one out both ways; `match` and `prefer` hold own fields to values, a null member absent, as D12 has every optional value, `match` pushed to the host as equality over own columns, which the core checks again, so a pool of one person's accounts in a table of everyone's reads that person's rows; `exclude` names at most 100 keys; and a pick reads at most 2,000 members and refuses more (`pool_too_large`) rather than answer from the first pages, which would pick a worse member silently.) | A pick that waits inside the core, which reads no clock and holds no connection |
+| A member out past its `outUntil` with no later check arms a deadline (D103, step 3) `recheckAfterMs` on, whose fire writes an outbox event the app's worker answers through `reportRoom` with the provider's figure. The core calls no provider. (Amended when step 3 was built in full: the first recheck falls due at `outUntil`, not `recheckAfterMs` past it, since the provider's time is the earliest a check can find room, then every `recheckAfterMs` until a check comes; a check without room arms the next at the later of the member's `outUntil` and `recheckAfterMs` from now, so a reset already past cannot spin the handler; and the fire emits the event `recheck`, which the table's event queue carries and the API's behavior worker hands to the project's `Workers` method, as Schedules' `run`.) | Polling in each app, which is most of the code this behavior replaces |
+| A member whose table also implements `Budget` is read through a contract, `Capacity` (`hasRoom`), which `Budget` implements, as D70's `Supply` joins `Holds` to `Stock`: a member with no room in a meter counts as out until the meter's period rolls over. (Amended when step 3 was built in full: a declaration names the contracts its behavior implements or asks (`contracts`), the core finds a type's implementers by their declarations and never by a behavior's name, and with several meters out Capacity's time is the earliest at which every meter has room, `checkReserve`'s rule for an amount of one, which for one meter is its period's rollover or a provider's figure's lapse.) | Pool reading Budget's columns, which D103 rules out between behaviors |
 
 ### Schedules
 
@@ -15116,11 +15125,16 @@ table's behavior worker to a method of the API's `Workers` that the
 project writes, and cron lines read in a zone of the IANA database the
 core bundles; then Schedules on the core, its cases written by hand first and
 replayed by every adapter, and a table implementing it in each language
-whose wake-ups the project's handler answers. Pool, the rest of step 3,
-still needs a read across a table (its `pick`) and the `Capacity`
-contract with Budget; the events its recheck writes are built. Step 4 is
-not built. The names and configs are reversible until the first
-release.
+whose wake-ups the project's handler answers. Step 3 built in full:
+what Pool needed, a command without a row (an operation a declaration
+gives the scope `schema`, which the core runs on the table as a whole,
+Lease's `expireHolder` and Pool's `pick` its first consumers), a read
+across a table, and the `Capacity` contract, the first general contract
+between behaviors on the core, which Budget implements; then Pool on the
+core, its cases written by hand first and replayed by every adapter, and
+a table implementing it beside Budget in each language, whose rechecks
+the project's handler answers. Step 4 is next. The names and configs are
+reversible until the first release.
 - **The core addition.** `Behavior::settle(view, operation, params)` is a
   hook a use answers about an operation of its own before any use's guard
   is asked. The core asks it after the parameter check, for a caller's
@@ -15622,7 +15636,8 @@ release.
   made. `expireHolder`, an operation of the table as a whole, is left out
   of the core's declaration (`declared.rs` leaves out every operation whose
   scope is `schema` or `namespace`), of the layout and of a
-  `@behaviorOperations` set, which warns of it.
+  `@behaviorOperations` set, which warns of it. (Since step 3 was built in
+  full it runs on the core as the table's command without a row, below.)
 - **The fencing token as a command's precondition.** The core's command
   carries `preconditions`, each use's entry by its use id (`{ "Lease": {
   "token": 3 } }`, D16's form, since an implements use's id is its
@@ -15871,7 +15886,8 @@ release.
   ORM no longer writes an unused import and variable for a behavior table
   with no owned fields (`Workspace`).
 - **The specification.** `rules-testkit` replays the engine's recordings
-  on the reference host: `workqueue-lease.json` 610 of its 691 steps (the
+  on the reference host: `workqueue-lease.json` 610 of its 691 steps (637
+  since step 3 was built in full, below; the
   scenario that composes Dependencies, `expireHolder`'s calls and the steps
   after the three that wrote rows, the engines opened with a value store,
   Comments' steps, incidental there, and reads of the engine's store
@@ -15944,7 +15960,8 @@ release.
   `AccountActions`, each `@behaviorOperations @auth`) and runs Job's
   deadlines and Session's misses (`JobDeadlines`, and `SessionPresence`,
   holding `jobs.override`); its one warning is that `expireHolder` is left
-  out (`TestAgentsFixturesLoad`). Each language's test runs, on Postgres,
+  out (`TestAgentsFixturesLoad`), gone since step 3 was built in full. Each
+  language's test runs, on Postgres,
   the generated server through its SDK, the repositories (Rust's adapter)
   for creates and updates, and the two workers' queues in process, a
   deadline made due by moving its message's `due_at`, through 21 cases in
@@ -16600,12 +16617,376 @@ release.
   `problem_schedules_set_schedule`, and `TestRustSchedulesOnPostgres`). A
   deadline is made due by moving its message's `due_at`, and each refusal
   is checked whole and to leave the row's `_version` where it was.
+- **Step 3 in full: a command without a row.** The core's `Action`
+  gains `TableOperation { useId, operation, params }` (`"kind":
+  "tableOperation"`), an action of its own rather than `Operation` with
+  an optional key, so every host's and every behavior's match on a row's
+  operation keeps its meaning and a host that does not know the kind
+  refuses it through its fallback arm. It runs an operation a declaration
+  gives the scope `schema` (`OperationDecl.table`,
+  `Declaration::table_operation` and `find_table_operation`;
+  `find_operation` finds a row's alone, and its `not_found` lists a row's
+  operations) on a placeholder frame that is no row: the parameter check,
+  the use's `settle`, every use's guard in list order with
+  `GuardRequest::Table`, then the handler; no validation, no after-change
+  hook and no preconditions, which the core refuses in its existing
+  words (`a tableOperation takes no preconditions`). Every use's guard is
+  asked, as D16's composition holds a type's every action to its
+  behaviors' checks, so a later behavior can refuse an operation of the
+  table; each today answers it through its fallback arm. The handler
+  reads rows through the reads and writes them only through
+  `Cx::call_on` and `Cx::create_row`, each row with its own guards,
+  version and hooks, the call's caller the calling use as from any row;
+  `set`, `insert_row`, `update_row`, `delete_row`, `emit`, `arm`,
+  `clear`, `call`, `call_as_caller` and `View::sub_rows` on the table
+  frame are the core's defects (`emit(recheck): a table operation runs on
+  no row: it reaches rows through call_on and create_row`). It takes no
+  lock of its own: each row it writes is fenced on its version, and a
+  moved row runs the command again; a rule that decides on many rows and
+  must not race takes a `LockKey` as any rule does, which neither consumer
+  needs. Its change set holds the rows its calls wrote, their sub-table
+  rows, events and deadlines, and its result, which every adapter returns
+  as an operation's; one that writes no row applies nothing, and a
+  read-only one (`writes: false`) is served as a `POST` whose transaction
+  writes nothing. `declared.rs` reads a `schema` operation as the
+  table's and still leaves a `namespace` one out (Comments').
+  `tests/core.rs` has 66 cases.
+- **A table's route.** `@behaviorOperations(T)` serves an operation of
+  the table at `POST <type>/<member>/<op>` (`account/pool/pick`,
+  `job/lease/expire-holder`), the row's route with its `{id}` segment
+  gone, as the engine's schema route drops its instance; its name, handle
+  and capability are a row operation's (`poolPick`, `account_pool_pick`,
+  `account.pool.pick`), and its input takes no key and never
+  `preconditions`, a row's. `ir.BehaviorOperation.Table` and the layout's
+  `Operation.table` mark it (behaviorops' `Serves` and `RunsOnTheTable`
+  replace `RunsOnARow`, and `TableRestPath` builds the route), and the
+  build refuses a route it adds that another operation of the API, by the
+  same method, matches with a `{param}` read as any one segment, or the
+  reverse (`<set>: the operation pick it adds is routed at POST
+  account/pool/pick, which <Set>.<operation>'s POST <path> also matches:
+  rename one, or serve the table's operations from code of the project's
+  own (D104)`), so no router's precedence decides. The warning of an
+  operation it leaves out is for a namespace one alone, in new words
+  (`... whose operation inbox runs on a namespace as a whole:
+  @behaviorOperations serves the operations a behavior runs on a row or on
+  its table, and leaves inbox out (D103, D104)`). Each server runs it as a command
+  without a row: TypeScript's router calls the repository's member method
+  with no key and no preconditions; Go's handler calls
+  `runTableBehaviorOperation`, generated only where a table operation is
+  served, over the ORM's `Pick(ctx, params) (*AccountPoolPickResult,
+  error)`, a pointer as a row operation's result is (the contract wrote a
+  value); and Rust's calls the generated `behaviors::run_table_operation`,
+  which runs the adapter's `postgres::run_table_operation` in one
+  transaction of the pool. OpenAPI, the four SDKs, as a method of the
+  use's member with no key (`sdk.account.pool.pick(input)`,
+  `sdk.AccountNamespace.Pool.Pick(ctx, input)`,
+  `sdk.account.pool.pick(input, None)`, Python's alike), each listing a
+  member's methods in route order, so `pick` comes before `markOut`, and
+  the MCP tools (`account_pool_pick`, `job_lease_expire_holder`, whose
+  inputs take no id) carry it. The permission catalog lists a use's
+  config permissions under it as under each operation of the use, and
+  Lease's `overridePermission` under `expireHolder`, which checks it.
+- **A read across a table.** `ReadRequest::Rows { type, equal, tables,
+  after, limit }` (`"kind": "rows"`) asks for one page of a type's live
+  rows, `LINKED_PAGE` (500) at most, after a key, in the key column's
+  order: each own field `equal` names held to its value, `IS NULL` for a
+  null, bound as a command's own value of the field binds (a UUID in
+  either form as its column's; a UUID field's value that is no UUID,
+  which no column of it can hold, matches no row), and each row with the
+  rows of each sub-table `tables` names (`TableRef { useId, table }`) on
+  its `KeyedRow.tables`, by use id and the table's declared name, an empty
+  list for a row that has none, read by one query per sub-table per page
+  (on a SQLite store TypeScript's binds the page's keys a hundred to a
+  statement, D1's limit of bound values, since its `readRows` is D1's too;
+  SQLite's own limit is far above a page).
+  Equality over own columns is all an adapter learns of a rule: the core
+  checks it again, and every other rule (a behavior's `prefer`,
+  `exclude`, order and contract) stays the core's. Every adapter answers
+  it from the layout, on both dialects and generically (TypeScript's
+  `readRows`, Go's `rows.go`, Rust's `read_rows`), and refuses it under a
+  lock on SQLite and D1, as a linked read; the reference host answers it
+  by code point (`Store::table_rows`, since the host already had a
+  `Store::rows`), a UUID field's strings compared in either written form,
+  as every adapter's uuid column binds both. `View::read_rows` reads it. A rule pages it to the end,
+  and each round of the run reads every page before it again from the
+  answers, so k pages cost k rounds of the run, a query of the table and
+  one per named sub-table each, and k(k+1)/2 page evaluations in the
+  core: a pool of tens is one page and one round, and Pool bounds a pick
+  at 2,000 members, four pages, past which it refuses.
+- **Contracts between behaviors.** A declaration lists the contracts its
+  behavior implements or asks of other uses (`contracts: [{ name, role,
+  description }]`, `role` `implements` or `asks`), the general form of
+  the contract D70's Holds and Stock keep in the engine, and the first in
+  the core. `registry.Contracts` lists the core's (`Capacity`), and
+  `RegisterBehavior` refuses, in this order, a name it does not list, a
+  role other than the two, a name given twice, a contract on an
+  extension's behavior (`which the behaviors' core asks and answers: an
+  extension's behavior runs in its engine (D58)`) and `asks` off
+  `registry.RulesPackage`. `implements` is taken on any package's
+  behavior (Budget's is the work queue's), since the engine's declaration
+  parser now accepts the member, checks its shape and shifts it out unread
+  with `tables` and `armsDeadlines`, so its describe of Budget, and every
+  recording, are what they were. `superschematic_rules::Declaration` gains
+  `contracts` and `asks` (`contract()`, `asking()`, `implements()`,
+  `asks_contract()`), which `declared.rs` reads. A question is a
+  `ContractQuery { contract, query, params }`, answered by a pure hook,
+  `Behavior::answer(config, query, row, tables, now) -> Option<Value>`,
+  over a row a read across the table already holds with the implementer's
+  sub-tables (`View::contract_tables`), so no read per row is made;
+  `View::implementers` and `View::ask` find a type's implementers by their
+  declarations, in list order, never by a behavior's name. Asking a
+  contract the asking use's declaration does not list is a defect, as an
+  undeclared event is, and so is an implementer that answers no such
+  query. `rules-behaviors`' `capacity` module names Capacity and its one
+  query, `hasRoom`, answered `{ room, until? }`, and joins its
+  implementers' answers (`has_room`): room when every one has it,
+  `Room::OPEN` when none implements it, and with none the latest of their
+  times, absent when one gives none. Budget answers it over the row's
+  meters and buckets, each meter of its config read as `checkReserve`
+  reads it for an amount of one: used (a provider's figure while an
+  observation holds) and reserved, less the reservation of a lease no
+  longer active (Lease's owned fields, by `lease_of`'s rule), plus one,
+  within the limit (the observation's while it holds), a meter with no
+  limit always fitting; with no room, its time is the earliest instant of
+  every meter's moves (a fixed period's start, an observation's lapse, a
+  rolling bucket's departure) at which every meter has room, absent when
+  none does. A scope's meters are not read: they tell no member from
+  another, and would need a read per row. `CONTRACTS` lists the core's
+  beside `NAMES`; a test holds every declaration's contracts to it and
+  each implementer to answering its contracts' queries, and
+  `TestContractsAreTheCores` holds the core's to `registry.Contracts`.
+  D70's Supply fits the same member later (`implements` on Stock and
+  Calendar, `asks` on Holds, which finds the supply's use by
+  `implementers` and calls its operations through `call_on`); nothing is
+  built for it.
+- **expireHolder on the core.** `lease.rs` runs Lease's operation of the
+  table as a whole: the override permission first, in the engine's words
+  (`otto may not expire the leases of a holder on Job: it needs
+  permission jobs.override`, or that its Lease config names none), then
+  the holding read of `holder`, by its exact text as the engine's `WHERE
+  holder = ?` read it, paged to the end, and for each row in key order
+  Lease's own rule over the row as its call reads it (the same read of
+  the row, not the holding page's copy, so a heartbeat between the two
+  cannot have an empty write made of a lease `expire` spares), so a lease
+  `expire` would spare (an active one renewed or acquired after
+  `notRenewedAfter`) is passed over unwritten, then `call_on` of Lease's
+  own `expire` with `{ holder, notRenewedAfter? }`; a veto or a row gone
+  since the read passes over that row, as the engine's sweep left a vetoed
+  one for its next run, and any other refusal is passed on. It answers
+  `{ expired, reasons, ids }`, a reason none expired for absent. A row
+  whose call waits on the host goes on to the next (`Stop::is_waiting`:
+  the core undoes a call that stops, a refused one or one that waits, and
+  the run asks for every read its hooks asked for, so one round answers
+  every row's next read), and the wait is returned at the end, over a
+  refusal after it, which may come of what the run has not read: the rows
+  a gone holder held cost rounds of the host loop by how deep each row's
+  reads go, not by how many it held, where each row had cost a round and a
+  holder of more than `MAX_ROUNDS` (256) leases was refused as `internal`.
+  Presence's `releaseLeases` goes on past a waiting row the same way.
+  `tests/lease.rs` has 20 cases, one expiring 300 leases of one holder on
+  a table with Lease and Workflow in one command.
+- **Pool.** `rules-behaviors/src/pool.rs`: a table says `implements
+  Pool<Account, { order, outForMs?, recheckAfterMs?, permission? }>`,
+  and its module doc holds it to D103's test, which it passes: its state
+  is each member's `availability`, `outUntil`, `outReason` and
+  `checkedAt` and the `recheck` deadline an out member arms; its rules
+  say how a member goes out, when it may come back and which member
+  `pick` answers; and it recurs (accounts at model vendors, payment
+  processors, SMS gateways, API credentials). A new member is open, as a
+  breaker starts closed, and a row that predates the use reads as open.
+  `markOut({ until?, reason })` puts a member out until `until`, or
+  `outForMs` from now, a time already past reading as now; an out member
+  keeps the later time and takes the new reason, and a call that moves
+  neither answers `unchanged` before any guard and writes nothing; it
+  arms the recheck at `outUntil`. `reportRoom({ room, near?, resetsAt?,
+  reason? })` records a check made now, each time: with room it opens a
+  member whose `outUntil` has come (`opened`), near when `near` says so,
+  and clears its recheck, while a check before `outUntil` records
+  `checkedAt` alone, since an early check may read a provider's figure
+  from before the refusal; with no room the member is out until the
+  later of its `outUntil` and `resetsAt`, or `outForMs` on, for `reason`,
+  else its reason, else `no room`, its recheck armed then or
+  `recheckAfterMs` on when that is later. `near` is read only with room,
+  `resetsAt` and `reason` only without. `pick({ match?, prefer?, exclude?
+  })` reads the members `match` keeps across the table, the Capacity
+  implementers' sub-tables with each, and of those neither out (by its
+  availability, or with no room by Capacity) nor excluded answers the
+  first of the open ones `prefer` keeps, then of its near ones, then of
+  the other open and near ones, each tier by `order` ascending, no value
+  last, then by key by code point; with none, `{ member: null, until }`,
+  the least time back of the out members `match` keeps, an excluded out
+  member counting and an excluded open one not. A UUID field's value in
+  `match` and `prefer`, and an `exclude` key, compare in either form, by
+  its base62 wire form, and a null member of `match` or `prefer` is
+  absent, as D12 has every optional value. The config's `permission`
+  holds `markOut` and `reportRoom` in `settle`, after the parameters and before any guard, so
+  `forbidden` comes before Lease's `held_by_another`; `pick` checks none,
+  since what it answers is what a read of the table shows and its route
+  holds who calls. `check_params` holds `match` and `prefer` to the
+  table's own fields (`/match/owner: Account has no own field owner (its
+  own fields: name, vendor, kind, rank)`) and refuses a field that holds
+  an instant. Its config checks are the schema's, then `order` a field of
+  the type and a number one. Any config change is allowed, a narrower
+  time applying from each next `markOut`, check or fire; Pool may join a
+  type that has rows, each reading as open, and its removal from one is
+  refused, its members' availability and rechecks staying behind (Lease's
+  rule). It reads no column of Budget's, composes with Lease only through
+  Lease's `exempt` (`Pool.markOut`, `Pool.reportRoom`; `pick` meets no
+  lease, since the table frame holds none, and the fire calls no
+  operation), and with Workflow not at all. `tests/pool.rs` has 19 cases,
+  `pool_too_large` at 2,001 rows among them, and `tests/budget.rs` 24, its
+  Capacity answer by every meter among them. It registers fourteenth,
+  after Schedules (`NAMES`, `DECLARATIONS`, `core()`,
+  `registry.RulesBehaviors`, every transcript's `behaviors`), and only
+  the core implements it (`registry.RulesPackage`): its declaration's copy
+  is `rules-behaviors/declarations/Pool.behavior.json`, the engine never
+  registers it, and the build refuses it on an engine type.
+- **Pool's storage and recheck.** Its owned columns are
+  `pool_availability`, `pool_out_until`, `pool_out_reason` and
+  `pool_checked_at`, each nullable, read-only in every repository and SDK;
+  it keeps no sub-table and hears no change, so its table gets a deadline
+  queue and an event queue and no change queue or trigger. The recheck,
+  one per row, payload `{ dueAt }`, does nothing when it falls due on a
+  member no longer out, arms again at an `outUntil` a raw write moved past
+  the fire, and otherwise emits `recheck` (`{ outUntil, outReason?,
+  checkedAt?, dueAt, firedAt }`, about the row its event's key names) and
+  arms the next `recheckAfterMs` on, until a check comes. The project's
+  `Workers` method (`AccountRechecksPoolRecheck`,
+  `accountRechecksPoolRecheck`, `account_rechecks_pool_recheck`) asks the
+  provider and reports through `reportRoom` in the event's transaction,
+  as the worker, idempotent by the row's key and `dueAt`, which no two
+  fires of a row share. The fire calls no operation, so no guard is asked
+  of it and a lease never holds it; a deleted member's deadline goes with
+  its row.
+- **The surface.** `@superschematic/db` exports `PoolAvailability`,
+  `PoolOn` and `Pool`, which resolves to the empty object type as Timers
+  does (`pool.typecheck.ts` holds what fails to compile, `@behavior("Pool",
+  ...)` among it); the IR's schema file and its parity corpus gain Pool's
+  branch. The build checks `order` in the core's words and order (a field
+  of the table, then a number field) and refuses beside the core an owned
+  field, a relation by its name, an audit field, a list and a field
+  encrypted at rest (`verify/behaviors_pool.go`, its number types held to
+  the core's `ORDER_TYPES` by `TestOrderTypesAreTheCores`); a Pool table
+  without Budget loads with no warning. `behaviortypes` names
+  `AccountPoolAvailability`, `AccountPoolMatch` and
+  `AccountPoolPickMember` (its `order` an integer for a `Generic.Int64`
+  order field, else a number), and on a table Lease's
+  `JobLeaseExpireHolderReasons`. `AccountPoolMatch` holds one optional
+  member per own scalar or enum field but the key, taking no null (the
+  core reads a null member as absent), typed by the
+  JSON value its field holds (a string for an `Identity.UUID`, an
+  `Identity.UserID` or an enum, an integer for `Generic.Int64`, a number,
+  a boolean), where the contract typed each as its field: the API imports
+  the table's type alone and holds no enum of the database's, a second
+  `AccountKind` in the API's types or the ORM's package could collide with
+  it, and a UUID's wire form is a string, as `pick`'s `key` is, which the
+  core takes in either form. The permission catalog lists `accounts.pool`
+  under each of Pool's three operations. The writer writes the clause back
+  in every format (`TestPoolRoundTrip`). `fixture-agents-api`'s goldens
+  change by `expire-holder` alone, and `fixture-agents-db`'s ORM and
+  layout by its table method; no other existing fixture's golden changes,
+  and enginedoc and engineclientgen leave Pool out, as Schedules.
+- **The adapters.** None names a behavior. Each runs a `tableOperation`
+  through its host loop with no key (TypeScript's `runTableOperation`, Go's
+  `RunTableOperation`, Rust's `run_table_operation` on both stores), each
+  row its calls write held to its version, and the ORMs bind a layout
+  operation marked `table` as a method of the use's member with no key:
+  TypeScript's `TableOperations<...>` beside `UseOperations<...>`, run in
+  the repository's transaction as the caller (`RulesTableCallOptions`),
+  and Go's method running `RunTableOperation` as the context's behavior
+  caller, which a NoOp repository answers `ErrNotFound`. A busy refusal of
+  a command without a row names no key (`pick of Account: the row kept
+  moving while the command ran; ...`), as the reference host words it.
+  Each adapter's store tests hold the read across a table (equality on a
+  string, on a UUID in either form and on a null, a UUID field's value
+  that is no UUID, paging, a soft-deleted row left out, sub-table rows
+  with a row that has none, the refusal under a lock on SQLite) and an
+  operation of the table (a read-only one writing nothing, a writing one's
+  rows fenced on their versions), on both dialects.
+- **The specification.** The engine recorded nothing of Pool, so
+  `rules/scenarios/core-pool.json` (5 scenarios, 91 steps: picks through
+  every tier with `match`, `prefer` and `exclude`, a null member absent, a
+  field the table lacks and none open; `markOut`'s later time and its repeat,
+  `reportRoom` before and at `outUntil`, near and back, without room with
+  and without `resetsAt`, and the parameter, permission and not-found
+  refusals; the recheck at `outUntil`, its event and its re-arming, a
+  check that moves it and one that clears it; Capacity with an hourly
+  Budget meter full, its rollover, a provider's figure's lapse and an
+  excluded open member; and the define refusals, with Pool's removal from
+  a type with rows) was written first, by hand in the recorded format,
+  before Pool's code. A row-less call is the engine's own
+  `instances.invokeSchema`, which the replayer maps to
+  `Action::TableOperation` on the one use whose core declaration gives the
+  operation on the table, and skips for one a behavior declares on a
+  namespace. The reference host checks all 91 steps, floor 91 (the
+  contract expected 92: the removal is refused at its define, which runs
+  the publish check from the live version, so no publish follows). Its
+  transcript, `core-pool.transcript.json`, holds 82 steps: 65 commands (12
+  creates, 22 picks, commands without a row whose `expect` holds a result
+  or a refusal, its `others` and its events and no row or version, 27
+  operations of a row, one a repeat answered unchanged, and 4 recheck
+  deadlines with their events) and 17 checks, 7 of them refused; the
+  opens, the three runs that ran nothing and one read are left out; floor
+  82. Lease's `expireHolder` steps of `workqueue-lease.json`, which the
+  reference host skipped, now replay: 637 of its 691 steps checked (from
+  610), 54 skipped (the Dependencies scenario's 26, the value store's 12,
+  Comments' 10, and 6 reads and options the host does not take), and
+  `core-lease.transcript.json` grows from 436 steps to 449 (334 commands,
+  8 of them `expireHolder`'s, 2 refused, and 115 checks), floor 449, none
+  of its earlier steps changed. TypeScript replays the nineteen
+  transcripts on bun:sqlite and Postgres, Go on SQLite and Postgres and
+  Rust on rusqlite and Postgres, each with 0 mismatches at its floor; the
+  seventeen others change by their `behaviors` header alone. The engine
+  corpus changes by `registry.json`'s metaSchema and the name enum's
+  message, as the IR's schema file gained Pool's branch; Budget's
+  `contracts`, which the engine shifts out, changes no recording.
+- **Fixtures and end-to-end tests.** `fixture-pool-db`'s `Account` is a
+  person's account at a vendor or a paid key (`owner`, `name`, `vendor`,
+  `kind`, an enum of `account` and `key`, and `rank`): `implements
+  Pool<Account, { order: "rank"; outForMs: 1800000; recheckAfterMs:
+  120000; permission: "accounts.pool" }>` beside `Budget<Account, {
+  meters: { tokens: { limit: 1000; reset: "hourly" } }; observePermission:
+  "accounts.observe" }>`. `fixture-pool-api` serves their operations
+  (`AccountActions`, `@behaviorOperations @auth`, `pick` at
+  `account/pool/pick`) and runs the rechecks and their events in
+  `AccountRechecks` (`@behaviorWorker(Account, { permissions:
+  ["accounts.pool"] })`), whose event handler is the project's, with no
+  warning (`TestPoolFixturesLoad`). `fixture-agents-api`'s warning that
+  `expireHolder` is left out is gone: Job's Lease serves it at
+  `job/lease/expire-holder`. Each language's test runs, on Postgres, the
+  generated server through its SDK and the worker's two queues in process
+  with the test's own `Workers`, whose handler asks a fake provider and
+  reports through `reportRoom`, idempotent by the key and `dueAt`, through
+  12 cases in one wording: a pick among an owner's accounts by rank, the
+  account lowest by rank holding the greatest key, so a pick by key would
+  answer another; a null member of `match` and `prefer`, sent as any HTTP
+  client may send it, absent; `prefer`'s tiers and its fall back; `markOut` for thirty minutes arming
+  its recheck at `outUntil`; the later time kept and a repeat unchanged;
+  an early check leaving the account out; every account out answering no
+  member and the soonest time; a due recheck handed to the handler once,
+  whose check opens the account and clears the recheck; a recheck whose
+  check finds no room putting it out until `resetsAt` and arming the
+  recheck there; a Budget meter a provider's figure fills counting as out
+  until the figure lapses; `forbidden` without `accounts.pool`; and a key
+  no row holds `not_found` (`TestPoolGoServerOnPostgres`, which also plans
+  and vets the worker's main over the scaffolded implementation,
+  `TestGeneratedPoolEndToEnd`, which also lists and runs the MCP tool
+  `account_pool_pick`, and `TestRustPoolOnPostgres`). Since `reportRoom`
+  opens only at or after `outUntil` by the command's clock, the two
+  recheck cases put the account out until a time that has come, each by
+  its own means (TypeScript with `markOut`'s `until` now, Go by moving
+  `outUntil` and its message into the past by SQL, the repair D103 keeps,
+  Rust with an `until` two seconds on), where the contract's wording put
+  it out ten minutes and made the deadline due. Each Agents test gains one
+  case: `expireHolder` of a worker's leases is forbidden without
+  `jobs.override`, every job's `_version` unmoved, and for a caller holding
+  it answers `{ expired: 2, reasons: { holder: 2 }, ids }`, both jobs
+  queued with their tokens advanced and another worker's job untouched
+  (and in TypeScript through the MCP tool `job_lease_expire_holder` too).
+  Each refusal is checked whole and to leave the row's `_version` where it
+  was. The servergen tests plan each language's `AccountRechecks` main,
+  hold it to a golden and compile it.
 - **Left for later steps.**
-  - Pool, the rest of step 3: its `pick`, a read across a table and a
-    command without a row, and the `Capacity` contract with Budget. The
-    events its recheck writes are built: a message of its table's event
-    queue, which the API's behavior worker hands to the project's
-    `Workers` method, the handler that calls `reportRoom`.
   - The event stream over HTTP, and SSE or MCP surfaces for a table's
     events: a behavior's own events reach the app through its table's
     event queue and the worker's handler alone.
@@ -16743,18 +17124,16 @@ release.
   - The engine advertises the new members of Constants, StateRules and
     Approvals through their shared declarations and refuses each, until
     engine types go (D103, step 7).
-  - `expireHolder`, and every operation whose scope is a table or a
-    namespace: a command without a row. `@behaviorOperations` warns of it
-    and leaves it out. A gone holder's leases expire at their own
-    deadlines, by `expire` with `holder` on each row, or by a Presence
-    miss's `releaseLeases`.
+  - An operation whose scope is a namespace (Comments'), the behavior's
+    own tables across every type of a namespace: the core runs no command
+    for it, `declared.rs` leaves it out, and `@behaviorOperations` warns of
+    it and leaves it out.
   - Lease's `directOn` waits for Revisions and Branches on the core (D103,
     step 4). `sweepMs`, Lease's and Presence's, is refused on a table, and
     the replayer leaves it out of the recordings' configs; Timers still
     parses its own and reads none of it (D103). Lease's and Presence's
-    descriptions still name the engine's runner, and `releaseLeases`'
-    still names `expireHolder`, so the recorded declarations change by new
-    members alone.
+    descriptions still name the engine's runner, so the recorded
+    declarations change by new members alone.
   - Retries' `resultField` waits for an update an operation makes
     (Revisions, D103 step 4); five recorded scenarios stop at their define.
     A table's `recordAttempt` input still offers `result`, as the
@@ -17000,6 +17379,57 @@ release.
     for a caller without the active lease unless Lease's `exempt` lists
     them, the handler's `reportRun` among them; no fixture composes
     Schedules with Lease.
+  - `match` and `prefer` over a Workflow's state or an owned field: a
+    member a Workflow disables is the project's own boolean meanwhile.
+  - A pick of the members whose field holds no value. A null member of
+    `match` or `prefer` is absent, as D12 has every optional value: the
+    core reads it so, the API's types, OpenAPI and the MCP tools offer a
+    member of a value alone, and so a pick answers alike on every server
+    and through every repository and SDK, where the Go server, the Go
+    repository, the Go, Rust and Python SDKs and the Rust server dropped a
+    null that the TypeScript server handed the core as a field with no
+    value. A field a pick goes by takes a value (a boolean, not a null);
+    the member that tells null from absent in every language, which the
+    earlier item on a null `from` names, would let a pick ask for none.
+  - A pick over more than 2,000 members (`pool_too_large`), and the
+    rounds a pick of several pages costs, each reading every page before
+    it again; an index on the `match` columns is the project's.
+  - The permission catalog lists Pool's `permission` under `pick`, which
+    checks none, as every use's config permissions are listed under each
+    of its operations until a class declaration says which checks which.
+  - `expireHolder` finds a holder by its exact text, where Presence's
+    `releaseLeases` reads each form of a UUID subject.
+  - Presence's `releaseLeases` calls Lease's `expire` on every row the
+    principal holds, so a lease `expire` spares (one renewed after the
+    principal's last sight) still has its row written empty, its version
+    moved and its after-change hooks run, since a called operation's
+    `unchanged()` does nothing; `expireHolder` reads Lease's rule over the
+    row first and calls none of those.
+  - Capacity reads a member's own meters, not its scope's, which tell no
+    member from another and would need a read per row.
+  - A raw write of a `pool_*` column re-arms nothing until the recheck's
+    fire, which re-arms at a later `outUntil`, and a member a raw write
+    puts out arms no recheck until its next `markOut` or check: no
+    trigger or check refuses such a write (D103), and the docs and the
+    agent skill say what it skips.
+  - An out member is rechecked for as long as it stays out, every
+    `recheckAfterMs`; a handler that cannot reach its provider fails its
+    event to dead after D68's retries, and the next fire emits again.
+  - Holds and Stock on the contract member (D70's Supply), and a contract
+    whose answer a behavior gives by an operation rather than a pure read.
+  - `pick`'s `key` is the key's wire form, a string, in every API type, a
+    UUID key in base62, which each SDK passes back to a row's route as it
+    is.
+  - Pool's `markOut` and `reportRoom` are writes of the row, which Lease's
+    guard holds for a caller without the active lease unless Lease's
+    `exempt` lists them, the handler's `reportRoom` among them; no fixture
+    composes Pool with Lease.
+  - The engine registers no Pool and reads no `contracts`: its declaration
+    parser shifts the member out of Budget's, and Pool's declaration is the
+    core's crate's alone.
+  - The build's check that no authored route matches a table's route
+    rebuilds an operation's path as apigen does, its path parameters by
+    codegen's scalar traits, so a change to apigen's rule must reach it.
 
 ## D105. An upsert whose update sets no field writes nothing, and reads the row its key holds back, by the key's columns or by its expression's value (D79, D89 amended)
 

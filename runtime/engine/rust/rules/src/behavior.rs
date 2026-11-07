@@ -21,6 +21,12 @@
 //! The enums a hook is handed ([`GuardRequest`], [`Change`],
 //! [`ValidationRequest`]) are open: a hook matches the cases it handles and
 //! lets the rest through with a fallback arm.
+//!
+//! A behavior may declare contracts it implements or asks of other uses
+//! ([`Declaration::contracts`], [`Declaration::asks`], D104): a question one
+//! behavior answers about a row for another, which the core resolves by the
+//! declarations of a type's uses, never by a behavior's name, and asks
+//! through [`Behavior::answer`] ([`crate::View::ask`]).
 
 use std::collections::BTreeMap;
 
@@ -60,10 +66,24 @@ impl Stop {
     }
 
     /// Whether the run is refused, rather than waiting on the host. A
-    /// behavior that goes on past a call's error does so only for a
-    /// refusal.
+    /// behavior that goes on past a call's error does so for a refusal, or
+    /// for a wait ([`Stop::is_waiting`]) when it calls on many rows.
     pub fn is_refusal(&self) -> bool {
         matches!(self, Stop::Refuse(_))
+    }
+
+    /// Whether the run waits on the host: a read or a lock it has not
+    /// answered. A call that stopped so is undone, and the run asks the host
+    /// for every read and lock its hooks asked for, whatever they return, so
+    /// a behavior that calls on many rows (Lease's `expireHolder`, Presence's
+    /// `releaseLeases`) goes on to the next row past one that waits and
+    /// returns the wait at the end: one round of the host loop then answers
+    /// every row's next read, not one row's, and the rows a command reaches
+    /// cost rounds by how deep each one's reads go, not by how many there are
+    /// (D104). A refusal after a wait may come of what the run has not read
+    /// yet, so such a behavior returns the wait over it.
+    pub fn is_waiting(&self) -> bool {
+        matches!(self, Stop::Read(_) | Stop::Lock(_))
     }
 }
 
@@ -76,9 +96,10 @@ impl From<Refusal> for Stop {
 /// What a behavior declares: its name, the fields it owns on a row and the
 /// one that holds a field anchor's value, the ones it computes at a read,
 /// its sub-tables, whether it arms deadlines and whether it hears its row's
-/// writes, its operations, the veto codes it refuses with, whether a create
-/// gives it parameters, and whether a caller presents it a precondition. The
-/// core holds a behavior's writes to it: a
+/// writes, its operations (of a row, and of the table as a whole), the
+/// contracts it implements and asks, the veto codes it refuses with, whether
+/// a create gives it parameters, and whether a caller presents it a
+/// precondition. The core holds a behavior's writes to it: a
 /// field or a sub-table it does not declare is a defect, and so are a value
 /// a sub-table it declares with fields does not hold, a deadline armed or
 /// cleared by a behavior that declares none, and a veto code it does not
@@ -139,6 +160,15 @@ pub struct Declaration {
     /// the project's handler. One that declares none emits none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<String>,
+    /// The contracts it implements (D103's interfaces, D104): what
+    /// [`crate::View::ask`] resolves a type's implementers by, and what
+    /// [`Behavior::answer`] answers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contracts: Vec<String>,
+    /// The contracts it asks of other uses ([`crate::View::ask`]); asking
+    /// one it does not list is a defect, as an undeclared event kind is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asks: Vec<String>,
     #[serde(default)]
     pub vetoes: Vec<String>,
     /// Whether a create gives the behavior parameters, as a declaration
@@ -210,13 +240,20 @@ impl TableDecl {
     }
 }
 
-/// One declared operation: its name, and whether it writes. A writing
-/// operation moves the row's version; one that does not writes nothing.
+/// One declared operation: its name, whether it writes, and whether it
+/// runs on the table as a whole (D104), a declaration's scope `schema`. A
+/// writing operation of a row moves the row's version; one that does not
+/// writes nothing. One of the table writes rows only through the operations
+/// of their uses and the creates it makes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationDecl {
     pub name: String,
     pub writes: bool,
+    /// True for an operation of the table as a whole, which
+    /// [`crate::Action::TableOperation`] runs; false for one of a row.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub table: bool,
 }
 
 impl Declaration {
@@ -291,13 +328,52 @@ impl Declaration {
         self.computed.iter().any(|field| field == name)
     }
 
-    /// The declaration with an operation.
+    /// The declaration with an operation of a row.
     pub fn operation(mut self, name: impl Into<String>, writes: bool) -> Self {
         self.operations.push(OperationDecl {
             name: name.into(),
             writes,
+            table: false,
         });
         self
+    }
+
+    /// The declaration with an operation of the table as a whole (D104).
+    pub fn table_operation(mut self, name: impl Into<String>, writes: bool) -> Self {
+        self.operations.push(OperationDecl {
+            name: name.into(),
+            writes,
+            table: true,
+        });
+        self
+    }
+
+    /// The declaration with a contract it implements, kept once (D104).
+    pub fn contract(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        if !self.implements(&name) {
+            self.contracts.push(name);
+        }
+        self
+    }
+
+    /// The declaration with a contract it asks of other uses, kept once.
+    pub fn asking(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        if !self.asks_contract(&name) {
+            self.asks.push(name);
+        }
+        self
+    }
+
+    /// Whether it implements a contract.
+    pub fn implements(&self, contract: &str) -> bool {
+        self.contracts.iter().any(|known| known == contract)
+    }
+
+    /// Whether it asks a contract of other uses.
+    pub fn asks_contract(&self, contract: &str) -> bool {
+        self.asks.iter().any(|known| known == contract)
     }
 
     /// The declaration with the kind of an event it emits, kept once.
@@ -332,11 +408,29 @@ impl Declaration {
         self
     }
 
-    /// The operation with a name.
+    /// The operation of a row with a name; an operation of the table as a
+    /// whole is not one.
     pub fn find_operation(&self, name: &str) -> Option<&OperationDecl> {
         self.operations
             .iter()
-            .find(|operation| operation.name == name)
+            .find(|operation| !operation.table && operation.name == name)
+    }
+
+    /// The operation of the table as a whole with a name (D104).
+    pub fn find_table_operation(&self, name: &str) -> Option<&OperationDecl> {
+        self.operations
+            .iter()
+            .find(|operation| operation.table && operation.name == name)
+    }
+
+    /// The names of its operations of a row, or of the table as a whole, in
+    /// order.
+    pub fn operation_names(&self, table: bool) -> Vec<String> {
+        self.operations
+            .iter()
+            .filter(|operation| operation.table == table)
+            .map(|operation| operation.name.clone())
+            .collect()
     }
 
     pub fn has_field(&self, name: &str) -> bool {
@@ -539,6 +633,19 @@ pub enum GuardRequest<'a> {
         /// a caller's request and every other call.
         as_caller: bool,
     },
+    /// An operation of the table as a whole (D104): no row, the view's own
+    /// and owned fields empty. Every use's guard is asked, in list order,
+    /// as for any action of the type, and none is handed a precondition.
+    Table {
+        /// The use whose operation it is.
+        use_id: &'a str,
+        /// That use's behavior.
+        behavior: &'a str,
+        operation: &'a str,
+        params: &'a Value,
+        /// Whether the operation writes, as its declaration says.
+        writes: bool,
+    },
 }
 
 impl<'a> GuardRequest<'a> {
@@ -549,11 +656,14 @@ impl<'a> GuardRequest<'a> {
             GuardRequest::Create { .. } => "create",
             GuardRequest::Update { .. } => "update",
             GuardRequest::Delete => "delete",
-            GuardRequest::Operation { operation, .. } => operation,
+            GuardRequest::Operation { operation, .. } | GuardRequest::Table { operation, .. } => {
+                operation
+            }
         }
     }
 
-    /// The parameters, when this is the named operation of the named use:
+    /// The parameters, when this is the named operation of the named use on
+    /// a row (an operation of the table as a whole is none):
     /// what a guard that checks its own operation matches on.
     pub fn operation_of(&self, use_id: &str, operation: &str) -> Option<&'a Value> {
         match self {
@@ -572,6 +682,26 @@ impl<'a> GuardRequest<'a> {
         match self {
             GuardRequest::Operation { caller, .. } => *caller,
             _ => None,
+        }
+    }
+}
+
+/// A question one behavior asks another through a contract (D103, D104):
+/// the contract, its query, and the query's parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ContractQuery<'a> {
+    pub contract: &'a str,
+    pub query: &'a str,
+    pub params: &'a Value,
+}
+
+impl<'a> ContractQuery<'a> {
+    pub fn new(contract: &'a str, query: &'a str, params: &'a Value) -> Self {
+        ContractQuery {
+            contract,
+            query,
+            params,
         }
     }
 }
@@ -901,6 +1031,24 @@ pub trait Behavior: Send + Sync + 'static {
         let _ = now;
         self.read_fields(config, row, tables)
     }
+
+    /// Answers a query of a contract its declaration says it implements
+    /// ([`Declaration::contracts`], D104) about one row, as the host read it
+    /// with the use's sub-tables by name, each table's rows in key order, at
+    /// a time: `None` for a query it does not answer, which the core refuses
+    /// as the implementer's defect. Pure: it reads nothing but its
+    /// arguments, as [`Behavior::read_fields_at`] does. None by default.
+    fn answer(
+        &self,
+        config: &Self::Config,
+        query: &ContractQuery<'_>,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Option<Value> {
+        let _ = (config, query, row, tables, now);
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1018,5 +1166,55 @@ mod tests {
         assert_eq!(request.operation_of("fulfilment", "transition"), None);
         assert_eq!(request.caller(), Some("Dispatch"));
         assert_eq!(GuardRequest::Delete.action(), "delete");
+        // An operation of the table names no row's operation and no caller.
+        let table = GuardRequest::Table {
+            use_id: "Pool",
+            behavior: "Pool",
+            operation: "pick",
+            params: &params,
+            writes: false,
+        };
+        assert_eq!(table.action(), "pick");
+        assert_eq!(table.operation_of("Pool", "pick"), None);
+        assert_eq!(table.caller(), None);
+    }
+
+    /// A declaration's operations of the table are found apart from its
+    /// row's, and its contracts are kept once (D104).
+    #[test]
+    fn a_declaration_holds_its_table_operations_and_its_contracts() {
+        let declaration = Declaration::new("Pool")
+            .operation("markOut", true)
+            .table_operation("pick", false)
+            .asking("Capacity")
+            .asking("Capacity");
+        assert!(declaration.find_operation("pick").is_none());
+        assert_eq!(
+            declaration.find_table_operation("pick"),
+            Some(&OperationDecl {
+                name: "pick".into(),
+                writes: false,
+                table: true
+            })
+        );
+        assert!(declaration.find_table_operation("markOut").is_none());
+        assert_eq!(declaration.operation_names(false), ["markOut"]);
+        assert_eq!(declaration.operation_names(true), ["pick"]);
+        assert!(declaration.asks_contract("Capacity"));
+        assert!(!declaration.implements("Capacity"));
+        assert_eq!(declaration.asks, ["Capacity"]);
+        let written = serde_json::to_value(&declaration).unwrap();
+        assert_eq!(
+            written["operations"],
+            json!([{"name": "markOut", "writes": true}, {"name": "pick", "writes": false, "table": true}])
+        );
+        assert_eq!(written["asks"], json!(["Capacity"]));
+        assert!(written.get("contracts").is_none());
+        let budget = Declaration::new("Budget")
+            .contract("Capacity")
+            .contract("Capacity");
+        assert_eq!(budget.contracts, ["Capacity"]);
+        assert!(budget.implements("Capacity"));
+        assert!(serde_json::to_value(&budget).unwrap().get("asks").is_none());
     }
 }

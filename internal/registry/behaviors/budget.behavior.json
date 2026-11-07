@@ -377,6 +377,9 @@
       "writes": true
     }
   ],
+  "contracts": [
+    { "name": "Capacity", "role": "implements", "description": "hasRoom: whether a row has room in every meter now, used and reserved counted as checkReserve counts them, and when not, the earliest time the clock alone gives every meter room again." }
+  ],
   "vetoes": [
     { "code": "over_limit", "description": "The reservation does not fit a meter's limit, here or in an enclosing scope (details.scope names which)." },
     { "code": "not_leased", "description": "On a type that composes Lease, reserve needs an active lease." },

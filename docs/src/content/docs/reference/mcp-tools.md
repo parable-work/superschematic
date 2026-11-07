@@ -167,6 +167,13 @@ only the kinds the config's `kinds` name and `reportRun`'s `outcome` an
 enum of its `outcomes`. The events a schedule's runs emit reach no tool:
 the API's behavior worker hands them to your `Workers` method (D104,
 [A table's schedules and their events](/superschematic/guides/api-routes/#a-tables-schedules-and-their-events)).
+Pool's are `account_pool_pick`, an operation of the table as a whole
+whose input takes no `id`, only `match`, `prefer` and `exclude`, and
+`account_pool_mark_out` and `account_pool_report_room`, which take the
+member's `id`; Lease's `job_lease_expire_holder` takes no `id` either,
+only `holder` and `notRenewedAfter` (D104,
+[An operation of the table as a whole](/superschematic/guides/api-routes/#an-operation-of-the-table-as-a-whole)).
+A pool member's recheck events reach no tool.
 
 A TypeScript API's endpoint lists the tool and runs it through its route,
 so the set's `@requirePermission` and the core's own permission checks

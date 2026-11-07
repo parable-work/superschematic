@@ -9,6 +9,8 @@
 //! carries the caller's preconditions (D16, D104), a body member by use id,
 //! calls `run_operation_with_preconditions`, which hands them to the core
 //! with the command.
+//! An operation of a table as a whole (D104), routed with no key, calls
+//! `run_table_operation`, which the core runs as a command without a row.
 //!
 //! The behavior worker JobDeadlines of fixture-agents-api (D103): Job's
 //! behavior queues, its deadlines, each message claimed from
@@ -479,6 +481,11 @@ pub const RULES_LAYOUT: &str = r#"{
             {
               "name": "acknowledge",
               "writes": true
+            },
+            {
+              "name": "expireHolder",
+              "writes": true,
+              "table": true
             },
             {
               "name": "resetExpiries",
@@ -1390,6 +1397,50 @@ where
         operation,
         params,
         caller(ctx),
+    )
+    .await;
+    match ran {
+        Ok(result) => {
+            tx.commit().await.map_err(internal)?;
+            serde_json::from_value(result).map_err(internal)
+        }
+        // Dropping the transaction rolls it back.
+        Err(Error::Refused(refusal)) if is_problem(refusal.status) => Err(problem(*refusal)),
+        Err(err) => Err(internal(err)),
+    }
+}
+
+/// Runs `operation` of the use `use_id` on the table of `type_name` as a
+/// whole (D104), a command without a row, with `params`, in a transaction of
+/// the pool, as the request's caller, and returns its result once the
+/// transaction commits: the core writes each row it reaches through a call
+/// on that row, each held to its version, and a read-only one writes
+/// nothing. Its refusals and failures are answered as `run_operation`'s.
+pub(crate) async fn run_table_operation<P, R>(
+    behaviors: &Behaviors,
+    ctx: &RequestContext,
+    type_name: &str,
+    use_id: &str,
+    operation: &str,
+    params: &P,
+) -> Result<R, ApiError>
+where
+    P: Serialize + ?Sized,
+    R: DeserializeOwned,
+{
+    let params = serde_json::to_value(params).map_err(internal)?;
+    let mut client = behaviors.pool.get().await.map_err(internal)?;
+    let tx = client.transaction().await.map_err(internal)?;
+    let host = Host::new(core(), layout());
+    let ran = postgres::run_table_operation(
+        &host,
+        &*tx,
+        type_name,
+        use_id,
+        operation,
+        params,
+        caller(ctx),
+        &ExecuteOptions::default(),
     )
     .await;
     match ran {

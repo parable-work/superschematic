@@ -114,6 +114,10 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/account/{id}/status/transition", route);
     let route = RouteControls::new()
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .apply(post(handle_job_lease_expire_holder));
+    router = router.route("/api/job/lease/expire-holder", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .apply(post(handle_job_lease_acknowledge));
     router = router.route("/api/job/{id}/lease/acknowledge", route);
     let route = RouteControls::new()
@@ -944,6 +948,66 @@ async fn handle_account_status_transition(
         &args.id,
         "status",
         "transition",
+        &args.input,
+    )
+    .await;
+    operation_response(result, request_id.as_deref())
+}
+
+/// Decodes the arguments of job.leaseExpireHolder in the order the TypeScript
+/// router reads them: path, query, input, then body fields.
+fn decode_job_lease_expire_holder(body: Option<Value>) -> Result<JobLeaseExpireHolderArgs, ApiError> {
+    Ok(JobLeaseExpireHolderArgs {
+        input: required_input(body, types::validators::parse_job_lease_expire_holder_input)?,
+    })
+}
+
+impl JobLeaseExpireHolderArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_job_lease_expire_holder_input)?;
+        Ok(())
+    }
+}
+
+async fn handle_job_lease_expire_holder(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let request_id = request_id_from_headers(&headers);
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is none.
+    let body = match json_body(body) {
+        Ok(body) => body,
+        Err(err) => return error_response(err),
+    };
+    let args = match decode_job_lease_expire_holder(body) {
+        Ok(args) => args,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/job/lease/expire-holder".to_string());
+    ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
+    ctx.query_params = query.last_values();
+    // Job's Lease expireHolder, a Lease (D104): the behaviors' core
+    // runs it on the table as a whole, a command without a row, on a
+    // transaction of fixture-agents-db's pool, as the request's caller.
+    let result: Result<types::JobLeaseExpireHolderResult, ApiError> = behaviors::run_table_operation(
+        &state.implementations.behaviors,
+        &ctx,
+        "Job",
+        "Lease",
+        "expireHolder",
         &args.input,
     )
     .await;

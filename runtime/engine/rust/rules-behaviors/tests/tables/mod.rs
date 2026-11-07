@@ -1,8 +1,10 @@
-//! The host the tests of Presence and Budget share: a source in memory that
-//! keeps rows of several types, their specs, their sub-table rows and the
-//! deadlines the core arms, as a database's adapter keeps its tables, so a
+//! The host the tests of Presence, Budget, Lease's expireHolder and Pool
+//! share: a source in memory that keeps rows of several types, their specs,
+//! their sub-table rows, the deadlines the core arms with their payloads and
+//! the events it emits, as a database's adapter keeps its tables, so a
 //! command that reaches another row (`Cx::call_on`, a linked read, a
-//! holding read, another row's sub-table rows) runs as it does on a table.
+//! holding read, a read across a table, another row's sub-table rows) runs
+//! as it does on a table.
 
 #![allow(dead_code)]
 
@@ -11,8 +13,8 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     key_of, merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange,
-    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, Source, SubRow,
-    SubRowChange, TypeSpec,
+    KeyedRow, LinkedRows, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowWrite, Source,
+    SubRow, SubRowChange, TypeSpec,
 };
 
 /// A row's place: its type and its key.
@@ -28,6 +30,15 @@ pub struct Tables {
     pub sub_rows: BTreeMap<(At, String, String, String), Map<String, Value>>,
     /// By row, use id and name: the time it falls due.
     pub armed: BTreeMap<(At, String, String), i64>,
+    /// By row, use id and name: the payload an arming carries back.
+    pub payloads: BTreeMap<(At, String, String), Value>,
+    /// The events the core emitted, in order.
+    pub events: Vec<OutboxEvent>,
+    /// Whether a read across a table ignores its equalities, as a host that
+    /// answers more than it is asked does.
+    pub loose: bool,
+    /// The reads across a table it answered, each its request.
+    pub rows_read: Vec<ReadRequest>,
 }
 
 fn at(type_name: &str, key: &str) -> At {
@@ -75,6 +86,36 @@ impl Source for Tables {
                 *limit,
                 |row| row.owned.get(use_id).and_then(|fields| fields.get(field)) == Some(value),
             ))),
+            ReadRequest::Rows {
+                type_name,
+                equal,
+                tables,
+                after,
+                limit,
+            } => {
+                self.rows_read.push(request.clone());
+                let loose = self.loose;
+                let mut page = self.page(type_name, after.as_deref(), *limit, |row| {
+                    loose
+                        || equal.iter().all(|(field, value)| {
+                            let held = row.own.get(field).filter(|held| !held.is_null());
+                            match value {
+                                Value::Null => held.is_none(),
+                                value => held == Some(value),
+                            }
+                        })
+                });
+                for row in &mut page.rows {
+                    for table in tables {
+                        let found = self.table(type_name, &row.key, &table.use_id, &table.table);
+                        row.tables
+                            .entry(table.use_id.clone())
+                            .or_default()
+                            .insert(table.table.clone(), found);
+                    }
+                }
+                Ok(Answer::Linked(page))
+            }
             other => Err(Refusal::internal(format!(
                 "this host answers no read of this kind: {other:?}"
             ))),
@@ -109,10 +150,7 @@ impl Tables {
             .filter(|((name, key), row)| {
                 name == type_name && after.is_none_or(|after| key.as_str() > after) && holds(row)
             })
-            .map(|((_, key), row)| KeyedRow {
-                key: key.clone(),
-                row: row.clone(),
-            })
+            .map(|((_, key), row)| KeyedRow::new(key.clone(), row.clone()))
             .collect();
         let more = rows.len() > limit;
         rows.truncate(limit);
@@ -159,6 +197,7 @@ impl Tables {
                     self.rows.remove(&row);
                     self.sub_rows.retain(|(owner, ..), _| *owner != row);
                     self.armed.retain(|(owner, ..), _| *owner != row);
+                    self.payloads.retain(|(owner, ..), _| *owner != row);
                     deleted.push(row);
                 }
                 other => panic!("a write this host does not take: {other:?}"),
@@ -169,6 +208,8 @@ impl Tables {
         } = &command.action
         {
             self.armed
+                .remove(&(at(top, key), use_id.clone(), name.clone()));
+            self.payloads
                 .remove(&(at(top, key), use_id.clone(), name.clone()));
         }
         for write in &changes.sub_rows {
@@ -216,14 +257,17 @@ impl Tables {
             }
             let arming = (row, change.use_id().to_owned(), change.name().to_owned());
             match change {
-                DeadlineChange::Arm { at, .. } => {
-                    self.armed.insert(arming, *at);
+                DeadlineChange::Arm { at, payload, .. } => {
+                    self.armed.insert(arming.clone(), *at);
+                    self.payloads.insert(arming, payload.clone());
                 }
                 _ => {
                     self.armed.remove(&arming);
+                    self.payloads.remove(&arming);
                 }
             }
         }
+        self.events.extend(changes.events.iter().cloned());
     }
 }
 
@@ -418,6 +462,16 @@ impl Host {
         due.sort_by_key(|(_, at)| *at);
         due.into_iter()
             .map(|(((type_name, key), use_id, name), at)| {
+                let payload = self
+                    .tables
+                    .payloads
+                    .get(&(
+                        (type_name.clone(), key.clone()),
+                        use_id.clone(),
+                        name.clone(),
+                    ))
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 let outcome = self.run(
                     &type_name,
                     runner,
@@ -427,7 +481,7 @@ impl Host {
                         use_id,
                         name: name.clone(),
                         at,
-                        payload: Value::Null,
+                        payload,
                     },
                 );
                 ((type_name, key), name, outcome)

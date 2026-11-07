@@ -44,6 +44,7 @@ import type {
   AccountStatusTransitionResult,
   JobLeaseAcquireResult,
   JobLeaseDirectResult,
+  JobLeaseExpireHolderResult,
   JobLeaseExpireResult,
   JobLeaseHeartbeatResult,
   JobLeaseResetExpiriesResult,
@@ -80,6 +81,8 @@ import {
   parseJobLeaseAcquireInputJson,
   parseJobLeaseDirectInputFromJSON,
   parseJobLeaseDirectInputJson,
+  parseJobLeaseExpireHolderInputFromJSON,
+  parseJobLeaseExpireHolderInputJson,
   parseJobLeaseExpireInputFromJSON,
   parseJobLeaseExpireInputJson,
   parseJobLeaseHeartbeatInputFromJSON,
@@ -111,6 +114,7 @@ export type OperationName =
   | 'budgetSettle'
   | 'budgetSettleFor'
   | 'accountStatusTransition'
+  | 'leaseExpireHolder'
   | 'leaseAcknowledge'
   | 'leaseAcquire'
   | 'leaseDirect'
@@ -243,6 +247,18 @@ export const operationSpecs = {
     queryParams: [],
     bodyParams: [],
     input: { parse: (value: unknown) => parseAccountStatusTransitionInputFromJSON(parseAccountStatusTransitionInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  leaseExpireHolder: {
+    name: 'leaseExpireHolder',
+    namespace: 'job',
+    method: 'POST',
+    path: '/api/job/lease/expire-holder',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseJobLeaseExpireHolderInputFromJSON(parseJobLeaseExpireHolderInputJson(value)), required: true },
     auth: { public: false, required: true, permissions: [] },
     manual: false,
   },
@@ -656,6 +672,29 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: options.bodyLimits?.accountStatusTransition,
       rateLimitPerMinute: options.rateLimits?.accountStatusTransition,
       timeoutSeconds: options.timeouts?.accountStatusTransition,
+    }
+  );
+  // Job's Lease expireHolder, a Lease's operation of the table as a
+  // whole (D104): the repository runs it through the behaviors' core as a
+  // command without a row, as the request's caller, and a refusal of the
+  // core's is the problem of its status, code and message.
+  mountOperation(
+    router,
+    operationSpecs.leaseExpireHolder,
+    (ctx, request) =>
+      behaviorOperation(() =>
+        options.orm.job.lease.expireHolder(
+          // The repository's parameters: the wire values of JobLeaseExpireHolderInput,
+          // each optional member that is null left out (D104).
+          behaviorParams(request.input, ['notRenewedAfter']) as never,
+          { caller: behaviorCaller(ctx) }
+        )
+      ) as Promise<JobLeaseExpireHolderResult>,
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.leaseExpireHolder,
+      rateLimitPerMinute: options.rateLimits?.leaseExpireHolder,
+      timeoutSeconds: options.timeouts?.leaseExpireHolder,
     }
   );
   // Job's Lease acknowledge, a Lease (D103): the

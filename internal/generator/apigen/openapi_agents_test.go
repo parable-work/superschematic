@@ -16,11 +16,13 @@ import (
 
 // TestOpenAPIAgentsOperations: fixture-agents-api's OpenAPI document holds
 // the operations of the Lease, Retries, Presence and Budget its tables
-// implement (D104) as any operation, under each use's member, but Lease's
-// expireHolder, which runs on the table as a whole; every Job operation's
-// request body presents the member preconditions, JobPreconditions, whose
-// member Lease is JobLeasePrecondition, a token of at least 0, and no other
-// table's does; recordAttempt's failure is the enum of the config's classes
+// implement (D104) as any operation, under each use's member, Lease's
+// expireHolder, an operation of the table as a whole, at
+// /api/job/lease/expire-holder with no path parameter; every Job row
+// operation's request body presents the member preconditions,
+// JobPreconditions, whose member Lease is JobLeasePrecondition, a token of
+// at least 0, and expireHolder's and no other table's does;
+// recordAttempt's failure is the enum of the config's classes
 // and every Budget operation's meter the enum of its meters; an operation
 // of no parameter and no precondition (Session's beat) takes no body; and
 // the permission catalog lists each config permission under each of its
@@ -58,6 +60,7 @@ func TestOpenAPIAgentsOperations(t *testing.T) {
 		{"/api/job/{id}/lease/acquire", "JobLeaseAcquireHandler", "JobLeaseAcquireInput", "JobLeaseAcquireResult"},
 		{"/api/job/{id}/lease/heartbeat", "JobLeaseHeartbeatHandler", "JobLeaseHeartbeatInput", "JobLeaseHeartbeatResult"},
 		{"/api/job/{id}/lease/reset-expiries", "JobLeaseResetExpiriesHandler", "JobLeaseResetExpiriesInput", "JobLeaseResetExpiriesResult"},
+		{"/api/job/lease/expire-holder", "JobLeaseExpireHolderHandler", "JobLeaseExpireHolderInput", "JobLeaseExpireHolderResult"},
 		{"/api/job/{id}/retries/record-attempt", "JobRetriesRecordAttemptHandler", "JobRetriesRecordAttemptInput", "JobRetriesRecordAttemptResult"},
 		{"/api/job/{id}/status/transition", "JobStatusTransitionHandler", "JobStatusTransitionInput", "JobStatusTransitionResult"},
 		{"/api/session/{id}/presence/beat", "SessionPresenceBeatHandler", "", "SessionPresenceBeatResult"},
@@ -83,17 +86,23 @@ func TestOpenAPIAgentsOperations(t *testing.T) {
 			t.Errorf("%s: result = %v, want %s", tc.path, result, tc.result)
 		}
 	}
-	for path := range doc.Paths {
-		if path == "/api/job/{id}/lease/expire-holder" {
-			t.Errorf("the document serves %s, which runs on the table as a whole", path)
-		}
+	if _, ok := doc.Paths["/api/job/{id}/lease/expire-holder"]; ok {
+		t.Errorf("the document serves expireHolder on a row: it runs on the table as a whole")
+	}
+	if parameters := jsonPath(doc.Paths["/api/job/lease/expire-holder"]["post"], "parameters"); parameters != nil {
+		t.Errorf("/api/job/lease/expire-holder: parameters = %v, want none: it names no row", parameters)
+	}
+	if ref := refOf(jsonPath(doc.Components.Schemas["JobLeaseExpireHolderResult"], "properties", "reasons")); ref != "#/components/schemas/JobLeaseExpireHolderReasons" {
+		t.Errorf("JobLeaseExpireHolderResult.reasons = %v, want JobLeaseExpireHolderReasons", ref)
 	}
 	for name, input := range doc.Components.Schemas {
 		if !slices.Contains([]string{"Input"}, name[max(0, len(name)-5):]) {
 			continue
 		}
 		ref := refOf(jsonPath(input, "properties", "preconditions"))
-		job := len(name) > 3 && name[:3] == "Job"
+		// A precondition is a row's: an operation of the table as a whole
+		// presents none (D104).
+		job := len(name) > 3 && name[:3] == "Job" && name != "JobLeaseExpireHolderInput"
 		switch {
 		case job && ref != "#/components/schemas/JobPreconditions":
 			t.Errorf("%s.preconditions = %v, want JobPreconditions", name, ref)
@@ -122,8 +131,8 @@ func TestOpenAPIAgentsOperations(t *testing.T) {
 	}
 
 	// The permission catalog lists Job's Lease's jobs.override under each of
-	// Lease's operations, and Account's accounts.limits and
-	// accounts.observe under each of Budget's.
+	// Lease's operations, expireHolder's among them, and Account's
+	// accounts.limits and accounts.observe under each of Budget's.
 	var catalog struct {
 		Permissions []struct {
 			Name       string   `json:"name"`
@@ -137,7 +146,7 @@ func TestOpenAPIAgentsOperations(t *testing.T) {
 	for _, p := range catalog.Permissions {
 		operations[p.Name] = p.Operations
 	}
-	for permission, want := range map[string]int{"jobs.override": 7, "accounts.limits": 9, "accounts.observe": 9} {
+	for permission, want := range map[string]int{"jobs.override": 8, "accounts.limits": 9, "accounts.observe": 9} {
 		if got := operations[permission]; len(got) != want {
 			t.Errorf("%s is required by %v, want %d operations", permission, got, want)
 		}

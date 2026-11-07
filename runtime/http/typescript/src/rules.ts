@@ -1,7 +1,7 @@
 import type { SqlDatabase, SqlValue } from './d1.js';
 import type { OrmOptions, OrmQueryable } from './orm.js';
 import { HttpProblem } from './problem.js';
-import { uuidFromDb, uuidToDb } from './uuid.js';
+import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
 /*
 The adapter of the behaviors' pure core (D103): the one host every
@@ -53,6 +53,20 @@ them. A rule over the rows a principal holds asks for the rows of a type
 whose use's owned field holds a value (a holding read, D104), which the
 adapter reads by the layout's column of that field as it reads a linked
 read's own field.
+
+An operation of a use on the table as a whole (D104), a command without a
+row (runTableOperation, the core's tableOperation action, a declaration's
+scope schema), runs through the same loop: it names no key, so the core
+reads no row of its own, and it reaches rows only through the reads and the
+calls it makes on each (each such row's write fenced on its version, as
+any). A read-only one is a change set that writes nothing and carries its
+result. A rule over a table's rows asks for a page of a type's live rows
+(the read across a table, rows): every live row in the key column's order,
+each own field equal names held to its value by an equality the adapter
+binds as it binds a linked read's own field, or IS NULL for a null, with
+the rows of the sub-tables it names for each row read by one query per
+sub-table per page. Equality over own columns is all the adapter learns of
+the rule: what a behavior keeps, prefers or orders by is the core's.
 
 A use's sub-tables are child tables of its row (the layout's tables), whose
 rows the core reads (subRows) and the change set inserts, updates and
@@ -164,6 +178,8 @@ export type CoreAction =
   | { readonly kind: 'update'; readonly key: string; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'delete'; readonly key: string }
   | { readonly kind: 'operation'; readonly key: string; readonly useId: string; readonly operation: string; readonly params?: unknown }
+  /** An operation of a use on the table as a whole (D104), one its declaration's scope schema gives: no row, so no key, and no preconditions. */
+  | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
   | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
   | { readonly kind: 'change'; readonly key: string; readonly change: CoreRowChange };
 
@@ -214,7 +230,27 @@ export type CoreReadRequest =
   /** The rows of a type whose own field holds a key, in its key column's order, at most limit, after the key after when given (D103). */
   | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number }
   /** The rows of a type whose use's owned field holds a value, in its key column's order, at most limit, after the key after when given (D104), answered as a linked read is. */
-  | { readonly kind: 'holding'; readonly type: string; readonly useId: string; readonly field: string; readonly value: unknown; readonly after?: string; readonly limit: number };
+  | { readonly kind: 'holding'; readonly type: string; readonly useId: string; readonly field: string; readonly value: unknown; readonly after?: string; readonly limit: number }
+  /**
+   * The live rows of a type, each own field equal names holding its value (a
+   * null: none), each with the rows of the sub-tables tables names, in its
+   * key column's order, at most limit, after the key after when given (the
+   * read across a table, D104), answered as a linked read is.
+   */
+  | {
+      readonly kind: 'rows';
+      readonly type: string;
+      readonly equal?: Readonly<Record<string, unknown>>;
+      readonly tables?: readonly CoreTableRef[];
+      readonly after?: string;
+      readonly limit: number;
+    };
+
+/** One sub-table of a use, as a read across a table names it (D104): the use's id and the sub-table's declared name (superschematic_rules::TableRef). */
+export interface CoreTableRef {
+  readonly useId: string;
+  readonly table: string;
+}
 
 /** One row as the host read it: own fields, owned fields by use id then declared name, and its version. */
 export interface CoreRow {
@@ -229,9 +265,22 @@ export interface CoreSubRow {
   readonly values?: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * A row a linked, holding or table read answers, with its key, and with a
+ * read across a table the rows of each sub-table it names, by use id and
+ * then the table's declared name, each table's in key order, an empty list
+ * for a row that has none; absent for a linked or a holding read
+ * (superschematic_rules::KeyedRow).
+ */
+export interface CoreKeyedRow {
+  readonly key: string;
+  readonly row: CoreRow;
+  readonly tables?: Readonly<Record<string, Readonly<Record<string, readonly CoreSubRow[]>>>>;
+}
+
 /** The rows a linked read answers, each with its key, and whether more follow (superschematic_rules::LinkedRows). */
 export interface CoreLinkedRows {
-  readonly rows: readonly { readonly key: string; readonly row: CoreRow }[];
+  readonly rows: readonly CoreKeyedRow[];
   readonly more: boolean;
 }
 
@@ -378,10 +427,12 @@ export interface RulesOwnedField extends RulesColumn {
   readonly value?: boolean;
 }
 
-/** An operation a behavior declares on a row. */
+/** An operation a behavior declares on a row, or on the table as a whole. */
 export interface RulesOperation {
   readonly name: string;
   readonly writes: boolean;
+  /** True for an operation of the table as a whole (D104), a declaration's scope schema: a repository method that takes no key, which the adapter runs as a command without a row (runTableOperation). */
+  readonly table?: boolean;
 }
 
 /**
@@ -1059,6 +1110,21 @@ export async function runOperation(host: RulesHost, type: string, key: string, u
   return (await execute(host, type, command, options)).result;
 }
 
+/**
+ * Runs an operation of a use on the table as a whole (D104), a command
+ * without a row, and resolves to its result: one a declaration's scope
+ * schema gives, which reads rows through the read across a table and the
+ * linked and holding reads, and writes them only through its calls on each,
+ * each held to its version. A read-only one applies nothing; a writing one
+ * whose calls wrote no row applies nothing either. Null or absent params
+ * are {}. The core refuses options.preconditions on it, as on any command
+ * that names no row.
+ */
+export async function runTableOperation(host: RulesHost, type: string, useId: string, operation: string, params: unknown, caller: CoreCaller, options?: ExecuteOptions): Promise<unknown> {
+  const command = commandOf(host, caller, { kind: 'tableOperation', useId, operation, params: params ?? {} });
+  return (await execute(host, type, command, options)).result;
+}
+
 /** What a create through the core takes beside its own fields. */
 export interface CreateOptions extends ExecuteOptions {
   /** The key to write, in its wire form; absent, one the adapter makes (execute). */
@@ -1200,6 +1266,92 @@ export async function readHolding(host: RulesHost, type: string, useId: string, 
   return rowsHolding(host, table, column, value, after, limit, 'a read of the rows that hold a value');
 }
 
+/**
+ * Reads a page of the live rows of a type, as the core reads them
+ * (ReadRequest::Rows, the read across a table, D104): each own field equal
+ * names held to its value, bound as a command's own value of the field
+ * binds (a UUID's wire form as its column's text), or IS NULL for a null; at
+ * most limit of them in the key column's order, after the key after when
+ * given; a soft-deletable table's live rows alone; each with its key in its
+ * wire form and converted as a row read converts it, and whether more
+ * follow. Each row gets the rows of each sub-table tables names, read with
+ * one query per sub-table for the whole page (on SQLite, one per hundred of
+ * its rows, D1's limit of bound values), by use id and then declared
+ * name, each table's in key order by code point and converted as a
+ * sub-table read converts them, an empty list for a row that has none. A
+ * type the layout lacks has none, and so does a value of a UUID field that
+ * is no UUID, which no column of it can hold; a field that is no own column
+ * of the type, or a use or sub-table the layout does not give it, refuses
+ * the command as internal.
+ */
+export async function readRows(
+  host: RulesHost,
+  type: string,
+  equal: Readonly<Record<string, unknown>> | undefined,
+  tables: readonly CoreTableRef[] | undefined,
+  after: string | undefined,
+  limit: number
+): Promise<CoreLinkedRows> {
+  const table = host.layout.types[type];
+  if (table === undefined) return { rows: [], more: false };
+  if (!Number.isSafeInteger(limit) || limit < 0) throw internal(`a read of ${type}'s rows asks for ${JSON.stringify(limit)} rows`);
+  const dialect = host.store.dialect;
+  const subs = (tables ?? []).map(ref => ({ ref, sub: subTableOf(table, ref.useId, ref.table) }));
+  const values: unknown[] = [];
+  const conditions: string[] = [];
+  for (const [field, value] of Object.entries(equal ?? {})) {
+    const column = table.own.find(c => c.field === field);
+    if (column === undefined) throw internal(`${type} has no own field ${field} in the behaviors' layout`);
+    if (value === null || value === undefined) {
+      conditions.push(`${quote(column.column)} IS NULL`);
+      continue;
+    }
+    if (UUID_TYPES.has(column.type) && (typeof value !== 'string' || uuidValue(value) === undefined)) return { rows: [], more: false };
+    values.push(toColumn(value, column, table, dialect));
+    conditions.push(`${quote(column.column)} = ${placeholder(dialect, values.length)}`);
+  }
+  if (table.live) conditions.push(`${quote(table.live.column)} IS NULL`);
+  if (after !== undefined) {
+    values.push(keyValue(table, after));
+    conditions.push(`${quote(table.key.column)} > ${placeholder(dialect, values.length)}`);
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+  const text = `SELECT ${quote(table.key.column)} AS k, ${rowList(table)} FROM ${quote(table.table)}${where} ORDER BY ${quote(table.key.column)} LIMIT ${limit + 1}`;
+  const found = await host.store.query(text, values);
+  const page = found.slice(0, limit).map(row => ({ key: wireKeyOf(table, row.k), row: rowFrom(table, row, dialect) }));
+  if (subs.length === 0) return { rows: page, more: found.length > limit };
+  // Each named sub-table's rows of the page's rows, by the row's wire key.
+  const byRow = new Map<string, Record<string, Record<string, CoreSubRow[]>>>(page.map(({ key }) => [key, {}]));
+  for (const { ref, sub } of subs) {
+    for (const held of byRow.values()) (held[ref.useId] ??= {})[ref.table] = [];
+    if (page.length === 0) continue;
+    const keys = page.map(({ key }) => keyValue(table, key));
+    const list = [`${quote(sub.row)} AS r`, `${quote(sub.key.column)} AS k`, ...sub.fields.map((field, i) => `${quote(field.column)} AS c${i}`)].join(', ');
+    const order = dialect === 'postgres' ? `${quote(sub.row)}, ${quote(sub.key.column)} COLLATE "C"` : `${quote(sub.row)}, ${quote(sub.key.column)}`;
+    // The page's keys in statements of at most the bound values a SQLite
+    // store takes, D1's 100, each a run of whole rows: a row's sub-table
+    // rows stay in key order.
+    const chunk = dialect === 'postgres' ? keys.length : SQLITE_BOUND_VALUES;
+    const rows: Record<string, unknown>[] = [];
+    for (let at = 0; at < keys.length; at += chunk) {
+      const some = keys.slice(at, at + chunk);
+      const among = some.map((_, i) => placeholder(dialect, i + 1)).join(', ');
+      rows.push(...(await host.store.query(`SELECT ${list} FROM ${quote(sub.table)} WHERE ${quote(sub.row)} IN (${among}) ORDER BY ${order}`, some)));
+    }
+    for (const row of rows) {
+      const held = byRow.get(wireKeyOf(table, row.r));
+      if (held === undefined) continue;
+      const read: Record<string, unknown> = {};
+      sub.fields.forEach((field, i) => {
+        const value = fromColumn(row[`c${i}`], field, table, dialect);
+        if (value !== undefined) read[field.name] = value;
+      });
+      held[ref.useId]![ref.table]!.push({ key: String(row.k), values: read });
+    }
+  }
+  return { rows: page.map(({ key, row }) => ({ key, row, tables: byRow.get(key)! })), more: found.length > limit };
+}
+
 /** The rows of a table whose column holds a value, a linked read's and a holding read's page: the value bound as the column binds it, at most limit of them after the key after, and whether more follow. */
 async function rowsHolding(host: RulesHost, table: RulesTable, column: RulesColumn, value: unknown, after: string | undefined, limit: number, what: string): Promise<CoreLinkedRows> {
   if (!Number.isSafeInteger(limit) || limit < 0) throw internal(`${what} of ${table.type} asks for ${JSON.stringify(limit)} rows`);
@@ -1277,6 +1429,9 @@ function prepared(host: RulesHost, table: RulesTable, command: CoreCommand, prec
 
 /** The UUID types whose wire form is base62 and whose column holds the hyphenated text (D79). */
 const UUID_TYPES: ReadonlySet<string> = new Set(['Identity.UUID', 'Identity.UserID']);
+
+/** The most values a statement binds on a SQLite store: D1's limit of 100 bound parameters, which bun:sqlite's far higher one admits too. A read of a page's sub-table rows binds its keys in runs of this many. */
+const SQLITE_BOUND_VALUES = 100;
 
 /** A key for a create that names none: a UUID's wire form, or a UUID's text for a string key. */
 function newKey(table: RulesTable): string {
@@ -1357,6 +1512,10 @@ async function settle(host: RulesHost, spec: CoreTypeSpec, command: CoreCommand)
           // Nor of the rows whose owned field holds a value.
           throw internal('a read of the rows whose owned field holds a value under a lock has no check on SQLite or D1 yet (D104)');
         }
+        if (request.kind === 'rows' && locks.length > 0 && host.store.locks === 'fenced') {
+          // Nor of a table's rows.
+          throw internal("a read of a table's rows under a lock has no check on SQLite or D1 yet (D103)");
+        }
         const answered: CoreAnswered = { request, answer: await answerOf(host, request), held: locks.length };
         const same = JSON.stringify(request);
         const at = reads.findIndex(known => JSON.stringify(known.request) === same);
@@ -1379,7 +1538,7 @@ async function settle(host: RulesHost, spec: CoreTypeSpec, command: CoreCommand)
 }
 
 function actionName(action: CoreAction): string {
-  return action.kind === 'operation' ? action.operation : action.kind === 'deadline' ? action.name : action.kind;
+  return action.kind === 'operation' || action.kind === 'tableOperation' ? action.operation : action.kind === 'deadline' ? action.name : action.kind;
 }
 
 /** A row's key in its wire form, from either form: a UUID key's base62 text from its hyphenated or base62 text, any other key its text. */
@@ -1468,6 +1627,8 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
       return { linked: await readLinked(host, request.type, request.field, request.key, request.after, request.limit) };
     case 'holding':
       return { linked: await readHolding(host, request.type, request.useId, request.field, request.value, request.after, request.limit) };
+    case 'rows':
+      return { linked: await readRows(host, request.type, request.equal, request.tables, request.after, request.limit) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }
@@ -1975,7 +2136,7 @@ function fromColumn(value: unknown, column: RulesColumn, table: RulesTable, dial
  */
 export function busyRefusal(type: string, command: CoreCommand, attempts: number): CoreRefusal {
   const action = command.action;
-  const name = action.kind === 'operation' ? action.operation : action.kind === 'deadline' ? action.name : action.kind;
+  const name = actionName(action);
   const key = 'key' in action ? ` ${action.key}` : action.kind === 'create' && action.id ? ` ${action.id}` : '';
   return {
     code: 'busy',
@@ -2033,6 +2194,23 @@ export interface RulesCallOptions<Preconditions = Readonly<Record<string, unknow
  */
 export type UseOperations<Ops extends Record<string, { readonly params: unknown; readonly result: unknown }>, Key = string, Preconditions = Readonly<Record<string, unknown>>> = {
   readonly [Name in keyof Ops]: (key: Key, params: Ops[Name]['params'], options?: RulesCallOptions<Preconditions>) => Promise<Ops[Name]['result']>;
+};
+
+/** What a behavior's operation of the table as a whole on a repository takes beside its parameters (D104): no preconditions, which only a row's command presents. */
+export interface RulesTableCallOptions {
+  /** The caller the core checks a behavior's permissions against; the ORM's acting user, holding no permissions, unless set. */
+  readonly caller?: CoreCaller;
+}
+
+/**
+ * The methods a use's operations of the table as a whole (D104) add to a
+ * table's repository under the use's member, beside its operations of a
+ * row: each operation's (params, options) to its result, with no key. The
+ * generated orm.ts types each from its declaration, as orm.account.pool's
+ * TableOperations<{ pick: { params: { exclude?: string[] }; result: { member: ... } } }>.
+ */
+export type TableOperations<Ops extends Record<string, { readonly params: unknown; readonly result: unknown }>> = {
+  readonly [Name in keyof Ops]: (params: Ops[Name]['params'], options?: RulesTableCallOptions) => Promise<Ops[Name]['result']>;
 };
 
 /** What a repository's runDeadline takes beside the deadline. */

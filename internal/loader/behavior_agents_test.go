@@ -28,11 +28,6 @@ const (
 	agentsAPIFixture = "tsreader/testdata/services/fixture-agents-api"
 )
 
-// expireHolderLeftOut is the API's one warning: Lease's expireHolder runs
-// on the table as a whole, which waits for a command without a row, so
-// JobActions leaves it out (D104).
-const expireHolderLeftOut = "JobActions: Job's Lease is a Lease, whose operation expireHolder runs on the schema as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves expireHolder out (D103, D104)"
-
 // TestAgentsFixturesLoad: both fixtures load; Job stays a table whose uses
 // are Lease and Retries, which it implements, and its status, in that
 // order, Session's Presence and its status, Account's Budget and its
@@ -43,11 +38,12 @@ const expireHolderLeftOut = "JobActions: Job's Lease is a Lease, whose operation
 // deadline queue, Presence's four owned fields and Session's deadline
 // queue, Budget's three sub-tables on each of Account and Workspace and no
 // queue for either, and no change queue anywhere; the API's sets serve
-// each use's operations on a row, Lease's but expireHolder, every Job
-// operation's input presenting JobPreconditions, recordAttempt's failure a
-// JobRetriesClass and every Budget meter an AccountBudgetMeter; its one
-// warning is that expireHolder is left out; and the expanded IR of both is
-// held to its golden (D104).
+// each use's operations on a row, and Lease's expireHolder on the table as
+// a whole at job/lease/expire-holder, every Job row operation's input
+// presenting JobPreconditions and expireHolder's none, recordAttempt's
+// failure a JobRetriesClass and every Budget meter an AccountBudgetMeter;
+// the API loads with no warning; and the expanded IR of both is held to its
+// golden (D104).
 func TestAgentsFixturesLoad(t *testing.T) {
 	db, err := LoadService(filepath.FromSlash(agentsDBFixture))
 	if err != nil {
@@ -155,8 +151,8 @@ func TestAgentsFixturesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{expireHolderLeftOut}; !slices.Equal(warnings, want) {
-		t.Errorf("the API's warnings =\n%q\nwant\n%q", warnings, want)
+	if len(warnings) != 0 {
+		t.Errorf("the API's warnings =\n%q\nwant none", warnings)
 	}
 	var operations []string
 	for _, set := range api.OperationSets {
@@ -183,6 +179,7 @@ func TestAgentsFixturesLoad(t *testing.T) {
 		"JobActions.leaseExpire job/{id}/lease/expire job_lease_expire Lease jobs.override",
 		"JobActions.leaseDirect job/{id}/lease/direct job_lease_direct Lease jobs.override",
 		"JobActions.leaseAcknowledge job/{id}/lease/acknowledge job_lease_acknowledge Lease jobs.override",
+		"JobActions.leaseExpireHolder job/lease/expire-holder job_lease_expire_holder Lease jobs.override",
 		"JobActions.leaseResetExpiries job/{id}/lease/reset-expiries job_lease_reset_expiries Lease jobs.override",
 		"JobActions.retriesRecordAttempt job/{id}/retries/record-attempt job_retries_record_attempt Retries ",
 		"JobActions.statusTransition job/{id}/status/transition job_status_transition status ",
@@ -207,6 +204,7 @@ func TestAgentsFixturesLoad(t *testing.T) {
 		"JobPreconditions":             {"Lease:JobLeasePrecondition:optional"},
 		"JobLeasePrecondition":         {"token:Generic.Int64:required"},
 		"JobLeaseResetExpiriesInput":   {"preconditions:JobPreconditions:optional"},
+		"JobLeaseExpireHolderInput":    {"holder:string:required", "notRenewedAfter:Generic.Int64:optional"},
 		"JobLeaseHeartbeatInput":       {"acknowledge:Generic.Int64:optional", "preconditions:JobPreconditions:optional"},
 		"JobStatusTransitionInput":     {"from:JobStatusState:optional", "preconditions:JobPreconditions:optional", "to:JobStatusState:required"},
 		"JobRetriesRecordAttemptInput": {"detail:Generic.JSON:optional", "failure:JobRetriesClass:optional", "preconditions:JobPreconditions:optional", "predicates:boolean:optional", "result:Generic.JSON:optional", "score:number:optional", "signature:string:optional"},

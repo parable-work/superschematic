@@ -25,7 +25,10 @@ import (
 // to ormOf (withRulesCore), and types each use's operations as members of
 // the table's repository under the use's member,
 // orm.order.status.transition(key, { to: 'paid' }) and
-// orm.ticket.timers.fireTimer(key, { deadline: 'respond' }). A table whose
+// orm.ticket.timers.fireTimer(key, { deadline: 'respond' }), and each
+// operation of the table as a whole (D104), a declaration's scope schema,
+// as one that takes no key, orm.account.pool.pick({ exclude: [...] }),
+// which the adapter runs as a command without a row. A table whose
 // behaviors arm deadlines has runDeadline, and one whose writes its
 // behaviors hear runChange, which a behavior worker's handlers call, one
 // whose behaviors emit events runEvent (D104), which hands one of its event
@@ -60,7 +63,7 @@ var repositoryMembers = []string{
 	"keyColumns", "upsertWhere", "upsertRow", "upsertBatches", "heldRow", "rowsOfKeys", "resealed", "rulesHost",
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
-	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
+	"notFound", "operate", "operateTable", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
 	"clearActor", "runDeadline", "runChange", "runEvent", "refusePreconditions",
 }
 
@@ -68,12 +71,20 @@ var repositoryMembers = []string{
 // use's id, the anchor field or the behavior's name; Member, the
 // repository's member its operations sit under (behaviorlayout.UseMember:
 // the anchor field, or timers for implements Timers); Behavior, its
-// registered name; and its operations on a row.
+// registered name; its operations on a row, which take the row's key; and
+// its operations on the table as a whole (D104), which take none.
 type ORMUse struct {
-	ID         string
-	Member     string
-	Behavior   string
-	Operations []ORMOperation
+	ID              string
+	Member          string
+	Behavior        string
+	Operations      []ORMOperation
+	TableOperations []ORMOperation
+}
+
+// HasOperations reports whether the use has an operation of either kind,
+// so the repository holds a member for it.
+func (u ORMUse) HasOperations() bool {
+	return len(u.Operations) > 0 || len(u.TableOperations) > 0
 }
 
 // ORMOperation is a use's operation as orm.ts types it: its name, its
@@ -186,14 +197,20 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 						doc = declared.Description
 					}
 				}
-				ormUse.Operations = append(ormUse.Operations, ORMOperation{
+				operation := ORMOperation{
 					Name:   op.Name,
 					Doc:    doc,
 					Params: renderNarrowed(narrowed.Params[op.Name], aliases, "      "),
 					Result: renderNarrowed(narrowed.Results[op.Name], aliases, "      "),
-				})
+				}
+				// An operation of the table as a whole takes no key (D104).
+				if op.Table {
+					ormUse.TableOperations = append(ormUse.TableOperations, operation)
+					continue
+				}
+				ormUse.Operations = append(ormUse.Operations, operation)
 			}
-			if len(ormUse.Operations) > 0 {
+			if ormUse.HasOperations() {
 				out.uses[name] = append(out.uses[name], ormUse)
 			}
 		}

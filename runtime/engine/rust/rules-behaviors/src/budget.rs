@@ -98,6 +98,18 @@
 //! clock is before its expiry), as the engine read `Lease.active`. Deleting
 //! the row settles everything it reserved up the chain.
 //!
+//! Capacity (D104). Budget implements the contract Capacity, which Pool asks
+//! of each member at a pick: `hasRoom` answers whether the row has room in
+//! every meter now, each read as `checkReserve` reads it for an amount of 1
+//! (used, the provider's figure while an observation holds, plus reserved,
+//! less an ended lease's own reservation, plus 1, within the limit), and when
+//! not, `until`, the earliest instant at which the clock alone gives every
+//! meter room (a period's start, an observation's lapse, a bucket leaving a
+//! rolling window), absent when none does. A scope's meters are not read: a
+//! scope's room is shared by every row inside it, so it tells no member from
+//! another. It is a pure answer over the row and its `meters` and `buckets`
+//! as a read across the table gave them ([`Behavior::answer`]).
+//!
 //! `setLimit` of a meter whose limit an own field holds (`limitField`) is
 //! refused: the core writes no own field from an operation (D103), so on a
 //! table the limit is set by an update of the field, which the guard holds
@@ -127,10 +139,11 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
-    key_of, Behavior, Change, Code, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration,
-    GuardRequest, Hook, Refusal, Row, SchemaIssue, Stop, SubRow, Veto, View,
+    key_of, Behavior, Change, Code, ConfigCx, ConfigError, ConfigTarget, ContractQuery, Cx,
+    Declaration, GuardRequest, Hook, Refusal, Row, SchemaIssue, Stop, SubRow, Veto, View,
 };
 
+use crate::capacity::{self, Room};
 use crate::declared;
 use crate::moves::{self, StatusMove};
 use crate::periods;
@@ -744,6 +757,75 @@ impl Behavior for Budget {
         fields.insert(METERS.into(), Value::Object(meters));
         fields
     }
+
+    // Capacity's hasRoom, over the row's meters and buckets at the time:
+    // see the module's header. Any other query it answers none to.
+    fn answer(
+        &self,
+        config: &BudgetConfig,
+        query: &ContractQuery<'_>,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Option<Value> {
+        if query.contract != capacity::NAME || query.query != capacity::HAS_ROOM {
+            return None;
+        }
+        Some(room_of(config, row, tables, now).to_json())
+    }
+}
+
+// room_of is whether a row has room in every meter of the config at a time,
+// each read as checkReserve reads it for an amount of 1, and when not, the
+// earliest instant at which the clock alone gives every meter room.
+fn room_of(
+    config: &BudgetConfig,
+    row: &Row,
+    tables: &BTreeMap<String, Vec<SubRow>>,
+    now: i64,
+) -> Room {
+    let meters = tables.get(METERS).map_or(&[][..], Vec::as_slice);
+    let buckets = tables.get(BUCKETS).map_or(&[][..], Vec::as_slice);
+    let active = active_token(lease_state_of(config, row, now).as_ref());
+    let readings: Vec<Reading> = config
+        .meters
+        .iter()
+        .map(|(name, spec)| {
+            let meter = meter_row(meters, name);
+            let stale = if config.lease.is_some()
+                && meter.reservation > 0
+                && !same_token(meter.token, active)
+            {
+                meter.reservation
+            } else {
+                0
+            };
+            Reading {
+                spec: spec.clone(),
+                meter: name.clone(),
+                reserved: meter.reserved - stale,
+                row: meter,
+                buckets: buckets.to_vec(),
+                own: row.own.clone(),
+                amount: 1,
+            }
+        })
+        .collect();
+    if readings.iter().all(|reading| reading.fits(now)) {
+        return Room::OPEN;
+    }
+    let mut instants: Vec<i64> = readings
+        .iter()
+        .flat_map(|reading| reading.moves(now))
+        .collect();
+    instants.sort_unstable();
+    instants.dedup();
+    Room {
+        room: false,
+        until: instants
+            .into_iter()
+            .find(|at| readings.iter().all(|reading| reading.fits(*at))),
+    }
 }
 
 // ---- a meter's state ----
@@ -1135,25 +1217,32 @@ struct LeaseState {
     active: bool,
 }
 
-// lease_of reads the lease; None on a type without Lease.
+// lease_of reads the lease of the row the view runs on, as the run has it;
+// None on a type without Lease.
 fn lease_of(view: &View<'_, BudgetConfig>) -> Option<LeaseState> {
     let lease = view.config().lease.as_deref()?;
+    Some(lease_state(|field| view.get_of(lease, field), view.now()))
+}
+
+// lease_state_of reads the lease of a row as a read gave it; None on a type
+// without Lease.
+fn lease_state_of(config: &BudgetConfig, row: &Row, now: i64) -> Option<LeaseState> {
+    let lease = config.lease.as_deref()?;
+    Some(lease_state(|field| row.owned(lease, field).cloned(), now))
+}
+
+// lease_state is Lease's rule over its owned fields at a time: active while
+// its holder holds a subject and the time is before its expiry.
+fn lease_state(get: impl Fn(&str) -> Option<Value>, now: i64) -> LeaseState {
     let holder = matches!(
-        view.get_of(lease, LEASE_HOLDER),
+        get(LEASE_HOLDER),
         Some(Value::String(holder)) if !holder.is_empty()
     );
-    let expires_at = view
-        .get_of(lease, LEASE_EXPIRES_AT)
-        .as_ref()
-        .and_then(integer);
-    Some(LeaseState {
-        token: view
-            .get_of(lease, LEASE_TOKEN)
-            .as_ref()
-            .and_then(integer)
-            .unwrap_or(0),
-        active: holder && expires_at.is_some_and(|at| view.now() < at),
-    })
+    let expires_at = get(LEASE_EXPIRES_AT).as_ref().and_then(integer);
+    LeaseState {
+        token: get(LEASE_TOKEN).as_ref().and_then(integer).unwrap_or(0),
+        active: holder && expires_at.is_some_and(|at| now < at),
+    }
 }
 
 // active_token is the token of the active lease; None when no lease is

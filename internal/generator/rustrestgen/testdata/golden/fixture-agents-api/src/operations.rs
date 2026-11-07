@@ -159,6 +159,22 @@ pub const ACCOUNT_STATUS_TRANSITION: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// job.leaseExpireHolder (`POST /api/job/lease/expire-holder`), which the behaviors'
+/// core runs: Job's Lease expireHolder, a Lease, on the table as a
+/// whole (D104).
+pub const JOB_LEASE_EXPIRE_HOLDER: OperationInfo = OperationInfo {
+    namespace: "job",
+    name: "leaseExpireHolder",
+    method: "POST",
+    path: "/api/job/lease/expire-holder",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// job.leaseAcknowledge (`POST /api/job/{id}/lease/acknowledge`), which the behaviors'
 /// core runs: Job's Lease acknowledge, a Lease (D103).
 pub const JOB_LEASE_ACKNOWLEDGE: OperationInfo = OperationInfo {
@@ -351,6 +367,7 @@ pub const ALL: &[OperationInfo] = &[
     ACCOUNT_BUDGET_SETTLE,
     ACCOUNT_BUDGET_SETTLE_FOR,
     ACCOUNT_STATUS_TRANSITION,
+    JOB_LEASE_EXPIRE_HOLDER,
     JOB_LEASE_ACKNOWLEDGE,
     JOB_LEASE_ACQUIRE,
     JOB_LEASE_DIRECT,

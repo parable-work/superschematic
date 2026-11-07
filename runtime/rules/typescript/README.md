@@ -50,7 +50,11 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   limit }`, answered `{ linked: { rows, more } }`, each row `{ key, row }`),
   or one page of a type's rows whose use's owned field holds a value
   (`holding`: `{ kind: 'holding', type, useId, field, value, after?, limit
-  }`, answered as a linked read is, D104).
+  }`, answered as a linked read is, D104), or one page of a type's live
+  rows whose own fields hold the values `equal` names, null for none, each
+  with its rows of the sub-tables `tables` names (`rows`: `{ kind: 'rows',
+  type, equal?, tables?, after?, limit }`, answered as a linked read is,
+  each row's `tables` by use id and table name, D104).
   A spec may list the type's own fields (`TypeSpec.fields`, each a
   `FieldSpec`: `name`, `type`, `dateTime` and, for a to-one relation's,
   `relation`: `{ name, type }`), which a config that names a field is held
@@ -58,7 +62,10 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   its target. A command's action may be a change of a row from its table's
   change queue (`{ kind: 'change', key, change: { write, at, before?,
   after? } }`, D103), and a change set may write a row gone (`{ kind:
-  'gone', type, key }`). An update, a delete and an operation may carry the
+  'gone', type, key }`); it may be an operation of a use on the table as a
+  whole (`{ kind: 'tableOperation', useId, operation, params }`, D104), a
+  command without a row, which writes rows only through its calls on them
+  and presents no preconditions. An update, a delete and an operation may carry the
   caller's `preconditions`, each use's entry by its use id (`{ Lease: {
   token: 3 } }`, D16, D104), which the core checks before it reads the
   row; any other action that carries one is refused.
@@ -69,7 +76,11 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   (`hearsChanges`), and the entry a caller presents it as a precondition
   (`preconditionSchema`), in the order Workflow, Reactions, Constants,
   StateRules, Approvals, Timers, Lease, Presence, Budget, Retries, Seats,
-  Reconcile, Schedules. A value field the behavior does not set at a
+  Reconcile, Schedules, Pool. An operation the core runs on the table as
+  a whole says `scope: 'schema'` (Pool's `pick`, Lease's `expireHolder`),
+  and the contracts a behavior implements or asks are its
+  `contracts` (`DeclaredContract`: each its name and role, D104: Budget
+  implements `Capacity`, which Pool asks). A value field the behavior does not set at a
   create says `optional: true` (Reconcile's `observed`,
   `DeclaredField.optional`), and its column takes NULL. A behavior that
   emits events about a row lists them (`events`, `DeclaredEvent`: each its

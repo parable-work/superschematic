@@ -26,8 +26,15 @@
 //! no command writes; whether a table has rows; a type's spec from the
 //! layout; a row's rows of a use's sub-table, in key order; the rows whose
 //! own field holds a key, and those whose use's owned field holds a value
-//! (D104), by the layout's column, in key order. A soft-deletable table's
-//! reads and writes see its live rows alone. A lock is a transaction's
+//! (D104), by the layout's column, in key order; and a table's rows (D104),
+//! each own field the read names held to its value by equality, in key
+//! order, each with the rows of the sub-tables the read names, one read of
+//! each sub-table per page. A soft-deletable table's reads and writes see
+//! its live rows alone. An operation of the table as a whole (D104), a
+//! command without a row, runs through `run_table_operation`: the core
+//! reads the table's rows and writes each row it reaches through a call on
+//! that row, each fenced on its version, so one that writes no row applies
+//! nothing. A lock is a transaction's
 //! advisory lock on Postgres; SQLite takes none, and the unit that writes
 //! begins with a check of each read made under one. A refusal is returned
 //! whole ([`Error::Refused`]); a change set is applied as one unit in a

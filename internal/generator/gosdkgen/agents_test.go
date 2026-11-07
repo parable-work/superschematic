@@ -54,9 +54,10 @@ func loadAgentsAPI(t *testing.T) (*ir.Schema, *ir.Schema, *apigen.APIOutput) {
 // the operations of each use Job, Session and Account implement are methods
 // of a struct of their own, the field of the namespace named for the use's
 // member (JobNamespace.Lease.Heartbeat, AccountNamespace.Budget.Observe),
-// beside each status's; every Job operation's input presents
-// JobPreconditions, whose member Lease is JobLeasePrecondition. Regenerate
-// with:
+// beside each status's, and Lease's expireHolder, an operation of the table
+// as a whole, takes no key (JobNamespace.Lease.ExpireHolder(ctx, input),
+// D104); every Job row operation's input presents JobPreconditions, whose
+// member Lease is JobLeasePrecondition. Regenerate with:
 // go test ./internal/generator/gosdkgen -run TestAgentsSDKGolden -update
 func TestAgentsSDKGolden(t *testing.T) {
 	_, _, apiOutput := loadAgentsAPI(t)
@@ -85,6 +86,7 @@ func TestAgentsSDKGolden(t *testing.T) {
 	}
 	for _, want := range []string{
 		"JobNamespace.Lease *JobLeaseOperations.Heartbeat",
+		"JobNamespace.Lease *JobLeaseOperations.ExpireHolder",
 		"JobNamespace.Retries *JobRetriesOperations.RecordAttempt",
 		"JobNamespace.Status *JobStatusOperations.Transition",
 		"SessionNamespace.Presence *SessionPresenceOperations.Beat",
@@ -94,8 +96,8 @@ func TestAgentsSDKGolden(t *testing.T) {
 			t.Errorf("members = %v, want %s among them", got, want)
 		}
 	}
-	if len(got) != 22 {
-		t.Errorf("members = %d (%v), want 22", len(got), got)
+	if len(got) != 23 {
+		t.Errorf("members = %d (%v), want 23", len(got), got)
 	}
 }
 

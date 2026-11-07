@@ -3,9 +3,11 @@ package loader
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -732,13 +734,14 @@ func viewTSConfig(t *testing.T) string {
 	return string(out)
 }
 
-// TestBehaviorOperationsLeaveOutOperationsWithoutARow: an operation of a
-// use that runs on the schema or a namespace as a whole, not on a row, is
-// one a command without a row would run, which the core does not take yet
-// (Lease's expireHolder): the set is not refused, the build warns of it
-// once per set, use and operation, and the expansion leaves it out, serving
-// the use's other operations (D103, D104).
-func TestBehaviorOperationsLeaveOutOperationsWithoutARow(t *testing.T) {
+// TestBehaviorOperationsServeTableOperations: an operation of a use that
+// runs on the table as a whole (scope schema) is served at POST
+// <type>/<member>/<op>, with no key argument, marked Table, which the
+// servers run as a command without a row; one that runs on a namespace as
+// a whole (Comments') the core runs no command for, so the set is not
+// refused, the build warns of it once per set, use and operation, and the
+// expansion leaves it out, serving the use's other operations (D103, D104).
+func TestBehaviorOperationsServeTableOperations(t *testing.T) {
 	reg := behaviorOperationsRegistry(t)
 	db := ordersDB()
 	db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Gauge", Field: "fill"}, ir.BehaviorRef{Name: "Tally", Field: "items"})
@@ -753,8 +756,7 @@ func TestBehaviorOperationsLeaveOutOperationsWithoutARow(t *testing.T) {
 		warnings = append(warnings, d.Msg)
 	}
 	want := []string{
-		"OrderActions: Order's fill is a Gauge, whose operation census runs on the schema as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves census out (D103, D104)",
-		"OrderActions: Order's items is a Tally, whose operation sum runs on the namespace as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves sum out (D103, D104)",
+		"OrderActions: Order's items is a Tally, whose operation sum runs on a namespace as a whole: @behaviorOperations serves the operations a behavior runs on a row or on its table, and leaves sum out (D103, D104)",
 	}
 	if !reflect.DeepEqual(warnings, want) {
 		t.Errorf("CheckBehaviorOperations' warnings =\n%q\nwant\n%q", warnings, want)
@@ -766,8 +768,64 @@ func TestBehaviorOperationsLeaveOutOperationsWithoutARow(t *testing.T) {
 	for _, op := range api.OperationSets[0].Operations {
 		names = append(names, op.Name)
 	}
-	if want := []string{"statusTransition"}; !reflect.DeepEqual(names, want) {
-		t.Errorf("OrderActions' operations = %v, want %v", names, want)
+	if want := []string{"statusTransition", "fillCensus"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("OrderActions' operations = %v, want %v", names, want)
+	}
+	census := api.OperationSets[0].Operations[1]
+	if census.HTTPMethod != "POST" || census.RestPath != "order/fill/census" || len(census.Arguments) != 0 || census.MCP.Handle != "order_fill_census" ||
+		!census.BehaviorOperation.Table || census.BehaviorOperation.Key != "id" || census.Docs.ReplayMode != ir.DocsReplayModeReadOnly {
+		t.Errorf("fillCensus = %s %s, %d arguments, handle %q, marker %+v, replay %q", census.HTTPMethod, census.RestPath, len(census.Arguments), census.MCP.Handle, census.BehaviorOperation, census.Docs.ReplayMode)
+	}
+	if row := api.OperationSets[0].Operations[0]; row.BehaviorOperation.Table || row.RestPath != "order/{id}/status/transition" {
+		t.Errorf("statusTransition = %s, table %v", row.RestPath, row.BehaviorOperation.Table)
+	}
+}
+
+// TestTableRouteThatAnAuthoredRouteMatchesRefused: an operation of the table
+// as a whole the expansion adds is routed at POST <type>/<member>/<op>, and
+// an operation of the API with the same method whose path matches it, a
+// {parameter} read as any one segment, is refused, naming the set, the
+// added operation, both routes and the other operation; one with another
+// method, or another count of segments, is not (D104).
+func TestTableRouteThatAnAuthoredRouteMatchesRefused(t *testing.T) {
+	reg := behaviorOperationsRegistry(t)
+	db := ordersDB()
+	db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Gauge", Field: "fill"})
+	authored := func(op *ir.FieldDef) *ir.Schema {
+		return ordersAPI(actionsOf("OrderActions", "Order"), &ir.OperationSet{Name: "OrderMutations", Operations: []*ir.FieldDef{op}})
+	}
+	const refusal = "OrderActions: the operation fillCensus it adds is routed at POST /api/order/fill/census, which OrderMutations.%s's POST %s also matches: rename one, or serve the table's operations from code of the project's own (D104)"
+	for _, test := range []struct {
+		name string
+		op   *ir.FieldDef
+		want string
+	}{
+		{"a parameter in the use's place", &ir.FieldDef{Name: "census", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, HTTPMethod: "POST", RestPath: "order/{id}/census",
+			Arguments: []*ir.ArgumentDef{{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true}}}, fmt.Sprintf(refusal, "census", "/api/order/{id}/census")},
+		{"a parameter in the operation's place", &ir.FieldDef{Name: "fill", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, HTTPMethod: "POST",
+			Arguments: []*ir.ArgumentDef{{Name: "level", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}, fmt.Sprintf(refusal, "fill", "/api/order/fill/{level}")},
+		{"the same path", &ir.FieldDef{Name: "census", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, HTTPMethod: "POST", RestPath: "/order/fill/census"}, fmt.Sprintf(refusal, "census", "/api/order/fill/census")},
+		{"another method", &ir.FieldDef{Name: "census", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, HTTPMethod: "GET", RestPath: "order/{id}/census",
+			Arguments: []*ir.ArgumentDef{{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true}}}, ""},
+		{"another count of segments", &ir.FieldDef{Name: "census", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, HTTPMethod: "POST", RestPath: "order/{id}/fill/census",
+			Arguments: []*ir.ArgumentDef{{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true}}}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			res := verify.CheckBehaviorOperations(authored(test.op), verify.Input{Registry: reg, Database: db})
+			var errs []string
+			for _, d := range res.Errors {
+				errs = append(errs, d.Msg)
+			}
+			if test.want == "" {
+				if len(errs) != 0 {
+					t.Errorf("errors = %q, want none", errs)
+				}
+				return
+			}
+			if !slices.Contains(errs, test.want) {
+				t.Errorf("errors = %q, want %q", errs, test.want)
+			}
+		})
 	}
 }
 

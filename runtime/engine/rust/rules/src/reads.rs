@@ -99,6 +99,44 @@ pub enum ReadRequest {
         after: Option<String>,
         limit: usize,
     },
+    /// The live rows of a type ([`Answer::Linked`], D104): each own field
+    /// `equal` names holding its value (a null: the field holds none), each
+    /// row with the rows of the sub-tables `tables` names, in the key
+    /// column's order, at most `limit`, after the key `after` when given.
+    /// What a rule over a table's rows reads (Pool's pick). A
+    /// soft-deletable table's live rows alone; a type the host does not
+    /// have answers no rows. Equality over own fields is the one rule a
+    /// host learns of it: every other the core applies to the rows it is
+    /// answered.
+    Rows {
+        #[serde(rename = "type")]
+        type_name: String,
+        #[serde(default, skip_serializing_if = "Map::is_empty")]
+        equal: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tables: Vec<TableRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+        limit: usize,
+    },
+}
+
+/// One sub-table of a use, as a read across a table names it (D104): the
+/// use's id and the sub-table's declared name.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableRef {
+    pub use_id: String,
+    pub table: String,
+}
+
+impl TableRef {
+    pub fn new(use_id: impl Into<String>, table: impl Into<String>) -> Self {
+        TableRef {
+            use_id: use_id.into(),
+            table: table.into(),
+        }
+    }
 }
 
 /// How many rows a linked read asks for at a time: Links' page (500).
@@ -193,6 +231,24 @@ impl ReadRequest {
             limit: LINKED_PAGE,
         }
     }
+
+    /// One page of a type's live rows whose own fields hold the values
+    /// `equal` gives, each with the sub-tables `tables` names:
+    /// [`LINKED_PAGE`] at most, after a key when given (D104).
+    pub fn rows(
+        type_name: impl Into<String>,
+        equal: Map<String, Value>,
+        tables: Vec<TableRef>,
+        after: Option<&str>,
+    ) -> Self {
+        ReadRequest::Rows {
+            type_name: type_name.into(),
+            equal,
+            tables,
+            after: after.map(str::to_owned),
+            limit: LINKED_PAGE,
+        }
+    }
 }
 
 /// One row as the host read it: its own fields, each use's owned fields by
@@ -262,13 +318,14 @@ pub enum Answer {
     /// The sub-table's rows of the row, in key order; none for a row that
     /// has none, or that does not exist.
     SubRows(Vec<SubRow>),
-    /// The rows a [`ReadRequest::Linked`] or a [`ReadRequest::Holding`]
-    /// asks for, and whether more follow.
+    /// The rows a [`ReadRequest::Linked`], a [`ReadRequest::Holding`] or a
+    /// [`ReadRequest::Rows`] asks for, and whether more follow.
     Linked(LinkedRows),
 }
 
-/// One page of the rows of a type whose own field holds a key, or whose
-/// use's owned field holds a value, each with
+/// One page of the rows of a type whose own field holds a key, whose use's
+/// owned field holds a value, or whose own fields hold the values a read
+/// across the table names, each with
 /// its key, in key order, and whether more follow it. A type the host does
 /// not have answers no rows. The core's rules never depend on the order; a
 /// host orders by its key column (the reference host by code point).
@@ -287,6 +344,33 @@ pub struct LinkedRows {
 pub struct KeyedRow {
     pub key: String,
     pub row: Row,
+    /// With a read across a table ([`ReadRequest::Rows`], D104), the rows
+    /// of each sub-table it names, by use id and then the table's declared
+    /// name, each table's rows in key order (by code point), an empty list
+    /// for a row that has none; empty, and absent in JSON, for a linked or
+    /// a holding read.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tables: BTreeMap<String, BTreeMap<String, Vec<SubRow>>>,
+}
+
+impl KeyedRow {
+    /// A row with its key, and no sub-table rows.
+    pub fn new(key: impl Into<String>, row: Row) -> Self {
+        KeyedRow {
+            key: key.into(),
+            row,
+            tables: BTreeMap::new(),
+        }
+    }
+
+    /// The rows of one sub-table of a use, as a read across a table took
+    /// them; none when it took none.
+    pub fn table(&self, use_id: &str, table: &str) -> &[SubRow] {
+        self.tables
+            .get(use_id)
+            .and_then(|tables| tables.get(table))
+            .map_or(&[], Vec::as_slice)
+    }
 }
 
 /// A key the host locks before it answers the reads a rule across rows
@@ -557,6 +641,58 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Answer::Linked(LinkedRows::default())).unwrap(),
             json!({"linked": {"rows": [], "more": false}})
+        );
+    }
+
+    /// A read across a table names its equalities and its sub-tables, and
+    /// its answer each row's sub-table rows (D104).
+    #[test]
+    fn a_read_across_a_table_reads_as_json() {
+        let equal = json!({"owner": "6xYb", "rank": null})
+            .as_object()
+            .cloned()
+            .unwrap();
+        let read = ReadRequest::rows(
+            "Account",
+            equal,
+            vec![
+                TableRef::new("Budget", "meters"),
+                TableRef::new("Budget", "holds"),
+            ],
+            Some("a2"),
+        );
+        let written = json!({"kind": "rows", "type": "Account", "equal": {"owner": "6xYb", "rank": null},
+            "tables": [{"useId": "Budget", "table": "meters"}, {"useId": "Budget", "table": "holds"}],
+            "after": "a2", "limit": 500});
+        assert_eq!(serde_json::to_value(&read).unwrap(), written);
+        assert_eq!(
+            serde_json::from_value::<ReadRequest>(written).unwrap(),
+            read
+        );
+        // With no equality, no sub-table and no key to start after, it
+        // writes none of the three.
+        assert_eq!(
+            serde_json::to_value(ReadRequest::rows("Account", Map::new(), Vec::new(), None))
+                .unwrap(),
+            json!({"kind": "rows", "type": "Account", "limit": 500})
+        );
+        let answer: Answer = serde_json::from_value(json!({"linked": {"rows": [
+            {"key": "a3", "row": {"own": {"rank": 3}, "owned": {}, "version": 1},
+             "tables": {"Budget": {"meters": [{"key": "tokens", "values": {"used": 4}}], "holds": []}}},
+            {"key": "a4", "row": {"own": {}, "owned": {}, "version": 2}}
+        ], "more": true}}))
+        .unwrap();
+        let Answer::Linked(page) = answer else {
+            panic!("a page");
+        };
+        assert_eq!(page.rows[0].table("Budget", "meters")[0].key, "tokens");
+        assert!(page.rows[0].table("Budget", "holds").is_empty());
+        assert!(page.rows[1].table("Budget", "meters").is_empty());
+        assert!(page.more);
+        // A linked read's rows write no tables.
+        assert_eq!(
+            serde_json::to_value(KeyedRow::new("t1", Row::default())).unwrap(),
+            json!({"key": "t1", "row": {"own": {}, "owned": {}, "version": 0}})
         );
     }
 }

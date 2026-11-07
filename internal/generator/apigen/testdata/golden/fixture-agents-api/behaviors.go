@@ -75,6 +75,26 @@ func runBehaviorOperation[K, P, R any](ctx context.Context, op func(context.Cont
 	return convertBehaviorJSON(out, result)
 }
 
+// runTableBehaviorOperation runs op, an operation of a behavior on a table
+// of fixture-agents-db as a whole (D104), a command without a row, as its
+// ORM declares it, with the request's input, as the request's caller, and
+// decodes its result into result, as runBehaviorOperation runs one of a
+// row. It presents no preconditions, which only a row's command presents.
+func runTableBehaviorOperation[P, R any](ctx context.Context, op func(context.Context, P) (R, error), input, result any) error {
+	var params P
+	if input != nil {
+		if err := convertBehaviorJSON(input, &params); err != nil {
+			return err
+		}
+	}
+	ctx = orm.WithBehaviorCaller(callerContext(ctx), behaviorCaller(ctx))
+	out, err := op(ctx, params)
+	if err != nil {
+		return err
+	}
+	return convertBehaviorJSON(out, result)
+}
+
 // runBehaviorOperationWithPreconditions is runBehaviorOperation for an
 // operation whose input carries the caller's preconditions (D16, D104):
 // its member preconditions, each use's entry by its use id, such as a

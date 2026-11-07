@@ -118,6 +118,11 @@ const (
 	// ActionChange is a change command (D103): a write of a row, whoever
 	// made it, that the table's change queue hands the core.
 	ActionChange ActionKind = "change"
+	// ActionTableOperation is an operation of a use on the table as a whole
+	// (D104), a command without a row: one its declaration's scope schema
+	// gives. It reads rows through the reads across a table and writes them
+	// only through the rows' own operations, and presents no preconditions.
+	ActionTableOperation ActionKind = "tableOperation"
 )
 
 // Action is what a command does. MarshalJSON writes exactly its kind's
@@ -139,8 +144,10 @@ type Action struct {
 	Key   string
 	Patch map[string]json.RawMessage
 	// UseID and Operation name an operation:
-	// {"kind","key","useId","operation","params"}. UseID names a
-	// deadline's use too.
+	// {"kind","key","useId","operation","params"}, or an operation of the
+	// table as a whole, which names no key:
+	// {"kind","useId","operation","params"}. UseID names a deadline's use
+	// too.
 	UseID     string
 	Operation string
 	// Name, At and Payload are a deadline's:
@@ -184,11 +191,11 @@ func (i RowImage) MarshalJSON() ([]byte, error) {
 	}{objectOf(i.Own), owned})
 }
 
-// name is what a refusal names as refused: the operation's name, a
-// deadline's, else the kind (change for a change command).
+// name is what a refusal names as refused: the operation's name, a table
+// operation's, a deadline's, else the kind (change for a change command).
 func (a Action) name() string {
 	switch a.Kind {
-	case ActionOperation:
+	case ActionOperation, ActionTableOperation:
 		return a.Operation
 	case ActionDeadline:
 		return a.Name
@@ -258,6 +265,13 @@ func (a Action) MarshalJSON() ([]byte, error) {
 			Operation string          `json:"operation"`
 			Params    json.RawMessage `json:"params"`
 		}{a.Kind, a.Key, a.UseID, a.Operation, rawOr(a.Params, emptyObject)})
+	case ActionTableOperation:
+		return json.Marshal(struct {
+			Kind      ActionKind      `json:"kind"`
+			UseID     string          `json:"useId"`
+			Operation string          `json:"operation"`
+			Params    json.RawMessage `json:"params"`
+		}{a.Kind, a.UseID, a.Operation, rawOr(a.Params, emptyObject)})
 	case ActionDeadline:
 		return json.Marshal(struct {
 			Kind    ActionKind      `json:"kind"`
@@ -317,6 +331,8 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 		out.Key = wire.Key
 	case ActionOperation:
 		out.Key, out.UseID, out.Operation, out.Params = wire.Key, wire.UseID, wire.Operation, wire.Params
+	case ActionTableOperation:
+		out.UseID, out.Operation, out.Params = wire.UseID, wire.Operation, wire.Params
 	case ActionDeadline:
 		out.Key, out.UseID, out.Name, out.At, out.Payload = wire.Key, wire.UseID, wire.Name, wire.At, wire.Payload
 	case ActionChange:
@@ -392,6 +408,11 @@ const (
 	// value (D104), answered as a linked read is: what a rule over the rows
 	// a principal holds reads.
 	ReadKindHolding ReadKind = "holding"
+	// ReadKindRows is the live rows of a type (D104), each own field Equal
+	// names holding its value, each row with the sub-table rows Tables
+	// names, answered as a linked read is: what a rule over a table's rows
+	// reads (Pool's pick).
+	ReadKindRows ReadKind = "rows"
 )
 
 // LinkedPage is how many rows a linked read asks for at a time, the core's
@@ -401,9 +422,12 @@ const LinkedPage = 500
 // ReadRequest is what the core asks the host to read: a row of a type by
 // its key, whether a type has rows, a type's spec, the rows of one
 // sub-table of one use on one row (UseID and Table name it), one page of
-// the rows of a type whose own field Field holds Key, or one page of the
-// rows of a type whose use UseID's owned field Field holds Value; a page in
-// key order, at most Limit, after the key After when it is not "".
+// the rows of a type whose own field Field holds Key, one page of the rows
+// of a type whose use UseID's owned field Field holds Value, or one page of
+// the live rows of a type whose own fields Equal names hold its values,
+// each with the sub-table rows Tables names (D104); a page in key order, at
+// most Limit, after the key After when it is not "". A request holds a map
+// and a list, so two compare by sameRequest.
 type ReadRequest struct {
 	Kind  ReadKind `json:"kind"`
 	Type  string   `json:"type"`
@@ -412,16 +436,31 @@ type ReadRequest struct {
 	Table string   `json:"table,omitempty"`
 	Field string   `json:"field,omitempty"`
 	// Value is a holding read's value, its JSON text, which the request
-	// writes as the JSON it is; "" for every other kind. Text, so a request
-	// compares as a value.
+	// writes as the JSON it is; "" for every other kind.
 	Value string `json:"-"`
-	After string `json:"after,omitempty"`
-	Limit int    `json:"limit,omitempty"`
+	// Equal is a read across a table's own fields and the values each holds
+	// (D104), a null for a field that holds none: the one rule over a
+	// table's rows an adapter learns, equality, bound as a command's own
+	// value of the field binds. Nil for every other kind.
+	Equal map[string]json.RawMessage `json:"equal,omitempty"`
+	// Tables are the sub-tables a read across a table takes with each row,
+	// each by its use's id and declared name (D104); nil for every other
+	// kind.
+	Tables []TableRef `json:"tables,omitempty"`
+	After  string     `json:"after,omitempty"`
+	Limit  int        `json:"limit,omitempty"`
 }
 
-// MarshalJSON writes the request with its kind's members: a linked read's
-// and a holding read's limit always, a holding read's value as its JSON,
-// any other kind's members as they are set.
+// TableRef is one sub-table of a use, as a read across a table names it:
+// the use's id and the sub-table's declared name (D104).
+type TableRef struct {
+	UseID string `json:"useId"`
+	Table string `json:"table"`
+}
+
+// MarshalJSON writes the request with its kind's members: a linked read's,
+// a holding read's and a read across a table's limit always, a holding
+// read's value as its JSON, any other kind's members as they are set.
 func (r ReadRequest) MarshalJSON() ([]byte, error) {
 	var after *string
 	if r.After != "" {
@@ -454,6 +493,15 @@ func (r ReadRequest) MarshalJSON() ([]byte, error) {
 			After *string         `json:"after,omitempty"`
 			Limit int             `json:"limit"`
 		}{r.Kind, r.Type, r.UseID, r.Field, value, after, r.Limit})
+	case ReadKindRows:
+		return json.Marshal(struct {
+			Kind   ReadKind                   `json:"kind"`
+			Type   string                     `json:"type"`
+			Equal  map[string]json.RawMessage `json:"equal,omitempty"`
+			Tables []TableRef                 `json:"tables,omitempty"`
+			After  *string                    `json:"after,omitempty"`
+			Limit  int                        `json:"limit"`
+		}{r.Kind, r.Type, r.Equal, r.Tables, after, r.Limit})
 	}
 	type plain ReadRequest
 	return json.Marshal(plain(r))
@@ -513,6 +561,11 @@ type LinkedRows struct {
 type KeyedRow struct {
 	Key string `json:"key"`
 	Row Row    `json:"row"`
+	// Tables are, with a read across a table (D104), the rows of each
+	// sub-table it names, by use id and then the table's declared name,
+	// each table's rows in key order, an empty list for a row that has
+	// none; nil, and absent in JSON, for a linked or a holding read.
+	Tables map[string]map[string][]SubRow `json:"tables,omitempty"`
 }
 
 // Answer is the host's answer to one request, of its kind:

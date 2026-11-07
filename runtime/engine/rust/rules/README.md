@@ -20,9 +20,10 @@ as JSON.
 `superschematic-rules-behaviors` (`../rules-behaviors`) holds the behaviors
 ported onto it, in the engine's order: Workflow, Reactions, Constants,
 StateRules, Approvals, Timers, Lease, Presence, Budget and Retries, then
-Seats, Reconcile and Schedules, which no engine implements (D104), and the
-calendar Schedules reads its cron lines with, in a zone of the IANA
-database jiff bundles (`calendar`);
+Seats, Reconcile, Schedules and Pool, which no engine implements (D104),
+the calendar Schedules reads its cron lines with, in a zone of the IANA
+database jiff bundles (`calendar`), and the contract Capacity, which
+Budget implements and Pool asks (`capacity`);
 `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
@@ -162,6 +163,24 @@ with a fallback arm.
 - `Delete { key }`.
 - `Operation { key, use_id, operation, params }`: one use's declared
   operation.
+- `TableOperation { use_id, operation, params }` (D104): one use's
+  operation of the table as a whole, a declaration's `"scope": "schema"`
+  (Pool's `pick`, Lease's `expireHolder`), a command without a row: no key
+  and no preconditions. It runs on the table's placeholder, whose own and
+  owned fields are empty: the use's `check_params` and `settle`, every
+  use's `guard` in list order with `GuardRequest::Table`, then its handler,
+  and no `validate` or `after_change`. It reads rows through the reads
+  across a table, the linked and the holding reads, and writes them only
+  through `call_on` and `create_row`, each row's guards, version and hooks
+  running as for any call; a write of its own state is a defect. It takes
+  no lock of its own. Its change set holds the rows its calls wrote, none
+  when they wrote nothing, and its result; a read-only one (`writes:
+  false`) writes nothing. An `Operation` that names one is `not_found`, and
+  so is a `TableOperation` that names an operation of a row.
+
+  ```json
+  {"kind": "tableOperation", "useId": "Pool", "operation": "pick", "params": {"exclude": ["a1"]}}
+  ```
 - `Deadline { key, use_id, name, at, payload }`: a deadline a use armed that
   fell due, with the time it was armed to fall due at and the payload it was
   armed with, run at the later of the host's clock and `at`. The host, never
@@ -264,7 +283,20 @@ allTerminal); and `Holding { type, use_id, field, value, after, limit }`
 field holds `value`, compared as the column holds it, converted as a
 command's value of the field is, in its key column's order, paged as a
 linked read is: what a rule over the rows a principal holds reads
-(Presence's releaseLeases over Lease's holder, D104). The enum is open: sub-table rows by a condition and counts
+(Presence's releaseLeases over Lease's holder, D104); and `Rows { type,
+equal, tables, after, limit }` (`Answer::Linked(LinkedRows)` too, D104),
+the live rows of a type, each own field `equal` names holding its value (a
+null: the column is NULL), bound as a command's value of the field binds,
+in its key column's order, paged as a linked read is, each row's `KeyedRow`
+with `tables`: the rows of each sub-table the request names (`TableRef {
+use_id, table }`), by use id and table name, each table's rows in key order,
+`[]` for a row that has none, read with one query per sub-table per page.
+What a rule over a table's rows reads (Pool's pick): equality over own
+columns is the one rule a host learns of it, and the core applies every
+other (a behavior's predicate, its order, the contracts it asks) to the
+rows it is answered. A field that is no own column of the type, or a
+sub-table the layout does not give its use, is refused as `internal`, and
+so is the read under a lock on SQLite or D1. The enum is open: sub-table rows by a condition and counts
 join it as behaviors need them, so a host matches it with a fallback arm,
 which refuses the command as `internal`. An answer of
 another kind than its request asks for is refused as `invalid_argument`.
@@ -279,7 +311,15 @@ update merges, a delete removes; a row the run creates has none and reads
 no host; a table the declaration does not declare is a defect),
 `ctx.read_linked(type, field, key, after)?` (one page of a linked read),
 `ctx.read_holding(type, use_id, field, &value, after)?` (one page of a
-holding read), `ctx.sub_rows_of(type, key, use_id, table)?` (any row's
+holding read), `ctx.read_rows(type, &equal, &tables, after)?` (one page of
+a read across a table, D104), `ctx.implementers(type, contract)?` and
+`ctx.contract_tables(type, contract)?` (the uses of a type that implement a
+contract, by their declarations, and the sub-tables a read across it takes
+for them), `ctx.ask(type, &keyed_row, &ContractQuery::new(contract, query,
+&params))?` (each implementer's answer about a row a read across the table
+gave, by `Behavior::answer`; a contract the asking use's declaration does
+not list in `asks` is its defect, and a query an implementer answers `None`
+to is the implementer's), `ctx.sub_rows_of(type, key, use_id, table)?` (any row's
 rows of a sub-table as the run has them: the host's with the run's writes
 of them applied, none for a row the run creates or deleted; a use the type
 lacks, or a table its behavior does not declare, is a defect),
@@ -479,6 +519,8 @@ and the hooks it needs, each with a default:
   `as_caller` a call a behavior makes as the command's caller's own request,
   `cx.call_as_caller(..)`: Reconcile's steps toward an observed state, which
   Lease holds so too);
+  `GuardRequest::Table` asks about an operation of the table as a whole,
+  with no row, which no guard of the behaviors so far refuses;
   `request.operation_of(use_id, name)` matches the use's own operation. A
   guard refuses otherwise through its error (`view.forbidden(..)`,
   `Refusal::operation_params(..)`).
@@ -512,6 +554,15 @@ and the hooks it needs, each with a default:
   D104); the default is `read_fields`'. `Core::read_fields_at(spec, use_id,
   row, tables, now)` computes them, and the replayer reads at the step's
   time.
+- `answer(config, query, row, tables, now)`: the use's answer to a query of
+  a contract its declaration implements (`Declaration::contracts`, the
+  file's `"contracts": [{ "name", "role": "implements" }]`, D104) about a
+  row as a read across the table gave it, with the use's sub-tables by
+  name: Budget answers Capacity's `hasRoom` (`{ room, until? }`) over its
+  meters. Pure, as `read_fields_at` is. `None`, the default, answers no
+  query, which the core refuses as the implementer's defect when one is
+  asked. A behavior that asks a contract lists it (`"role": "asks"`,
+  `Declaration::asks`): Pool asks Capacity of each member at a pick.
 
 `GuardRequest`, `Change`, `Heard` and `ValidationRequest` are open, so a hook matches
 the cases it handles with a fallback arm.
@@ -585,8 +636,13 @@ own, params)` creates a row of any type as a caller's create runs, its type's
 create parameters, validation, guards, initializers and after-change hooks;
 a row the run creates stays a create whatever calls on it follow. A refused
 call or create undoes its own effects and returns the refusal, which the
-caller passes on with `?` or goes on past (`Stop::is_refusal`). Calls and
-creates nest at most `MAX_CALL_DEPTH` (16) deep.
+caller passes on with `?` or goes on past (`Stop::is_refusal`). One that
+waits on a read or a lock the host has not answered is undone too, and a
+behavior that calls on many rows goes on past it to the next row and
+returns the wait at the end (`Stop::is_waiting`, D104): the run asks the
+host for every read its hooks asked for, so one round of the host loop
+answers every row's next read. Calls and creates nest at most
+`MAX_CALL_DEPTH` (16) deep.
 
 ## Logical names and a host's layout
 

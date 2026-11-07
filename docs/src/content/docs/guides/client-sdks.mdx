@@ -326,6 +326,25 @@ config narrowed still reads:
 The events a schedule's runs emit reach no SDK: the API's behavior worker
 hands each to your `Workers` method.
 
+A table that implements Pool puts its operations under `pool` (D104,
+[A table's pool and its rechecks](/superschematic/guides/api-routes/#a-tables-pool-and-its-rechecks)).
+`pick` runs on the table as a whole, so its method takes no id, only its
+input, and each SDK lists it first, in its route's order; `markOut` and
+`reportRoom` take the member's id as any row's operation does. `match`
+and `prefer` are `AccountPoolMatch`, a member per own field typed by the
+JSON value it holds, and `pick`'s answer names the member by its key in
+its wire form, a UUID in base62, which a row's method takes as it is:
+
+| Language | Call |
+| --- | --- |
+| Go | `sdk.AccountNamespace.Pool.Pick(ctx, types.AccountPoolPickInput{...})`, `sdk.AccountNamespace.Pool.MarkOut(ctx, id, types.AccountPoolMarkOutInput{Reason: "rate limited"})` |
+| TypeScript | `await sdk.account.pool.pick({ match: { owner }, prefer: { vendor: "anthropic" } })`, `await sdk.account.pool.markOut(id, { reason: "rate limited" })` |
+| Rust | `sdk.account.pool.pick(input, None).await?` |
+| Python | `sdk.account.pool.pick(AccountPoolPickInput(...))` |
+
+Lease's `expireHolder` is such a method too, `sdk.job.lease.expireHolder({
+holder })`. The events a pool member's rechecks emit reach no SDK.
+
 ## Timeouts, retries and hooks
 
 | | Go | TypeScript | Python | Rust |

@@ -8,17 +8,20 @@
 //! SQLite's do their work at once, which the SQLite module drives to its
 //! end with one poll.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     Action, Answer, Answered, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
     KeyedRow, LinkedRows, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage,
-    RowWrite, Step, SubRow, SubRowChange, SubRowWrite, TypeSpec, ValidationIssue, WriteKind,
+    RowWrite, Step, SubRow, SubRowChange, SubRowWrite, TableRef, TypeSpec, ValidationIssue,
+    WriteKind,
 };
 
-use crate::convert::{base62, from_cell, internal, key_value, to_column, Bind, Cell, UUID_TYPES};
+use crate::convert::{
+    base62, from_cell, internal, key_value, to_column, uuid_value, Bind, Cell, UUID_TYPES,
+};
 use crate::host::Host;
 use crate::layout::{Changes, Column, Deadlines, Events, Layout, SubTable, Table};
 use crate::{busy_refusal, CreateOptions, Error, ExecuteOptions, Executed, Owned};
@@ -754,6 +757,40 @@ pub(crate) async fn run_operation<S: Store>(
     Ok(executed.result)
 }
 
+/// Runs an operation of a use on the table as a whole (D104), a command
+/// without a row, with what the options give it beside, and returns its
+/// result. The core runs it on no row: it reads the table's rows through
+/// the read across a table and writes each row it reaches through a call
+/// on that row, each fenced on its version as any row write is, so a run
+/// that writes no row applies an empty unit. The core refuses the caller's
+/// preconditions on it, since a precondition is a row's.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_table_operation<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    use_id: &str,
+    operation: &str,
+    params: Value,
+    caller: Caller,
+    options: &ExecuteOptions,
+) -> Result<Value, Error> {
+    let params = if params.is_null() {
+        Value::Object(Map::new())
+    } else {
+        params
+    };
+    let action = Action::TableOperation {
+        use_id: use_id.to_owned(),
+        operation: operation.to_owned(),
+        params,
+    };
+    let command = command_of(host, caller, action);
+    let executed = execute(host, store, type_name, command, options).await?;
+    Ok(executed.result)
+}
+
 /// Creates a row through the core and returns its key.
 pub(crate) async fn run_create<S: Store>(
     host: &Host<'_>,
@@ -1061,8 +1098,8 @@ async fn settle<S: Store>(
                 for request in requests {
                     // A store whose locks are fenced checks each read made
                     // under one in the unit that writes, and has no check
-                    // of sub-table rows or of the rows that link to a row
-                    // yet (D103, left for later).
+                    // of sub-table rows, of the rows that link to a row or
+                    // of a table's rows yet (D103, left for later).
                     if store.fenced() && !answers.locks.is_empty() {
                         match request {
                             ReadRequest::SubRows { .. } => return Err(internal(
@@ -1075,6 +1112,10 @@ async fn settle<S: Store>(
                             .into()),
                             ReadRequest::Holding { .. } => return Err(internal(
                                 "a read of the rows whose use's field holds a value under a lock has no check on SQLite or D1 yet (D103)",
+                            )
+                            .into()),
+                            ReadRequest::Rows { .. } => return Err(internal(
+                                "a read of a table's rows under a lock has no check on SQLite or D1 yet (D103)",
                             )
                             .into()),
                             _ => {}
@@ -1171,6 +1212,20 @@ async fn answer_of<S: Store>(
             let value = to_column(value, column, table)?;
             Ok(Answer::Linked(
                 read_page(store, table, column, value, after.as_deref(), *limit).await?,
+            ))
+        }
+        ReadRequest::Rows {
+            type_name,
+            equal,
+            tables,
+            after,
+            limit,
+        } => {
+            let Some(table) = layout.table(type_name) else {
+                return Ok(Answer::Linked(LinkedRows::default()));
+            };
+            Ok(Answer::Linked(
+                read_rows(store, table, equal, tables, after.as_deref(), *limit).await?,
             ))
         }
         other => Err(internal(format!(
@@ -1342,9 +1397,187 @@ async fn read_page<S: Store>(
             None => continue,
         };
         let row = row_of(cells, table, &at)?;
-        page.rows.push(KeyedRow { key: at, row });
+        page.rows.push(KeyedRow::new(at, row));
     }
     Ok(page)
+}
+
+/// One page of a table's live rows (D104), what a rule over a table's rows
+/// reads (Pool's pick): each own field `equal` names held to its value,
+/// bound as the field's column binds a command's value of it (a UUID in
+/// either form as its column's), or to no value for a null; in the key
+/// column's order, after the key `after` when given, at most `limit`, each
+/// read as a row read reads it, and whether more follow; and with each row
+/// the rows of each sub-table `tables` names, by use id and then the
+/// table's declared name, an empty list for a row that has none. Equality
+/// over own columns is the only rule the adapter learns: the core checks
+/// it again and applies every other. A UUID field's value that is no UUID,
+/// which no column of it can hold, matches no row. A field the table has
+/// no own column for, and a use or a sub-table the layout lacks, are
+/// internal.
+async fn read_rows<S: Store>(
+    store: &S,
+    table: &Table,
+    equal: &Map<String, Value>,
+    tables: &[TableRef],
+    after: Option<&str>,
+    limit: usize,
+) -> Result<LinkedRows, Error> {
+    let subs = tables
+        .iter()
+        .map(|named| Ok((named, sub_table_of(table, &named.use_id, &named.table)?)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let dialect = store.dialect();
+    let mut binder = Binder::new(dialect);
+    let mut conditions = Vec::new();
+    for (field, value) in equal {
+        let Some(column) = table.own.iter().find(|column| column.field == *field) else {
+            return Err(internal(format!(
+                "{} has no own field {field} in the behaviors' layout",
+                table.type_name
+            ))
+            .into());
+        };
+        if value.is_null() {
+            conditions.push(format!("{} IS NULL", quote(&column.column)));
+        } else if UUID_TYPES.contains(&column.type_name.as_str())
+            && !value
+                .as_str()
+                .is_some_and(|text| uuid_value(text).is_some())
+        {
+            return Ok(LinkedRows::default());
+        } else {
+            let at = binder.bind(to_column(value, column, table)?);
+            conditions.push(format!("{} = {at}", quote(&column.column)));
+        }
+    }
+    if let Some(live) = &table.live {
+        conditions.push(format!("{} IS NULL", quote(&live.column)));
+    }
+    if let Some(after) = after {
+        let at = binder.bind(key_value(table, after)?);
+        conditions.push(format!("{} > {at}", quote(&table.key.column)));
+    }
+    let condition = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+    let text = format!(
+        "SELECT {} AS k, {} FROM {}{condition} ORDER BY {} LIMIT {}",
+        selected(dialect, &table.key.column),
+        row_list(dialect, table).join(", "),
+        quote(&table.table),
+        quote(&table.key.column),
+        limit.saturating_add(1)
+    );
+    let mut page = LinkedRows::default();
+    for cells in store.query(&text, &binder.values).await? {
+        if page.rows.len() == limit {
+            page.more = true;
+            break;
+        }
+        let mut cells = cells.into_iter();
+        let at = match from_cell(cells.next().unwrap_or(Cell::Null), &table.key, table)? {
+            Some(Value::String(at)) => at,
+            Some(other) => other.to_string(),
+            None => continue,
+        };
+        let row = row_of(cells, table, &at)?;
+        page.rows.push(KeyedRow::new(at, row));
+    }
+    for (named, sub) in subs {
+        read_page_sub_rows(store, table, sub, named, &mut page).await?;
+    }
+    Ok(page)
+}
+
+/// The rows of one use's sub-table for every row of a page of a read
+/// across a table (D104), in one read: each row's in key order (by code
+/// point, as [`read_sub_rows`] orders them), set on the row under the
+/// use's id and the table's declared name, an empty list for a row that
+/// has none, each converted as a sub-table row read converts it.
+async fn read_page_sub_rows<S: Store>(
+    store: &S,
+    table: &Table,
+    sub: &SubTable,
+    named: &TableRef,
+    page: &mut LinkedRows,
+) -> Result<(), Error> {
+    for keyed in &mut page.rows {
+        keyed
+            .tables
+            .entry(named.use_id.clone())
+            .or_default()
+            .insert(named.table.clone(), Vec::new());
+    }
+    if page.rows.is_empty() {
+        return Ok(());
+    }
+    let dialect = store.dialect();
+    let mut binder = Binder::new(dialect);
+    let mut keys = Vec::with_capacity(page.rows.len());
+    for keyed in &page.rows {
+        keys.push(binder.bind(key_value(table, &keyed.key)?));
+    }
+    let list: Vec<String> = std::iter::once(&sub.key)
+        .chain(&sub.fields)
+        .enumerate()
+        .map(|(i, field)| format!("{} AS c{i}", selected(dialect, &field.column.column)))
+        .collect();
+    let order = match dialect {
+        Dialect::Postgres => " COLLATE \"C\"",
+        Dialect::Sqlite => "",
+    };
+    let text = format!(
+        "SELECT {} AS r, {} FROM {} WHERE {} IN ({}) ORDER BY {}, {}{order}",
+        selected(dialect, &sub.row),
+        list.join(", "),
+        quote(&sub.table),
+        quote(&sub.row),
+        keys.join(", "),
+        quote(&sub.row),
+        quote(&sub.key.column.column)
+    );
+    // Each row's place in the page, by its key as the core holds it.
+    let places: HashMap<String, usize> = page
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(place, keyed)| (keyed.key.clone(), place))
+        .collect();
+    for cells in store.query(&text, &binder.values).await? {
+        let mut cells = cells.into_iter();
+        let of = match from_cell(cells.next().unwrap_or(Cell::Null), &table.key, table)? {
+            Some(Value::String(of)) => of,
+            Some(other) => other.to_string(),
+            None => continue,
+        };
+        let mut next =
+            |column: &Column| from_cell(cells.next().unwrap_or(Cell::Null), column, table);
+        let at = match next(&sub.key.column)? {
+            Some(Value::String(at)) => at,
+            Some(other) => other.to_string(),
+            None => continue,
+        };
+        let mut values = Map::new();
+        for field in &sub.fields {
+            if let Some(value) = next(&field.column)? {
+                values.insert(field.name.clone(), value);
+            }
+        }
+        let Some(&place) = places.get(&of) else {
+            continue;
+        };
+        if let Some(rows) = page.rows[place]
+            .tables
+            .get_mut(&named.use_id)
+            .and_then(|tables| tables.get_mut(&named.table))
+        {
+            rows.push(SubRow { key: at, values });
+        }
+    }
+    Ok(())
 }
 
 /// The rows of a use's sub-table on one row, in key order (by code point,

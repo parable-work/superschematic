@@ -67,6 +67,12 @@ type BehaviorOperation struct {
 	// state.
 	Writes bool `json:"writes,omitempty" yaml:"writes,omitempty"`
 
+	// Table is true for an operation of the table as a whole (D104), one
+	// its declaration gives the scope schema: its route takes no key, and
+	// the servers run it as a command without a row. Key still names the
+	// table's @key field, which its result's keys are of.
+	Table bool `json:"table,omitempty" yaml:"table,omitempty"`
+
 	// Permissions are the permissions the use's config names, sorted and
 	// each once (a Workflow transition's permission), which the core
 	// checks for the moves that name them. The permission catalog lists

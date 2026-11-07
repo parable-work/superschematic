@@ -25,9 +25,12 @@ var agentsFixtures = behaviorFixtures{"fixture-agents-api", "fixture-agents-db"}
 // their golden copies: the routes, whose handlers of Job's operations run
 // them with runBehaviorOperationWithPreconditions, since Job's Lease takes
 // a command's preconditions, which each operation's input carries in its
-// member preconditions (D104), and whose handlers of Session's and
-// Account's run them with runBehaviorOperation; behaviors.go, which holds
-// both and the queues of JobDeadlines and SessionPresence, the latter's
+// member preconditions (D104), but for expireHolder, an operation of Job's
+// table as a whole routed with no key, which runs with
+// runTableBehaviorOperation and presents none, and whose handlers of
+// Session's and Account's run them with runBehaviorOperation;
+// behaviors.go, which holds the three and the queues of JobDeadlines and
+// SessionPresence, the latter's
 // caller holding jobs.override; deps.go and the interfaces, which have no
 // method for them; the OpenAPI document; and the permission catalog.
 // Regenerate with:
@@ -36,13 +39,20 @@ func TestWriteAPIGoldenAgents(t *testing.T) {
 	api, db := loadFixturePair(t, agentsFixtures)
 	output := generatePairAPI(t, agentsFixtures, api, db)
 
-	var presenting, plain []string
+	var presenting, plain, table []string
 	for _, ep := range output.Endpoints {
 		bo := ep.BehaviorOperation()
 		if bo == nil {
 			continue
 		}
 		line := ep.Method + " " + ep.Path + " " + ep.BehaviorRepositoryCall()
+		if bo.Table {
+			if ep.BehaviorPreconditions || len(ep.PathParams) > 0 {
+				t.Errorf("%s, an operation of the table as a whole, carries preconditions %t or path parameters %d", line, ep.BehaviorPreconditions, len(ep.PathParams))
+			}
+			table = append(table, line+" "+ep.BehaviorRunner())
+			continue
+		}
 		if ep.BehaviorPreconditions {
 			if bo.Type != "Job" {
 				t.Errorf("%s carries the caller's preconditions: only Job's uses take them", line)
@@ -65,6 +75,12 @@ func TestWriteAPIGoldenAgents(t *testing.T) {
 	}
 	if !slices.Equal(presenting, want) {
 		t.Fatalf("the behavior endpoints that carry preconditions = %q, want %q", presenting, want)
+	}
+	if want := []string{"POST /api/job/lease/expire-holder GetJobRepository().Lease().ExpireHolder runTableBehaviorOperation"}; !slices.Equal(table, want) {
+		t.Fatalf("the behavior endpoints of a table as a whole = %q, want %q", table, want)
+	}
+	if !output.HasTableBehaviorEndpoints() {
+		t.Fatal("HasTableBehaviorEndpoints is false")
 	}
 	if len(plain) == 0 {
 		t.Fatal("no behavior endpoint of Session or Account")
@@ -130,8 +146,9 @@ func TestWriteAPIGoldenAgents(t *testing.T) {
 // fixture-agents-api's Go types and API module into a temporary tree
 // shaped as the dist, and builds and vets the API module: its handlers call
 // the ORM's Lease, Retries, Presence, Budget and Workflow operations with
-// its types, the ones of Job's under orm.WithPreconditions (D104), and its
-// behavior workers' queues its RunDeadline. Linking needs the core's
+// its types, the ones of Job's under orm.WithPreconditions (D104) but for
+// expireHolder, an operation of the table as a whole, which takes no key,
+// and its behavior workers' queues its RunDeadline. Linking needs the core's
 // archive, which a build does not; go vet type-checks the cgo package.
 func TestAgentsAPICompiles(t *testing.T) {
 	if testing.Short() {
@@ -154,6 +171,7 @@ func TestAgentsAPICompiles(t *testing.T) {
 		"runBehaviorOperationWithPreconditions(r.Context(), db.GetJobRepository().Lease().Heartbeat, Id, input, &result)",
 		"runBehaviorOperationWithPreconditions(r.Context(), db.GetJobRepository().Status().Transition, Id, input, &result)",
 		"runBehaviorOperation(r.Context(), db.GetSessionRepository().Presence().Beat, Id, nil, &result)",
+		"runTableBehaviorOperation(r.Context(), db.GetJobRepository().Lease().ExpireHolder, input, &result)",
 	} {
 		if !strings.Contains(string(routes), want) {
 			t.Errorf("routes.go holds no %q", want)
@@ -165,6 +183,7 @@ func TestAgentsAPICompiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ctx = orm.WithPreconditions(ctx, preconditions)",
+		"func runTableBehaviorOperation[P, R any](ctx context.Context, op func(context.Context, P) (R, error), input, result any) error {",
 		"func JobDeadlinesQueues(db *orm.Database, logger *zap.Logger) []worker.Queue {",
 		`caller := rules.Caller{Subject: "fixture-agents-api/SessionPresence", Permissions: []string{"jobs.override"}}`,
 	} {

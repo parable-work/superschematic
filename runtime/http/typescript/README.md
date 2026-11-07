@@ -153,7 +153,15 @@ Its entry points:
   answers the core's `linked` read (a type's rows whose own field holds a
   key, a page at a time, in key order) and its `holding` read (a type's
   rows whose use's owned field holds a value, `readHolding`, by the
-  layout's column of that field, D104), and passes a command's
+  layout's column of that field, D104) and its `rows` read (D104,
+  `readRows`: a type's live rows each own field `equal` names holds, `IS
+  NULL` for a null, a UUID field's value that is no UUID matching none, a
+  page at a time in key order, each row with its rows of the sub-tables
+  `tables` names, read by one query per sub-table per page), refused under
+  a lock on SQLite and D1 as the linked read is; `runTableOperation` runs
+  an operation of a table as a whole (D104), a command without a row,
+  through the same host loop, each row its calls write held to its
+  version, and one that writes no row applying nothing; and it passes a command's
   `preconditions` (D16, D104), each use's entry by its use id, to the core
   as the command or `ExecuteOptions.preconditions` gives them, which the
   core checks before it reads the row; it reads none of them. An owned or
@@ -168,7 +176,10 @@ Its entry points:
   Postgres), so it reaches the core as it was written (D104). A generated repository whose table
   arms deadlines runs them with its `runDeadline` (typed
   `BehaviorDeadlines`), and one whose writes are heard runs its changes
-  with its `runChange` (typed `BehaviorChanges`), each in its transaction,
+  with its `runChange` (typed `BehaviorChanges`), each in its transaction;
+  an operation of the table as a whole is a method of its use's member
+  with no key (`TableOperations`, `RulesTableCallOptions`), run in the
+  repository's transaction as the caller;
   and one whose behaviors keep sub-tables or arm deadlines has no upserts
   (`WithoutUpserts`), since an upsert applies no change set.
 - `@superschematic/http-runtime/identity`, the core user model's runtime

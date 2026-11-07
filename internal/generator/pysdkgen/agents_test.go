@@ -22,7 +22,9 @@ const agentsService = "fixture-agents-api"
 // implement are methods of a class of their own, the property of the
 // namespace named for the use's member, sdk.job.lease.heartbeat and
 // sdk.account.budget.observe, whose inputs present JobPreconditions and
-// name an AccountBudgetMeter. Regenerate with:
+// name an AccountBudgetMeter, and Lease's expireHolder, an operation of the
+// table as a whole, takes no key, sdk.job.lease.expire_holder(input)
+// (D104). Regenerate with:
 // go test ./internal/generator/pysdkgen -run TestAgentsSDKGolden -update
 func TestAgentsSDKGolden(t *testing.T) {
 	load := func(name string) *ir.Schema {
@@ -62,6 +64,7 @@ func TestAgentsSDKGolden(t *testing.T) {
 	}
 	for _, want := range []string{
 		"job.lease JobLeaseOperations.heartbeat",
+		"job.lease JobLeaseOperations.expire_holder",
 		"job.retries JobRetriesOperations.record_attempt",
 		"job.status JobStatusOperations.transition",
 		"session.presence SessionPresenceOperations.beat",
@@ -71,7 +74,7 @@ func TestAgentsSDKGolden(t *testing.T) {
 			t.Errorf("members = %v, want %s among them", got, want)
 		}
 	}
-	if len(got) != 22 {
-		t.Errorf("members = %d (%v), want 22", len(got), got)
+	if len(got) != 23 {
+		t.Errorf("members = %d (%v), want 23", len(got), got)
 	}
 }

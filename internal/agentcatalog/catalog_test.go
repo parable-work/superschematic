@@ -69,8 +69,8 @@ func TestEveryDecoratorIsListed(t *testing.T) {
 }
 
 // Every behavior an engine implements is listed, and one the behaviors'
-// core alone implements (Seats, Reconcile, Schedules, D104) is not: no engine type
-// composes it.
+// core alone implements (Seats, Reconcile, Schedules, Pool, D104) is not: no
+// engine type composes it.
 func TestEveryBehaviorIsListed(t *testing.T) {
 	acme := withAcme(t)
 	catalog := render(t, Behaviors, acme)
@@ -87,8 +87,8 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 			t.Errorf("behavior %s has no entry", beh.Name)
 		}
 	}
-	if coreOnly != 3 {
-		t.Errorf("%d behaviors no engine implements, want Seats, Reconcile and Schedules", coreOnly)
+	if coreOnly != 4 {
+		t.Errorf("%d behaviors no engine implements, want Seats, Reconcile, Schedules and Pool", coreOnly)
 	}
 	if !strings.Contains(catalog, "- Config: `WorkflowConfig`, required.\n") {
 		t.Error("Workflow's entry does not name its config type")

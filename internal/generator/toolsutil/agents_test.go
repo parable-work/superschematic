@@ -15,11 +15,13 @@ import (
 )
 
 // TestToolSchemasGoldenAgents pins the tool schemas of fixture-agents-api
-// (D104): every tool of a Job operation takes preconditions, an object
+// (D104): every tool of a Job row operation takes preconditions, an object
 // whose member Lease is an object of a token of at least 0, as any input
-// member, beside the operation's parameters and the row's key; a tool of
-// Session's or Account's takes none; Session's beat takes the key alone;
-// and recordAttempt's failure and observe's meter are their enums.
+// member, beside the operation's parameters and the row's key; Lease's
+// expireHolder, an operation of the table as a whole, takes its parameters
+// alone, no key and no preconditions; a tool of Session's or Account's
+// takes none; Session's beat takes the key alone; and recordAttempt's
+// failure and observe's meter are their enums.
 // Regenerate with:
 // go test ./internal/generator/toolsutil -run TestToolSchemasGoldenAgents -update
 func TestToolSchemasGoldenAgents(t *testing.T) {
@@ -47,12 +49,15 @@ func TestToolSchemasGoldenAgents(t *testing.T) {
 	for _, tool := range tools {
 		byName[tool.Name] = tool
 	}
-	if len(tools) != 22 {
-		t.Errorf("tools = %d, want 22", len(tools))
+	if len(tools) != 23 {
+		t.Errorf("tools = %d, want 23", len(tools))
+	}
+	if expire := byName["job.leaseExpireHolder"]; !slices.Equal(keysOf(expire.Parameters.Properties), []string{"holder", "notRenewedAfter"}) || !slices.Equal(expire.Parameters.Required, []string{"holder"}) {
+		t.Errorf("job.leaseExpireHolder takes %v, requiring %v, want holder and notRenewedAfter, holder required", keysOf(expire.Parameters.Properties), expire.Parameters.Required)
 	}
 	for name, tool := range byName {
 		preconditions, ok := tool.Parameters.Properties["preconditions"]
-		job := len(name) > 4 && name[:4] == "job."
+		job := len(name) > 4 && name[:4] == "job." && name != "job.leaseExpireHolder"
 		switch {
 		case job && !ok:
 			t.Errorf("%s takes no preconditions: %v", name, keysOf(tool.Parameters.Properties))

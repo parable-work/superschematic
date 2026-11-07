@@ -20,9 +20,9 @@ var configMember = regexp.MustCompile(`(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*
 // implements as the registry declares it, what it adds to a type and the
 // name of its config type, then every config type, from
 // @superschematic/schema. A behavior the behaviors' core alone implements
-// (registry.RulesPackage: Seats, Reconcile, Schedules, D104) is left out: no
-// engine type composes it, so BehaviorConfigs names no type for it, and the
-// guide to tables (database-tables) describes it.
+// (registry.RulesPackage: Seats, Reconcile, Schedules, Pool, D104) is left
+// out: no engine type composes it, so BehaviorConfigs names no type for it,
+// and the guide to tables (database-tables) describes it.
 func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	configTypes := map[string]string{}
 	for _, d := range typeDecls(exports) {

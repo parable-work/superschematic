@@ -464,6 +464,35 @@
       ]
     },
     {
+      "toolName": "job.lease.expireHolder",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "expireHolder",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "holder",
+          "required": true,
+          "kind": "input",
+          "target": "input.holder"
+        },
+        {
+          "toolParameter": "notRenewedAfter",
+          "required": false,
+          "kind": "input",
+          "target": "input.notRenewedAfter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["holder", "notRenewedAfter"]
+        }
+      ]
+    },
+    {
       "toolName": "job.lease.acknowledge",
       "apiId": "fixture-agents-api",
       "namespace": "job",

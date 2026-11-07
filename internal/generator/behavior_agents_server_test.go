@@ -34,6 +34,7 @@ var agentsCases = []string{
 	"a failure in a class with a backoff sets retryAt, and until it passes the move into running and the lease's acquire are refused as backing_off",
 	"when the backoff ends its then, run by the worker, moves the waiting job back to queued",
 	"a lease that lapses expires when its deadline falls due on the worker: onExpiry moves the job back to queued and the token advances",
+	"expireHolder expires every lease a gone holder holds, for a caller holding jobs.override, and is forbidden without it",
 	"a second build failure of one revision exhausts the job, and a new revision starts its counts again",
 	"a precondition for a use whose behavior takes none is refused as invalid_argument",
 	"a session's create arms its miss ttlMs on: its deadline and its queue message",
@@ -165,6 +166,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -638,6 +640,74 @@ func TestAgents(t *testing.T) {
 		}
 		if got, want := sortedJSON(t, row.ended), fmt.Sprintf("{\"at\":%d,\"reason\":\"ttl\"}", acquired.ExpiresAt); got != want {
 			t.Fatalf("the lease ended %s, want %s", got, want)
+		}
+	})
+
+	t.Run("expireHolder expires every lease a gone holder holds, for a caller holding jobs.override, and is forbidden without it", func(t *testing.T) {
+		// A worker of its own, so no other case's lease is the gone
+		// holder's, leases two jobs and moves them to running; another
+		// worker leases a third.
+		gone := subject(t)
+		asGone := as(gone)
+		var keys, columns []string
+		for range 2 {
+			key, column, _ := job(t)
+			acquire(t, asGone, key)
+			move(t, asGone, key, types.JobStatusState_Running, 1)
+			keys = append(keys, key)
+			columns = append(columns, column)
+		}
+		otherKey, otherColumn, _ := job(t)
+		acquire(t, asOther, otherKey)
+		move(t, asOther, otherKey, types.JobStatusState_Running, 1)
+		versions := map[string]int64{}
+		for _, column := range append(slices.Clone(columns), otherColumn) {
+			versions[column] = readJob(t, column).version
+		}
+		// expireHolder is an operation of Job's table as a whole (D104): its
+		// route and its SDK method take no key.
+		var input types.JobLeaseExpireHolderInput
+		if err := json.Unmarshal([]byte(fmt.Sprintf("{\"holder\":%q}", gone)), &input); err != nil {
+			t.Fatal(err)
+		}
+		operator := subject(t)
+		_, err := as(operator).JobNamespace.Lease.ExpireHolder(ctx, input)
+		apiErr := apiRefused(t, "an expireHolder without jobs.override", err)
+		if want := operator + " may not expire the leases of a holder on Job: it needs permission jobs.override"; apiErr.StatusCode != 403 || apiErr.Code != "forbidden" || apiErr.Message != want {
+			t.Fatalf("an expireHolder without jobs.override refused with %d %s %q, want 403 forbidden %q", apiErr.StatusCode, apiErr.Code, apiErr.Message, want)
+		}
+		for column, version := range versions {
+			unmovedJob(t, "an expireHolder without jobs.override", column, version)
+		}
+		result, err := as(operator+":jobs.override").JobNamespace.Lease.ExpireHolder(ctx, input)
+		if err != nil {
+			t.Fatalf("expireHolder: %v", err)
+		}
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var expired struct {
+			Expired int64            ` + "`json:\"expired\"`" + `
+			Reasons map[string]int64 ` + "`json:\"reasons\"`" + `
+			Ids     []string         ` + "`json:\"ids\"`" + `
+		}
+		if err := json.Unmarshal(data, &expired); err != nil {
+			t.Fatalf("%s: %v", data, err)
+		}
+		// A UUID key pages in UUID order on Postgres, so ids is a set here.
+		ids := slices.Sorted(slices.Values(expired.Ids))
+		if expired.Expired != 2 || len(expired.Reasons) != 1 || expired.Reasons["holder"] != 2 || !slices.Equal(ids, slices.Sorted(slices.Values(keys))) {
+			t.Fatalf("expireHolder answered %s, want 2 expired by holder, the jobs %q", data, keys)
+		}
+		for _, column := range columns {
+			row := readJob(t, column)
+			if row.status != "queued" || row.holder != nil || row.token == nil || *row.token != 2 {
+				t.Fatalf("an expired job is %s, held by %v at token %v, want queued (onExpiry), held by none, at token 2", row.status, row.holder, row.token)
+			}
+		}
+		if row := readJob(t, otherColumn); row.version != versions[otherColumn] || row.status != "running" || row.holder == nil || *row.holder != other {
+			t.Fatalf("the other worker's job is %s at version %d, held by %v, want it untouched", row.status, row.version, row.holder)
 		}
 	})
 

@@ -40,6 +40,7 @@
         "JobLeaseAcquireHandler",
         "JobLeaseDirectHandler",
         "JobLeaseExpireHandler",
+        "JobLeaseExpireHolderHandler",
         "JobLeaseHeartbeatHandler",
         "JobLeaseReleaseHandler",
         "JobLeaseResetExpiriesHandler"

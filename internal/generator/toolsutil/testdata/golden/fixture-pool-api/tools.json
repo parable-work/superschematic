@@ -1,0 +1,619 @@
+[
+  {
+    "name": "account.poolPick",
+    "inputSchemaDigest": "sha256:f4322c17aff5cd0cafaab5122bc3eacc4acbdaf6021710cf6cc742df5eba85f1",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "Array of string values",
+          "items": {
+            "type": "string",
+            "description": "A string value"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "match": {
+          "additionalProperties": false,
+          "description": "AccountPoolMatch object",
+          "properties": {
+            "kind": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "owner": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "x-superschematic-scalar": "Generic.Int64",
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "vendor": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "prefer": {
+          "additionalProperties": false,
+          "description": "AccountPoolMatch object",
+          "properties": {
+            "kind": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "owner": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "x-superschematic-scalar": "Generic.Int64",
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "vendor": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountPoolPickResult object"
+    }
+  },
+  {
+    "name": "account.budgetCheckReserve",
+    "inputSchemaDigest": "sha256:f12fff0d0dd8816ee0e541402c225208914e56090b0f64d2a4cea180acb73bc5",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "description": "A AccountBudgetMeter value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "tokens",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetCheckReserveResult object"
+    }
+  },
+  {
+    "name": "account.budgetObserve",
+    "inputSchemaDigest": "sha256:3bc161880cf28d8658c09c304253d41c50039cd10c73c57cbc8d840336a183db",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "limit": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "tokens"
+          ]
+        },
+        "resetsAt": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "used": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "meter",
+        "used"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetObserveResult object"
+    }
+  },
+  {
+    "name": "account.budgetRecordUsage",
+    "inputSchemaDigest": "sha256:722acb6a830d84c543bc5ed5f66e9267cbc620a35518b38863828138cbc96f99",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "tokens"
+          ]
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "meter"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetRecordUsageResult object"
+    }
+  },
+  {
+    "name": "account.budgetRecordUsageFor",
+    "inputSchemaDigest": "sha256:e74b2857c26222d31951ebb6d253a76144ccd9cefa558a58c41fe721184e6ec8",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "tokens"
+          ]
+        },
+        "released": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "schema": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "id",
+        "meter",
+        "released",
+        "schema"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetRecordUsageForResult object"
+    }
+  },
+  {
+    "name": "account.budgetReserve",
+    "inputSchemaDigest": "sha256:f12fff0d0dd8816ee0e541402c225208914e56090b0f64d2a4cea180acb73bc5",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "description": "A AccountBudgetMeter value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "tokens",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetReserveResult object"
+    }
+  },
+  {
+    "name": "account.budgetReserveFor",
+    "inputSchemaDigest": "sha256:0bbb1e819b022c3fc119bf709761ac425ad61505909f86511b3d548085c384be",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "tokens"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "id",
+        "meter",
+        "schema"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetReserveForResult object"
+    }
+  },
+  {
+    "name": "account.budgetSetLimit",
+    "inputSchemaDigest": "sha256:dc15332bec7735afe6b9396044c924e3e2eccccd66a560f8860011f48cb25db9",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "limit": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "tokens"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "limit",
+        "meter"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetSetLimitResult object"
+    }
+  },
+  {
+    "name": "account.budgetSettle",
+    "inputSchemaDigest": "sha256:1d748f075054e179c371ee64f1051339728f08491437995450e7d4c16773c9c8",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "description": "A AccountBudgetMeter value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "tokens",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetSettleResult object"
+    }
+  },
+  {
+    "name": "account.budgetSettleFor",
+    "inputSchemaDigest": "sha256:0bbb1e819b022c3fc119bf709761ac425ad61505909f86511b3d548085c384be",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "tokens"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "id",
+        "meter",
+        "schema"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetSettleForResult object"
+    }
+  },
+  {
+    "name": "account.poolMarkOut",
+    "inputSchemaDigest": "sha256:33dcb8851ec5e56a38feb5f0767163e41dd3c9d06e1e65e5e960eee7c49ee4f7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "reason": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "until": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "reason"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountPoolMarkOutResult object"
+    }
+  },
+  {
+    "name": "account.poolReportRoom",
+    "inputSchemaDigest": "sha256:836df0512a192ec8612d5ef54b493bd30a7c4c4b8d663607db95f1ec1e0279ad",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "near": {
+          "description": "A boolean value (true or false)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "A string value",
+          "minLength": 1,
+          "maxLength": 256,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resetsAt": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "room": {
+          "type": "boolean",
+          "description": "A boolean value (true or false)"
+        }
+      },
+      "required": [
+        "id",
+        "room"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountPoolReportRoomResult object"
+    }
+  }
+]

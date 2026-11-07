@@ -60,9 +60,21 @@
 //! veto of the fire refuses the command, which the worker releases to fall
 //! due a minute on, as the sweep tried it at its next run. `sweepMs`, how
 //! often the runner swept, is refused on a table, as `directOn` is, which
-//! waits for Revisions and Branches on the core (D103, step 4); `expireHolder`
-//! runs on the table as a whole, which the core runs no command for, so a
-//! table's declaration leaves it out (D104's Left for later).
+//! waits for Revisions and Branches on the core (D103, step 4).
+//!
+//! `expireHolder` expires every lease one principal holds on the table, for
+//! a principal that is gone (D16's amendment): an operation of the table as
+//! a whole, which runs as a command without a row (D104). It needs
+//! `overridePermission`, refused when the config names none; it reads the
+//! rows whose `holder` holds the principal's exact text, a page at a time,
+//! passes over a lease `expire` would spare by Lease's own rule (one renewed
+//! or acquired after `notRenewedAfter` while it is active), so a spared row
+//! is not written, and calls Lease's own `expire` with the holder on each of
+//! the rest (`Cx::call_on`), so each row's guards, version and hooks run as
+//! for any call. A row a guard vetoes, or one deleted since the read, is
+//! passed over, as the engine's sweep left a vetoed one for its next run; any
+//! other refusal refuses the command. It answers how many expired, by
+//! reason, and their keys, in key order.
 //!
 //! The guard keeps a lease exclusive. While a lease is active it refuses an
 //! update, a delete and every writing operation of another behavior by any
@@ -128,8 +140,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
-    Behavior, Change, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, GuardRequest, Hook,
-    Refusal, Row, SchemaIssue, Stop, SubRow, Veto, View,
+    Behavior, Change, Code, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, GuardRequest,
+    Hook, Refusal, Row, SchemaIssue, Stop, SubRow, Veto, View,
 };
 
 use crate::declared;
@@ -146,6 +158,10 @@ pub const DIRECTIVES: &str = "directives";
 /// The operation that applies an expiry, and the deadline the expiry and
 /// the longest hold fall due at.
 pub const EXPIRE: &str = "expire";
+
+/// The operation of the table as a whole that expires every lease a
+/// principal holds (D16, D104).
+pub const EXPIRE_HOLDER: &str = "expireHolder";
 
 /// The operations, by their declared names.
 pub const ACQUIRE: &str = "acquire";
@@ -800,8 +816,8 @@ impl Behavior for Lease {
 
     // The declaration file names its owned fields, the computed active,
     // its directives sub-table, that it arms deadlines and takes a
-    // precondition (D103, D104); expireHolder, an operation of the table as
-    // a whole, is left out.
+    // precondition (D103, D104), and expireHolder, an operation of the
+    // table as a whole (D104).
     fn declaration(&self) -> Declaration {
         declared::declaration(DECLARATION)
     }
@@ -976,6 +992,7 @@ impl Behavior for Lease {
             DIRECT => direct(cx, params),
             ACKNOWLEDGE => acknowledge(cx, params),
             RESET_EXPIRIES => reset_expiries(cx),
+            EXPIRE_HOLDER => expire_holder(cx, params),
             _ => Err(cx.defect(format!("it declares no operation {name}"))),
         }
     }
@@ -1214,6 +1231,97 @@ fn expire(cx: &Cx<'_, LeaseConfig>, params: &Value) -> Hook<Value> {
     };
     apply_expiry(cx, &lease, reason)?;
     Ok(json!({ "expired": true, "reason": reason }))
+}
+
+// expire_holder expires every lease one principal holds on the table, on
+// the table as a whole: the rows the holding read finds, a page at a time,
+// each one expire would not spare expired through Lease's own expire on its
+// row, a veto or a row gone since the read passed over. A row whose call
+// waits on the host goes on to the next (Stop::is_waiting), so the rows a
+// gone holder held cost rounds of the host loop by how deep each one's
+// reads go, not by how many it held.
+fn expire_holder(cx: &Cx<'_, LeaseConfig>, params: &Value) -> Hook<Value> {
+    require_override(cx, "expire the leases of a holder on")?;
+    let holder = params
+        .get("holder")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let (type_name, use_id) = (cx.type_name(), cx.use_id());
+    let value = Value::from(holder);
+    let mut held = Vec::new();
+    let mut after: Option<String> = None;
+    loop {
+        let page = cx.read_holding(type_name, use_id, "holder", &value, after.as_deref())?;
+        held.extend(page.rows.iter().map(|row| row.key.clone()));
+        match (page.more, page.rows.last()) {
+            (true, Some(last)) => after = Some(last.key.clone()),
+            _ => break,
+        }
+    }
+    let mut ids: Vec<String> = Vec::new();
+    let mut reasons: Map<String, Value> = Map::new();
+    let mut waiting: Option<Stop> = None;
+    for key in held {
+        let reason = match expire_held(cx, holder, params, &key) {
+            Ok(Some(reason)) => reason,
+            Ok(None) => continue,
+            Err(stop) if stop.is_waiting() => {
+                waiting.get_or_insert(stop);
+                continue;
+            }
+            // A refusal after a wait may come of what the run has not read.
+            Err(_) if waiting.is_some() => continue,
+            Err(Stop::Refuse(refusal)) if matches!(refusal.code, Code::Vetoed | Code::NotFound) => {
+                continue
+            }
+            Err(stop) => return Err(stop),
+        };
+        ids.push(key);
+        let counted = reasons.get(&reason).and_then(Value::as_i64).unwrap_or(0) + 1;
+        reasons.insert(reason, Value::from(counted));
+    }
+    if let Some(stop) = waiting {
+        return Err(stop);
+    }
+    Ok(json!({ "expired": ids.len(), "reasons": reasons, "ids": ids }))
+}
+
+// expire_held expires the lease of one row the holding read found, through
+// Lease's own expire, and answers why it expired, or none for a lease it
+// spared. Lease's own rule is read over the row as the call reads it, the
+// same read, so a lease its holder renewed after the time since the
+// holding read is spared and the row not written.
+fn expire_held(
+    cx: &Cx<'_, LeaseConfig>,
+    holder: &str,
+    params: &Value,
+    key: &str,
+) -> Hook<Option<String>> {
+    let (type_name, use_id) = (cx.type_name(), cx.use_id());
+    let Some(row) = cx.row_of(type_name, key)? else {
+        return Ok(None);
+    };
+    let lease = Held::of(|field| row.owned(use_id, field).cloned());
+    let active = lease.is_active(hold_limit(cx.config(), &row.own), cx.now());
+    let renewed = active
+        && params
+            .get("notRenewedAfter")
+            .and_then(whole)
+            .is_some_and(|after| lease.renewed_at.or(lease.acquired_at).unwrap_or(0) > after);
+    if lease.holder.as_deref() != Some(holder) || renewed {
+        return Ok(None);
+    }
+    let answer = cx.call_on(type_name, key, use_id, EXPIRE, params)?;
+    if answer.get("expired") != Some(&Value::Bool(true)) {
+        return Ok(None);
+    }
+    Ok(Some(
+        answer
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    ))
 }
 
 // direct: who may send one is the guard's question (direct_guard).
@@ -1607,7 +1715,7 @@ fn params_issues(operation: &str, params: &Value) -> Issues {
         ACQUIRE => &["ttlMs"],
         HEARTBEAT => &["acknowledge"],
         RELEASE => &["abandon"],
-        EXPIRE => &["holder", "notRenewedAfter"],
+        EXPIRE | EXPIRE_HOLDER => &["holder", "notRenewedAfter"],
         DIRECT => &["data", "dedupeKey", "name"],
         ACKNOWLEDGE => &["ids"],
         RESET_EXPIRIES => &[],
@@ -1636,9 +1744,13 @@ fn params_issues(operation: &str, params: &Value) -> Issues {
                 schema::boolean_issues("/abandon", abandon, &mut issues);
             }
         }
-        EXPIRE => {
-            if let Some(holder) = given.get("holder") {
-                schema::text_issues("/holder", holder, &mut issues);
+        EXPIRE | EXPIRE_HOLDER => {
+            match given.get("holder") {
+                Some(holder) => schema::text_issues("/holder", holder, &mut issues),
+                None if operation == EXPIRE_HOLDER => {
+                    issues.push("", "required", "must have required property 'holder'");
+                }
+                None => {}
             }
             if let Some(after) = given.get("notRenewedAfter") {
                 schema::integer_issues("/notRenewedAfter", after, Some(0), None, &mut issues);

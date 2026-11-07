@@ -105,6 +105,31 @@ pub async fn run_operation_with<C: GenericClient + Sync>(
     .await
 }
 
+/// Runs an operation of a use on the table as a whole (D104), a command
+/// without a row, and returns its result; null params are `{}`. The core
+/// reads the table's rows through the read across a table, a page at a
+/// time, and writes each row it reaches through a call on that row, each
+/// held to its version; one that writes no row applies nothing, so a
+/// read-only one (Pool's pick) writes nothing in the transaction. The
+/// options' preconditions are refused, since a precondition is a row's.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_table_operation<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    use_id: &str,
+    operation: &str,
+    params: Value,
+    caller: Caller,
+    options: &ExecuteOptions,
+) -> Result<Value, Error> {
+    let store = PgStore { client };
+    run::run_table_operation(
+        host, &store, type_name, use_id, operation, params, caller, options,
+    )
+    .await
+}
+
 /// Creates a row through the core, its uses' create parameters,
 /// validation, guards and initializers run, and returns its key: the
 /// options' id, or one the adapter made.
@@ -515,6 +540,16 @@ mod tests {
                 "transition",
                 Value::Null,
                 Caller::default(),
+            ));
+            send(&run_table_operation(
+                host,
+                tx,
+                "Account",
+                "Pool",
+                "pick",
+                Value::Null,
+                Caller::default(),
+                &options,
             ));
             send(&read_row(host, tx, "Order", "o1"));
             let deadline = Deadline {

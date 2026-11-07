@@ -452,6 +452,7 @@ async fn cases(db: Arc<Database>) {
     let as_worker = sdk(&base_url, &worker, "");
     let as_other = sdk(&base_url, &other, "");
     lease_cases(&db, &worker, &as_worker, &as_other).await;
+    expire_holder_case(&db, &base_url).await;
     retries_cases(&db, &worker, &as_worker, &as_other).await;
     presence_cases(&db, &base_url).await;
     budget_cases(&db, &base_url).await;
@@ -514,6 +515,47 @@ async fn lease_cases(db: &Database, worker: &Subject, as_worker: &FixtureAgentsA
     let (status, code, vetoed) = veto(as_worker.job.lease.acquire(j.id, of(json!({})), None).await.unwrap_err());
     assert_eq!((status, code, vetoed), (409, json!("held_by_another"), json!({"expiresAt": taken["expiresAt"]})));
     assert_eq!(db.job_row(&j).await.version, held);
+}
+
+/// Lease's expireHolder (D104), an operation of the table as a whole, a
+/// command without a row, through the SDK's method of the table with no
+/// key.
+async fn expire_holder_case(db: &Database, base_url: &str) {
+    case("expireHolder expires every lease a gone holder holds, for a caller holding jobs.override, and is forbidden without it");
+    let (gone, other, operator) = (db.subject().await, db.subject().await, db.subject().await);
+    let (as_gone, as_other) = (sdk(base_url, &gone, ""), sdk(base_url, &other, ""));
+    let (as_plain, as_operator) = (sdk(base_url, &operator, ""), sdk(base_url, &operator, "jobs.override"));
+    let (j1, j2, j3) = (db.job("held 1").await, db.job("held 2").await, db.job("held by another").await);
+    for (job, as_holder) in [(&j1, &as_gone), (&j2, &as_gone), (&j3, &as_other)] {
+        as_holder.job.lease.acquire(job.id, of(json!({})), None).await.unwrap();
+        as_holder.job.status.transition(job.id, of(fenced(1, json!({"to": "running"}))), None).await.unwrap();
+    }
+    let mut held = Vec::new();
+    for job in [&j1, &j2, &j3] {
+        held.push(db.job_row(job).await.version);
+    }
+    let expire = json!({"holder": gone.wire});
+    let refused = refusal(as_plain.job.lease.expire_holder(of(expire.clone()), None).await.unwrap_err());
+    let want = format!("{} may not expire the leases of a holder on Job: it needs permission jobs.override", operator.wire);
+    assert_eq!(refused, (403, "forbidden".to_string(), want, Value::Null), "the refusal whole");
+    for (job, version) in [&j1, &j2, &j3].into_iter().zip(&held) {
+        assert_eq!(db.job_row(job).await.version, *version, "a refusal writes nothing");
+    }
+    let expired = value(as_operator.job.lease.expire_holder(of(expire), None).await.unwrap());
+    assert_eq!((&expired["expired"], &expired["reasons"]), (&json!(2), &json!({"holder": 2})), "{expired}");
+    let mut ids: Vec<String> = expired["ids"].as_array().expect("ids").iter().map(|id| id.as_str().unwrap_or_default().to_string()).collect();
+    ids.sort();
+    let mut want = vec![j1.wire.clone(), j2.wire.clone()];
+    want.sort();
+    assert_eq!(ids, want, "the two jobs, as a set");
+    for job in [&j1, &j2] {
+        let stored = db.job_row(job).await;
+        assert_eq!((stored.status.as_str(), stored.holder.as_deref(), stored.token), ("queued", None, Some(2)), "{stored:?}");
+        assert_eq!(stored.ended.as_ref().map(|ended| &ended["reason"]), Some(&json!("holder")), "{stored:?}");
+    }
+    let stored = db.job_row(&j3).await;
+    assert_eq!((stored.status.as_str(), stored.holder.as_deref(), stored.token), ("running", Some(other.wire.as_str()), Some(1)), "{stored:?}");
+    assert_eq!(stored.version, held[2], "another holder's job is untouched");
 }
 
 async fn retries_cases(db: &Database, worker: &Subject, as_worker: &FixtureAgentsApiSdk, as_other: &FixtureAgentsApiSdk) {

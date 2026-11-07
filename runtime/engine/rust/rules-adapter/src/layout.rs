@@ -405,12 +405,38 @@ impl SubTable {
     }
 }
 
-/// An operation a behavior declares on a row.
+/// An operation a behavior declares on a row, or on the table as a whole.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Operation {
     pub name: String,
     #[serde(default)]
     pub writes: bool,
+    /// True for an operation of the table as a whole (D104), a
+    /// declaration's scope `schema`: a repository method that takes no
+    /// key, which the adapter runs as a command without a row
+    /// (`run_table_operation`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub table: bool,
+}
+
+impl Operation {
+    /// An operation of a row.
+    pub fn new(name: impl Into<String>, writes: bool) -> Self {
+        Operation {
+            name: name.into(),
+            writes,
+            table: false,
+        }
+    }
+
+    /// An operation of the table as a whole (D104).
+    pub fn of_table(name: impl Into<String>, writes: bool) -> Self {
+        Operation {
+            name: name.into(),
+            writes,
+            table: true,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -665,6 +691,45 @@ mod tests {
         let layout = Layout::from_json(&without.to_string()).expect("it reads");
         assert!(layout.table("Problem").expect("Problem").events.is_none());
         assert_eq!(serde_json::to_value(&layout).expect("it writes"), without);
+    }
+
+    /// The document behaviorlayout writes for fixture-pool-db, as its test
+    /// holds it, reads (D104): Pool's operations of a row, then pick, of the
+    /// table as a whole, beside Budget's of a row, and Account's deadline
+    /// and event queues; and it writes back as it was, `table` written for
+    /// an operation of the table alone.
+    #[test]
+    fn the_generators_document_of_a_pool_reads_its_operation_of_the_table() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../internal/generator/behaviorlayout/testdata/fixture-pool-db.layout.json",
+        );
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let layout = Layout::from_json(&text).expect("it reads");
+        let account = layout.table("Account").expect("Account");
+        let pool = account
+            .uses
+            .iter()
+            .find(|used| used.behavior == "Pool")
+            .expect("its Pool");
+        assert_eq!(
+            pool.operations,
+            [
+                Operation::new("markOut", true),
+                Operation::new("reportRoom", true),
+                Operation::of_table("pick", false),
+            ]
+        );
+        let budget = account
+            .uses
+            .iter()
+            .find(|used| used.behavior == "Budget")
+            .expect("its Budget");
+        assert!(budget.operations.iter().all(|operation| !operation.table));
+        assert!(account.deadlines.is_some() && account.events.is_some());
+        let written = serde_json::to_value(&layout).expect("it writes");
+        let read: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+        assert_eq!(written, read);
     }
 
     /// The document behaviorlayout writes for fixture-timers-db, as its

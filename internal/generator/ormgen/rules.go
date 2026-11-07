@@ -76,8 +76,8 @@ type RepositoryUse struct {
 	// operation's parameters and result and the objects they hold.
 	Enums   []GoEnum
 	Structs []GoStruct
-	// Operations are the use's operations on a row, in the declaration's
-	// order.
+	// Operations are the use's operations on a row and on the table as a
+	// whole (D104), in the declaration's order.
 	Operations []RepositoryOperation
 	// Precondition is the struct the use's entry of a command's
 	// preconditions is (<Type><Member>Precondition, D104), one of Structs,
@@ -101,6 +101,10 @@ type RepositoryOperation struct {
 	Result string
 	// ResultIsStruct is a result the method returns a pointer to.
 	ResultIsStruct bool
+	// Table is an operation of the table as a whole (D104), a declaration's
+	// scope schema: its method takes no key, and runs as a command without
+	// a row (rules.RunTableOperation).
+	Table bool
 }
 
 // MethodDoc is the doc comment of the operation's method: its
@@ -108,10 +112,13 @@ type RepositoryOperation struct {
 // operation when the declaration gives none.
 func (o RepositoryOperation) MethodDoc() string {
 	doc := strings.Join(strings.Fields(o.Doc), " ")
-	if doc == "" {
-		return fmt.Sprintf("%s runs the operation %s on the row id names.", o.GoName, o.Name)
+	switch {
+	case doc != "":
+		return o.GoName + " " + lowerFirstWord(doc)
+	case o.Table:
+		return fmt.Sprintf("%s runs the operation %s on the table as a whole.", o.GoName, o.Name)
 	}
-	return o.GoName + " " + lowerFirstWord(doc)
+	return fmt.Sprintf("%s runs the operation %s on the row id names.", o.GoName, o.Name)
 }
 
 // ResultReturn is the operation's result as its method returns it: a
@@ -457,6 +464,9 @@ func (o *ORMOutput) RulesExample() string {
 	for _, repo := range o.Repositories {
 		for _, use := range repo.Uses {
 			for _, op := range use.Operations {
+				if op.Table {
+					continue
+				}
 				return fmt.Sprintf("db.%s.%s().%s(ctx, id, params)", repo.TypeName, use.GoName, op.GoName)
 			}
 		}
@@ -740,6 +750,11 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			Doc: fmt.Sprintf("%sOperations are the operations of %s's %s, %s (D103), each run through the behaviors' core on the row whose key it takes, in a transaction.",
 				base, repo.TypeName, member, behaviortypes.An(use.Behavior)),
 		}
+		if slices.ContainsFunc(use.Operations, func(op behaviorlayout.Operation) bool { return op.Table }) {
+			// An operation of the table as a whole takes no key (D104).
+			ru.Doc = fmt.Sprintf("%sOperations are the operations of %s's %s, %s (D103), each run through the behaviors' core in a transaction: on the row whose key it takes, or on the table as a whole, as a command without a row (D104).",
+				base, repo.TypeName, member, behaviortypes.An(use.Behavior))
+		}
 		if narrowed.Preconditions != nil {
 			// The use's entry of a command's preconditions, by its use id
 			// (D16, D104): a struct of the behavior's preconditionSchema.
@@ -779,6 +794,7 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 				Params:         params,
 				Result:         result,
 				ResultIsStruct: isStruct,
+				Table:          op.Table,
 			})
 		}
 		ru.Enums, ru.Structs = b.enums, b.structs

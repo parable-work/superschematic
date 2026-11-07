@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "api": "fixture-pool-api",
+  "permissions": [
+    {
+      "name": "accounts.observe",
+      "identity": false,
+      "operations": [
+        "AccountBudgetCheckReserveHandler",
+        "AccountBudgetObserveHandler",
+        "AccountBudgetRecordUsageForHandler",
+        "AccountBudgetRecordUsageHandler",
+        "AccountBudgetReserveForHandler",
+        "AccountBudgetReserveHandler",
+        "AccountBudgetSetLimitHandler",
+        "AccountBudgetSettleForHandler",
+        "AccountBudgetSettleHandler"
+      ]
+    },
+    {
+      "name": "accounts.pool",
+      "identity": false,
+      "operations": [
+        "AccountPoolMarkOutHandler",
+        "AccountPoolPickHandler",
+        "AccountPoolReportRoomHandler"
+      ]
+    }
+  ]
+}

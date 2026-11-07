@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -60,12 +61,23 @@ import (
 // spends the claimed message after the row writes, as a deadline's does,
 // and a row the core found gone deletes what no row of its key keeps.
 //
+// A command without a row, an operation of a use on the table as a whole
+// (D104, RunTableOperation), runs through the same loop: it names no key,
+// so the adapter reads no row of its own and its change set holds only the
+// rows the operation's calls on them wrote, each fenced on its version; a
+// run that writes nothing applies nothing. A read across a table (D104)
+// reads one page of a type's live rows at a time, each own field the
+// request names held to its value by equality, the one rule over a table's
+// rows the adapter learns, and each row's rows of the sub-tables it names,
+// one query per sub-table per page.
+//
 // A generated repository calls it: each use's operations run
-// RunOperation, and a table that composes behaviors creates, updates and
-// deletes its rows through the core (RunCreate, RunUpdate, RunDelete) so
-// its uses' initializers, guards and validation run, and binds in an
-// upsert's insert the owned fields the core's create of each row gives it
-// (PrepareCreate). A behavior worker's handler runs each due deadline with
+// RunOperation, or RunTableOperation for one of the table, and a table
+// that composes behaviors creates, updates and deletes its rows through
+// the core (RunCreate, RunUpdate, RunDelete) so its uses' initializers,
+// guards and validation run, and binds in an upsert's insert the owned
+// fields the core's create of each row gives it (PrepareCreate). A
+// behavior worker's handler runs each due deadline with
 // RunDeadline and each change of its table with RunChange, and spends each
 // event it hands to the project's handler with SpendEvent. A hand-written
 // server runs Execute on a store of its own transaction. The owned columns
@@ -176,7 +188,8 @@ type Result struct {
 	// the rest.
 	Result json.RawMessage
 	// Key is the command's row's key: a create's (the adapter's when it
-	// named none); "" for define and publish.
+	// named none); "" for define and publish, and for a command without a
+	// row (D104).
 	Key string
 	// Attempts is how many times the command ran: 1 unless a row moved.
 	Attempts int
@@ -328,6 +341,29 @@ func RunOperation(ctx context.Context, host Host, typeName, key, useID, operatio
 		}
 	}
 	command := commandOf(host, caller, Action{Kind: ActionOperation, Key: key, UseID: useID, Operation: operation, Params: raw})
+	result, err := Execute(ctx, host, typeName, command, opts)
+	if err != nil {
+		return nil, err
+	}
+	return result.Result, nil
+}
+
+// RunTableOperation runs an operation of a use on the table as a whole
+// (D104), a command without a row, and returns its result. Nil params, or
+// params that encode as null, are {}. The core refuses a command without a
+// row that presents preconditions, so opts gives none for it.
+func RunTableOperation(ctx context.Context, host Host, typeName, useID, operation string, params any, caller Caller, opts *ExecuteOptions) (json.RawMessage, error) {
+	raw := emptyObject
+	if params != nil {
+		encoded, err := encodeValue(params)
+		if err != nil {
+			return nil, fmt.Errorf("rules: encode the parameters of %s: %w", operation, err)
+		}
+		if !isNull(encoded) {
+			raw = encoded
+		}
+	}
+	command := commandOf(host, caller, Action{Kind: ActionTableOperation, UseID: useID, Operation: operation, Params: raw})
 	result, err := Execute(ctx, host, typeName, command, opts)
 	if err != nil {
 		return nil, err
@@ -639,7 +675,8 @@ func newKey(table *Table) (string, error) {
 }
 
 // keyOfCommand is the key of a command's row: a create's id or the key it
-// names; "" for a define or publish check.
+// names; "" for a define or publish check and for a command without a row
+// (D104).
 func keyOfCommand(command Command) string {
 	switch command.Action.Kind {
 	case ActionCreate:
@@ -735,7 +772,7 @@ func settle(ctx context.Context, host Host, core Core, spec TypeSpec, command Co
 				answered := Answered{Request: request, Answer: answer, Held: len(locks)}
 				replaced := false
 				for i := range reads {
-					if reads[i].Request == request {
+					if sameRequest(reads[i].Request, request) {
 						reads[i] = answered
 						replaced = true
 						break
@@ -762,6 +799,23 @@ func settle(ctx context.Context, host Host, core Core, spec TypeSpec, command Co
 	return nil, nil, Internal("%s of %s: the run still asked for reads or locks after %d rounds", command.Action.name(), spec.Name, MaxRounds)
 }
 
+// sameRequest reports whether a and b ask for one read: each member alike,
+// a read across a table's values by their JSON text.
+func sameRequest(a, b ReadRequest) bool {
+	if a.Kind != b.Kind || a.Type != b.Type || a.Key != b.Key || a.UseID != b.UseID || a.Table != b.Table ||
+		a.Field != b.Field || a.Value != b.Value || a.After != b.After || a.Limit != b.Limit ||
+		len(a.Equal) != len(b.Equal) || !slices.Equal(a.Tables, b.Tables) {
+		return false
+	}
+	for name, value := range a.Equal {
+		other, ok := b.Equal[name]
+		if !ok || compactText(value) != compactText(other) {
+			return false
+		}
+	}
+	return true
+}
+
 // jsonText is a value's JSON, for a message.
 func jsonText(value any) string {
 	out, err := json.Marshal(value)
@@ -783,10 +837,10 @@ func contains(list []string, item string) bool {
 // answerOf is the answer to one of the core's reads, through the store,
 // made while the command holds held locks; a kind of read the adapter does
 // not take refuses the command as internal, and so does a read of
-// sub-table rows, of the rows that link to a row or of the rows whose use's
-// field holds a value under a lock on a store whose locks are fenced,
-// which its unit has no check of yet. A holding read is answered as a
-// linked read is.
+// sub-table rows, of the rows that link to a row, of the rows whose use's
+// field holds a value or of a table's rows under a lock on a store whose
+// locks are fenced, which its unit has no check of yet. A holding read and
+// a read across a table are answered as a linked read is.
 func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (Answer, error) {
 	switch request.Kind {
 	case ReadKindRow:
@@ -859,6 +913,19 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 			return Answer{}, err
 		}
 		return Answer{Kind: ReadKindLinked, Linked: holding}, nil
+	case ReadKindRows:
+		if held > 0 && host.Store.Locks() == LocksFenced {
+			return Answer{}, Internal("a read of a table's rows under a lock has no check on SQLite or D1 yet (D103)")
+		}
+		table := host.Layout.Types[request.Type]
+		if table == nil {
+			return Answer{Kind: ReadKindLinked, Linked: &LinkedRows{Rows: []KeyedRow{}}}, nil
+		}
+		rows, err := readRows(ctx, host.Store, table, request)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindLinked, Linked: rows}, nil
 	default:
 		return Answer{}, Internal("the adapter answers no read of this kind: %s", jsonText(request))
 	}

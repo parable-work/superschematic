@@ -15,6 +15,7 @@ import type {
   JobLeaseAcknowledgeInput,
   JobLeaseAcquireInput,
   JobLeaseDirectInput,
+  JobLeaseExpireHolderInput,
   JobLeaseExpireInput,
   JobLeaseHeartbeatInput,
   JobPreconditions,
@@ -91,6 +92,11 @@ export interface AccountStatusTransitionParams {
   from?: AccountStatusState;
   id: string;
   to: AccountStatusState;
+}
+
+export interface JobLeaseExpireHolderParams {
+  holder: string;
+  notRenewedAfter?: JobLeaseExpireHolderInput['notRenewedAfter'];
 }
 
 export interface JobLeaseAcknowledgeParams {
@@ -290,6 +296,7 @@ export const ACCOUNT_BUDGET_SET_LIMIT = 'account.budget.setLimit' as const;
 export const ACCOUNT_BUDGET_SETTLE = 'account.budget.settle' as const;
 export const ACCOUNT_BUDGET_SETTLE_FOR = 'account.budget.settleFor' as const;
 export const ACCOUNT_STATUS_TRANSITION = 'account.status.transition' as const;
+export const JOB_LEASE_EXPIRE_HOLDER = 'job.lease.expireHolder' as const;
 export const JOB_LEASE_ACKNOWLEDGE = 'job.lease.acknowledge' as const;
 export const JOB_LEASE_ACQUIRE = 'job.lease.acquire' as const;
 export const JOB_LEASE_DIRECT = 'job.lease.direct' as const;
@@ -317,6 +324,7 @@ export type ToolName =
   | typeof ACCOUNT_BUDGET_SETTLE
   | typeof ACCOUNT_BUDGET_SETTLE_FOR
   | typeof ACCOUNT_STATUS_TRANSITION
+  | typeof JOB_LEASE_EXPIRE_HOLDER
   | typeof JOB_LEASE_ACKNOWLEDGE
   | typeof JOB_LEASE_ACQUIRE
   | typeof JOB_LEASE_DIRECT
@@ -344,6 +352,7 @@ export const TOOL_NAMES: ToolName[] = [
   ACCOUNT_BUDGET_SETTLE,
   ACCOUNT_BUDGET_SETTLE_FOR,
   ACCOUNT_STATUS_TRANSITION,
+  JOB_LEASE_EXPIRE_HOLDER,
   JOB_LEASE_ACKNOWLEDGE,
   JOB_LEASE_ACQUIRE,
   JOB_LEASE_DIRECT,
@@ -779,6 +788,46 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     returns: {
       type: 'object',
       description: `AccountStatusTransitionResult object`
+    }
+  },
+  [JOB_LEASE_EXPIRE_HOLDER]: {
+    name: 'job.lease.expireHolder',
+    operationId: 'JobLeaseExpireHolderHandler',
+    title: `Job lease: expire holder`,
+    mcp: {
+      hidden: false,
+      name: `Job lease: expire holder`,
+      handle: 'job_lease_expire_holder',
+      description: `Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.`,
+      invocationPolicy: 'auto',
+      _meta: {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+    },
+    capability: 'job.lease.expire-holder',
+    lifecycle: 'active',
+    visibility: 'public',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.`,
+    namespace: 'job',
+    methodName: 'lease.expireHolder',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:1b2b3dc9635589ad50cc7163330f0de778f4f2bb4bc06e8700b4f97541b7d2f3',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        holder: {"description":"A string value","minLength":1,"type":"string"},
+        notRenewedAfter: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+      },
+      required: ['holder']
+    },
+    returns: {
+      type: 'object',
+      description: `JobLeaseExpireHolderResult object`
     }
   },
   [JOB_LEASE_ACKNOWLEDGE]: {
@@ -1430,6 +1479,19 @@ export const openAIFunctions: OpenAIFunction[] = [
     }
   },
   {
+    name: 'job.lease.expireHolder',
+    description: `Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        holder: {"description":"A string value","minLength":1,"type":"string"},
+        notRenewedAfter: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+      },
+      required: ['holder']
+    }
+  },
+  {
     name: 'job.lease.acknowledge',
     description: `Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.`,
     parameters: {
@@ -1754,6 +1816,19 @@ export const anthropicTools: AnthropicTool[] = [
     }
   },
   {
+    name: 'job.lease.expireHolder',
+    description: `Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none.`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        holder: {"description":"A string value","minLength":1,"type":"string"},
+        notRenewedAfter: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+      },
+      required: ['holder']
+    }
+  },
+  {
     name: 'job.lease.acknowledge',
     description: `Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.`,
     input_schema: {
@@ -1941,6 +2016,7 @@ export type ToolParams = {
   [ACCOUNT_BUDGET_SETTLE]: AccountBudgetSettleParams;
   [ACCOUNT_BUDGET_SETTLE_FOR]: AccountBudgetSettleForParams;
   [ACCOUNT_STATUS_TRANSITION]: AccountStatusTransitionParams;
+  [JOB_LEASE_EXPIRE_HOLDER]: JobLeaseExpireHolderParams;
   [JOB_LEASE_ACKNOWLEDGE]: JobLeaseAcknowledgeParams;
   [JOB_LEASE_ACQUIRE]: JobLeaseAcquireParams;
   [JOB_LEASE_DIRECT]: JobLeaseDirectParams;
@@ -1998,6 +2074,8 @@ export async function invokeTool<T extends ToolName>(
       return sdk.account.budget.settleFor((params as AccountBudgetSettleForParams).id, { amount: (params as AccountBudgetSettleForParams).amount, id: (params as AccountBudgetSettleForParams).id, meter: (params as AccountBudgetSettleForParams).meter, schema: (params as AccountBudgetSettleForParams).schema });
     case ACCOUNT_STATUS_TRANSITION:
       return sdk.account.status.transition((params as AccountStatusTransitionParams).id, { from: (params as AccountStatusTransitionParams).from, to: (params as AccountStatusTransitionParams).to });
+    case JOB_LEASE_EXPIRE_HOLDER:
+      return sdk.job.lease.expireHolder({ holder: (params as JobLeaseExpireHolderParams).holder, notRenewedAfter: (params as JobLeaseExpireHolderParams).notRenewedAfter });
     case JOB_LEASE_ACKNOWLEDGE:
       return sdk.job.lease.acknowledge((params as JobLeaseAcknowledgeParams).id, { ids: (params as JobLeaseAcknowledgeParams).ids, preconditions: (params as JobLeaseAcknowledgeParams).preconditions });
     case JOB_LEASE_ACQUIRE:

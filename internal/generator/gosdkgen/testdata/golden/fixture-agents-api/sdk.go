@@ -25,6 +25,7 @@ type FixtureAgentsApiSDK struct {
 	// JobNamespace exposes job namespace operations.
 	//
 	// Endpoints:
+	// - Lease.ExpireHolder: Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. With notRenewedAfter, an active lease renewed after that time is spared. Needs overridePermission; refused when the config names none. Requires authentication.
 	// - Lease.Acknowledge: Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition. Requires authentication.
 	// - Lease.Acquire: Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first. Requires authentication.
 	// - Lease.Direct: Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either. Requires authentication.

@@ -482,8 +482,14 @@ async fn handle_{{ .SnakeName }}(
 {{- end }}
     ctx.query_params = query.last_values();
 {{- if .Behavior }}
+{{- if .Behavior.Table }}
+    // {{ .Behavior.Type }}'s {{ .Behavior.Use }} {{ .Behavior.Operation }}, a {{ .Behavior.Behavior }} (D104): the behaviors' core
+    // runs it on the table as a whole, a command without a row, on a
+    // transaction of {{ .Behavior.Database }}'s pool, as the request's caller.
+{{- else }}
     // {{ .Behavior.Type }}'s {{ .Behavior.Use }} {{ .Behavior.Operation }}, a {{ .Behavior.Behavior }} (D103): the behaviors' core
     // runs it on a transaction of {{ .Behavior.Database }}'s pool, as the request's caller.
+{{- end }}
 {{ .BehaviorCall }}
 {{- else }}
 {{- if and .Page .Page.Sort }}
