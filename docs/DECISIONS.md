@@ -17451,3 +17451,98 @@ every sign-in.
 | Go decides before the statement whether it needs the transaction: `<type>UpdateSetsField` compares the update with one that holds its `UpdatedBy` alone, since every other member of `<Type>Update` sets a field's value or null, and `UpsertMany`'s fields name none when they equal `<Type>Fields{}`. | A transaction for every upsert, two more round trips for one that sets a field. |
 | A key over an expression has no read by its columns (D89), so it gains one: `UniqueKey.Held`, `SELECT <columns> FROM category WHERE (lower(label)) = (SELECT (lower(label)) FROM (VALUES (CAST($1 AS TEXT))) AS category (label))`, and its partial index's predicate. The expression is evaluated over the input's values of the key's columns, which the index's keys name (D83), each cast to its column's type, under the table's name, so a column the expression qualifies resolves to the input's value too. Go's `<type>UniqueKeys` and the `./orm` entry's `held` carry it. `upsertMany` and an upsert only if changed still refuse such a key. | Evaluating the expression in the client. Substituting the input's values into the expression's text, which would parse SQL. Keeping the write for such a key alone, the key a get-or-create by a case-insensitive email upserts on. |
 | An update that sets only an `Encrypted<T>` field sets no field in the statement (D89), so its upsert of a held row is three statements, the upsert, the read and the second statement that seals the field, where it was two; the row's version moves once, where it moved twice. | Keeping the keep's write when a second statement follows, which records two history rows for one change. |
+
+## D106. An operation marked `@tableOperation` reads or writes one table through its `@source` views with a handler the build writes, and a list takes its filters as a `FilterBy` argument (D60, D62, D90, D103 amended)
+
+An API and its database are separate services on purpose. An API returns
+a `@source` view of a table, never the table, so a column reaches a
+caller only when a view lists it, and a body sets a column only when an
+input type holds it. That stays. What it costs today is the code between
+the two. Every operation that reads a row, lists rows, creates one,
+changes one or deletes one has a body somebody writes: `getProduct` reads
+the row and copies its columns into `ProductView`, and `createProduct`
+copies `CreateProductInput` into the repository's create. The views
+already say all of it, and the loader already checks each view's field
+against the table's column. An issue tracker of about twenty tables is
+some hundred such bodies, most of its handler code. `@behaviorOperations`
+(D103) is the one place a route has no implementation, and it serves a
+behavior's operations alone.
+
+A list has no way to take filters either. `listProducts` declares
+`inStock: QueryParam<boolean>`, one argument per filter, and its
+implementation turns each into the repository's filter by hand. `SortBy`
+(D60, amended) and `SearchQuery` (D62) each made one such argument a
+declaration; a filter has none. `FieldDef.Filterable` is a leftover of
+one: the Go routes parse `filter[field]=value` and
+`filter[field][op]=value` through `filterparse` when it is set, and the
+SDK templates declare a `FilterParam` for it, but no decorator sets it,
+no loader checks it, and nothing documents it.
+
+This entry adds:
+- `@tableOperation()`, on a method whose views are `@source` views of
+  one table, which the build serves with a handler it writes;
+- `FilterBy<Item, Fields>`, a list's filter argument, on a hand-written
+  list as on a generated one, in place of `Filterable`.
+
+It adds no way to serve a table without declaring each operation and
+each view, and no rule over which rows a caller may touch beyond the
+route's guards.
+
+### An operation the build serves
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@tableOperation()` from `@superschematic/api` goes on a method of an API's operation set, one operation at a time. The method stays an ordinary declaration: its `@rest` route, its guards, its `@docs`, `@mcp` and `@rateLimit`, its arguments and its result are written as today, and the OpenAPI document, the SDKs, the permission catalog and the tool documents read it as any operation. The decorator changes one thing: the build writes the handler, and the implementation's interface and its scaffold leave the method out, as they leave a behavior operation's out (D103). It writes `FieldDef.TableOperation` (`ir.TableOperation`, JSON `tableOperation`: the kind and the table), which IR without it does not hold. | A class with no members over a table, `@tableOperations(Issue)`, as `@behaviorOperations` is: routes, names and permissions by convention, which a tracker would then override per operation, and a second vocabulary for what `@rest` and `@requirePermission` already say. It can follow as a shorthand that expands to these methods, as `@userSessions` expands to its routes. Serving a table's columns with no view, which is the direct access the two services exist to prevent. |
+| The table is the `@source` of the method's result view, a table of the API's database, its `authDb` or its one DB dependency, as `@behaviorOperations` names one. Every view the method names, its result and its body, is a `@source` view of that table, and a method that names a plain type, or views of two tables, fails the load. A read and a list may take a projection (D90) as the source in the table's place; a write may not, a projection being read-only. | The table as the decorator's argument, which says it twice and can disagree with the views. A write through a projection, which has no row to write. |
+| The method's HTTP method and shape decide what the handler does, and the loader names what it found when a shape fits none: a `GET` whose path holds the table's key and whose result is one view reads a row; a `GET` whose result is a list of views lists rows; a `POST` with one body argument and no key creates a row; a `PATCH` with the key and one body argument updates one; a `DELETE` with the key deletes one. Each write answers the view of the row as the write left it, a delete's as it was before. A `PUT` is refused. | A kind in the decorator, `@tableOperation("update")`, beside a `@rest(HttpMethod.PATCH, ...)` that already says it. An upsert for `PUT`, which needs a key the caller names and D105's rules about a row that did not change: it can follow. |
+| Nothing is served that a view does not list. A result view's field reads its column, a relation's key (`assigneeId`) its foreign key (D61, amended), and a field marked `@decrypted` the opened value. A result view with a `@virtual` field fails the load on a `@tableOperation`, since no implementation fills it: that operation is written by hand. A view of a relation's rows nested in the result (`lines: OrderLineView[]`) is `@virtual` today and so stays hand-written. | Filling a `@virtual` field with null or its zero, a value the view's type says is real. Nested views loaded through the repositories' `include` (D90): a second set of rules, for which related rows a caller may see, that can follow once row rules do. |
+| A create's body is a `@source` view whose fields are the columns a caller may set. The loader refuses, in it, the key of a table that generates its own, an audit field (`createdAt`, `createdBy`, `updatedAt`, `updatedBy`, `deletedAt`, `deletedBy`), `_version`, and a field a behavior owns (a `Workflow` field, whose initial state the core sets). It refuses a create whose body leaves out a column the table requires and gives no default, a create no request could make. | Taking the table's own create type, every column a caller could set. Leaving a missing required column to the database's refusal at run time. |
+| An update's body is a `@source` view whose fields are all optional. A member the request leaves out leaves its column as it is; a member that is null sets a column that may be null to null, and is a 400 at that member for one that may not; a body that sets no member writes nothing and answers the row (D105). The loader refuses a required member, and the fields a create's body refuses, the key among them. A field a `by` names, or one `Constants` freezes, is warned of as D104 warns of any `@source` input that carries one, and the core refuses the write it guards. | A `PUT` that replaces the row, which would null every column the view does not list. Treating null as absent, which leaves no way to clear a column. Go and Rust read an optional member as a pointer or an `Option`, which holds no difference between absent and null, so their handlers need a body reader that keeps it: the reason TypeScript is first. |
+| A delete is the repository's `deleteOne`: a soft delete of a table with `deletedAt` and `deletedBy`, stamped with the caller, and a hard delete of any other. A read, a list, an update and a delete leave soft-deleted rows out, so each answers 404 for one. | A hard delete of a soft-deletable table, which `hardDeleteOne` keeps for an implementation of yours. A restore, which is an update of `deletedAt` no view may carry. |
+| A path parameter beside the key that is named for a relation's key of the table (`teams/{teamId}/issues`, `issues/{issueId}/comments/{id}`) holds the row to it. A create sets the relation from it, and its body may not carry the same field; a read, a list, an update and a delete keep only rows whose relation is that row, so a row under another parent is a 404. A path parameter that names neither the key nor a relation's key fails the load. | A nested route whose parent the handler ignores, which reads any team's issue through any team's path. Naming the parent in the decorator, which the path's name and the table's relation already settle. |
+| Every handler runs in one transaction through the database's repositories, as the caller (D87): `createdBy`, `updatedBy` and `deletedBy` are stamped, an `Encrypted<T>` column is sealed and opened, and a table that composes behaviors is written through the core (D103), so a rule's refusal is the 409 `vetoed` a behavior operation answers. The outbox, `@enqueueOnChange` and Reactions see the write as they see any. The handler has no hook before or after it. | Hooks, `before` and `after` functions per operation: the implementation the decorator exists to remove, reachable by taking the decorator off. Work that follows a write belongs to Reactions and the change queue, which a raw write reaches too. |
+| The refusals are the ones a hand-written operation answers (D42): 404 `not_found` for a key that holds no live row, 409 `conflict` for a unique key another row holds, 400 at the field for a relation's key that names no row, and the validation every body gets before the handler runs. | A 422, a status no other route answers. |
+| A route's guards are the method's, as on any operation: `@auth`, `@requirePermission`, `@publicRoute`, `@requireService`, `@allowService`, `@rateLimit`, `@bodyLimit` and `@timeout`. `@requireOwnership` fails the load on a `@tableOperation`, as on a `@behaviorOperations` class, since no implementation of yours runs to check what the caller owns. So this entry's rule for which rows a caller may touch is the route's: a caller the route admits reaches every live row the path holds. | A row rule in this entry. The vocabulary for one exists, a field or a seat that names the caller (`by`, D104), and a list that reads only the caller's rows is a filter through it; it is the next step, and until then an operation that needs it is written by hand. |
+| Different callers get different views by different operations: a table may have any number of `@tableOperation` methods, in any sets, each with its own views and guards (`getIssue` returning `IssueView` for `issues.read`, `getIssueForGuest` returning `IssueGuestView` on a public route). | A permission on a view's field, which leaves a field out for a caller who lacks it: every SDK type's field then becomes optional, and a response's shape depends on who asked. |
+| Taking `@tableOperation()` off a method makes it a hand-written operation with the same route, types, SDK method and tool, and a set may hold both kinds. Nothing about a table is refused to an implementation because some of its operations are generated. On a server language whose generator writes no handler yet, the build warns once per API and keeps the method in the interface and the scaffold, to be written by hand, so a project in two languages still builds. | Failing the build on such a server, which blocks an API over a decorator its other server serves. |
+
+### A list, and its filters
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A generated list is `@paginated` (D60), or the load fails: it reads the repository's `findPage` with the page request. It sorts by its `SortBy` argument (D60, amended) and searches by its `SearchQuery` argument (D62), which needs a `@searchField` on the table, and filters by its `FilterBy` argument. A `QueryParam` argument on a generated list fails the load, since nothing says what it compares. | A list of the whole table. Reading a `QueryParam` named for a column as an equality, a rule by name that `FilterBy` states outright. |
+| `FilterBy<Item, Fields>` from `@superschematic/api` is an argument of a `GET` whose result is a list: `Item` the list's item type, `Fields` the fields a caller may filter by (`filter: FilterBy<IssueView, ["assigneeId", "stateId", "priority", "createdAt"]>`). One per operation. It is not also a `SortBy`, a `SearchQuery` or a `RefersTo`, and carries no `Validate` rule. It writes `FieldDef.Filter` (`ir.OperationFilter`, JSON `filter`: the fields, each with its kind and operators), and `FieldDef.Filterable` is removed with the route and SDK templates that read it. | `@filterable` as it stood, every field of anything, checked by nobody. A filter object in a `POST` body, which makes a read a write to caches, tools and the permission catalog. |
+| Each field names a field of `Item` that a filter can compare: on a `@source` item, one with a column whose kind `sqlutil.FilterKind` gives operators, a relation's key among them. A `@virtual` field, a `Secret`, a `@decrypted` field, a list and a map fail the load. So a list filters by nothing its view does not show, and a hidden column cannot be probed by narrowing a list until a row drops out. | Any column of the table, which answers questions about columns no view returns. |
+| On the wire a filter is the bracket form `filterparse` already reads: `filter[field]=value` is equality, and `filter[field][op]=value` names an operator. The operators follow the column's kind, as the repositories' filters do (D79, D90): `eq` and `in` (values separated by commas, at most 100) on every kind; `gt`, `gte`, `lt` and `lte` on a number, a date and a time; `contains` on text, the repository's `ilike` of the value with its `%`, `_` and `\` escaped; `isNull` (`true` or `false`) on a field that may be null. Members are ANDed. A request holds at most 50 filters. A field `Fields` does not name, an operator its kind does not take and a value its type refuses are each a 400 at `filter[field]`. | `neq`, which `filterparse` parses and no repository filter holds: a negation is the ORMs' to add first, in both. `anyOf` and `allOf` (D90, D99) in the query string, an expression language the engine's `where` declined (D16, amended): a list that needs them is hand-written and composes the repository's filter. A JSON object in one query parameter, as the engine's `where` is, which a browser's form cannot write. |
+| Each runtime reads the filter with one reader, Go's `filterparse`, and TypeScript's and Rust's beside their page readers, held to `runtime/http/testdata/filter_parity.json` as the page readers are to `page_parity.json` (D60). A hand-written list's implementation takes the filter typed, a member per field with its operators, beside its arguments, and a generated list's handler turns it into the repository's filter member for member. | A parser per server, which D60 found three ways to disagree about one query string. |
+| The OpenAPI document gives `filter` as a `deepObject` parameter, each field with its operators. An MCP tool takes `filter` as an object, a member per field holding a value or `{ op: value }`, and its description lists the fields. Each SDK method takes a typed filter, `ListIssuesFilter`, and writes the bracket form. | A string the caller formats, which no SDK type checks. |
+| A cursor carries no filter (D60): the next page is asked with the same filters, and a UI that changes one starts at the first page. | |
+
+### Order of work
+
+1. `FilterBy`: the IR and its checks, the three readers and their vectors,
+   the OpenAPI document, the tool documents and the four SDKs, with
+   `Filterable` removed. acme's `listProducts` and `listOrders` take one in
+   place of their `QueryParam` filters.
+2. `@tableOperation` in the loader and the IR, and the TypeScript server's
+   handlers for all five kinds, with a fixture API and one of acme's
+   TypeScript APIs on them.
+3. The Go server's handlers, with a body reader that keeps an absent
+   member apart from a null one.
+4. Row rules: an operation that reads or writes only the rows a field or
+   a seat names the caller in (`by`, D104).
+
+Left for later steps, each with what stands in for it until then:
+- Rust's handlers, which wait on a Rust ORM; a Rust API writes these
+  operations by hand.
+- Nested views in a result, loaded through `include` (D90); a view with
+  one is `@virtual` and hand-written.
+- A fenced update or delete, which writes only at the `_version` the
+  caller read. The Go ORM has `UpdateOneIfVersion` and the TypeScript
+  repositories have no such write yet; a generated update is the last
+  write's.
+- An upsert by `PUT`.
+- The memberless shorthand over a table, if the per-operation form
+  proves long.
+
+Status: decided, not built.
