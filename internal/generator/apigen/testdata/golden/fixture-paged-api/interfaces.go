@@ -9,6 +9,7 @@ import (
 	"context"
 	types "example.com/schemas/types/go/fixture-paged-api"
 	"fmt"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 )
 
@@ -40,6 +41,28 @@ type CatalogImplementation interface {
 	//
 	// One item.
 	GetItem(ctx context.Context, itemId types.IdentityUUID) (*types.ItemView, error)
+	// ListParts handles GET /api/parts
+	//
+	// The parts, in order of their names unless the caller sorts them by
+	// quantity, kept to the ones the caller's filters find (D106): a filter
+	// on a field of each kind, beside a page and a sort.
+	//
+	// This endpoint filters its list (FilterBy, D106): filter holds what the
+	// request filters by, a member per field, nil for a field it does not
+	// filter by, and each operator the request sent set on it. Every member
+	// set must hold at once.
+	//
+	// This endpoint pages its list (@paginated): page is the request's cursor,
+	// "" for the first page, and its limit, 1 to 5 (2 when the request
+	// sends none). Return the items after the cursor in the operation's own
+	// order and, while more follow, the cursor of the last one: read up to
+	// page.Limit+1 rows and build the page with paging.FromRows, and read the
+	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	// page.Sort is the order to read them in (D60, amended), name when the
+	// request sends none: a field of name, quantity, descending when page.Sort.Desc,
+	// ties broken by id in the same direction. The cursor is your own key's;
+	// the route binds it to the sort and back.
+	ListParts(ctx context.Context, filter CatalogListPartsFilter, page paging.Request) (paging.Page[types.PartView], error)
 	// ListTags handles GET /api/tags
 	//
 	// The tags items carry: a page of a primitive, with the default limits.
@@ -51,6 +74,33 @@ type CatalogImplementation interface {
 	// page.Limit+1 rows and build the page with paging.FromRows, and read the
 	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
 	ListTags(ctx context.Context, page paging.Request) (paging.Page[string], error)
+}
+
+// CatalogListPartsFilter is what a request of Catalog.listParts filters by
+// (FilterBy, D106): a member per field, nil for a field the request does
+// not filter by, each operator the request sent set on it. Every member set
+// holds at once.
+type CatalogListPartsFilter struct {
+	// Id filters by id: eq, in.
+	Id *filterparse.Equals[types.IdentityUUID]
+	// Name filters by name: eq, in, contains.
+	Name *filterparse.Text[string]
+	// Kind filters by kind: eq, in.
+	Kind *filterparse.Equals[types.PartKind]
+	// Quantity filters by quantity: eq, in, gt, gte, lt, lte.
+	Quantity *filterparse.Ordered[int64]
+	// Weight filters by weight: eq, in, gt, gte, lt, lte.
+	Weight *filterparse.Ordered[float64]
+	// Price filters by price: eq, in, gt, gte, lt, lte.
+	Price *filterparse.Ordered[types.GenericDecimal]
+	// Discontinued filters by discontinued: eq, in.
+	Discontinued *filterparse.Equals[bool]
+	// MadeAt filters by madeAt: eq, in, gt, gte, lt, lte.
+	MadeAt *filterparse.Ordered[types.TemporalDateTime]
+	// RetiredOn filters by retiredOn: eq, in, gt, gte, lt, lte, isNull.
+	RetiredOn *filterparse.Ordered[types.TemporalDate]
+	// SupplierId filters by supplierId: eq, in, isNull.
+	SupplierId *filterparse.Equals[types.IdentityUUID]
 }
 
 // Implementations holds all namespace implementation interfaces.

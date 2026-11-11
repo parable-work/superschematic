@@ -51,6 +51,20 @@ pub const CATALOG_GET_ITEM: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// catalog.listParts (`GET /api/parts`).
+pub const CATALOG_LIST_PARTS: OperationInfo = OperationInfo {
+    namespace: "catalog",
+    name: "listParts",
+    method: "GET",
+    path: "/api/parts",
+    requires_auth: false,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// catalog.listTags (`GET /api/tags`).
 pub const CATALOG_LIST_TAGS: OperationInfo = OperationInfo {
     namespace: "catalog",
@@ -70,5 +84,6 @@ pub const ALL: &[OperationInfo] = &[
     CATALOG_PLACE_BASKET,
     CATALOG_LIST_ITEMS,
     CATALOG_GET_ITEM,
+    CATALOG_LIST_PARTS,
     CATALOG_LIST_TAGS,
 ];

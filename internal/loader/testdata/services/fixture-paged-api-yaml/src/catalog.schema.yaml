@@ -1,11 +1,23 @@
 name: fixture-paged-api
 kind: API
 scalars:
+  Generic.Decimal:
+    name: Generic.Decimal
+    languagePrimitive: string
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
   Identity.Slug:
     name: Identity.Slug
     languagePrimitive: string
   Identity.UUID:
     name: Identity.UUID
+    languagePrimitive: string
+  Temporal.Date:
+    name: Temporal.Date
+    languagePrimitive: string
+  Temporal.DateTime:
+    name: Temporal.DateTime
     languagePrimitive: string
 types:
   # Request body: the lines of a basket to place.
@@ -64,6 +76,47 @@ types:
       - name: inStock
         typeRef: { name: boolean }
         required: true
+  # A part of an item: a field of every kind a filter compares.
+  PartView:
+    name: PartView
+    role: EmbeddedStruct
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: kind
+        typeRef: { name: PartKind }
+        required: true
+      - name: quantity
+        typeRef: { name: Generic.Int64 }
+        required: true
+      - name: weight
+        typeRef: { name: number }
+        required: true
+      - name: price
+        typeRef: { name: Generic.Decimal }
+        required: true
+      - name: discontinued
+        typeRef: { name: boolean }
+        required: true
+      - name: madeAt
+        typeRef: { name: Temporal.DateTime }
+        required: true
+      - name: retiredOn
+        typeRef: { name: Temporal.Date }
+      - name: supplierId
+        typeRef: { name: Identity.UUID }
+enums:
+  # What a part is.
+  PartKind:
+    name: PartKind
+    values:
+      - { name: Bolt, serializedAs: bolt }
+      - { name: Nut, serializedAs: nut }
+      - { name: Washer, serializedAs: washer }
 operationSets:
   - name: Catalog
     operations:
@@ -105,6 +158,33 @@ operationSets:
         page: {}
         httpMethod: GET
         restPath: tags
+      # The parts, in order of their names unless the caller sorts them by
+      # quantity, kept to the ones the caller's filters find (D106): a filter
+      # on a field of each kind, beside a page and a sort.
+      - name: listParts
+        typeRef: { name: PartView, isArray: true }
+        required: true
+        arguments:
+          - name: sort
+            typeRef: { name: string }
+            isQuery: true
+            sort: [name, quantity]
+        filter:
+          argument: filter
+          fields:
+            - name: id
+            - name: name
+            - name: kind
+            - name: quantity
+            - name: weight
+            - name: price
+            - name: discontinued
+            - name: madeAt
+            - name: retiredOn
+            - name: supplierId
+        page: { defaultLimit: 2, maxLimit: 5, defaultSort: name }
+        httpMethod: GET
+        restPath: parts
       # Place a basket.
       - name: placeBasket
         typeRef: { name: BasketView }

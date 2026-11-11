@@ -327,6 +327,10 @@ type pageOp struct {
 	Snake    string // project_archive_project
 	ArgsName string // ProjectArchiveProjectArgs
 	Output   string // the call's result type
+	// Filter is the Args' field of the operation's FilterBy (D106), empty
+	// without one: a call that builds the Args itself sets it to its
+	// default, which filters by nothing.
+	Filter string
 	// Params are the page route parameters its path arguments come from,
 	// in its path's order.
 	Params []string
@@ -1190,6 +1194,7 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 		Kind:     c.kind,
 		Snake:    info.SnakeName,
 		ArgsName: info.ArgsName,
+		Filter:   info.Filter,
 		Output:   info.Output,
 		Items:    info.Output,
 		Verb:     c.verb,

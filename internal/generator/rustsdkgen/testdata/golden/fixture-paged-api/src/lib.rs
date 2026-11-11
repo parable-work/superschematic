@@ -17,5 +17,6 @@ pub use runtime::{
     EncryptedPayloadEnvelope, EncryptedRequestOptions, ForwardedUser, MultipartBody, PublicEncryptionKey,
     RequestHook, RequestOptions, UploadFile,
 };
+pub use runtime::{Equals, Ordered, Text};
 pub use runtime::{Page, Pager};
 pub use sdk::FixturePagedApiSdk;

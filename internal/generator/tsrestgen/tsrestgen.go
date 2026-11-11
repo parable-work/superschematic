@@ -138,6 +138,13 @@ type EndpointInfo struct {
 	// router binds the page's next to (bindPage); it is not among
 	// QueryParams.
 	Page *apigen.PageInfo
+	// Filter is the operation's FilterBy (D106), nil for an operation that
+	// takes no filter. The operation table carries its fields, and the
+	// router reads the request's filters with the runtime's readFilter
+	// after the query parameters and before the page, and hands them to
+	// the method typed, under the filter's argument; it is not among
+	// QueryParams.
+	Filter *FilterInfo
 
 	PathParams  []ParamInfo
 	QueryParams []ParamInfo
@@ -181,6 +188,86 @@ type EndpointInfo struct {
 	// through the table's repository in RouterOptions.orm, so it has no
 	// implementation method.
 	Behavior *BehaviorRoute
+	// Table is the table operation the endpoint is (D106), nil for every
+	// other: the router mounts it with the runtime's handler of its kind,
+	// over RouterOptions.orm, and the implementation has no method for it.
+	Table *TableRoute
+}
+
+// TableRoute is a table operation (D106) as the router mounts it: the
+// route of an operation marked @tableOperation, which the runtime's
+// handler of its kind serves from the table's repository in the
+// database's orm.ts, with no implementation method. Its literal is the
+// runtime's TableOperation, which the handler reads.
+type TableRoute struct {
+	// Operation names the operation as the loader does, Set.operation.
+	Operation string
+	// Kind, Database and Type are the loader's: what the operation does,
+	// the DB service, and the table, or for a read and a list a keyed
+	// projection (D90).
+	Kind     string
+	Database string
+	Type     string
+	// Repository is the member of the ORM that holds the type's
+	// repository, as tsgen names it.
+	Repository string
+	// Key is the table's key, the path parameter of a read, an update and
+	// a delete; empty for a list and a create.
+	Key string
+	// Parents are the path parameters beside the key, each the row's
+	// member that holds a to-one relation's key.
+	Parents []string
+	// View are the members of the result's view, and Decrypted those of
+	// them marked @decrypted.
+	View      []string
+	Decrypted []string
+	// Body are the members of a create's and an update's body.
+	Body []string
+	// Search is a list's SearchQuery argument, by its query parameter.
+	Search string
+}
+
+// Handler is the runtime's handler of the operation's kind: tableRead,
+// tableList, tableCreate, tableUpdate or tableDelete.
+func (r *TableRoute) Handler() string {
+	return "table" + codegen.ToPascalCase(r.Kind)
+}
+
+// Article is the operation's kind with its article, as a sentence starts
+// with it: A read, An update.
+func (r *TableRoute) Article() string {
+	if r.Kind == ir.TableOperationUpdate {
+		return "An " + r.Kind
+	}
+	return "A " + r.Kind
+}
+
+// Literal is the operation as router.ts's table of them holds it, a
+// TableOperation: { kind: 'update', type: 'Issue', repository: 'issue',
+// key: 'id', view: ['id', 'title'], body: ['title'] }.
+func (r *TableRoute) Literal() string {
+	fields := []string{
+		"kind: " + tsString(r.Kind),
+		"type: " + tsString(r.Type),
+		"repository: " + tsString(r.Repository),
+	}
+	if r.Key != "" {
+		fields = append(fields, "key: "+tsString(r.Key))
+	}
+	if len(r.Parents) > 0 {
+		fields = append(fields, "parents: "+tsStringList(r.Parents))
+	}
+	fields = append(fields, "view: "+tsStringList(r.View))
+	if len(r.Decrypted) > 0 {
+		fields = append(fields, "decrypted: "+tsStringList(r.Decrypted))
+	}
+	if r.Kind == ir.TableOperationCreate || r.Kind == ir.TableOperationUpdate {
+		fields = append(fields, "body: "+tsStringList(r.Body))
+	}
+	if r.Search != "" {
+		fields = append(fields, "search: "+tsString(r.Search))
+	}
+	return "{ " + strings.Join(fields, ", ") + " }"
 }
 
 // BehaviorRoute is a behavior operation (D103) as the router mounts it:
@@ -366,9 +453,70 @@ func serviceCallersText(clause *ir.ServiceCallers, sep, none string) string {
 }
 
 // HasArgs reports whether the implementation method takes any argument; a
-// paged operation's takes its page.
+// paged operation's takes its page, and a filtered one's its filter.
 func (e EndpointInfo) HasArgs() bool {
-	return e.HasInput || len(e.PathParams) > 0 || len(e.QueryParams) > 0 || len(e.BodyParams) > 0 || e.Page != nil
+	return e.HasInput || len(e.PathParams) > 0 || len(e.QueryParams) > 0 || len(e.BodyParams) > 0 || e.Page != nil || e.Filter != nil
+}
+
+// FilterInfo is an endpoint's FilterBy (D106) as the package writes it:
+// the operation table's filter, the runtime's FilterSpec, which the router
+// reads a request's filters against, and the type the implementation
+// takes them as.
+type FilterInfo struct {
+	// Argument is the filter argument's name, and TSName the member of the
+	// method's arguments that holds the filter.
+	Argument string
+	TSName   string
+	// TypeName names the filter's type in interfaces.ts, <Operation>Filter
+	// (ListPartsFilter), as the arguments' type is <Operation>Args.
+	TypeName string
+	// Fields are the fields a caller may filter by, in FilterBy's order.
+	Fields []FilterFieldInfo
+}
+
+// FilterFieldInfo is one field of a FilterInfo.
+type FilterFieldInfo struct {
+	// Name is the item's field, by its JSON name: the name the wire and
+	// the filter's member carry.
+	Name string
+	// Kind is the field's kind, one of ir.FilterKinds, which the runtime
+	// reads a date's and a decimal's value by.
+	Kind string
+	// Operators are the operators the field takes, in the wire's order.
+	Operators []string
+	// Shape is the shape of the field's filter (apigen's Equals, Ordered
+	// or Text), which names the runtime's type of it.
+	Shape string
+	// TSType is the TypeScript type of one value of the field, as a query
+	// parameter of the field's type has it.
+	TSType string
+	// SpecLiteral is the ParamSpec literal of one value of the field, a
+	// query parameter named filter[<field>], which the runtime decodes
+	// each value with.
+	SpecLiteral string
+}
+
+// Type is the field's member of the filter's type: the runtime's filter of
+// its shape over its value's type, OrderedFilter<number>.
+func (f FilterFieldInfo) Type() string {
+	return f.Shape + "Filter<" + f.TSType + ">"
+}
+
+// FieldSpecLiteral is one field of the operation table's filter, a
+// FilterFieldSpec: { name: 'kind', kind: 'enum', operators: ['eq', 'in'],
+// value: { name: 'filter[kind]', kind: 'enum', required: false,
+// enumValues: [...] } }.
+func (f FilterFieldInfo) FieldSpecLiteral() string {
+	return fmt.Sprintf("{ name: %s, kind: %s, operators: %s, value: %s }", tsString(f.Name), tsString(f.Kind), tsStringList(f.Operators), f.SpecLiteral)
+}
+
+// FieldNames are the filter's fields, by their JSON names.
+func (f *FilterInfo) FieldNames() []string {
+	names := make([]string, len(f.Fields))
+	for i, field := range f.Fields {
+		names[i] = field.Name
+	}
+	return names
 }
 
 // NamespaceInfo groups the implementable (non-manual) endpoints of one
@@ -460,6 +608,9 @@ type APIOutput struct {
 	// HasSortedPages reports whether a paged endpoint sorts (D60,
 	// amended): the router then imports the runtime's bindPage.
 	HasSortedPages bool
+	// HasFilters reports whether any endpoint takes a filter (D106): the
+	// operation table carries its FilterSpec.
+	HasFilters bool
 	// HasDownloads reports whether an implemented endpoint answers a
 	// FileDownload (D81): the interfaces import the runtime's FileDownload.
 	HasDownloads bool
@@ -593,6 +744,81 @@ func (o *APIOutput) BehaviorsOnFields() bool {
 	return true
 }
 
+// TableRoutes are the table operations the router mounts (D106), in route
+// order.
+func (o *APIOutput) TableRoutes() []*TableRoute {
+	var out []*TableRoute
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Table != nil {
+			out = append(out, endpoint.Table)
+		}
+	}
+	return out
+}
+
+// HasTableOperations reports whether the API has an operation marked
+// @tableOperation (D106), which the router serves from
+// RouterOptions.orm.
+func (o *APIOutput) HasTableOperations() bool {
+	return len(o.TableRoutes()) > 0
+}
+
+// TableHandlers are the runtime's handlers the router mounts its table
+// operations with, each once, sorted.
+func (o *APIOutput) TableHandlers() []string {
+	handlers := map[string]struct{}{}
+	for _, route := range o.TableRoutes() {
+		handlers[route.Handler()] = struct{}{}
+	}
+	return sortedKeys(handlers)
+}
+
+// RouterNeedsORM reports whether the router runs operations through
+// RouterOptions.orm, the repositories of the API's database: a table's
+// behavior operations (D103) and the table operations (D106).
+func (o *APIOutput) RouterNeedsORM() bool {
+	return o.HasBehaviors() || o.HasTableOperations()
+}
+
+// ORMOperations names what the router runs through RouterOptions.orm, with
+// the decisions that say so: "the behavior operations", "D103".
+func (o *APIOutput) ORMOperations() (what, decisions string) {
+	switch {
+	case o.HasBehaviors() && o.HasTableOperations():
+		return "the behavior operations and the table operations", "D103, D106"
+	case o.HasTableOperations():
+		return "the table operations", "D106"
+	}
+	return "the behavior operations", "D103"
+}
+
+// ORMRuns is what the router runs through RouterOptions.orm, as a
+// sentence names it: "the behavior operations".
+func (o *APIOutput) ORMRuns() string {
+	what, _ := o.ORMOperations()
+	return what
+}
+
+// ORMDecisions are the decisions that route operations through
+// RouterOptions.orm: "D103".
+func (o *APIOutput) ORMDecisions() string {
+	_, decisions := o.ORMOperations()
+	return decisions
+}
+
+// ImplementsPages reports whether an operation the implementation writes,
+// or a @manualRouteRegistration one, is @paginated (D60): interfaces.ts
+// then imports the runtime's Page and PageRequest. A paged behavior or
+// table operation is the router's alone.
+func (o *APIOutput) ImplementsPages() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Page != nil && endpoint.Behavior == nil && endpoint.Table == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // HasBehaviors reports whether the API serves a table's behavior
 // operations (D103): RouterOptions then takes orm, the repositories of the
 // API's database, which run them.
@@ -625,10 +851,85 @@ func (o *APIOutput) BehaviorsTakePreconditions() bool {
 	return false
 }
 
+// FilteredEndpoints are the endpoints whose filter the router reads and
+// hands an implementation (D106): every filtered endpoint but a
+// @manualRouteRegistration one, whose handler reads its own, and a table
+// operation, whose handler takes the filter as the router read it.
+func (o *APIOutput) FilteredEndpoints() []EndpointInfo {
+	var filtered []EndpointInfo
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Filter != nil && !endpoint.ManualRouteRegistration && endpoint.Table == nil {
+			filtered = append(filtered, endpoint)
+		}
+	}
+	return filtered
+}
+
+// ReadsFilters reports whether the router reads a request's filter
+// (D106): for an implementation, or for a table operation's list.
+func (o *APIOutput) ReadsFilters() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Filter != nil && !endpoint.ManualRouteRegistration {
+			return true
+		}
+	}
+	return false
+}
+
+// FilterTypeNames are the filter types of the endpoints the router reads
+// a filter for, which it imports from interfaces.ts, sorted.
+func (o *APIOutput) FilterTypeNames() []string {
+	names := map[string]struct{}{}
+	for _, endpoint := range o.FilteredEndpoints() {
+		names[endpoint.Filter.TypeName] = struct{}{}
+	}
+	return sortedKeys(names)
+}
+
+// InterfaceRuntimeTypes are the types interfaces.ts imports from the
+// runtime's main entry, sorted: the result and the context of every
+// method, a download's file (D81), a page and its request (D60), and the
+// filters of the shapes the filtered endpoints' fields have (D106).
+func (o *APIOutput) InterfaceRuntimeTypes() []string {
+	types := map[string]struct{}{"OperationResult": {}, "RequestContext": {}}
+	if o.HasDownloads {
+		types["FileDownload"] = struct{}{}
+	}
+	if o.ImplementsPages() {
+		types["Page"] = struct{}{}
+		types["PageRequest"] = struct{}{}
+	}
+	for _, endpoint := range o.FilteredEndpoints() {
+		for _, field := range endpoint.Filter.Fields {
+			types[field.Shape+"Filter"] = struct{}{}
+		}
+	}
+	return sortedKeys(types)
+}
+
+// OperationTableType is the type router.ts holds its operation table to:
+// the runtime's OperationSpec, with a filtered operation's FilterSpec
+// (D106) and a paged one's PageSpec (D60), which the router reads beside
+// it.
+func (o *APIOutput) OperationTableType() string {
+	var members []string
+	if o.HasFilters {
+		members = append(members, "readonly filter?: FilterSpec")
+	}
+	if o.HasPages {
+		members = append(members, "readonly page?: PageSpec")
+	}
+	if len(members) == 0 {
+		return "OperationSpec"
+	}
+	return "OperationSpec & { " + strings.Join(members, "; ") + " }"
+}
+
 // RuntimeImport is router.ts's import from the runtime's main entry: the
 // helpers of the behavior operations' handlers (D103, D104), the page
-// helpers (D60) and the dropper of undeclared keys (D87) the router calls,
-// and the operation table's types.
+// helpers (D60), the filter reader (D106), the dropper of undeclared keys
+// (D87) and the table operations' handlers (D106) the router calls, and
+// the types of the operation table and of the table operations'.
 func (o *APIOutput) RuntimeImport() string {
 	var values []string
 	if o.HasBehaviors() {
@@ -646,12 +947,23 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.DropsUndeclaredKeys() {
 		values = append(values, "declaredKeysOnly")
 	}
+	if o.ReadsFilters() {
+		values = append(values, "readFilter")
+	}
 	if o.HasPages {
 		values = append(values, "readPage")
 	}
-	types := []string{"OperationSpec"}
+	values = append(values, o.TableHandlers()...)
+	var types []string
+	if o.HasFilters {
+		types = append(types, "FilterSpec")
+	}
+	types = append(types, "OperationSpec")
 	if o.HasPages {
 		types = append(types, "PageSpec")
+	}
+	if o.HasTableOperations() {
+		types = append(types, "TableOperation")
 	}
 	if len(values) == 0 {
 		return "import type { " + strings.Join(types, ", ") + " } from " + tsString(o.RuntimePackage) + ";"
@@ -771,6 +1083,22 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			}
 			continue
 		}
+		// A table operation runs through the database's repositories too
+		// (D106), with the runtime's handler of its kind and no
+		// implementation method: the interfaces leave it out, and the
+		// router mounts it over RouterOptions.orm.
+		if ep.Operation != nil && ep.Operation.TableOperation != nil {
+			endpoint, err := b.tableEndpoint(ep, ep.Operation.TableOperation)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			output.HasPages = output.HasPages || endpoint.Page != nil
+			output.HasSortedPages = output.HasSortedPages || (endpoint.Page != nil && endpoint.Page.Sort != nil)
+			output.HasFilters = output.HasFilters || endpoint.Filter != nil
+			continue
+		}
 		endpoint, err := b.endpoint(ep)
 		if err != nil {
 			return nil, err
@@ -779,6 +1107,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		output.Endpoints = append(output.Endpoints, endpoint)
 		output.HasPages = output.HasPages || endpoint.Page != nil
 		output.HasSortedPages = output.HasSortedPages || (endpoint.Page != nil && endpoint.Page.Sort != nil)
+		output.HasFilters = output.HasFilters || endpoint.Filter != nil
 		output.HasDownloads = output.HasDownloads || (endpoint.Download != nil && !endpoint.ManualRouteRegistration)
 		if endpoint.WebhookProvider != "" {
 			webhookProviders[endpoint.WebhookProvider] = struct{}{}
@@ -806,10 +1135,14 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	output.TypeImports = b.packageImports(b.typeImports)
 	output.RouterTypeImports = b.packageImports(b.routerTypeImports)
 	output.ValidatorImports = b.packageImports(b.validatorImports)
-	output.ScalarImports = sortedKeys(b.scalarImports)
 	for symbol := range b.scalarImports {
 		b.routerScalarImports[symbol] = struct{}{}
 	}
+	// A filter's value types are interfaces.ts's alone (D106).
+	for symbol := range b.filterScalarImports {
+		b.scalarImports[symbol] = struct{}{}
+	}
+	output.ScalarImports = sortedKeys(b.scalarImports)
 	output.RouterScalarImports = sortedKeys(b.routerScalarImports)
 	peers := map[string]struct{}{}
 	for pkg := range b.typeImports {
@@ -843,6 +1176,10 @@ type builder struct {
 	// routerScalarImports are the scalars router.ts imports beside
 	// scalarImports: the behavior operations' keys (D103).
 	routerScalarImports map[string]struct{}
+	// filterScalarImports are the scalars interfaces.ts imports beside
+	// scalarImports: the types of the filters' values (D106), which
+	// router.ts does not name.
+	filterScalarImports map[string]struct{}
 }
 
 func newBuilder(schema *ir.Schema, opts Options) *builder {
@@ -860,6 +1197,7 @@ func newBuilder(schema *ir.Schema, opts Options) *builder {
 		validatorImports:    map[string]map[string]struct{}{},
 		scalarImports:       map[string]struct{}{},
 		routerScalarImports: map[string]struct{}{},
+		filterScalarImports: map[string]struct{}{},
 	}
 }
 
@@ -1026,6 +1364,134 @@ func (b *builder) behaviorEndpoint(ep apigen.EndpointInfo, op *ir.BehaviorOperat
 	return endpoint, nil
 }
 
+// tableEndpoint is a table operation (D106) as the router mounts it: its
+// route, decoded as an implemented endpoint's, and what the runtime's
+// handler of its kind reads of it. Its types are rendered by a builder of
+// their own, so they add no import to interfaces.ts, which has no method
+// for it, and none but its input's validators to router.ts, whose handler
+// hands the runtime the decoded request whole. The loader fills an
+// operation's TableOperation and refuses what no handler serves; IR that
+// did not go through it is refused here, naming the operation, since a
+// handler written from half of it would serve something else.
+func (b *builder) tableEndpoint(ep apigen.EndpointInfo, op *ir.TableOperation) (EndpointInfo, error) {
+	own := newBuilder(b.schema, b.opts)
+	endpoint, err := own.endpoint(ep)
+	if err != nil {
+		return endpoint, err
+	}
+	owner := behaviorSet(b.schema, ep.Operation) + "." + ep.Operation.Name
+	refuse := func(format string, args ...any) (EndpointInfo, error) {
+		return endpoint, fmt.Errorf("tsrestgen: %s is a @tableOperation (D106) %s; the loader fills an operation's tableOperation and checks it, so load the schema before generating", owner, fmt.Sprintf(format, args...))
+	}
+	if !slices.Contains(ir.TableOperationKinds, op.Kind) || op.Type == "" || op.Database == "" {
+		return refuse("whose kind, table and database are not all set (kind %q, type %q, database %q)", op.Kind, op.Type, op.Database)
+	}
+	route := &TableRoute{
+		Operation:  owner,
+		Kind:       op.Kind,
+		Database:   op.Database,
+		Type:       op.Type,
+		Repository: lowerFirst(op.Type),
+		Key:        op.Key,
+	}
+	if !identifierPattern.MatchString(route.Repository) {
+		return endpoint, fmt.Errorf("tsrestgen: %s is a %s of %s, and the repository's member %q is no identifier the router can name it by", owner, op.Kind, op.Type, route.Repository)
+	}
+	inPath := func(name string) bool {
+		return slices.ContainsFunc(endpoint.PathParams, func(p ParamInfo) bool { return p.Name == name })
+	}
+	keyed := op.Kind != ir.TableOperationList && op.Kind != ir.TableOperationCreate
+	switch {
+	case keyed && (op.Key == "" || !inPath(op.Key)):
+		return refuse("whose route, %s %s, has no path parameter for the key of %s (%q)", endpoint.Method, endpoint.Path, op.Type, op.Key)
+	case !keyed && op.Key != "":
+		return refuse("whose %s names a key, %s", op.Kind, op.Key)
+	}
+	for _, parent := range op.Parents {
+		if parent.Param == "" || !inPath(parent.Param) {
+			return refuse("whose route, %s %s, has no path parameter %q, a parent's", endpoint.Method, endpoint.Path, parent.Param)
+		}
+		route.Parents = append(route.Parents, parent.Param)
+	}
+	named := len(route.Parents)
+	if keyed {
+		named++
+	}
+	if len(endpoint.PathParams) != named {
+		return refuse("whose route, %s %s, has a path parameter that is neither its key nor a parent", endpoint.Method, endpoint.Path)
+	}
+
+	view := b.viewType(ep.OutputType)
+	if view == nil || view.Source == nil || len(view.Fields) == 0 {
+		return refuse("whose result, %s, is no @source view of %s's with fields", ep.OutputType, b.opts.SchemaName)
+	}
+	for _, field := range view.Fields {
+		if field == nil {
+			continue
+		}
+		if field.Virtual {
+			return refuse("whose result %s has a @virtual field, %s, which no implementation fills", view.Name, field.Name)
+		}
+		route.View = append(route.View, field.Name)
+		if field.Decrypted {
+			route.Decrypted = append(route.Decrypted, field.Name)
+		}
+	}
+
+	writesBody := op.Kind == ir.TableOperationCreate || op.Kind == ir.TableOperationUpdate
+	switch {
+	case writesBody:
+		body := b.viewType(ep.InputType)
+		if !endpoint.HasInput || op.Input == "" || body == nil || body.Source == nil {
+			return refuse("whose %s takes no body the router decodes as an input type (input %q)", op.Kind, op.Input)
+		}
+		for _, field := range body.Fields {
+			if field != nil {
+				route.Body = append(route.Body, field.Name)
+			}
+		}
+	case endpoint.HasInput || len(endpoint.BodyParams) > 0 || op.Input != "":
+		return refuse("whose %s takes a body", op.Kind)
+	}
+
+	if op.Kind == ir.TableOperationList {
+		if endpoint.Page == nil {
+			return refuse("that lists %s and is not @paginated", op.Type)
+		}
+		for _, param := range ep.ArgQueryParams() {
+			if !param.Search {
+				return refuse("that lists %s by a query parameter, %s, which nothing compares", op.Type, param.Name)
+			}
+			route.Search = param.Name
+		}
+	} else if endpoint.Page != nil || endpoint.Filter != nil || len(endpoint.QueryParams) > 0 {
+		return refuse("whose %s takes a page, a filter or a query parameter", op.Kind)
+	}
+	endpoint.Table = route
+
+	// The handler reads the request the route decoded, with no cast: the
+	// router imports the input's validators, which its table of
+	// operations parses the body with, and no type of the operation's.
+	for pkg, symbols := range own.validatorImports {
+		for symbol := range symbols {
+			b.addImport(b.validatorImports, pkg, symbol)
+		}
+	}
+	return endpoint, nil
+}
+
+// viewType finds a view a table operation names: one of the API's own
+// types, or of its inputs.
+func (b *builder) viewType(name string) *ir.TypeDef {
+	if name == "" {
+		return nil
+	}
+	if td := b.schema.Types[name]; td != nil {
+		return td
+	}
+	return b.schema.Inputs[name]
+}
+
 // behaviorSet names the operation set that holds op: the
 // @behaviorOperations set the loader added it to (D103).
 func behaviorSet(schema *ir.Schema, op *ir.FieldDef) string {
@@ -1187,6 +1653,13 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 	}
 	endpoint.OutputType = outputType
 	endpoint.OutputIsArrayOfArrays = ep.OutputIsArrayOfArrays
+	if ep.Filter != nil {
+		filter, err := b.filter(ep)
+		if err != nil {
+			return endpoint, err
+		}
+		endpoint.Filter = filter
+	}
 	endpoint.DocLines = docLines(endpoint)
 
 	// b.param fails only for a body argument whose type it cannot decode;
@@ -1235,6 +1708,52 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		}
 	}
 	return endpoint, nil
+}
+
+// filter is the endpoint's FilterBy as the package writes it (D106). Each
+// field's value is resolved as a query parameter of the field's type is
+// (param), named filter[<field>] and never required, so the runtime
+// decodes a filter's value by the rules of a query list's item, and the
+// filter's type holds the TypeScript type such a parameter has. The types
+// a value names are interfaces.ts's to import, which declares the filter's
+// type, and not router.ts's, which narrows the filter it read to that
+// type; a @manualRouteRegistration operation's filter has no type there,
+// its handler reading the operation table's filter itself.
+func (b *builder) filter(ep apigen.EndpointInfo) (*FilterInfo, error) {
+	info := &FilterInfo{
+		Argument: ep.Filter.Argument,
+		TSName:   tsutil.ToCamelCase(ep.Filter.Argument),
+		TypeName: ep.Filter.TypeName,
+	}
+	values := newBuilder(b.schema, b.opts)
+	for _, field := range ep.Filter.Fields {
+		value := field.Value.Param
+		value.Required = false
+		param, err := values.param(value, inQuery)
+		if err != nil {
+			return nil, fmt.Errorf("tsrestgen cannot decode filter field %s.%s(%s): %w", ep.Namespace, ep.Name, field.Name, err)
+		}
+		info.Fields = append(info.Fields, FilterFieldInfo{
+			Name:        field.Name,
+			Kind:        field.Kind,
+			Operators:   append([]string(nil), field.Operators...),
+			Shape:       field.Shape(),
+			TSType:      param.TSType,
+			SpecLiteral: param.SpecLiteral,
+		})
+	}
+	if ep.ManualRouteRegistration {
+		return info, nil
+	}
+	for pkg, symbols := range values.typeImports {
+		for symbol := range symbols {
+			b.addImport(b.typeImports, pkg, symbol)
+		}
+	}
+	for symbol := range values.scalarImports {
+		b.filterScalarImports[symbol] = struct{}{}
+	}
+	return info, nil
 }
 
 // paramPlace is where a parameter travels: the path, the query string, or
@@ -1594,6 +2113,10 @@ func docLines(ep EndpointInfo) []string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, ep.Method+" "+ep.Path)
+	if ep.Filter != nil {
+		lines = append(lines, "Filtered (FilterBy): args."+ep.Filter.TSName+" holds a member for each of "+strings.Join(ep.Filter.FieldNames(), ", ")+
+			" the request filters by, and an item is kept when it matches them all; {} for a request that filters by none.")
+	}
 	if ep.Page != nil {
 		lines = append(lines, "Paged (@paginated): answers the Page args.page asks for, whose next is null after the last page.")
 	}
@@ -1671,10 +2194,14 @@ func tsStringList(values []string) string {
 }
 
 // WriteAPI writes the generated package into outputDir. It refuses an API
-// that serves a table's behavior operations (D103) whose Deps (SetDeps)
-// holds no repositories, which router.ts types RouterOptions.orm by.
+// that serves a table's behavior operations (D103), or has a table
+// operation (D106), whose Deps (SetDeps) holds no repositories, which
+// router.ts types RouterOptions.orm by.
 func WriteAPI(output *APIOutput, outputDir string) error {
 	if err := output.checkBehaviorDeps(output.Deps); err != nil {
+		return err
+	}
+	if err := output.checkTableDeps(output.Deps); err != nil {
 		return err
 	}
 	if err := output.checkBehaviorWorkers(output.Deps); err != nil {

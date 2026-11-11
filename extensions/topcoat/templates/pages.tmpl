@@ -1189,10 +1189,13 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
 async fn call_{{ .Snake }}(cx: &Cx{{ declareAfter .Params "&str" }}) -> Result<{{ .Output }}, Refusal> {
 {{- if .ArgForm }}
     {{ .NewForm }}.submit(cx).await.map_err(|refusal| page_refusal(refusal, &[{{ .RouteNames }}]))
-{{- else if .RouteFields }}
+{{- else if or .RouteFields .Filter }}
     let args = crate::api::{{ .ArgsName }} {
 {{- range .RouteFields }}
         {{ .Field }}: route_value({{ .Param }}, {{ .Read }}).ok_or_else(no_such_page)?,
+{{- end }}
+{{- with .Filter }}
+        {{ . }}: Default::default(),
 {{- end }}
     };
     operations::{{ .Snake }}(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &[{{ .RouteNames }}]))

@@ -137,6 +137,14 @@ func (property JSONSchemaProperty) MarshalJSON() ([]byte, error) {
 
 func (property JSONSchemaProperty) marshalShape() ([]byte, error) {
 	type plain JSONSchemaProperty
+	if property.Type == "" && len(property.OneOf) > 0 && !property.Nullable {
+		// Members of different JSON types (a filter's value or its
+		// operators, D106): the property has no type of its own.
+		return json.Marshal(struct {
+			plain
+			Type string `json:"type,omitempty"`
+		}{plain: plain(property)})
+	}
 	if property.Type == "any" {
 		types := append([]string(nil), jsonValueTypes...)
 		if property.Nullable {
@@ -371,7 +379,9 @@ func BuildInputTypeFieldsMap(apiOutput *apigen.APIOutput) map[string][]apigen.Pa
 // an item gives its reference (D61), the search argument its mark (D62),
 // and the sort argument its values and its mark (D60, amended), under the
 // keys' names. keys supplies the vendor keys; page is nil for an endpoint
-// that does not page.
+// that does not page, and filter for one that takes no filter (D106): one
+// that does takes it as an object under its argument's name
+// (FilterProperty).
 func BuildParametersSchema(
 	pathParams []ToolPathParam,
 	queryArgs []ToolQueryArg,
@@ -386,6 +396,7 @@ func BuildParametersSchema(
 	paramKeyFn ParamKeyFn,
 	keys apigen.ToolKeys,
 	page *apigen.PageInfo,
+	filter *apigen.FilterInfo,
 ) JSONSchemaObject {
 	schema := JSONSchemaObject{
 		Vendor:     append([]apigen.ToolKeyValue(nil), keys.Parameters...),
@@ -473,6 +484,10 @@ func BuildParametersSchema(
 		for name, prop := range PageParameters(page) {
 			schema.Properties[paramKeyFn(name, "")] = prop
 		}
+	}
+
+	if filter != nil {
+		schema.Properties[paramKeyFn(filter.Argument, "")] = FilterProperty(filter, scalars, inputTypeEnums)
 	}
 
 	for name, prop := range schema.Properties {
@@ -759,6 +774,53 @@ func PageParameters(page *apigen.PageInfo) map[string]JSONSchemaProperty {
 			Minimum: &minimum, Maximum: &maximum,
 		},
 	}
+}
+
+// FilterProperty is a filtered endpoint's filter as a tool parameter
+// (D106): a closed object with a member per field a caller may filter by,
+// each a value of the field's type, for equality, or a closed object of the
+// field's operators: eq and the comparisons a value, in a list of 1 to
+// ir.FilterMaxInValues values, contains text and isNull a boolean. A tool's
+// caller sends the object; the SDK that invokes the tool writes it as the
+// bracket form.
+func FilterProperty(filter *apigen.FilterInfo, scalars map[string]apigen.ScalarJSONSchemaInfo, enums map[string]apigen.ToolEnumInfo) JSONSchemaProperty {
+	property := JSONSchemaProperty{
+		Type:                 "object",
+		Description:          apigen.FilterDescription(filter),
+		AdditionalProperties: closedObject(),
+		Properties:           make(map[string]JSONSchemaProperty, len(filter.Fields)),
+	}
+	one, most := 1, ir.FilterMaxInValues
+	for _, field := range filter.Fields {
+		value := typeToJSONSchemaProperty(field.Value.Type, scalars, enums)
+		value.Description = ""
+		operators := JSONSchemaProperty{
+			Type:                 "object",
+			AdditionalProperties: closedObject(),
+			Properties:           make(map[string]JSONSchemaProperty, len(field.Operators)),
+		}
+		for _, op := range field.Operators {
+			var operand JSONSchemaProperty
+			switch op {
+			case ir.FilterOpIn:
+				items := value
+				operand = JSONSchemaProperty{Type: "array", Items: &items, MinItems: &one, MaxItems: &most}
+			case ir.FilterOpContains:
+				operand = JSONSchemaProperty{Type: "string", MinLength: &one}
+			case ir.FilterOpIsNull:
+				operand = JSONSchemaProperty{Type: "boolean"}
+			default:
+				operand = value
+			}
+			operand.Description = apigen.FilterOperatorDescription(op)
+			operators.Properties[op] = operand
+		}
+		property.Properties[field.Name] = JSONSchemaProperty{
+			Description: "Filters by " + field.Name + ": a value it equals, or its operators (" + strings.Join(field.Operators, ", ") + ").",
+			OneOf:       []JSONSchemaProperty{value, operators},
+		}
+	}
+	return property
 }
 
 // BuildEndpointReturnSchema builds the JSON Schema an endpoint's tool

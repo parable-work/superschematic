@@ -301,7 +301,10 @@ operation's arguments, decoded and checked, as one struct,
 `<Namespace><Operation>Args`: a field per path, query and body argument,
 typed as the schema declares it, and `input` for an input type. The method
 returns the operation's result type. An operation without arguments has
-no `args`, and one without a result returns `()`:
+no `args`, and one without a result returns `()`. A `@tableOperation` is
+such a method too: the Rust server writes no handler for one yet, and the
+build warns
+([Operations the build serves](/superschematic/guides/api-routes/#the-servers)):
 
 ```rust
 use schemas_catalog_api::{types, ProductGetProductArgs, ProductImplementation};

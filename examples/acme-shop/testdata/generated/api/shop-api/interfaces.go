@@ -9,13 +9,22 @@ import (
 	"context"
 	types "example.com/acme/types/go/shop-api"
 	"fmt"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 )
 
 // ProductImplementation defines the interface for product namespace handlers.
 // Implement in internal/route-impl to provide business logic.
 type ProductImplementation interface {
 	// ListProducts handles GET /api/products
-	ListProducts(ctx context.Context, inStock bool) ([]types.ProductView, error)
+	//
+	// The products, or with filter[inStock] the ones in stock, or out of it
+	// (D106).
+	//
+	// This endpoint filters its list (FilterBy, D106): filter holds what the
+	// request filters by, a member per field, nil for a field it does not
+	// filter by, and each operator the request sent set on it. Every member
+	// set must hold at once.
+	ListProducts(ctx context.Context, filter ProductListProductsFilter) ([]types.ProductView, error)
 	// CreateProduct handles POST /api/products
 	CreateProduct(ctx context.Context, input *types.CreateProductInput) (*types.ProductView, error)
 	// GetProduct handles GET /api/products/{id}
@@ -36,6 +45,15 @@ type ProductImplementation interface {
 	// Signs an upload of the product's image to shop-media and records the
 	// object's name on the product.
 	CreateProductImageUpload(ctx context.Context, id types.IdentityUUID, input *types.ProductImageUploadInput) (*types.ProductImageUpload, error)
+}
+
+// ProductListProductsFilter is what a request of ProductQueries.listProducts filters by
+// (FilterBy, D106): a member per field, nil for a field the request does
+// not filter by, each operator the request sent set on it. Every member set
+// holds at once.
+type ProductListProductsFilter struct {
+	// InStock filters by inStock: eq, in.
+	InStock *filterparse.Equals[bool]
 }
 
 // Implementations holds all namespace implementation interfaces.

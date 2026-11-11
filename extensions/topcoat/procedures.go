@@ -29,6 +29,10 @@ type procedure struct {
 	// amended), named as its argument, empty for an unsorted one.
 	Paged bool
 	Sort  string
+	// Filter is the Args' field of the operation's FilterBy (D106), empty
+	// without one: the arguments record holds no filter, and the Args take
+	// the field's default, which filters by nothing.
+	Filter string
 	// Output is the result's record type, "()" without a result, and
 	// ReadOutput the expression that reads it from the result's JSON
 	// (`json`).
@@ -132,6 +136,9 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 			SnakeName:     endpoint.SnakeName(),
 			Output:        "()",
 			routeControls: controlsOf(endpoint),
+		}
+		if endpoint.Filter != nil {
+			p.Filter = endpoint.Filter.Field
 		}
 		var err error
 		if endpoint.HasArgs() {

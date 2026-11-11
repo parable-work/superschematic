@@ -166,8 +166,10 @@ func isRelationKey(schema *ir.Schema, in Input, view *ir.TypeDef, key, relation 
 // reader flattened it into Input.ExternalTypes). In an API, a RefersTo it
 // writes names no type that is @source of another table, the schema's own
 // or a dependency's, and with none, two or more types that are @source of
-// the related type draw a warning: ir.FieldReference then derives no
-// reference, and the key is a plain value.
+// the related type and that an operation lists (ir.ReferenceCandidates)
+// draw a warning: ir.FieldReference then derives no reference, and the key
+// is a plain value. Views of the table no operation lists, a
+// @tableOperation's bodies say (D106), are not ones a key could name.
 func checkRelationKey(schema *ir.Schema, in Input, view *ir.TypeDef, key, relation *ir.FieldDef, r *Result) {
 	relatedName, related := relatedOf(view, relation)
 	reads := fmt.Sprintf("%s.%s reads the key of %s.%s", view.Name, key.Name, view.Source.Target, relation.Name)
@@ -192,7 +194,7 @@ func checkRelationKey(schema *ir.Schema, in Input, view *ir.TypeDef, key, relati
 		}
 		return
 	}
-	candidates := ir.SourcedBy(schema, related)
+	candidates := ir.ReferenceCandidates(schema, in.DependencySchemas, related)
 	if len(candidates) > 1 {
 		names := make([]string, len(candidates))
 		for i, c := range candidates {

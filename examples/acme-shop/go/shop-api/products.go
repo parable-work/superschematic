@@ -56,12 +56,16 @@ func (p *Products) GetProduct(ctx context.Context, id types.IdentityUUID) (*type
 	return &view, nil
 }
 
-func (p *Products) ListProducts(ctx context.Context, inStock bool) ([]types.ProductView, error) {
-	var filter *orm.ProductFilter
-	if inStock {
-		filter = &orm.ProductFilter{InStock: &orm.BoolFilter{Eq: &inStock}}
+// ListProducts answers the products the request's filter keeps (D106):
+// every product without one, and with filter[inStock] the ones in stock,
+// or out of it. The filter's member holds each operator the request sent,
+// which the repository's filter of the column takes as it is.
+func (p *Products) ListProducts(ctx context.Context, filter api.ProductListProductsFilter) ([]types.ProductView, error) {
+	var where *orm.ProductFilter
+	if by := filter.InStock; by != nil {
+		where = &orm.ProductFilter{InStock: &orm.BoolFilter{Eq: by.Eq, In: by.In}}
 	}
-	rows, _, err := p.DB.GetProductRepository().FindMany(ctx, filter, &orm.ProductFindOptions{
+	rows, _, err := p.DB.GetProductRepository().FindMany(ctx, where, &orm.ProductFindOptions{
 		Fields: orm.ProductFields{}.All(),
 	})
 	if err != nil {

@@ -1,8 +1,8 @@
 import { Identity } from "superscalar";
 import {
   Authenticated,
+  FilterBy,
   HttpMethod,
-  QueryParam,
   docs,
   icon,
   mcp,
@@ -65,7 +65,7 @@ export class ProductQueries extends Authenticated {
   @mcp({ hidden: true, reason: "The storefront lists products; a model reads one with get_product." })
   @rest(HttpMethod.GET, "products")
   @requirePermission(["products.read"])
-  listProducts(inStock: QueryParam<boolean>): ProductView[] {
+  listProducts(filter: FilterBy<ProductView, ["inStock"]>): ProductView[] {
     throw new Error("schema declaration only");
   }
 }

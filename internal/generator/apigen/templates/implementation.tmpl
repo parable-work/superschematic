@@ -24,11 +24,8 @@ import (
 {{- if or (and .IsPublic (not .Auth.Identity)) .HasManualRoutes }}
 	"net/http"
 {{- end }}
-{{- if or .HasFilterableEndpoints .HasEncryptedEndpoints .HasPagedEndpoints }}
+{{- if or .HasEncryptedEndpoints .HasPagedEndpoints }}
 {{ end }}
-{{- if .HasFilterableEndpoints }}
-	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
-{{- end }}
 {{- if .HasEncryptedEndpoints }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 {{- end }}
@@ -191,7 +188,7 @@ type {{ toGoName . }} struct {
 // @manualRouteRegistration: the server mounts the handler NewManualRoutes
 // builds at its route, not this method.
 {{- end }}
-func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoImplResultType }}, error) {
+func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filter }}, {{ .Filter.Argument }} api.{{ .GoFilterTypeName }}{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoImplResultType }}, error) {
 	return {{ .GoZeroResult }}, api.NotImplementedError("{{ toGoName $namespace }}.{{ .ShortImplName }}")
 }
 {{- end }}

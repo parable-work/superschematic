@@ -10,7 +10,8 @@ import sys
 from typing import Any, Callable, Union
 
 from acme_shop_orders_sdk import APIError, ClientConfig, Page, ShopOrdersSDK
-from acme_types_shop_orders import PlaceOrderInput, PlaceOrderLine, ShippingAddress, WriteReviewInput
+from acme_shop_orders_sdk.namespaces.order import ListOrdersFilter
+from acme_types_shop_orders import OrderStatus, PlaceOrderInput, PlaceOrderLine, ShippingAddress, WriteReviewInput
 
 PRODUCT = "00000000-0000-4000-8000-0000000000b1"
 MISSING_ORDER = "00000000-0000-4000-8000-0000000000c1"
@@ -81,6 +82,12 @@ def main(base_url: str, token: str) -> None:
     print(f"every order: {sum(1 for _ in shopper.order.list_orders_all(limit=1))}")
     largest = sum(1 for _ in shopper.order.list_orders_all(sort="-totalCents", limit=1))
     print(f"every order by total, largest first: {largest}")
+
+    # The orders still on their way: a filter is typed, a member per field
+    # the list filters by, and goes out as
+    # filter[status][in]=placed,fulfilled with every page (D106).
+    on_their_way: ListOrdersFilter = {"status": {"in": [OrderStatus.Placed, OrderStatus.Fulfilled]}}
+    print(f"orders on their way: {sum(1 for _ in shopper.order.list_orders_all(filter=on_their_way, limit=1))}")
 
     # e30 is the cursor of {}, a key that names no order.
     print(f"orders after a cursor the server never returned: {status(lambda: shopper.order.list_orders(cursor='e30'))}")

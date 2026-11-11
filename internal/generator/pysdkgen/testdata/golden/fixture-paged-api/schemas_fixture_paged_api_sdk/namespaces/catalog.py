@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, FilterField, SyncHTTPClient, filter_query_params, path_segment
 from ..errors import SDKError, ValidationError
 from ..page import Page
 
@@ -39,7 +39,99 @@ if TYPE_CHECKING:
         BasketInput,
         BasketView,
         ItemView,
+        PartKind,
+        PartView,
     )
+
+
+# The operators of each field of ListPartsFilter (D106), all optional:
+# eq and the comparisons take a value of the field, in a list of them,
+# contains text, and is_null, for a field that may be null, a bool.
+ListPartsFilterId = TypedDict(
+    "ListPartsFilterId",
+    {"eq": "str", "in": "list[str]"},
+    total=False,
+)
+ListPartsFilterName = TypedDict(
+    "ListPartsFilterName",
+    {"eq": "str", "in": "list[str]", "contains": "str"},
+    total=False,
+)
+ListPartsFilterKind = TypedDict(
+    "ListPartsFilterKind",
+    {"eq": "PartKind", "in": "list[PartKind]"},
+    total=False,
+)
+ListPartsFilterQuantity = TypedDict(
+    "ListPartsFilterQuantity",
+    {"eq": "int", "in": "list[int]", "gt": "int", "gte": "int", "lt": "int", "lte": "int"},
+    total=False,
+)
+ListPartsFilterWeight = TypedDict(
+    "ListPartsFilterWeight",
+    {"eq": "float", "in": "list[float]", "gt": "float", "gte": "float", "lt": "float", "lte": "float"},
+    total=False,
+)
+ListPartsFilterPrice = TypedDict(
+    "ListPartsFilterPrice",
+    {"eq": "str", "in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str"},
+    total=False,
+)
+ListPartsFilterDiscontinued = TypedDict(
+    "ListPartsFilterDiscontinued",
+    {"eq": "bool", "in": "list[bool]"},
+    total=False,
+)
+ListPartsFilterMadeAt = TypedDict(
+    "ListPartsFilterMadeAt",
+    {"eq": "str", "in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str"},
+    total=False,
+)
+ListPartsFilterRetiredOn = TypedDict(
+    "ListPartsFilterRetiredOn",
+    {"eq": "str", "in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str", "is_null": "bool"},
+    total=False,
+)
+ListPartsFilterSupplierId = TypedDict(
+    "ListPartsFilterSupplierId",
+    {"eq": "str", "in": "list[str]", "is_null": "bool"},
+    total=False,
+)
+
+
+class ListPartsFilter(TypedDict, total=False):
+    """The filter of list_parts (D106): a member per field a caller may
+    filter by, a value, for equality, or the field's operators, and all of
+    them hold at once."""
+
+    id: str | ListPartsFilterId
+    name: str | ListPartsFilterName
+    kind: PartKind | ListPartsFilterKind
+    quantity: int | ListPartsFilterQuantity
+    weight: float | ListPartsFilterWeight
+    price: str | ListPartsFilterPrice
+    discontinued: bool | ListPartsFilterDiscontinued
+    made_at: str | ListPartsFilterMadeAt
+    retired_on: str | ListPartsFilterRetiredOn
+    supplier_id: str | ListPartsFilterSupplierId
+
+
+# The fields of ListPartsFilter: each member, the item's field as the
+# wire names it, the type of its values, and its operators.
+_LIST_PARTS_FILTER_FIELDS = (
+    FilterField("id", "id", "str", ("eq", "in")),
+    FilterField("name", "name", "str", ("eq", "in", "contains")),
+    FilterField("kind", "kind", "PartKind", ("eq", "in")),
+    FilterField("quantity", "quantity", "int", ("eq", "in", "gt", "gte", "lt", "lte")),
+    FilterField("weight", "weight", "float", ("eq", "in", "gt", "gte", "lt", "lte")),
+    FilterField("price", "price", "str", ("eq", "in", "gt", "gte", "lt", "lte")),
+    FilterField("discontinued", "discontinued", "bool", ("eq", "in")),
+    FilterField("made_at", "madeAt", "str", ("eq", "in", "gt", "gte", "lt", "lte")),
+    FilterField("retired_on", "retiredOn", "str", ("eq", "in", "gt", "gte", "lt", "lte", "is_null")),
+    FilterField("supplier_id", "supplierId", "str", ("eq", "in", "is_null")),
+)
+
+
 class CatalogNamespace:
     def __init__(
         self,
@@ -542,6 +634,59 @@ class CatalogNamespace:
                 return
             if page.next == cursor:
                 raise SDKError("list_items returned the cursor it was sent")
+            cursor = page.next
+    def list_parts(self, *, sort: str | None = None, filter: ListPartsFilter | None = None, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[PartView]:
+        path = "/api/parts"
+        query_params: dict[str, Any] | None = {}
+        if sort is not None:
+            query_params["sort"] = sort
+        if filter is not None:
+            # The filter is written in the bracket form (D106):
+            # filter[field]=value, or filter[field][op]=value.
+            query_params.update(
+                filter_query_params(filter, "filter", _LIST_PARTS_FILTER_FIELDS, self._validate_scalar_argument),
+            )
+        if cursor:
+            self._validate_query_param_constraints(
+                cursor,
+                "cursor", max_length=1024, pattern="^[A-Za-z0-9_-]+$",
+            )
+            query_params["cursor"] = cursor
+        if limit is not None:
+            self._validate_query_param_constraints(
+                limit,
+                "limit", min_value=1, max_value=5,
+            )
+            query_params["limit"] = limit
+        if not query_params:
+            query_params = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_page(response, "PartView")
+    def list_parts_all(self, *, sort: str | None = None, filter: ListPartsFilter | None = None, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Iterator[PartView]:
+        """Yield every item of list_parts, page after page (D60).
+
+        The first page is the one cursor names, the first of the list when
+        it is None, and each page holds up to limit items. A page is asked
+        for, with the last one's next, only when the items before it are
+        taken; an error raises there, and so does a page whose next is the
+        cursor it was asked with, after its items. Every page is asked
+        with the same filter (D106), which a cursor does not carry.
+        """
+        while True:
+            page = self.list_parts(sort=sort, filter=filter, cursor=cursor, limit=limit, timeout_seconds=timeout_seconds, extra_headers=extra_headers)
+            yield from page.items
+            if page.next is None:
+                return
+            if page.next == cursor:
+                raise SDKError("list_parts returned the cursor it was sent")
             cursor = page.next
     def list_tags(self, *, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[str]:
         path = "/api/tags"

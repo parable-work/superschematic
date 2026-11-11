@@ -17452,7 +17452,7 @@ every sign-in.
 | A key over an expression has no read by its columns (D89), so it gains one: `UniqueKey.Held`, `SELECT <columns> FROM category WHERE (lower(label)) = (SELECT (lower(label)) FROM (VALUES (CAST($1 AS TEXT))) AS category (label))`, and its partial index's predicate. The expression is evaluated over the input's values of the key's columns, which the index's keys name (D83), each cast to its column's type, under the table's name, so a column the expression qualifies resolves to the input's value too. Go's `<type>UniqueKeys` and the `./orm` entry's `held` carry it. `upsertMany` and an upsert only if changed still refuse such a key. | Evaluating the expression in the client. Substituting the input's values into the expression's text, which would parse SQL. Keeping the write for such a key alone, the key a get-or-create by a case-insensitive email upserts on. |
 | An update that sets only an `Encrypted<T>` field sets no field in the statement (D89), so its upsert of a held row is three statements, the upsert, the read and the second statement that seals the field, where it was two; the row's version moves once, where it moved twice. | Keeping the keep's write when a second statement follows, which records two history rows for one change. |
 
-## D106. An operation marked `@tableOperation` reads or writes one table through its `@source` views with a handler the build writes, and a list takes its filters as a `FilterBy` argument (D60, D62, D90, D103 amended)
+## D106. An operation marked `@tableOperation` reads or writes one table through its `@source` views with a handler the build writes, and a list takes its filters as a `FilterBy` argument (D60, D61, D62, D78, D90, D103 amended)
 
 An API and its database are separate services on purpose. An API returns
 a `@source` view of a table, never the table, so a column reaches a
@@ -17545,4 +17545,47 @@ Left for later steps, each with what stands in for it until then:
 - The memberless shorthand over a table, if the per-operation form
   proves long.
 
-Status: decided, not built.
+### What building steps 1 to 3 settled
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `FieldDef.Filter` holds the argument's name (`OperationFilter.Argument`) beside its fields, and the filter is not among `FieldDef.Arguments`: it is no query parameter of one value, so a writer that knows nothing of filters writes none, and each writer that does renders the bracket form from `Filter`. The loader fills each field's `kind`, `operators` and `typeRef` (`verify.checkFilters`); a data form may leave them out, and one that writes another is refused. The wire's parameter is `filter` whatever the argument is called, so no other argument of a filtered operation is named `filter`. | An `ArgumentDef` marked as the filter, as `SortBy`'s is: every writer that ranges over an operation's arguments would have had to skip it, and one that did not would write a query parameter `filter` of text. |
+| A field's kind is one of `uuid`, `string`, `enum`, `int`, `float`, `decimal`, `bool`, `datetime` and `date`. An enum is a kind of its own, with `eq` and `in` alone: its values are members, not text, so it takes no `contains`. A duration, a point and a JSON value fail the load, as a list and a map do: the repositories give a duration no `in` and a point no equality. On a `@source` item an audit field other than `createdAt` and `updatedAt` fails it too, since the repositories keep no filter for one. | `contains` on an enum, which the repositories' text filter would run and no caller means. A filter on `createdBy`, which waits on the repositories. |
+| The reader refuses a request by what its keys say before any value is read: more than 50 filter parameters; a key that is not `filter[field]` or `filter[field][operator]`; a field `Fields` does not name; an operator the field does not take; a field's operator sent twice, `filter[f]` and `filter[f][eq]` being one; an `isNull` that is not `true` or `false`; an `in` of no value or of more than 100; an empty `contains`. It reads the keys in ascending order of their UTF-8 bytes, so a request with two faults is refused for the same one by every runtime, whatever order the query sent them in. A value is then decoded as an item of a query list of the field's type, its refusal named at `filter[field]`, and a `date` and a `decimal` are parsed by the scalar core in every runtime. A route refuses its own query parameters first, then the filter, then the page. | The first fault in the query's order, which Go's `url.Values` does not keep. Reading a repeated key's first value, which `filterparse` did and which hides a caller's mistake. |
+| An implementation takes the filter typed by the shape of each field's operators: `Equals`, `Ordered` and `Text` (Go's `filterparse.Equals[T]`, TypeScript's `EqualsFilter<T>`, Rust's `filter::Equals<T>`), a member per operator, none set for a field the request does not filter by. Each SDK's filter is a member per field holding a value, for equality, or its operators, and refuses before it sends what the reader would refuse or misread: an `in` value that is blank or holds a comma or a space at either end, more than 100 values, an empty `contains`, more than 50 filters. The MCP endpoint refuses the same of a tool's `filter` object. | One type with every operator, which lets a caller set `contains` on a number and learn of it from the route. |
+| A Topcoat argument form holds a filtered list's filter, one control per field (D78): an enum's members as checkboxes, written as `in`; text as `contains`; every other kind as equality. It has no control for a range or for `isNull`. acme's orders page filters by status through it. | No control, which would have taken the status filter off acme's orders page with `statuses`. |
+| A `@tableOperation`'s key is the path parameter named as the table's key field (`{id}`), and a parent the one named as a to-one relation's key (`{teamId}`). The loader fills `TableOperation`'s `kind`, `database`, `type`, `projection`, `key`, `parents` and `input`, and refuses `@manualRouteRegistration` and `@webhook` beside `@requireOwnership`, a `Nullable` result, and a sort or a filter on a column the repositories do not sort or filter by. | A key parameter named for the table (`{issueId}`), which is a relation's key on the table's children and would need a rule for which it is. |
+| An update finds the live row under the path's key and parents first, a 404, then refuses a null for a column that may not be null, a 400 at the member, then writes. A create under a parent that does not exist is the parent's 404. A delete a foreign key blocks is a 409 `conflict`. A write that stamps its caller and has none is a 401. A unique key's 409 names the type and the key's fields (`Team with that key already exists`) and nothing of the database's. | The database's message, which names constraints and columns. A 500 for a delete of a row still referenced. |
+| A relation's key refers to the one view of the related table an operation lists (D61, amended): `ir.ReferenceCandidates` narrows two or more types that are `@source` of it to the ones a reference resolves to. A `@tableOperation`'s bodies are `@source` views too, and no operation lists them, so `IssueView.teamId` still refers to `TeamView` beside `CreateTeamInput` with no `RefersTo` written. Two or more listed views draw the warning as before; none listed, and the key is a plain value, silently, as a key whose one view no operation lists is. | The warning for every key of an API whose bodies are views, a `RefersTo` on each. |
+| The Go server serves a view whose fields each hold one scalar, text, number, boolean or enum, of a table. A projection, and a view with a list, a map, a JSON value or an embedded object, stay methods of its interface, with a warning that names each and why, as every `@tableOperation` of a Rust server does. A Go type holds an optional number or text without a pointer, so a Go response leaves such a member out when its column is null, zero or empty, as every Go route's does, and a create reads a zero or an empty optional member as unset; an update reads the request's own JSON and writes what it says. | Failing a Go build over an operation the TypeScript server serves. Pointers for every optional member of the Go types, a change to every Go API. |
+| A TypeScript response's time is a `Date`, milliseconds, and the column holds microseconds, so `filter[createdAt]=` a value a response gave may find no row; a range does. | Truncating the column, the database's to decide. |
+
+Status: steps 1 to 3 built. Step 1: `FilterBy` in the IR, the loader
+(`TestFilterFillsEachFieldsKindAndOperators`,
+`TestFiltersAreHeldToTheirListAndItem`) and the writers; the three readers
+held to `runtime/http/testdata/filter_parity.json`
+(`filterparse`'s `TestParityVectors`, `filter-parity.test.ts`,
+`tests/filter_parity.rs`); the three servers, each run through its
+generated router over fixture-paged-api's `listParts`, a field of every
+kind; the OpenAPI document's `deepObject` parameter; the tool documents
+and the TypeScript API's MCP endpoint; the four SDKs, each held to the
+vectors' `queries`; Topcoat's argument form
+(`TestAFilteredListsFormFiltersIt`); and `FieldDef.Filterable` gone with
+the route and SDK templates that read it. acme-shop's `listProducts` and
+`listOrders` take a filter in place of `inStock` and `statuses`. Step 2:
+`@tableOperation` in the loader (`TestTableOperationsAreFilledFromTheirDeclarations`,
+`TestTableOperationsAreHeldToTheirTable`) over fixture-tracker-db and
+fixture-tracker-api, and the TypeScript server's handlers
+(`runtime/http/typescript/src/table-routes.ts`), run against Postgres
+through the generated router (`TestGeneratedTableOperationsEndToEnd`);
+acme-shop's shop-cart serves a catalog of products through them. Step 3:
+the Go server's handlers (`tables.go`), run against Postgres through the
+generated module (`TestTableOperationsGoServerServesItsTables`), absent
+and null read from the request's own JSON. A Rust server keeps each
+`@tableOperation` a method of its trait, and the build warns once per
+API. Not run against Postgres: a table that composes behaviors, whose
+writes the handlers run through the core as the route's caller (built
+and unit-tested in TypeScript, built and compiled in Go), a projection's
+read and list in TypeScript, and an `Encrypted<T>` column. Step 4, row
+rules through `by`, is not designed here and not built: an operation
+that reads or writes only the caller's rows is written by hand.

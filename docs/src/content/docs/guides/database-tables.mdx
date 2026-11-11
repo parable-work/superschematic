@@ -469,6 +469,10 @@ the table cannot sort by. A sort never reaches the SQL as text:
 `FindPage` takes the column from the table's generated list of sort
 fields.
 
+An API list's `FilterBy` argument hands its implementation each field's
+filter shaped as the ORM's are, so a member copies into the table's
+filter ([Filters](/superschematic/guides/api-routes/#filters)).
+
 The page is one query, with no count. Its conditions are the filter's,
 then `deleted_at IS NULL` unless the options set `IncludeDeleted`
 ([Soft delete](#soft-delete)), then, after `After`, one row comparison

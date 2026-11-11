@@ -302,6 +302,9 @@ impl {{ .ArgsRecord }} {
 {{- range .Args }}
             {{ .Field }}: {{ .Decode }},
 {{- end }}
+{{- with .Filter }}
+            {{ . }}: Default::default(),
+{{- end }}
 {{- if .Paged }}
 {{- if .Sort }}
             page: crate::api::{{ .ArgsName }}::PAGE

@@ -12,3 +12,4 @@ serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
 schemas-fixture-paged-api-types = { path = "../../types/rust/fixture-paged-api" }
+superscalar = { path = "../../../../third_party/superscalar/crates/core" }

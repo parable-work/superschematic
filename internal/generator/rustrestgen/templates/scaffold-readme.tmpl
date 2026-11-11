@@ -16,6 +16,13 @@ mod implementations;
   hands each method to the function of the same name in its own file. A
   method takes the operation's `<Operation>Args`, its arguments decoded
   and checked by the router, and returns the operation's result type.
+- A list with a `FilterBy` argument (D106) takes what the request filters
+  by in its Args, under the argument's name: a `<Operation>Filter` with a
+  member per field, `None` for a field the request does not filter by,
+  each a `runtime::filter::Equals`, `Ordered` or `Text` of the field's
+  type holding the operators the request sent (`eq`, `in_`, `gt`, `gte`,
+  `lt`, `lte`, `contains`, `is_null`). Keep the items every member holds
+  for.
 - An operation declared `@manualRouteRegistration` has no file: the
   service mounts its route itself (see `build_router`).
 {{- if .HasBehaviorOperations }}

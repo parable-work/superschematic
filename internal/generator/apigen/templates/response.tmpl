@@ -6,9 +6,6 @@ import (
 	"net/http"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-{{- if .HasFilterableEndpoints }}
-	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
-{{- end }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/bodyargs"
 	runtimeresponse "{{ $.Naming.HTTPRuntimeGoModule }}/response"
 	types "{{ .TypesModule }}"
@@ -77,14 +74,3 @@ func requestMeta(r *http.Request) *runtimeresponse.Meta {
 		RequestID: chimiddleware.GetReqID(r.Context()),
 	}
 }
-
-{{- if .HasFilterableEndpoints }}
-
-// RespondFilterErrors sends a logged filter parse errors response.
-// Hardcodes WA-FL-001: schema-level filter errors always
-// originate in the generated route handler before reaching route-impl,
-// so there is no call site to chain .WithCode() on.
-func RespondFilterErrors(w http.ResponseWriter, r *http.Request, errors []filterparse.ParseError) {
-	runtimeresponse.LoggedFilterErrors(w, r, errors, "WA-FL-001")
-}
-{{- end }}

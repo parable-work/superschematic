@@ -480,9 +480,10 @@ type TypeScriptAPI struct {
 	ORMFieldKeys string
 
 	// Behaviors is true when the API serves a table's behavior operations
-	// (D103), which its router runs through Deps.orm: main.ts hands the
-	// router the repositories as RouterOptions.orm. False for a job's, a
-	// worker's and a deriver's API, which mount no routes.
+	// (D103) or has an operation marked @tableOperation (D106), which its
+	// router runs through Deps.orm: main.ts hands the router the
+	// repositories as RouterOptions.orm. False for a job's, a worker's and
+	// a deriver's API, which mount no routes.
 	Behaviors bool
 
 	// Calls are Deps' clients.
@@ -963,11 +964,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 		}
-		if o.HasBehaviors() && !background {
-			// The router runs the behavior operations through the
-			// repositories (D103).
+		if o.RouterNeedsORM() && !background {
+			// The router runs the behavior operations (D103) and the
+			// table operations (D106) through the repositories.
 			if !api.ORM {
-				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose behavior operations (D103) run through Deps.orm, the repositories of %s, and the %s opens none", in.Stack, s.Kind, in.Server, o.SchemaName, o.Deps.Database, s.Kind)
+				what, decisions := o.ORMOperations()
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose %s (%s) run through Deps.orm, the repositories of %s, and the %s opens none", in.Stack, s.Kind, in.Server, o.SchemaName, strings.TrimPrefix(what, "the "), decisions, o.Deps.Database, s.Kind)
 			}
 			api.Behaviors = true
 		}
@@ -1174,8 +1176,8 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
 	}
 	if a.Behaviors {
-		// Its behavior operations run through the repositories Deps holds
-		// (D103).
+		// Its behavior operations (D103) and its table operations (D106)
+		// run through the repositories Deps holds.
 		out = append(out, "orm: "+a.Deps+".orm")
 	}
 	return out

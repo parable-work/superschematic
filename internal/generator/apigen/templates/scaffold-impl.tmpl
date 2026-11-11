@@ -12,15 +12,11 @@ package {{ toPackageName .Endpoint.Namespace }}
 import (
 	"context"
 	"errors"
-{{- if or .Endpoint.Filterable .Endpoint.Page }}
-{{ end }}
-{{- if .Endpoint.Filterable }}
-	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
-{{- end }}
 {{- if .Endpoint.Page }}
+
 	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
 {{- end }}
-{{- if .Endpoint.HasFileUpload }}
+{{- if or .Endpoint.HasFileUpload .Endpoint.Filter }}
 
 	api "{{ .ModulePath }}"
 {{- end }}
@@ -86,6 +82,12 @@ import (
 //     * {{ .Name }} ({{ .ScalarType }}{{ if not .Required }}, optional{{ end }}): max {{ .MaxSize }} bytes
 {{- end }}
 {{- end }}
+{{- with .Endpoint.Filter }}
+//
+// Filter (FilterBy):
+//   - {{ .Argument }} (api.{{ $.Endpoint.GoFilterTypeName }}): what the request filters by, a member per field, nil for a field it does not filter by
+//     ({{ join .FieldNames ", " }}); each operator the request sent is set on its member, and every member set holds at once
+{{- end }}
 {{- if .Endpoint.Page }}
 //
 // Page (@paginated):
@@ -104,7 +106,7 @@ import (
 //   - *{{ .Endpoint.OutputGoType }}: Success response
 {{- end }}
 //   - error: Error if operation fails
-func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Endpoint.Page }}, page paging.Request{{- end }}) ({{ .Endpoint.GoImplResultType }}, error) {
+func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filter }}, {{ .Endpoint.Filter.Argument }} api.{{ .Endpoint.GoFilterTypeName }}{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Endpoint.Page }}, page paging.Request{{- end }}) ({{ .Endpoint.GoImplResultType }}, error) {
 	// TODO: Implement {{ .Endpoint.ShortImplName }}
 	//
 	// Example implementation patterns:
@@ -143,6 +145,13 @@ func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{-
 	//        // Access metadata: {{ .Name }}File.Filename, {{ .Name }}File.ContentType, {{ .Name }}File.Size
 	//    }
 {{- end }}
+	//
+{{- end }}
+{{- with .Endpoint.Filter }}
+	// 5. Keep the rows that pass every member of {{ .Argument }} that is set, all
+	//    at once: a nil member filters nothing, and a set one holds each
+	//    operator the request sent ({{ .Argument }}.{{ (index .Fields 0).GoName }}.Eq, {{ .Argument }}.{{ (index .Fields 0).GoName }}.In), the others
+	//    nil or empty.
 	//
 {{- end }}
 {{- if .Endpoint.Page }}

@@ -8,6 +8,7 @@ import {
   RateLimitError,
   LocalStorageTokenStorage,
   ConsoleLogger,
+  ValidationError,
 } from './types';
 import type {
   SDKConfig,
@@ -72,6 +73,108 @@ export async function* pageItems<T>(
     }
     current = page.next;
   }
+}
+
+/** The operators of a filter, in the order the routes read them (D106). */
+const filterOperators = ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull'];
+
+/** The most values a filter's in may list, and the most filters of a request. */
+const filterMaxInValues = 100;
+const filterMaxFilters = 50;
+
+/** A filter's value as the query carries it: its text, a Date as ISO 8601. */
+function filterText(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+/**
+ * Writes a typed filter (FilterBy, D106) as the bracket form's query
+ * parameters, field by field in the filter's order and each field's
+ * operators in the routes' order: filter[field]=value for a value alone
+ * or under eq, and filter[field][op]=value for any other operator, an
+ * in's values joined by commas and isNull true or false. A member that
+ * is undefined or null, and an in of no value, is left out. An operator
+ * the SDK does not know is sent as it is, for the route to refuse.
+ *
+ * What the route's reader would refuse or read as something else is
+ * refused before the request, in one ValidationError: an in of more than
+ * 100 values, at filter[field][in]; an in's value that is blank, or
+ * holds a comma or surrounding space, which the comma-separated value
+ * cannot carry as it is, at filter[field][in][i]; a contains of no text,
+ * at filter[field][contains]; and more than 50 filters, at filter.
+ */
+export function filterParams(filter: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof filter !== 'object' || filter === null) {
+    return out;
+  }
+  const errors: Record<string, { validator: string; message: string }[]> = {};
+  const refuse = (path: string, validator: string, reason: string): void => {
+    errors[path] = [{ validator, message: `${path} ${reason}.` }];
+  };
+  for (const [field, member] of Object.entries(filter)) {
+    if (member === undefined || member === null) {
+      continue;
+    }
+    if (typeof member !== 'object' || member instanceof Date) {
+      out[`filter[${field}]`] = filterText(member);
+      continue;
+    }
+    const operators = [
+      ...filterOperators.filter((op) => op in member),
+      ...Object.keys(member).filter((op) => !filterOperators.includes(op)),
+    ];
+    for (const op of operators) {
+      const value: unknown = member[op];
+      if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) {
+        continue;
+      }
+      const name = op === 'eq' ? `filter[${field}]` : `filter[${field}][${op}]`;
+      if (op === 'in' && Array.isArray(value)) {
+        if (value.length > filterMaxInValues) {
+          refuse(name, 'listMax', `must contain at most ${filterMaxInValues} items`);
+          continue;
+        }
+        const items = value.map(filterText);
+        items.forEach((item, index) => {
+          if (/^\p{White_Space}*$/u.test(item)) {
+            refuse(`${name}[${index}]`, 'required', 'is required');
+          } else if (item.includes(',') || /^\p{White_Space}|\p{White_Space}$/u.test(item)) {
+            refuse(`${name}[${index}]`, 'pattern', 'must not contain a comma or surrounding space');
+          }
+        });
+        out[name] = items.join(',');
+      } else if (op === 'contains' && value === '') {
+        refuse(name, 'minLength', 'needs text');
+      } else {
+        out[name] = Array.isArray(value) ? value.map(filterText).join(',') : filterText(value);
+      }
+    }
+  }
+  if (Object.keys(out).length > filterMaxFilters) {
+    refuse('filter', 'max', `must hold at most ${filterMaxFilters} filters`);
+  }
+  if (Object.keys(errors).length > 0) {
+    throw new ValidationError(errors);
+  }
+  return out;
+}
+
+/**
+ * A method's query parameters as the request sends them: the member under
+ * argument, the method's filter (D106), is written as the bracket form
+ * (filterParams) after the others. A filter the route's reader would not
+ * read back as it was given throws a ValidationError.
+ */
+export function withFilter(
+  params: Record<string, unknown> | null | undefined,
+  argument: string
+): Record<string, unknown> | undefined {
+  if (params === undefined || params === null) {
+    return undefined;
+  }
+  const { [argument]: filter, ...others } = params;
+  return { ...others, ...filterParams(filter) };
 }
 
 /**

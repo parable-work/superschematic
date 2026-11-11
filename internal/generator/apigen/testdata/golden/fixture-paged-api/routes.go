@@ -14,6 +14,7 @@ import (
 	types "example.com/schemas/types/go/fixture-paged-api"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
@@ -134,6 +135,14 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Method:  "GET",
 			Path:    "/items/{itemId}",
 			Handler: createCatalogGetItemHandler(cfg.Implementations.Catalog),
+		},
+		// The parts, in order of their names unless the caller sorts them by
+		// quantity, kept to the ones the caller's filters find (D106): a filter
+		// on a field of each kind, beside a page and a sort.
+		{
+			Method:  "GET",
+			Path:    "/parts",
+			Handler: createCatalogListPartsHandler(cfg.Implementations.Catalog),
 		},
 		// The tags items carry: a page of a primitive, with the default limits.
 		{
@@ -309,6 +318,92 @@ func createCatalogGetItemHandler(impl CatalogImplementation) gohttp.HandlerFunc 
 		}
 
 		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createCatalogListPartsHandler creates a handler for GET /api/parts
+//
+// The parts, in order of their names unless the caller sorts them by
+// quantity, kept to the ones the caller's filters find (D106): a filter
+// on a field of each kind, beside a page and a sort.
+func createCatalogListPartsHandler(impl CatalogImplementation) gohttp.HandlerFunc {
+	// A filter's values (D106): each field's value as an item of a query
+	// list of its type, its error recorded at filter[field].
+	filterIdArg := bodyargs.NewArg("filter[id]", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	filterNameArg := bodyargs.NewArg("filter[name]", bodyargs.String)
+	filterKindArg := bodyargs.NewArg("filter[kind]", bodyargs.String)
+	filterQuantityArg := bodyargs.NewArg("filter[quantity]", bodyargs.Integer, bodyargs.Min(-9007199254740991), bodyargs.Max(9007199254740991))
+	filterWeightArg := bodyargs.NewArg("filter[weight]", bodyargs.Number)
+	filterPriceArg := bodyargs.NewArg("filter[price]", bodyargs.String, bodyargs.Pattern(`^[+-]?[0-9]+(\.[0-9]+)?$`))
+	filterDiscontinuedArg := bodyargs.NewArg("filter[discontinued]", bodyargs.Boolean)
+	filterMadeAtArg := bodyargs.NewArg("filter[madeAt]", bodyargs.String)
+	filterRetiredOnArg := bodyargs.NewArg("filter[retiredOn]", bodyargs.String, bodyargs.MaxLength(40))
+	filterSupplierIdArg := bodyargs.NewArg("filter[supplierId]", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Read the request's filters (FilterBy, D106): the bracket form,
+		// filter[field]=value and filter[field][op]=value, its own reader,
+		// whose refusal is the 400 every server answers at filter[field].
+		// Each value is then decoded as an item of a query list of its
+		// field's type.
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "id", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "name", Operators: []filterparse.Operator{"eq", "in", "contains"}}, {Name: "kind", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "quantity", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "weight", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "price", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "discontinued", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "madeAt", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "retiredOn", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "supplierId", Operators: []filterparse.Operator{"eq", "in", "isNull"}}}})
+		if !ok {
+			return
+		}
+		filterErrors := types.NewValidationErrors()
+		filters := CatalogListPartsFilter{
+			Id:           filterparse.DecodeEquals[types.IdentityUUID](filterErrors, filterRequest, "id", filterIdArg),
+			Name:         filterparse.DecodeText[string](filterErrors, filterRequest, "name", filterNameArg),
+			Kind:         filterparse.DecodeEquals[types.PartKind](filterErrors, filterRequest, "kind", filterKindArg),
+			Quantity:     filterparse.DecodeOrdered[int64](filterErrors, filterRequest, "quantity", filterQuantityArg),
+			Weight:       filterparse.DecodeOrdered[float64](filterErrors, filterRequest, "weight", filterWeightArg),
+			Price:        filterparse.DecodeOrdered[types.GenericDecimal](filterErrors, filterRequest, "price", filterPriceArg),
+			Discontinued: filterparse.DecodeEquals[bool](filterErrors, filterRequest, "discontinued", filterDiscontinuedArg),
+			MadeAt:       filterparse.DecodeOrdered[types.TemporalDateTime](filterErrors, filterRequest, "madeAt", filterMadeAtArg),
+			RetiredOn:    filterparse.DecodeOrdered[types.TemporalDate](filterErrors, filterRequest, "retiredOn", filterRetiredOnArg),
+			SupplierId:   filterparse.DecodeEquals[types.IdentityUUID](filterErrors, filterRequest, "supplierId", filterSupplierIdArg),
+		}
+		if filterErrors.HasErrors() {
+			RespondValidationErrors(w, r, filterErrors)
+			return
+		}
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		// It also reads sort, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"name", "quantity"}, Default: paging.Sort{Field: "name"}}})
+		if !ok {
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.ListParts(r.Context(), filters, page)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
+			return
+		}
+
+		// Respond with result
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 	}
 }

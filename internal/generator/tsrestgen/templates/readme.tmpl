@@ -11,11 +11,20 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   class with typed arguments (path params as scalar types, query params
   optional unless required, the input type from the generated types package)
   and the `Implementations` record the router takes.
-{{- if .HasPages }} A
+{{- if .ImplementsPages }} A
   `@paginated` operation's method takes `args.page`, the `PageRequest` the
   router read from the `cursor` and `limit` query parameters, and returns a
   `Page`, `{items, next}` with `next` null after the last page; the runtime's
   `pageFromRows`, `encodeCursor` and `decodeCursor` build and read one.
+{{- end }}
+{{- if .FilteredEndpoints }} A
+  list with a `FilterBy` argument (D106) takes the request's filters under
+  that argument, typed as its `<Operation>Filter`: a member per field the
+  request filters by (`filter[field]=value`, `filter[field][op]=value`),
+  each holding the operators it sent with their values read as the field's
+  type, and `{}` for a request that filters by none. The router answers a
+  field or an operator the filter does not take, and a value its type
+  refuses, with 400 at `filter[field]` before the method runs.
 {{- end }}
 {{- if .WebhookProviders }} Its
   `webhookVerifiers` holds the verifier of each `@hmacVerified` provider
@@ -49,6 +58,20 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   its use id (D16, D104), which the handler presents in the repository's
   options and the core checks before it reads the row.
 {{- end }}
+{{- end }}
+{{- if .HasTableOperations }}
+  The operations marked `@tableOperation` (D106) have no implementation
+  method: each reads or writes the rows of one table of
+  `{{ .Deps.Database }}` through `options.orm`, the database's repositories
+  (`Deps.orm`), with the runtime's handler of its kind (a read, a list, a
+  create, an update or a delete) and its entry of `tableOperations`, in one
+  transaction and as the request's caller. A response holds the members
+  the operation's result view lists and nothing else of the row. A key
+  that holds no live row under the path's parents is 404 `not_found`, a
+  unique key another row holds 409 `conflict`, and a relation's key that
+  names no row 400 at the body's member. Taking `@tableOperation` off an
+  operation makes it a method of the implementation, with the same route
+  and types.
 {{- end }}
 {{- if .HasServiceCallers }}
   A `@requireService` or `@allowService` operation also admits a calling
@@ -91,7 +114,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
 {{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .Behavior }} (behavior: {{ .Behavior.Type }}.{{ .Behavior.Use }}, a {{ .Behavior.Behavior }}){{ end }}{{ if .Page }} (paged){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .Behavior }} (behavior: {{ .Behavior.Type }}.{{ .Behavior.Use }}, a {{ .Behavior.Behavior }}){{ end }}{{ if .Table }} (table: {{ .Table.Type }}, {{ .Table.Kind }}){{ end }}{{ if .Filter }} (filtered){{ end }}{{ if .Page }} (paged){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
 {{- end }}
 
 ## Usage
@@ -137,8 +160,8 @@ const implementations: Implementations = { /* one object per operation class */ 
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   identity,
-{{- if .HasBehaviors }}
-  orm: createOrm(pool), // the repositories of {{ .Deps.Database }} (D103), from {{ .Deps.DatabaseTypesPackage }}/orm
+{{- if .RouterNeedsORM }}
+  orm: createOrm(pool), // the repositories of {{ .Deps.Database }} ({{ .ORMDecisions }}), from {{ .Deps.DatabaseTypesPackage }}/orm
 {{- end }}
 {{- if .HasServiceCallers }}
   authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits
@@ -179,8 +202,8 @@ const implementations: Implementations = { /* one object per operation class */ 
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   authenticate: async ctx => /* the caller, or null */ null,
-{{- if .HasBehaviors }}
-  orm: createOrm(pool), // the repositories of {{ .Deps.Database }} (D103), from {{ .Deps.DatabaseTypesPackage }}/orm
+{{- if .RouterNeedsORM }}
+  orm: createOrm(pool), // the repositories of {{ .Deps.Database }} ({{ .ORMDecisions }}), from {{ .Deps.DatabaseTypesPackage }}/orm
 {{- end }}
 {{- if .HasServiceCallers }}
   authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits

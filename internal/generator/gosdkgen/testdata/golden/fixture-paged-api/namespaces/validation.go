@@ -1,10 +1,12 @@
 package namespaces
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	types "example.com/schemas/types/go/fixture-paged-api"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 )
 
 // ValidationError reports client-side input validation failures.
@@ -131,4 +133,18 @@ func pageLimitErrors(limit, maxLimit int) types.ValidationErrors {
 		validationErrors.AddFieldError("limit", "max", fmt.Sprintf("must be at most %d", maxLimit))
 	}
 	return validationErrors
+}
+
+// filterError is the validation error of a filter filterparse.Check
+// refuses (D106), one the route's reader would refuse or read as something
+// else: the error at its parameter, filter[field][op], an in's value at
+// filter[field][in][i], or filter for more filters than a request holds.
+func filterError(err error) error {
+	var refused *filterparse.CheckError
+	if !errors.As(err, &refused) {
+		return err
+	}
+	validationErrors := types.NewValidationErrors()
+	validationErrors.AddFieldError(refused.Parameter, refused.Validator, refused.Reason)
+	return NewValidationError(validationErrors)
 }

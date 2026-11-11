@@ -48,6 +48,56 @@ pub struct CatalogGetItemArgs {
     pub item_id: types::IdentityUUID,
 }
 
+/// The arguments of catalog.listParts (`GET /api/parts`),
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
+#[derive(Debug, Clone)]
+pub struct CatalogListPartsArgs {
+    /// What the request filters by (FilterBy, D106): the `filter[field]`
+    /// and `filter[field][operator]` query parameters, a member per field,
+    /// `None` for a field the request does not filter by. Every member set
+    /// holds at once. `CatalogListPartsFilter::default()` filters by nothing.
+    pub filter: CatalogListPartsFilter,
+    /// The page asked for (D60): the `cursor` and `limit` query parameters,
+    /// the limit's default filled in. `PageRequest::first(limit)` asks for
+    /// the first page and `PageRequest::after(next, limit)` for the one
+    /// after a page's `next`.
+    /// Its `sort` is the `sort` query parameter (D60, amended): name, quantity,
+    /// descending after a `-`, `name` when the request sends none;
+    /// ties break by id. The implementation reads it `Some`, its default
+    /// filled in, and its cursor its own key's: the router unbinds the
+    /// cursor from the sort and binds the page's `next` to it.
+    pub page: runtime::page::PageRequest,
+}
+
+/// What a request of Catalog.listParts filters by (FilterBy, D106): a
+/// member per field, `None` for a field the request does not filter by,
+/// each operator the request sent set on it. Every member set holds at
+/// once. `check` holds one a caller built to the route's rules.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogListPartsFilter {
+    /// Filters by `id`: eq, in.
+    pub id: Option<runtime::filter::Equals<types::IdentityUUID>>,
+    /// Filters by `name`: eq, in, contains.
+    pub name: Option<runtime::filter::Text<String>>,
+    /// Filters by `kind`: eq, in.
+    pub kind: Option<runtime::filter::Equals<types::PartKind>>,
+    /// Filters by `quantity`: eq, in, gt, gte, lt, lte.
+    pub quantity: Option<runtime::filter::Ordered<types::GenericInt64>>,
+    /// Filters by `weight`: eq, in, gt, gte, lt, lte.
+    pub weight: Option<runtime::filter::Ordered<f64>>,
+    /// Filters by `price`: eq, in, gt, gte, lt, lte.
+    pub price: Option<runtime::filter::Ordered<types::GenericDecimal>>,
+    /// Filters by `discontinued`: eq, in.
+    pub discontinued: Option<runtime::filter::Equals<bool>>,
+    /// Filters by `madeAt`: eq, in, gt, gte, lt, lte.
+    pub made_at: Option<runtime::filter::Ordered<types::TemporalDateTime>>,
+    /// Filters by `retiredOn`: eq, in, gt, gte, lt, lte, isNull.
+    pub retired_on: Option<runtime::filter::Ordered<types::TemporalDate>>,
+    /// Filters by `supplierId`: eq, in, isNull.
+    pub supplier_id: Option<runtime::filter::Equals<types::IdentityUUID>>,
+}
+
 /// The arguments of catalog.listTags (`GET /api/tags`),
 /// decoded and checked by the router. `check` makes the same checks on
 /// arguments a caller builds.
@@ -72,6 +122,16 @@ pub trait CatalogImplementation: Send + Sync + 'static {
     async fn list_items(&self, ctx: RequestContext, args: CatalogListItemsArgs) -> Result<runtime::page::Page<types::ItemView>, ApiError>;
     /// One item.
     async fn get_item(&self, ctx: RequestContext, args: CatalogGetItemArgs) -> Result<types::ItemView, ApiError>;
+    /// The parts, in order of their names unless the caller sorts them by
+    ///
+    /// It filters its list (FilterBy, D106): keep the items every member
+    /// of `args.filter` that is set holds for, each operator set on a
+    /// member among them.
+    ///
+    /// It pages (D60): read up to `args.page.limit + 1` items after
+    /// `args.page.cursor` (`Cursor::decode`) in `args.page.sort`'s order,
+    /// ties broken by id (D60, amended), and return `Page::from_rows`.
+    async fn list_parts(&self, ctx: RequestContext, args: CatalogListPartsArgs) -> Result<runtime::page::Page<types::PartView>, ApiError>;
     /// The tags items carry: a page of a primitive, with the default limits.
     ///
     /// It pages (D60): read up to `args.page.limit + 1` items after

@@ -280,9 +280,11 @@ const QUERY_BOOLEANS: ReadonlyMap<string, boolean> = new Map([
  * integer item must be a finite JSON number and a boolean item a spelling
  * strconv.ParseBool accepts (`type` otherwise); any other item is its text,
  * a JSON string. The value then passes the checks of its kind: the scalar's
- * rules, then the argument's.
+ * rules, then the argument's. A filter's value (FilterBy, D106) is read as
+ * one too, by filter.ts, with no `path`: its refusal names the parameter,
+ * filter[field], alone.
  */
-function decodeQueryListItem(location: ParamLocation, spec: ParamSpec, path: string, item: string): unknown {
+export function decodeQueryListItem(location: ParamLocation, spec: ParamSpec, path: string | undefined, item: string): unknown {
   switch (spec.kind) {
     case 'integer':
     case 'number': {

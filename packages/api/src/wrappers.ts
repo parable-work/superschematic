@@ -39,6 +39,21 @@ export type SortBy<Item, Fields extends readonly (keyof Item & string)[]> =
   | ((Fields[number] | `-${Fields[number]}`) & { readonly __queryParam: true; readonly __sortBy: Fields })
   | null;
 
+/**
+ * The filters a list takes (D106): Fields names the fields of Item a
+ * caller may filter by, `filter: FilterBy<IssueView, ["assigneeId",
+ * "priority"]>`. On the wire each is `filter[field]=value` for equality
+ * or `filter[field][op]=value` for an operator, and all of them hold at
+ * once. A field's operators follow its type: `eq` and `in` on every
+ * field, `gt`, `gte`, `lt` and `lte` on a number, a date and a time,
+ * `contains` on text, and `isNull` on a field that may be null. An
+ * implementation takes the filter typed, a member per field. An operation
+ * takes one.
+ */
+export type FilterBy<Item, Fields extends readonly (keyof Item & string)[]> =
+  | ({ readonly [Field in Fields[number]]?: unknown } & { readonly __queryParam: true; readonly __filterBy: Fields })
+  | null;
+
 /** The constraints of a FileUpload field (D81); each one unsaid admits any. */
 export type FileUploadConfig = {
   /** The largest file, in bytes: 100 MiB unsaid. */

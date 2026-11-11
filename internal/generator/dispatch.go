@@ -576,6 +576,55 @@ func (r run) generateORM() error {
 	return nil
 }
 
+// warnTableOperationsUnserved warns, once per API, that a server of
+// language writes no handler for the API's @tableOperation operations
+// (D106): each stays a method of the implementation's interface and its
+// scaffold, to be written by hand, so a project that builds the API in two
+// languages still builds. The Go and TypeScript servers write the
+// handlers; the Rust server waits on a Rust ORM.
+func (r run) warnTableOperationsUnserved(language string) {
+	var names []string
+	for _, set := range r.Schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op != nil && op.TableOperation != nil {
+				names = append(names, set.Name+"."+op.Name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	r.Warnf("%s: the %s server writes no handler for a @tableOperation yet (D106): %s %s of the implementation's interface, to be written by hand, with the same route and types",
+		r.Config.Name, language, strings.Join(names, ", "), map[bool]string{true: "stays a method", false: "stay methods"}[len(names) == 1])
+}
+
+// warnGoTableOperationsUnserved warns of each @tableOperation the Go
+// server writes no handler for yet (D106), with why: a projection, a view
+// that holds more than single values, a default it cannot write. Each
+// stays a method of the implementation's interface, to be written by
+// hand, and the API's other table operations are served.
+func (r run) warnGoTableOperationsUnserved() error {
+	if !r.Schema.HasTableOperations() {
+		return nil
+	}
+	output, err := r.APIOutput()
+	if err != nil || output == nil {
+		return err
+	}
+	unserved, err := apigen.UnservedTableOperations(output)
+	if err != nil {
+		return fmt.Errorf("generator: go api for %s: %w", r.Config.Name, err)
+	}
+	for _, op := range unserved {
+		r.Warnf("%s: the Go server writes no handler for %s, a @tableOperation (D106): %s; it stays a method of the implementation's interface, to be written by hand, with the same route and types",
+			r.Config.Name, op.Operation, op.Reason)
+	}
+	return nil
+}
+
 // generateAPI dispatches API server generation by implementation language.
 func (r run) generateAPI() error {
 	if proto := r.Outputs.API.Protocol; proto != APIProtocolREST {
@@ -583,8 +632,12 @@ func (r run) generateAPI() error {
 	}
 	switch lang := r.Outputs.API.Language; lang {
 	case APILanguageGo:
+		if err := r.warnGoTableOperationsUnserved(); err != nil {
+			return err
+		}
 		return r.generateGoAPI()
 	case APILanguageRust:
+		r.warnTableOperationsUnserved("Rust")
 		return r.generateRustAPI()
 	case APILanguageTypeScript:
 		return r.generateTypeScriptAPI()

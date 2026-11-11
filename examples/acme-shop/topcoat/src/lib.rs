@@ -475,7 +475,10 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
 /// The shopper's own orders, or every customer's for staff, which need
 /// `orders.read`, a page at a time, filtered by the GET form
 /// `OrderListOrdersArgsForm` reads from the query, its controls showing the
-/// filters in effect. The query's `cursor` and
+/// filters in effect: the list's `FilterBy` gives the form a checkbox per
+/// status, which it holds in `filter_status` and reads from the query's
+/// `filter[status][in]`, or from `filter[status]`, as a link an app writes
+/// may say it (D106). The query's `cursor` and
 /// `limit` ask for the page, and no control holds them, so a submitted
 /// filter starts at the first page. After the orders, "Next page" links
 /// the page after this one, while one follows, and "First page" the first,
@@ -486,7 +489,7 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
 /// the sign-in button, or 403, with no links, since no page is theirs.
 #[page("/orders")]
 async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
-    let unfiltered = filter.statuses.is_empty();
+    let unfiltered = filter.filter_status.is_empty();
     let (status, page, errors) = match filter.submit(cx).await {
         Ok(page) => (StatusCode::OK, Some(page), FormErrors::default()),
         Err(refused) => (refused.status, None, refused.errors),
@@ -515,7 +518,8 @@ async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> to
 }
 
 /// The orders page's address for one of its pages: the query the filter
-/// holds (`query_pairs`), its statuses and its limit, then, for a page
+/// holds (`query_pairs`), its statuses, as one `filter[status][in]`, and
+/// its limit, then, for a page
 /// after the first, `cursor`, the `next` of the page before, each name and
 /// value percent-encoded.
 fn orders_href(filter: &OrderListOrdersArgsForm, cursor: Option<&str>) -> String {

@@ -311,7 +311,7 @@ func writeFixtureModulesWith(t *testing.T, f behaviorFixtures, api, db *ir.Schem
 	if err := apigen.SetReplacePaths(output, paths, apiDir); err != nil {
 		t.Fatal(err)
 	}
-	if output.RulesReplacePath == "" {
+	if output.Deps.Rules && output.RulesReplacePath == "" {
 		t.Fatal("SetReplacePaths gave the rules module no replace path")
 	}
 	if err := apigen.WriteAPI(output, apiDir); err != nil {

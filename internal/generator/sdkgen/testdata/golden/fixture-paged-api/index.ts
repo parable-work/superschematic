@@ -34,6 +34,7 @@ import { CatalogNamespace } from './namespaces/catalog';
 
 // Re-export types and errors for convenience
 export * from './types';
+export type { CatalogListPartsFilter } from './namespaces/catalog';
 export {
   // Re-export all types from the types package
   // Note: We explicitly don't re-export ValidationError to avoid conflicts

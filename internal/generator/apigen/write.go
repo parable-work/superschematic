@@ -44,6 +44,7 @@ var templatesFS embed.FS
 //	├── constants.go     # SystemUserID (public schemas with a UUID scalar)
 //	├── caller.go        # The ORM acting as each request's caller (D87; with a Deps database only)
 //	├── behaviors.go     # The behavior operations' caller and refusals, and the behavior workers' queues (D103; with either only)
+//	├── tables.go        # The table operations' handlers over the ORM (D106; with a @tableOperation only)
 //	└── fileupload.go    # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
 	return WriteAPIWithProfile(output, outputDir, nil, false)
@@ -55,7 +56,8 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 	// interfaces, the router and the Deps leave them out, and the router
 	// mounts the runtime's handlers at their routes. A table's behavior
 	// operations are the ORM's (D103): the router mounts generated handlers
-	// that call it.
+	// that call it. The table operations are served from the database's
+	// tables (D106): the router mounts the handlers tables.go holds.
 	output, err := ImplementedOutput(output)
 	if err != nil {
 		return err
@@ -130,6 +132,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
 		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
 		{Condition: output.HasBehaviorEndpoints() || output.HasBehaviorWorkers(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
+		{Condition: output.Tables != nil, Template: "tables.tmpl", Filename: "tables.go"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templatesFS, templateName, outputPath, output, funcs)

@@ -16,6 +16,7 @@ import (
 	"example.com/acme/sdk/go/shop-orders/runtime"
 	types "example.com/acme/types/go/shop-orders"
 	scalars "github.com/parable-work/superscalar/go"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 )
 
 // ordersClientGo makes the same calls as the TypeScript, Python and Rust
@@ -116,6 +117,21 @@ func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) 
 	}
 	fmt.Fprintf(&out, "every order by total, largest first: %d\n", every)
 
+	// The orders still on their way: a filter is typed, a member per field
+	// the list filters by, and goes out as
+	// filter[status][in]=placed,fulfilled with every page (D106).
+	onTheirWay := &namespaces.OrderListOrdersFilter{
+		Status: &filterparse.Equals[types.OrderStatus]{In: []types.OrderStatus{types.OrderStatus_Placed, types.OrderStatus_Fulfilled}},
+	}
+	every = 0
+	for _, err := range shopper.OrderNamespace.ListOrdersAll(ctx, &namespaces.OrderListOrdersQueryParams{Filter: onTheirWay}, runtime.PageRequest{Limit: 1}) {
+		if err != nil {
+			return "", err
+		}
+		every++
+	}
+	fmt.Fprintf(&out, "orders on their way: %d\n", every)
+
 	// e30 is the cursor of {}, a key that names no order.
 	_, err = shopper.OrderNamespace.ListOrders(ctx, nil, runtime.PageRequest{Cursor: "e30"})
 	fmt.Fprintf(&out, "orders after a cursor the server never returned: %s\n", status(err))
@@ -173,6 +189,7 @@ order a product that does not exist: 400
 orders: 0, the last page
 every order: 0
 every order by total, largest first: 0
+orders on their way: 0
 orders after a cursor the server never returned: 400
 get a missing order: 404
 `

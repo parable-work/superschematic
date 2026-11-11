@@ -69,6 +69,10 @@ func runInSDK(t *testing.T, schema *ir.Schema, apiOutput *apigen.APIOutput, serv
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	// An SDK with a filtered endpoint (D106) builds on the HTTP runtime.
+	if err := SetReplacePaths(sdkOutput, paths, sdkDir); err != nil {
+		t.Fatalf("SetReplacePaths: %v", err)
+	}
 	if err := WriteSDKWithTools(sdkOutput, apiOutput, sdkDir, typesDir, nestedArraysClock); err != nil {
 		t.Fatalf("WriteSDKWithTools: %v", err)
 	}

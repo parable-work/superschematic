@@ -2,39 +2,6 @@
 
 import type { ValidationErrors } from '{{.TypesPackage}}';
 
-{{- if .HasFilterableEndpoints}}
-// Operator list must match filterparse.ValidOperators in
-// http-runtime/go/filterparse/parse.go. Adding an operator
-// requires updating (1) filterparse (Go), (2) this template, (3) the Rust
-// SDK's runtime.tmpl FilterOp enum, (4) the test assertions in
-// sdkgen_test.go + rustsdkgen_test.go that enumerate the operator set.
-/**
- * Bracket-notation filter parameter.
- * Simple string values use the default "eq" operator.
- * Object values specify an explicit operator.
- *
- * **Multi-value wire contract**: `value` is always a single string. For
- * multi-value operators (`in`), the caller must join values with a comma.
- * The server reads only the first query-string value and splits on ",",
- * so passing an array or emitting repeated keys silently drops values.
- *
- * **SQL LIKE metacharacters**: if your backend translates `contains` to
- * SQL `LIKE`, escape `%` and `_` in the value before calling — unescaped
- * metacharacters will cause unintended pattern matches.
- *
- * @example
- * // Simple equality: filter[location_type]=remote
- * { location_type: "remote" }
- *
- * @example
- * // With operator: filter[country][in]=US,Canada
- * // NOTE: value must be a comma-joined string, not an array.
- * { country: { op: "in", value: "US,Canada" } }
- */
-export interface FilterParam {
-  [field: string]: string | { op: 'eq' | 'in' | 'contains' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'; value: string };
-}
-{{- end}}
 {{- if .HasPagedEndpoints}}
 
 /**

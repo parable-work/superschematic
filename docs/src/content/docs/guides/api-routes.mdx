@@ -123,9 +123,10 @@ A method's arguments say where each value comes from:
   ```
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
   implementation receives a pointer (`minRating *float64`) or a nil slice. A
-  list is read from repeated keys and comma-separated values
-  (`?statuses=placed,shipped`), and each item is checked at
-  `statuses[i]`.
+  list, such as the catalog's `ids`, is read from repeated keys and
+  comma-separated values (`?ids=<id>,<id>`), and each item is checked at
+  `ids[i]`. What a list filters by is not a query argument: it is one
+  [`FilterBy`](#filters) argument.
 - **Body, as an input type**: an argument of an object type, such as
   `input: PlaceOrderInput`, is the JSON body.
 - **Body, as fields**: on a method without an input type, the other
@@ -164,7 +165,8 @@ lists the columns a caller may see, and the loader checks each against the
 table's field of the same name. A relation's key reads the relation's
 foreign key: `OrderLineView.productId` is the `product_id` of
 `OrderLine.product`, and it refers to `ProductView`, the API's view of the
-products' table, with no `RefersTo` written
+products' table, or of several views of it the one an operation lists,
+with no `RefersTo` written
 ([What a value refers to](/superschematic/reference/references-and-search/#what-a-value-refers-to)).
 A field with no column behind it is `@virtual`, and the implementation
 fills it in:
@@ -283,8 +285,8 @@ list's `defaultSort` the order it had before it took a sort. An order
 stores its total when it is placed, since its lines do not change after,
 so its table can order by it. The Go implementation reads each page
 through `FindPage`: the caller's orders (every customer's for staff),
-their statuses a filter, in the sort `ParseOrderSort` reads, after the
-key the cursor holds, with their lines:
+of the statuses the request's [filter](#filters) keeps, in the sort
+`ParseOrderSort` reads, after the key the cursor holds, with their lines:
 
 <Snippet file="go/shop-orders/orders.go" symbol="Orders.ListOrders" />
 
@@ -312,6 +314,190 @@ key is the row's id alone, as the ORM's: in memory it finds the row among
 those it keeps, and over SQLite it reads the row's value of a column of
 the list's own, so a price compares as a number. A cursor whose row is
 gone is the 400 of a cursor it cannot read.
+
+### Filters
+
+A list takes its filters as one argument declared `FilterBy<Item, Fields>`
+from `@superschematic/api` (D106): `Item` is the type the operation lists,
+and `Fields` the fields of it a caller may filter by.
+
+`shop-orders` lists a caller's orders by their status:
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" from="// The caller's orders, or every customer's for staff, oldest first:" to="  }" />
+
+The operation is a `GET` whose result is a list, paged or not, and it
+takes one `FilterBy`. The argument is written as it stands: a filter is
+optional already, so it takes no `?`, `Nullable`, `QueryParam`, `Validate`
+or list around it. Its name is what the implementation and the SDKs call
+the filter. On the wire the parameter is `filter` whatever the argument is
+called, so no other argument of the operation is named `filter`, and a
+paged operation's filter is not named `cursor`, `limit` or `page`. The
+JSON and YAML forms write `filter: { argument, fields: [{ name }] }` on
+the operation.
+
+Each of `Fields` names a field of the item, once, that holds one value a
+filter can compare. The loader refuses:
+
+- a list or a map, a `Secret`, a `@decrypted` field, whose column holds
+  ciphertext, JSON, an object type, a union and a duration;
+- on an item that is a `@source` view, a `@virtual` field, which no column
+  of the table holds, and an audit field other than `createdAt` and
+  `updatedAt`.
+
+So a list filters by nothing its view does not show, and narrowing a list
+cannot probe a column no view returns. The refusal names the operation,
+the argument and the field:
+
+```
+OrderQueries.listOrders: filter argument filter names OrderView.lines, which holds OrderLineView[]; a filter compares one value
+```
+
+A field's type gives its kind, the one both ORMs give a column of that
+type, and its kind gives its operators:
+
+| Kind | A field of | Operators |
+| --- | --- | --- |
+| `uuid` | a UUID, such as `Identity.UUID`, a relation's key among them | `eq`, `in` |
+| `enum` | an enum | `eq`, `in` |
+| `bool` | `boolean` | `eq`, `in` |
+| `string` | `string`, or a scalar of text | `eq`, `in`, `contains` |
+| `int` | a whole number, such as `Generic.Int64` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
+| `float` | `number` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
+| `decimal` | `Generic.Decimal` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
+| `datetime` | `Temporal.DateTime` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
+| `date` | `Temporal.Date` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
+
+A field that may be null, a `Nullable` one, takes `isNull` as well, and no
+other field does. Here `status` is an enum, so the orders take `eq` and
+`in` of it. `shop-cart`'s catalog filters its products by `inStock`, a
+boolean, and `priceCents`, a whole number, which takes the comparisons
+too.
+
+On the wire a filter is the bracket form: `filter[field]=value` is
+equality, as `filter[field][eq]=value` is, and `filter[field][op]=value`
+names an operator.
+
+```
+GET /api/orders?filter[status][in]=placed,shipped
+GET /api/catalog/products?filter[inStock]=true&filter[priceCents][gte]=500&filter[priceCents][lt]=2000
+```
+
+- `eq`, `gt`, `gte`, `lt` and `lte` take one value of the field's type.
+- `in` takes 1 to 100 values separated by commas. Each is trimmed, and an
+  empty one is dropped.
+- `contains` takes text, at least one character, and keeps the items whose
+  field holds it, in any case.
+- `isNull` takes `true`, which keeps the items whose field is null, or
+  `false`, which keeps the others.
+
+Every filter a request sends holds at once; there is no way to ask for one
+or another. A request holds at most 50 filter parameters, and each
+operator of a field once: `filter[status]` and `filter[status][eq]` are
+the same one. Fields and operators are named exactly, so `filter[Status]`
+and `filter[status][IN]` are refused. A list without a `FilterBy` leaves a
+`filter` parameter alone, as it leaves any parameter it does not declare.
+
+Each server reads the filters with its runtime's reader, after the
+operation's query parameters and before its page: Go's `filterparse.Read`,
+TypeScript's `readFilter` and Rust's `FilterSpec::query`, held to one set
+of answers by `runtime/http/testdata/filter_parity.json`. A refusal is a
+400 problem whose `detail` names the parameter and whose `details` hold
+the `location` (`query`), the `parameter` and the `reason`:
+
+```json
+{
+  "status": 400,
+  "code": "bad_request",
+  "detail": "Invalid query parameter filter[status]: takes no operator gt; expected one of eq, in",
+  "details": {
+    "location": "query",
+    "parameter": "filter[status]",
+    "reason": "takes no operator gt; expected one of eq, in"
+  }
+}
+```
+
+The reader refuses more than 50 filter parameters first, at `filter`
+(`must hold at most 50 filters`). It then reads the keys in ascending
+order of their bytes, so a request with two faults gets the same answer
+from every server, and refuses the first key that is, in this order:
+
+| The fault | Named at | The reason |
+| --- | --- | --- |
+| not `filter[field]` or `filter[field][operator]` | the key | `expected filter[field] or filter[field][operator]` |
+| a field `Fields` does not name | `filter[field]` | `is not a field this operation filters by; expected one of status` |
+| an operator the field does not take | `filter[field]` | `takes no operator gt; expected one of eq, in` |
+| an operator sent twice | `filter[field]` | `holds eq more than once` |
+| a value the operator does not take | `filter[field]` | `isNull expects true or false`, `in names no value`, `in must hold at most 100 values` or `contains needs text` |
+
+The route then decodes each value as an item of a query list of its
+field's type, and a value the type refuses is a 400 at `filter[field]`
+too. The Go server answers every such field at once, in the problem's
+`errors`; the TypeScript and Rust servers answer the first, `Invalid query
+parameter filter[priceCents]: expected an integer`. A refused filter never
+reaches the implementation, and it is refused before the page is read:
+`limit=0&filter[colour]=red` is refused for its filter.
+
+The implementation takes the filter typed, a member per field. A member
+is set only for a field the request filters by, and holds each operator
+the request sent, its values decoded:
+
+| Server | The filter | A member |
+| --- | --- | --- |
+| Go | the method's `filter` argument, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`) | `*filterparse.Equals[T]`, `*filterparse.Ordered[T]` or `*filterparse.Text[T]`, nil for a field the request does not filter by: `Eq`, `Gt`, `Gte`, `Lt` and `Lte` a `*T`, `In` a `[]T`, `Contains` a `*string`, `IsNull` a `*bool` |
+| TypeScript | `args.filter`, a `ListOrdersFilter` (`<Operation>Filter`), `{}` when the request filters by nothing | `EqualsFilter<T>`, `OrderedFilter<T>` or `TextFilter<T>` of the HTTP runtime, absent for a field the request does not filter by: `eq`, `in`, `gt`, `gte`, `lt`, `lte`, `contains`, `isNull` |
+| Rust | `args.filter`, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`), whose `default()` filters by nothing | `Option<runtime::filter::Equals<T>>`, `Ordered<T>` or `Text<T>`: `eq`, `in_` (`in` is a keyword), `gt`, `gte`, `lt`, `lte`, `contains`, `is_null` |
+
+The member's type follows the field's operators: `Equals` for a UUID, an
+enum and a boolean, `Ordered` for a number, a date and a time, and `Text`
+for text. `T` is the field's type in the server's types: an enum is its
+generated type, a `Temporal.DateTime` a `Date` in TypeScript. The
+argument is named as the schema names it, so `where: FilterBy<...>` is
+Go's `where` and `args.where`. A Rust implementation is also called in
+process, by a caller that builds the filter itself; the filter's
+`check()` holds such a one to the route's rules, each member by its
+field's operators and then its values by the field's type, with the 400
+the router answers.
+
+The members are shaped as the Go ORM's filters are, so one copies across.
+`shop-api` lists its products by `inStock`, a `bool` on both sides:
+
+<Snippet file="go/shop-api/products.go" symbol="Products.ListProducts" />
+
+A number's member copies the same way, its `Gt`, `Gte`, `Lt` and `Lte`
+beside its `Eq` and `In`. An enum's or a scalar's values convert to the
+column's on the way. `shop-orders` holds an order's status as its text,
+and sets the filter beside the one that keeps a shopper to their own
+orders:
+
+<Snippet file="go/shop-orders/orders.go" symbol="statusFilter" />
+
+The Rust server takes the same filter as `args.filter.status`, its `eq`
+and its `in_`, in memory (`rust-server/src/lib.rs`) and over SQLite
+(`rust-server/src/sqlite.rs`).
+
+`contains` is the ORM's `ILike` of the text between two `%`, with its
+`\`, `%` and `_` escaped so they match themselves. `FindPage` and
+`FindMany` then read the rows the filter finds
+([Pages](/superschematic/guides/database-tables/#pages)).
+
+A cursor carries no filter. The caller asks for each next page with the
+same filters, and a page that changes one starts again at the first
+page. Each SDK takes the filter typed and writes the bracket form, and
+its `<operation>All` sends the filter with every page
+([Client SDKs](/superschematic/guides/client-sdks/#filters)).
+
+The OpenAPI document gives the filter as one query parameter, `filter`,
+with `style: deepObject` and `explode: true`: an object with a property
+per field, each an object of the field's operators, `in` an array of 1 to
+100 items. Its description gives the query string's form and the limit
+of 50 filters. An MCP tool takes the filter as an object
+([MCP tools](/superschematic/reference/mcp-tools/#toolsschemajson)).
+
+`FilterBy` is the only way to declare a list's filters. Earlier IR held a
+`Filterable` flag on an operation, which the Go routes and the SDKs read,
+but no decorator ever set it: there was no `@filterable`. The flag is
+gone, and the SDKs' untyped filter parameters with it.
 
 ## Files
 
@@ -675,6 +861,401 @@ plaidVerifier, err := webhook.JWTBodyHashVerifier(webhook.JWTBodyHashOptions{
 
 The three runtimes run the same vectors
 (`runtime/http/testdata/webhook_jwt_parity.json`).
+
+## Operations the build serves
+
+Most operations over a table do one thing: read a row and copy its columns
+into a view, list rows, or copy an input into the repository's create or
+update. `@tableOperation()` from `@superschematic/api` has the build write
+that handler (D106). The method's views are `@source` views of one table,
+and the generated server reads or writes that table through the
+database's repositories, so the implementation has no method for it.
+
+```ts
+// An issue as a caller who may read issues sees it.
+@source(Issue)
+export abstract class IssueView {
+  id: Identity.UUID;
+  teamId: Identity.UUID;
+  title: string;
+  body: Nullable<string>;
+  status: IssueStatus;
+  priority: Generic.Int64;
+  assigneeId: Nullable<Identity.UUID>;
+  createdAt: Temporal.DateTime;
+  createdBy: Identity.UUID;
+}
+
+// What a caller sets to create an issue under a team: the team is the
+// path's, and status and priority take the table's defaults when unsaid.
+@source(Issue)
+export abstract class CreateIssueInput {
+  title: Validate<string, { minLength: 1; maxLength: 200 }>;
+  body: Nullable<string>;
+  priority: Nullable<Generic.Int64>;
+  assigneeId: Nullable<Identity.UUID>;
+}
+
+// What a caller may change of an issue.
+@source(Issue)
+export abstract class UpdateIssueInput {
+  title: Nullable<Validate<string, { minLength: 1; maxLength: 200 }>>;
+  body: Nullable<string>;
+  status: Nullable<IssueStatus>;
+  priority: Nullable<Generic.Int64>;
+  assigneeId: Nullable<Identity.UUID>;
+}
+
+export class Issues extends Authenticated {
+  @rest(HttpMethod.GET, "teams/{teamId}/issues")
+  @requirePermission(["issues.read"])
+  @paginated({ defaultLimit: 20, maxLimit: 100, defaultSort: "-createdAt" })
+  @tableOperation()
+  listIssues(
+    teamId: Identity.UUID,
+    q: SearchQuery<Validate<string, { maxLength: 100 }>>,
+    sort: SortBy<IssueView, ["createdAt", "priority", "title"]>,
+    filter: FilterBy<IssueView, ["status", "priority", "title", "assigneeId", "createdAt"]>
+  ): IssueView[] {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "issues/{id}")
+  @requirePermission(["issues.read"])
+  @tableOperation()
+  getIssue(id: Identity.UUID): IssueView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.POST, "teams/{teamId}/issues")
+  @requirePermission(["issues.write"])
+  @tableOperation()
+  createIssue(teamId: Identity.UUID, input: CreateIssueInput): IssueView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.PATCH, "issues/{id}")
+  @requirePermission(["issues.write"])
+  @tableOperation()
+  updateIssue(id: Identity.UUID, input: UpdateIssueInput): IssueView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.DELETE, "issues/{id}")
+  @requirePermission(["issues.write"])
+  @tableOperation()
+  deleteIssue(id: Identity.UUID): IssueView {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+The method stays an ordinary declaration. Its `@rest` route, its guards,
+its `@docs`, `@mcp` and `@rateLimit`, its arguments and its result are
+what it writes, and the OpenAPI document, the SDKs, the permission catalog
+and the tool documents read it as any operation. The decorator changes one
+thing: the server mounts the route on a handler the build writes, and the
+implementation's interface and its scaffold leave the method out. Take the
+decorator off and the operation is one you implement, with the same route,
+types, SDK method and tool. A set may hold both kinds, so one operation
+that needs code of yours does not cost the others theirs. The decorator
+takes no argument; the JSON and YAML forms write `tableOperation: {}` on
+the operation.
+
+### The table and the kind
+
+The table is the `@source` of the method's result view, a table of the
+API's database: its `authDb`, or its one DB dependency. Every view the
+method names, its result and its body, is the API's own `@source` view of
+that table, and a method that names a plain type, or views of two tables,
+fails the load. A read and a list may read a projection with a key in the
+table's place ([Projections](/superschematic/reference/projections/)); a
+write may not, a projection being read-only.
+
+The HTTP method and the shape say what the handler does:
+
+| Method and shape | Kind | The handler | It answers |
+| --- | --- | --- | --- |
+| `GET`, the table's key in the path, one view | read | reads the live row the key names | the row's view |
+| `GET`, a list of views, no key in the path | list | reads one page of the live rows | the page, `{ items, next }` |
+| `POST`, one body argument, no key | create | creates a row from the body's members | the view of the row as the write left it |
+| `PATCH`, the key, one body argument | update | sets the members the body sets | the view of the row as the write left it |
+| `DELETE`, the key | delete | deletes the row | the view of the row as it was before |
+
+A success is the envelope a hand-written route answers, with the status it
+answers, 200. A shape that fits no kind fails the load, and the message
+says what it found:
+
+```
+Issues.getIssue: a GET whose result is one view reads a row of Issue, and its path holds no {id}, the table's key; a GET that lists rows answers IssueView[]
+```
+
+A `PUT` is refused: it would replace the row, or upsert it by a key the
+caller names, and neither is built. So is a `Nullable` result, since a key
+that holds no live row is a 404, a `@webhook`, and an argument a kind
+reads nothing from, such as a `QueryParam` on a read.
+
+### The path
+
+The key travels in the path under the key field's name: `{id}` for a
+table whose `@key` is `id`, with the key's type. A path parameter beside
+it is named for the key of one of the table's to-one relations, `{teamId}`
+for `Issue.team`, and holds the row to that parent:
+
+- a create sets the relation from the path, and its body may not carry
+  the same field;
+- a read, a list, an update and a delete keep only the rows whose relation
+  is the path's, so a row under another parent is a 404, as
+  `DELETE /api/issues/{issueId}/comments/{id}` is for a comment of
+  another issue;
+- a create under a parent that does not exist is a 404 that names the
+  parent, `Team not found`.
+
+A path parameter that names neither the key nor a relation's key fails
+the load, since nothing says what it compares.
+
+### What a view holds
+
+Nothing is served that a view does not list. A result view's field reads
+the row's column of the same name, a relation's key (`assigneeId`) the
+relation's foreign key, and a field marked `@decrypted` the opened value
+of its `Encrypted<T>` column. A result view with a `@virtual` field fails
+the load, since no implementation fills it: leave the field out, or write
+that operation by hand.
+
+A create's body is a `@source` view of the columns a caller may set. The
+loader refuses, in it and in an update's body:
+
+| A field that is | Because |
+| --- | --- |
+| the key of a table that generates its own; in an update, any key | the table generates it; it names the row and never changes |
+| an audit field: `createdAt`, `createdBy`, `updatedAt`, `updatedBy`, `deletedAt`, `deletedBy` | the repository stamps it |
+| internal metadata, `_version` | no write sets it |
+| a field a behavior owns, such as a `Workflow` field | only the behavior's operations change it |
+| the relation a path parameter sets, `teamId` under `teams/{teamId}/issues` | the path sets it |
+| `@virtual` | no column holds it |
+
+A create's body must also hold every column the table requires and gives
+no default, or no request could create a row:
+
+```
+Issues.createIssue: its body CreateIssueInput leaves out title, which Issue requires and gives no default: no request could create a row; add it to the view, or name it in the path
+```
+
+A member of a create's body that the request leaves out, or sends as
+null, is left unset, so its column takes the table's default, or null.
+
+An update's members are all optional, `Nullable` each, and the loader
+refuses a required one. The request's own JSON says what to write:
+
+| The request | The column |
+| --- | --- |
+| leaves the member out | stays as it is |
+| sends the member as null, and the column may be null | is set to null |
+| sends the member as null, and the column may not be null | is not written: a 400 at that member |
+| sets no member at all, `{}` | nothing is written, and neither `updatedAt` nor `updatedBy` moves; the answer is the row |
+
+A delete is the repository's: a soft delete of a table with `deletedAt`
+and `deletedBy`, stamped with the caller, and a hard delete of any other.
+It answers the view of the row as it was before. A read, a list, an
+update and a delete leave soft-deleted rows out, so each answers 404 for
+one.
+
+### The list
+
+A generated list is `@paginated`, or the load fails: it reads a page
+through the repository's `findPage`, never the whole table
+([Pages](#pages)). It takes three kinds of argument beside its path's
+parents:
+
+- a `SortBy`, whose fields are columns the repository pages by. Without
+  one, the list reads in the repository's own order, by key;
+- a `SearchQuery`, which needs a `@searchField` on the table, and keeps
+  the rows whose search fields hold each word of the text
+  ([References and search](/superschematic/reference/references-and-search/#searchquery-a-lists-search-text));
+- a `FilterBy`, which the handler turns into the repository's filter
+  member for member, `contains` as its case-insensitive `LIKE` of the
+  text with `\`, `%` and `_` escaped ([Filters](#filters)).
+
+A `QueryParam` on a generated list fails the load, since nothing says
+what it compares: filter by the field with `FilterBy`, or write the list
+by hand. The page's cursor is the repository's page key, and a cursor
+that names no row of its order is the 400 of a cursor the operation never
+returned.
+
+### The transaction and the caller
+
+Every handler runs in one transaction of the database's repositories, as
+the request's caller. So `createdBy`, `updatedBy` and `deletedBy` are
+stamped, an `Encrypted<T>` column is sealed and opened, and a table that
+composes behaviors is written through the behaviors' core, where a rule's
+refusal is the 409 `vetoed` a behavior operation answers
+([A table's behavior operations](#a-tables-behavior-operations)). The
+outbox, `@enqueueOnChange` and Reactions see the write as they see any
+other. The handler has no hook before or after it: work that follows a
+write belongs to Reactions and the change queue, and anything else is a
+reason to take the decorator off.
+
+### Refusals
+
+The body is decoded and checked against its input type before the handler
+runs, as any body is. The handler's own refusals are the ones a
+hand-written operation answers, mapped once the transaction has rolled
+back, and none carries a statement's or the driver's words:
+
+| The request | Status and code |
+| --- | --- |
+| a key that holds no live row under the path's parents, or a parent the path names that does not exist | 404 `not_found` |
+| a write that breaks a unique key | 409 `conflict` |
+| a delete of a row another table's row still references | 409 `conflict` |
+| a create or an update whose relation's key names no row | 400 `bad_request`, at the body's member |
+| an update that sends null for a column that may not be null | 400 `bad_request`, at the body's member |
+| a write that stamps its caller, on a route that admitted none | 401 `unauthorized` |
+
+The TypeScript server's bodies, each with the request's `requestId`
+beside:
+
+```json
+{"type": "about:blank", "title": "Not Found", "status": 404, "detail": "Issue not found", "code": "not_found"}
+```
+
+```json
+{"type": "about:blank", "title": "Conflict", "status": 409, "detail": "Team with that key already exists", "code": "conflict"}
+```
+
+```json
+{"type": "about:blank", "title": "Conflict", "status": 409, "detail": "Issue is still referenced", "code": "conflict"}
+```
+
+```json
+{
+  "type": "about:blank", "title": "Bad Request", "status": 400,
+  "detail": "Request body does not match the declared input", "code": "bad_request",
+  "details": {"location": "body", "reason": "validation failed"},
+  "errors": {"assigneeId": [{"validator": "reference", "message": "names no Member"}]}
+}
+```
+
+```json
+{
+  "type": "about:blank", "title": "Bad Request", "status": 400,
+  "detail": "Request body does not match the declared input", "code": "bad_request",
+  "details": {"location": "body", "reason": "validation failed"},
+  "errors": {"title": [{"validator": "required", "message": "required field"}]}
+}
+```
+
+```json
+{"type": "about:blank", "title": "Unauthorized", "status": 401, "detail": "Authentication required", "code": "unauthorized"}
+```
+
+A unique key's conflict names the key's fields when the database says
+which they are, and reads `Team conflicts with an existing row` when it
+does not. The Go server answers the same statuses and codes, with the two
+400s in the shape its own body validation answers, each error at the
+member's name.
+
+### Guards
+
+A route's guards are the method's, as on any operation: `@auth`,
+`@requirePermission`, `@publicRoute`, `@requireService`, `@allowService`,
+`@rateLimit`, `@bodyLimit` and `@timeout`
+([Auth and permissions](/superschematic/guides/auth-and-permissions/)).
+They are the only rule over which rows a caller reaches: a caller the
+route admits reaches every live row the path holds. `@requireOwnership`
+fails the load on a `@tableOperation`, since no implementation of yours
+runs to check what the caller owns, and so does
+`@manualRouteRegistration`, which hands the route to a handler of yours.
+
+Different callers get different views through different operations. A
+table may have any number of `@tableOperation` methods, in any sets, each
+with its own views and guards:
+
+```ts
+// An issue as anyone sees it: fewer of the same columns.
+@source(Issue)
+export abstract class IssueGuestView {
+  id: Identity.UUID;
+  title: string;
+  status: IssueStatus;
+}
+
+@rest(HttpMethod.GET, "public/issues/{id}")
+@publicRoute
+@tableOperation()
+getIssueForGuest(id: Identity.UUID): IssueGuestView {
+  throw new Error("schema declaration only");
+}
+```
+
+Several views of one table do not confuse a relation's key: it refers to
+the one of them an operation lists
+([What a value refers to](/superschematic/reference/references-and-search/#what-a-value-refers-to)).
+
+### The servers
+
+The TypeScript and Go servers write the handlers. A TypeScript router
+runs them through the database's repositories, which it takes as
+`RouterOptions.orm`, `createOrm(pool)` from the database's types package
+(`Deps.orm`); `buildRouter` throws without them
+([TypeScript](/superschematic/install/typescript/#serve-a-generated-api)).
+
+A Go server runs them through the Go ORM, in `tables.go` of the API's
+package: one typed function per view and one per operation, mounted with
+the database the routes take as `Config.DB`. It serves a view whose
+fields each hold one value, a scalar, text, a number, a boolean or an
+enum, of a table. A read or a list of a projection, and a view that
+holds a list, a map, a JSON value or an embedded object, it leaves to
+the implementation: the method stays in the namespace's interface and
+its scaffold, and the build warns of each, with why:
+
+```
+warning: tracker-api: the Go server writes no handler for Issues.getIssue, a @tableOperation (D106): its view IssueView holds labels, string[], and the Go server writes handlers for a view of single values so far, each a scalar, text, a number, a boolean or an enum; it stays a method of the implementation's interface, to be written by hand, with the same route and types
+```
+
+The API's other table operations are still served. A Go type holds an
+optional number or text without a pointer, so a Go response leaves such
+a member out when its column is null, zero or empty, as every Go route's
+does, and a create reads a zero or an empty optional member as unset. An
+update reads the request's own JSON, so `"estimate": 0` writes 0 and
+`"estimate": null` clears it.
+
+A Rust server writes no handler yet. It keeps each method in the
+namespace's trait and its scaffold, to be written by hand, and the build
+warns once per API, naming every such operation, so a project that
+builds the API in two languages still builds:
+
+```
+warning: tracker-api: the Rust server writes no handler for a @tableOperation yet (D106): Issues.listIssues, Issues.getIssue, Issues.createIssue, Issues.updateIssue, Issues.deleteIssue stay methods of the implementation's interface, to be written by hand, with the same route and types
+```
+
+A TypeScript server answers a `Temporal.DateTime` to the millisecond,
+`2026-03-01T09:30:00.123Z`, while its column holds microseconds. So an
+equality filter on a time a response gave, `filter[createdAt]=…`, may
+miss the row it came from. A range finds it:
+`filter[createdAt][gte]=…` with `filter[createdAt][lt]=…` a millisecond
+later.
+
+`shop-cart`, a TypeScript API over `shop-db`, serves its catalog this
+way: a list anyone may read, paged, sorted, searched and filtered, one
+product, and an update for staff. Its implementation has no method for
+any of the three:
+
+<Snippet file="schemas/services/shop-cart/src/catalog.schema.ts" symbol={['CatalogProduct', 'UpdateCatalogProductInput', 'CatalogProducts']} />
+
+### What is not built yet
+
+Each of these has something that stands in until it is:
+
+| Not built | Until then |
+| --- | --- |
+| a row rule: an operation that reads or writes only the rows a field or a seat names the caller in | the route's guards are the only rule; an operation that needs one is written by hand |
+| a view of a relation's rows nested in a result, `lines: OrderLineView[]` | such a field is `@virtual`, so its operation is written by hand |
+| a write fenced by the row's `_version` | a generated update is the last write's |
+| an upsert by `PUT` | a `PUT` is refused; write the operation by hand |
+| one declaration that serves a whole table | each operation and each view is declared |
+| the Rust server's handlers | a Rust API implements these operations by hand |
+| the Go server's handlers over a projection, and over a view that holds a list, a map, a JSON value or an embedded object | a Go API implements those operations by hand; the TypeScript server serves them |
 
 ## A table's behavior operations
 

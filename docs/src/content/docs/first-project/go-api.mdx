@@ -32,7 +32,9 @@ the caller is.
   middleware. `@requirePermission` lists the permissions that let a caller
   in; a granted permission covers the ones nested under it, so `products`
   covers `products.read` and `products.write`.
-- `QueryParam<boolean>` reads `inStock` from the query string.
+- `FilterBy<ProductView, ["inStock"]>` gives the list its filter: a caller
+  asks for `?filter[inStock]=true`, and the implementation takes the
+  filter typed ([Filters](/superschematic/guides/api-routes/#filters)).
 
 ## Configure it
 

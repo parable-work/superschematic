@@ -216,21 +216,23 @@ type ToolSchemaProperty struct {
 	Search               bool                            `json:"x-superschematic-search,omitempty"`
 	Sort                 bool                            `json:"x-superschematic-sort,omitempty"`
 	AdditionalProperties *ToolSchemaAdditionalProperties `json:"additionalProperties,omitempty"`
-	Type                 ToolSchemaType                  `json:"type"`
-	Format               string                          `json:"format,omitempty"`
-	Description          string                          `json:"description,omitempty"`
-	Pattern              string                          `json:"pattern,omitempty"`
-	Enum                 []any                           `json:"enum,omitempty"`
-	MinLength            *int64                          `json:"minLength,omitempty"`
-	MaxLength            *int64                          `json:"maxLength,omitempty"`
-	Minimum              *float64                        `json:"minimum,omitempty"`
-	Maximum              *float64                        `json:"maximum,omitempty"`
-	MinItems             *int64                          `json:"minItems,omitempty"`
-	MaxItems             *int64                          `json:"maxItems,omitempty"`
-	Items                *ToolSchemaProperty             `json:"items,omitempty"`
-	Properties           map[string]ToolSchemaProperty   `json:"properties,omitempty"`
-	Required             []string                        `json:"required,omitempty"`
-	OneOf                []ToolSchemaProperty            `json:"oneOf,omitempty"`
+	// Type is absent on a property whose OneOf members are of different
+	// JSON types: a filter's field, a value or its operators (D106).
+	Type        ToolSchemaType                `json:"type,omitempty"`
+	Format      string                        `json:"format,omitempty"`
+	Description string                        `json:"description,omitempty"`
+	Pattern     string                        `json:"pattern,omitempty"`
+	Enum        []any                         `json:"enum,omitempty"`
+	MinLength   *int64                        `json:"minLength,omitempty"`
+	MaxLength   *int64                        `json:"maxLength,omitempty"`
+	Minimum     *float64                      `json:"minimum,omitempty"`
+	Maximum     *float64                      `json:"maximum,omitempty"`
+	MinItems    *int64                        `json:"minItems,omitempty"`
+	MaxItems    *int64                        `json:"maxItems,omitempty"`
+	Items       *ToolSchemaProperty           `json:"items,omitempty"`
+	Properties  map[string]ToolSchemaProperty `json:"properties,omitempty"`
+	Required    []string                      `json:"required,omitempty"`
+	OneOf       []ToolSchemaProperty          `json:"oneOf,omitempty"`
 }
 
 // ToolSchemaReference is the reference a tool argument's value holds

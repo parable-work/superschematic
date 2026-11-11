@@ -17,6 +17,238 @@ use std::sync::Arc;
 
 use crate::errors::SDKError;
 
+/// The most values a filter's `one_of` may list, and the most filter
+/// parameters a request may hold, as the route reads them (D106).
+const FILTER_MAX_IN_VALUES: usize = 100;
+const FILTER_MAX_PARAMETERS: usize = 50;
+
+/// The filter of a field compared for equality alone (D106): a UUID, an
+/// enum or a boolean. Each member is an operator, `None` or empty when
+/// the filter does not use it, and the ones set hold at once. `one_of` is
+/// the wire's `in`: the field is one of the values, 1 to 100 of them.
+/// `is_null` is for a field that may be null: `true` keeps the items whose
+/// field is null, `false` the others.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Equals<T> {
+    pub eq: Option<T>,
+    pub one_of: Vec<T>,
+    pub is_null: Option<bool>,
+}
+
+/// The filter of a field whose values have an order (D106): a number, a
+/// date or a time. It adds `gt`, `gte`, `lt` and `lte` to [`Equals`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ordered<T> {
+    pub eq: Option<T>,
+    pub one_of: Vec<T>,
+    pub gt: Option<T>,
+    pub gte: Option<T>,
+    pub lt: Option<T>,
+    pub lte: Option<T>,
+    pub is_null: Option<bool>,
+}
+
+/// The filter of a field of text (D106). It adds `contains` to [`Equals`]:
+/// the text a value holds, in any case.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Text<T> {
+    pub eq: Option<T>,
+    pub one_of: Vec<T>,
+    pub contains: Option<String>,
+    pub is_null: Option<bool>,
+}
+
+// Default is written out: a derive would ask it of T, which a filter of
+// no operator does not need.
+impl<T> Default for Equals<T> {
+    fn default() -> Self {
+        Self {
+            eq: None,
+            one_of: Vec::new(),
+            is_null: None,
+        }
+    }
+}
+
+impl<T> Default for Ordered<T> {
+    fn default() -> Self {
+        Self {
+            eq: None,
+            one_of: Vec::new(),
+            gt: None,
+            gte: None,
+            lt: None,
+            lte: None,
+            is_null: None,
+        }
+    }
+}
+
+impl<T> Default for Text<T> {
+    fn default() -> Self {
+        Self {
+            eq: None,
+            one_of: Vec::new(),
+            contains: None,
+            is_null: None,
+        }
+    }
+}
+
+/// One field's operators, of any shape, as [`append_filter`] writes them.
+struct FilterOperators<'a, T> {
+    eq: Option<&'a T>,
+    one_of: &'a [T],
+    gt: Option<&'a T>,
+    gte: Option<&'a T>,
+    lt: Option<&'a T>,
+    lte: Option<&'a T>,
+    contains: Option<&'a str>,
+    is_null: Option<bool>,
+}
+
+/// Appends one field's filter to a request's query in the bracket form
+/// (D106), a pair for each operator set, in the operators' order:
+/// `filter[field]=value` for `eq` and `filter[field][op]=value` for any
+/// other, `one_of` as `in` with its values joined by commas. What the
+/// route would refuse is refused before the request: more values than an
+/// `in` may list, one of them that the comma-separated value cannot carry
+/// as it is, a `contains` of no text, and an `is_null` on a field that is
+/// never null.
+fn append_filter<T: std::fmt::Display>(
+    field: &str,
+    nullable: bool,
+    operators: FilterOperators<'_, T>,
+    query_params: &mut Vec<(String, String)>,
+) -> Result<(), SDKError> {
+    let name = format!("filter[{}]", field);
+    if let Some(value) = operators.eq {
+        query_params.push((name.clone(), value.to_string()));
+    }
+    if !operators.one_of.is_empty() {
+        let in_name = format!("{}[in]", name);
+        if operators.one_of.len() > FILTER_MAX_IN_VALUES {
+            return Err(SDKError::config(format!(
+                "{} must hold at most {} values",
+                in_name, FILTER_MAX_IN_VALUES
+            )));
+        }
+        let mut items = Vec::with_capacity(operators.one_of.len());
+        for (index, value) in operators.one_of.iter().enumerate() {
+            let text = value.to_string();
+            check_query_list_item(&in_name, index, &text)?;
+            items.push(text);
+        }
+        query_params.push((in_name, items.join(",")));
+    }
+    for (operator, value) in [
+        ("gt", operators.gt),
+        ("gte", operators.gte),
+        ("lt", operators.lt),
+        ("lte", operators.lte),
+    ] {
+        if let Some(value) = value {
+            query_params.push((format!("{}[{}]", name, operator), value.to_string()));
+        }
+    }
+    if let Some(text) = operators.contains {
+        if text.is_empty() {
+            return Err(SDKError::config(format!("{}[contains] needs text", name)));
+        }
+        query_params.push((format!("{}[contains]", name), text.to_string()));
+    }
+    if let Some(is_null) = operators.is_null {
+        if !nullable {
+            return Err(SDKError::config(format!("{} takes no operator isNull", name)));
+        }
+        query_params.push((format!("{}[isNull]", name), is_null.to_string()));
+    }
+    Ok(())
+}
+
+impl<T: std::fmt::Display> Equals<T> {
+    /// Appends the filter of `field` to a request's query in the bracket
+    /// form (D106), a pair of a name and a value for each operator set.
+    /// `nullable` is whether the field may be null: an `is_null` on one
+    /// that may not is refused, as the route refuses it.
+    pub fn append_query(
+        &self,
+        field: &str,
+        nullable: bool,
+        query_params: &mut Vec<(String, String)>,
+    ) -> Result<(), SDKError> {
+        let operators = FilterOperators {
+            eq: self.eq.as_ref(),
+            one_of: &self.one_of,
+            gt: None,
+            gte: None,
+            lt: None,
+            lte: None,
+            contains: None,
+            is_null: self.is_null,
+        };
+        append_filter(field, nullable, operators, query_params)
+    }
+}
+
+impl<T: std::fmt::Display> Ordered<T> {
+    /// Appends the filter of `field` to a request's query, as
+    /// [`Equals::append_query`] does.
+    pub fn append_query(
+        &self,
+        field: &str,
+        nullable: bool,
+        query_params: &mut Vec<(String, String)>,
+    ) -> Result<(), SDKError> {
+        let operators = FilterOperators {
+            eq: self.eq.as_ref(),
+            one_of: &self.one_of,
+            gt: self.gt.as_ref(),
+            gte: self.gte.as_ref(),
+            lt: self.lt.as_ref(),
+            lte: self.lte.as_ref(),
+            contains: None,
+            is_null: self.is_null,
+        };
+        append_filter(field, nullable, operators, query_params)
+    }
+}
+
+impl<T: std::fmt::Display> Text<T> {
+    /// Appends the filter of `field` to a request's query, as
+    /// [`Equals::append_query`] does.
+    pub fn append_query(
+        &self,
+        field: &str,
+        nullable: bool,
+        query_params: &mut Vec<(String, String)>,
+    ) -> Result<(), SDKError> {
+        let operators = FilterOperators {
+            eq: self.eq.as_ref(),
+            one_of: &self.one_of,
+            gt: None,
+            gte: None,
+            lt: None,
+            lte: None,
+            contains: self.contains.as_deref(),
+            is_null: self.is_null,
+        };
+        append_filter(field, nullable, operators, query_params)
+    }
+}
+
+/// Refuses a filter that wrote more parameters than a request may hold
+/// (D106), as the route's reader would.
+pub fn check_filter_count(count: usize) -> Result<(), SDKError> {
+    if count > FILTER_MAX_PARAMETERS {
+        return Err(SDKError::config(format!(
+            "filter must hold at most {} filters",
+            FILTER_MAX_PARAMETERS
+        )));
+    }
+    Ok(())
+}
+
 /// The bytes JavaScript's encodeURIComponent writes as they are: ASCII
 /// letters and digits and `-_.!~*'()`. Every other byte is percent-encoded.
 const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
@@ -42,7 +274,7 @@ pub fn path_segment(value: &impl std::fmt::Display) -> String {
 /// sent as one comma-separated value (?name=a,b). The route splits that
 /// value on commas, trims each item and refuses an empty one, so an item
 /// that is empty or blank, or holds a comma or surrounding space, cannot be
-/// sent as it is.
+/// sent as it is. A filter's `in` is read the same (D106).
 pub fn check_query_list_item(name: &str, index: usize, text: &str) -> Result<(), SDKError> {
     if text.trim().is_empty() {
         return Err(SDKError::config(format!("{}[{}] is required", name, index)));

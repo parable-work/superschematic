@@ -35,6 +35,45 @@ Its entry points:
   `OperationResult` holding one, to it (`bindCursor`), the base64url of
   `{"sort":"-placedAt","key":K}`. A cursor sent with another sort is the
   400 `SORTED_CURSOR_DETAIL`.
+  `readFilter` reads a list operation's filters (`FilterBy`, D106), the
+  bracket form `filter[field]=value` and `filter[field][op]=value`, against
+  the operation's `FilterSpec`, and answers the typed filter an
+  implementation takes: a member per field the request filters by
+  (`EqualsFilter`, `OrderedFilter` or `TextFilter`), each value decoded as
+  an item of a query list of the field's type is, a date and a decimal by
+  the scalar library, and `{}` for a request with no filter. `readFilters` is the reader alone, each filter's field,
+  operator and values as the query sent them, as the Go and Rust runtimes
+  read them (`runtime/http/testdata/filter_parity.json`). A field or an
+  operator the spec does not name, and a value its type refuses, are a 400
+  at `filter[field]`.
+  `tableRead`, `tableList`, `tableCreate`, `tableUpdate` and `tableDelete`
+  (`src/table-routes.ts`) are the handlers of a generated router's table
+  operations (D106), the routes of an API's operations marked
+  `@tableOperation`, which have no implementation method. Each takes the
+  repositories (`RouterOptions.orm`), the operation's `TableOperation`
+  (its kind, its table's repository, the key and the parents its path
+  names, the members of its result's view and of its body) and the decoded
+  request, and runs in one transaction as the route's principal
+  (`orm.as`) and as the behaviors' caller it gives: a read answers the
+  view of the live row under the path's key and parents; a list a page
+  through `findPage`, the request's filter mapped member for member
+  (`tableFilter`: `contains` is `ilike` with `\`, `%` and `_` escaped),
+  its search text, its sort and its cursor, the repository's page key; a
+  create sets the body's members and each parent; an update the members
+  the body sets, null clearing a column that may be null, and writes
+  nothing for a body that sets none; a delete goes through `deleteOne`
+  and answers the view as it was. A response holds the view's members
+  alone. An error is mapped once the transaction has rolled back, with
+  none of a statement's or the driver's words: no live row is 404
+  `not_found`, a unique key another row holds (23505) and a delete of a
+  row another still references (23503) 409 `conflict`, a
+  relation's key that names no row (23503) 400 at the body's member
+  (`reference`) or 404 for a parent's, a null a column does not take 400
+  at the member (`required`), a write with no caller to stamp 401
+  `unauthorized`, a cursor that names no row the refused-cursor 400, and a
+  refusal of the behaviors' core what `behaviorOperation` answers. They
+  read a table's columns from the definition its repository holds and
+  know an error by its shape, importing neither `pg` nor the repositories.
   `behaviorCaller` and `behaviorOperation` (`src/behavior-routes.ts`) are
   the handlers of a generated router's behavior operations (D103), the
   routes an API's `@behaviorOperations` sets add, which run each operation
@@ -121,7 +160,11 @@ Its entry points:
   streamable HTTP transport over any tool set, and `mountMcp` mounts it at
   `POST /api/mcp` behind the router's auth gate, listing the tools whose
   routes the caller may call and running each `tools/call` in process
-  through its operation's route. A tool marked `confirm`, whose invocation
+  through its operation's route. A tool's `filter` argument (`FilterBy`,
+  D106), an object with a member per field holding a value or an object of
+  operators, goes to the route's query as the bracket form, so the route's
+  reader refuses a field, an operator or a value as it does any caller's.
+  A tool marked `confirm`, whose invocation
   policy is ask, runs only once the person confirms the call (D93): a
   2026-07-28 client that elicits forms is asked with `elicitation/create`
   in an `input_required` result, any other gets a `confirmation_required`

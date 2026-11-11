@@ -28,17 +28,21 @@ var templatesFS embed.FS
 
 // SDKOutput contains all generated Rust SDK metadata.
 type SDKOutput struct {
-	SchemaName             string
-	CrateName              string
-	TypesCrate             string
-	TypesCrateModule       string
-	TypesDependencyPath    string
-	SDKStructName          string
-	Namespaces             []NamespaceInfo
-	HasInputSchemas        bool
-	InputSchemasJSON       string
-	HasAuth                bool
-	HasFilterableEndpoints bool
+	SchemaName          string
+	CrateName           string
+	TypesCrate          string
+	TypesCrateModule    string
+	TypesDependencyPath string
+	SDKStructName       string
+	Namespaces          []NamespaceInfo
+	HasInputSchemas     bool
+	InputSchemasJSON    string
+	HasAuth             bool
+	// HasFilteredEndpoints reports whether an operation takes a filter
+	// (D106); src/runtime.rs then carries Equals, Ordered and Text, the
+	// shapes of a field's filter, with check_query_list_item for an in's
+	// values, and src/lib.rs exports the shapes.
+	HasFilteredEndpoints bool
 	// ChecksQueryListItems reports whether a list query parameter's items
 	// are sent as text; src/runtime.rs then carries check_query_list_item.
 	ChecksQueryListItems bool
@@ -161,7 +165,18 @@ type EndpointInfo struct {
 	HasFileUpload          bool
 	FileUploadFields       []FileUploadField
 	FilesStructName        string
-	Filterable             bool
+	// Filter is the operation's FilterBy (D106), nil for an operation
+	// without one. Its method takes the filter typed, FilterStructName
+	// (ListPartsFilter) with a member per field in FilterFields, as the
+	// query struct's field named for the argument, FilterFieldName
+	// (QueryParam.FilterFields), and writes it in the bracket form;
+	// <method>_all sends it with every page, since a cursor carries no
+	// filter. The query struct derives Default when no field of it is
+	// required (QueryDerivesDefault), so a caller sets the filter alone.
+	Filter           *apigen.FilterInfo
+	FilterStructName string
+	FilterFieldName  string
+	FilterFields     []FilterField
 	// SupportsListAll marks limit/offset-paginated list endpoints that emit
 	// an auto-paginating `{method}_all` variant. Requires a schema-declared
 	// max on the `limit` query param so the generated page size matches the
@@ -204,12 +219,32 @@ type PathQueryBinding struct {
 	Required bool
 }
 
+// FilterField is one field of an operation's typed filter (D106).
+type FilterField struct {
+	// Name is the item's field, by its JSON name, as the wire names it in
+	// filter[<name>]; RustName is the filter struct's member.
+	Name     string
+	RustName string
+	// RustType is the member's type, the shape its operators give around
+	// the type a query parameter of the field's type has:
+	// runtime::Ordered<types::GenericInt64>.
+	RustType string
+	// Nullable reports whether the field takes isNull; the method refuses
+	// an is_null on one that does not, as the route would.
+	Nullable bool
+}
+
 // QueryParam represents a query string parameter.
 type QueryParam struct {
 	Name     string
 	RustName string
 	RustType string
 	Required bool
+	// FilterFields marks the operation's filter (D106), the query struct's
+	// field named for the FilterBy argument: RustType is the filter's
+	// struct, and these are its members, each written in the bracket form
+	// rather than as one value.
+	FilterFields []FilterField
 	// IsArray marks a list parameter (QueryParam<T[]>), sent as one
 	// comma-separated value (?name=a,b). An empty list is left out, the
 	// route refusing a present empty value, and a required one is refused.
@@ -459,6 +494,9 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		if converted.Page != nil {
 			output.HasPagedEndpoints = true
 		}
+		if converted.Filter != nil {
+			output.HasFilteredEndpoints = true
+		}
 		if marker != nil {
 			behaviorEndpoints[endpoint.HandlerName] = converted
 			continue
@@ -499,12 +537,6 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		sort.Slice(ns.Endpoints, func(i, j int) bool {
 			return ns.Endpoints[i].MethodName < ns.Endpoints[j].MethodName
 		})
-		for _, ep := range ns.AllEndpoints() {
-			if ep.Filterable {
-				output.HasFilterableEndpoints = true
-				break
-			}
-		}
 		namespaces = append(namespaces, *ns)
 	}
 	sort.Slice(namespaces, func(i, j int) bool {
@@ -770,6 +802,19 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			hasRequiredQueryParams = true
 		}
 	}
+	// The filter (D106) is the query struct's field after the operation's
+	// own and before a page's cursor and limit.
+	methodPrefix := toRustTypeName(ep.Name)
+	var filterFields []FilterField
+	if ep.Filter != nil {
+		filterFields = convertFilterFields(ep.Filter)
+		queryParams = append(queryParams, QueryParam{
+			Name:         ep.Filter.Argument,
+			RustName:     toRustFieldName(ep.Filter.Argument),
+			RustType:     methodPrefix + "Filter",
+			FilterFields: filterFields,
+		})
+	}
 	if ep.Page != nil {
 		queryParams = append(queryParams, pageQueryParams(ep.Page)...)
 	}
@@ -825,7 +870,6 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	}
 
 	methodHTTP := strings.ToUpper(ep.Method)
-	methodPrefix := toRustTypeName(ep.Name)
 	hasEncryptedBody := ep.Encrypted && apigen.EncryptedBodyMethod(methodHTTP)
 	supportsListAll, listAllPageSize := listAllPagination(ep, pathParams, pathQueryBindings, queryParams, scalarArgs, hasRequiredQueryParams)
 
@@ -857,9 +901,15 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		HasFileUpload:          ep.HasFileUpload,
 		FileUploadFields:       fileUploadFields,
 		FilesStructName:        methodPrefix + "Files",
-		Filterable:             ep.Filterable,
+		Filter:                 ep.Filter,
+		FilterFields:           filterFields,
 		SupportsListAll:        supportsListAll,
 		ListAllPageSize:        listAllPageSize,
+	}
+	if ep.Filter != nil {
+		converted.FilterStructName = methodPrefix + "Filter"
+		converted.FilterFieldName = toRustFieldName(ep.Filter.Argument)
+		converted.QueryDerivesDefault = !hasRequiredQueryParams
 	}
 	if ep.Page != nil {
 		converted.Page = ep.Page
@@ -869,6 +919,23 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		converted.QueryDerivesDefault = !hasRequiredQueryParams
 	}
 	return converted
+}
+
+// convertFilterFields are the members of an operation's typed filter
+// (D106), in FilterBy's order: each the shape its operators give
+// (runtime::Equals, runtime::Ordered or runtime::Text) around the type a
+// query parameter of the field's type has in this SDK.
+func convertFilterFields(filter *apigen.FilterInfo) []FilterField {
+	fields := make([]FilterField, len(filter.Fields))
+	for i, field := range filter.Fields {
+		fields[i] = FilterField{
+			Name:     field.Name,
+			RustName: toRustFieldName(field.Name),
+			RustType: "runtime::" + field.Shape() + "<" + mapURLParamToRust(field.Value.Type) + ">",
+			Nullable: field.Nullable(),
+		}
+	}
+	return fields
 }
 
 // pageQueryParams are a paged operation's two query parameters (D60),
@@ -903,8 +970,10 @@ func pageQueryParams(page *apigen.PageInfo) []QueryParam {
 // endpoints are plain GET-style lists: array output, optional-only query
 // params including f64 `limit`/`offset`, and a schema-declared max on
 // `limit` (the server's page-size clamp). Anything with a body, path
-// params, filters, or encryption keeps only the single-page method, and a
+// params, or encryption keeps only the single-page method, and a
 // @paginated operation gets the cursor-following `{method}_all` instead.
+// A filter (D106) is a field of the query struct, which either `_all`
+// sends with every page.
 func listAllPagination(
 	ep apigen.EndpointInfo,
 	pathParams []PathParam,
@@ -920,7 +989,7 @@ func listAllPagination(
 	}
 	// It gathers the pages into one Vec, which a map or a list that may be
 	// null (an Option) is not.
-	if !ep.OutputIsArray || ep.OutputIsMap || ep.OutputNullable || ep.HasInput || ep.HasFileUpload || ep.Filterable || ep.Encrypted {
+	if !ep.OutputIsArray || ep.OutputIsMap || ep.OutputNullable || ep.HasInput || ep.HasFileUpload || ep.Encrypted {
 		return false, 0
 	}
 	if len(pathParams) > 0 || len(pathQueryBindings) > 0 || len(scalarArgs) > 0 || hasRequiredQueryParams {

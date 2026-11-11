@@ -159,12 +159,12 @@ user_id = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40"
 role_id = "5d1f7c2a-3b4e-4f6a-8c9d-0e1f2a3b4c5d"
 session_user = {"id": user_id, "login": "ada@example.com", "name": "Ada"}
 role = {"id": role_id, "name": "editor", "permissions": ["identity.users.read"]}
-user = {**session_user, "disabled": False, "roles": [{"id": role_id, "name": "editor"}]}
+user = {**session_user, "disabled": False, "pending": False, "roles": [{"id": role_id, "name": "editor"}]}
 users = "/api/auth/admin/users/" + user_id
 roles = "/api/auth/admin/roles"
 answers = {
     ("POST", "/api/auth/login"): {"user": session_user, "expiresAt": "2026-10-08T12:00:00Z", "token": "session-token"},
-    ("POST", "/api/auth/register"): {"user": session_user, "expiresAt": "2026-10-08T12:00:00Z"},
+    ("POST", "/api/auth/register"): {"user": session_user, "expiresAt": "2026-10-08T12:00:00Z", "pending": False},
     ("GET", "/api/auth/me"): {"user": session_user, "roles": [{"id": role_id, "name": "editor"}], "permissions": ["identity.users.read"]},
     ("GET", "/api/auth/capabilities"): {"operations": {"greet": True, "listUsers": False}},
     ("POST", "/api/auth/logout"): True,

@@ -4649,9 +4649,8 @@
         "fileUpload": {
           "$ref": "#/$defs/FileUploadConfig"
         },
-        "filterable": {
-          "default": false,
-          "type": "boolean"
+        "filter": {
+          "$ref": "#/$defs/OperationFilter"
         },
         "hasMany": {
           "default": false,
@@ -4797,6 +4796,9 @@
           "default": "",
           "type": "string"
         },
+        "tableOperation": {
+          "$ref": "#/$defs/TableOperation"
+        },
         "temporalFormat": {
           "default": "",
           "type": "string"
@@ -4935,6 +4937,32 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "FilterField": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operators": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeRef"
+        }
+      },
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "GraphMemberConfig": {
@@ -5379,6 +5407,25 @@
         "code",
         "description",
         "commonCorrection"
+      ],
+      "type": "object"
+    },
+    "OperationFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "argument": {
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FilterField"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "argument",
+        "fields"
       ],
       "type": "object"
     },
@@ -6472,6 +6519,59 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "TableOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "database": {
+          "default": "",
+          "type": "string"
+        },
+        "input": {
+          "default": "",
+          "type": "string"
+        },
+        "key": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "parents": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TableOperationParent"
+          },
+          "type": "array"
+        },
+        "projection": {
+          "default": false,
+          "type": "boolean"
+        },
+        "type": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TableOperationParent": {
+      "additionalProperties": false,
+      "properties": {
+        "param": {
+          "type": "string"
+        },
+        "relation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "param",
+        "relation"
+      ],
       "type": "object"
     },
     "TraitConfigSchema": {

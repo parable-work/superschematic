@@ -13,8 +13,9 @@ import (
 
 // TestTSWriterEmitsPaginated: the TypeScript writer emits @paginated with
 // both limits, as the loader filled them in from a YAML page that left
-// them out, and a sorted page's defaultSort and SortBy argument (D60,
-// amended), and reading it back gives the same IR.
+// them out, a sorted page's defaultSort and SortBy argument (D60,
+// amended), and a list's FilterBy argument (D106), and reading it back
+// gives the same IR.
 func TestTSWriterEmitsPaginated(t *testing.T) {
 	schema, err := loader.LoadService(dataFixtures + "/fixture-paged-api-yaml")
 	if err != nil {
@@ -29,16 +30,18 @@ func TestTSWriterEmitsPaginated(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`import { HttpMethod, QueryParam, SortBy, paginated, rest } from "@superschematic/api";`,
+		`import { FilterBy, HttpMethod, QueryParam, SortBy, paginated, rest } from "@superschematic/api";`,
 		"  @rest(HttpMethod.GET, \"items\")\n  @paginated({ defaultLimit: 2, maxLimit: 5, defaultSort: \"name\" })\n  listItems(",
 		`sort: SortBy<ItemView, ["name", "sku"]>): ItemView[] {`,
 		"  @rest(HttpMethod.GET, \"tags\")\n  @paginated({ defaultLimit: 20, maxLimit: 100 })\n  listTags(",
+		// A filter is written as its argument, after the others (D106).
+		`listParts(sort: SortBy<PartView, ["name", "quantity"]>, filter: FilterBy<PartView, ["id", "name", "kind", "quantity", "weight", "price", "discontinued", "madeAt", "retiredOn", "supplierId"]>): PartView[] {`,
 	} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("TS output missing\n%s\n\ngot:\n%s", want, got)
 		}
 	}
-	if strings.Count(string(got), "@paginated") != 2 {
+	if strings.Count(string(got), "@paginated") != 3 {
 		t.Fatalf("TS output pages an operation it should not:\n%s", got)
 	}
 	if got, want := normalizeIR(t, writeAndReload(t, schema, FormatTS)), normalizeIR(t, schema); got != want {

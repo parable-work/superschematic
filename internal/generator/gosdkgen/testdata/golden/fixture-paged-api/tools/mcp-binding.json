@@ -99,6 +99,47 @@
       ]
     },
     {
+      "toolName": "catalog.listParts",
+      "apiId": "fixture-paged-api",
+      "namespace": "catalog",
+      "methodName": "listParts",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "sort",
+          "required": false,
+          "kind": "query",
+          "target": "query.sort"
+        },
+        {
+          "toolParameter": "filter",
+          "required": false,
+          "kind": "query",
+          "target": "query.filter"
+        },
+        {
+          "toolParameter": "cursor",
+          "required": false,
+          "kind": "query",
+          "target": "query.cursor"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "query",
+          "target": "query.limit"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "query",
+          "target": "query",
+          "sources": ["sort", "filter", "cursor", "limit"]
+        }
+      ]
+    },
+    {
       "toolName": "catalog.listTags",
       "apiId": "fixture-paged-api",
       "namespace": "catalog",

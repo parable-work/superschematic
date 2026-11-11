@@ -42,6 +42,9 @@ type refOptions struct {
 	ArgsName string
 	Nones    []string
 	Paged    bool
+	// Filter is the Args' field of its FilterBy (D106), empty without one:
+	// each call sets it to its default, which filters by nothing.
+	Filter string
 	// Search is its search argument's call (D61, amended), which a picker
 	// makes for the text a reader types; nil when it does not search.
 	Search *refSearch
@@ -945,6 +948,9 @@ func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef, hosted *hoste
 		for _, param := range e.QueryArgs {
 			o.Nones = append(o.Nones, param.Field)
 		}
+	}
+	if e.Filter != nil {
+		o.Filter = e.Filter.Field
 	}
 	if search != nil && e.HasArgs() {
 		for _, param := range e.QueryArgs {

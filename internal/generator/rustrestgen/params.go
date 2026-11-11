@@ -87,6 +87,9 @@ type builder struct {
 	patternByKey  map[string]string
 	depCrates     map[string]DependencyCrate
 	usesSchemaRef bool
+	// parses are the scalars a filter's value is read by the parse of
+	// (D106), in the order the router first names them.
+	parses []ParsedScalar
 }
 
 func newBuilder(schema *ir.Schema, opts Options) *builder {
@@ -170,6 +173,11 @@ func (b *builder) params(ep apigen.EndpointInfo, info *EndpointInfo) error {
 		}
 		info.QueryArgs = append(info.QueryArgs, param)
 	}
+	// The filter reaches the implementation typed, under its argument's
+	// name (D106).
+	if err := b.filter(ep, info, prefix, fields); err != nil {
+		return err
+	}
 	scalarPlace := inBody
 	if strings.EqualFold(ep.Method, "GET") {
 		scalarPlace = inQuery
@@ -233,6 +241,14 @@ func (b *builder) page(ep apigen.EndpointInfo, info *EndpointInfo) error {
 // not declare. A scalar-typed argument carries the scalar's own lengths,
 // pattern and range, which the router checks on every value.
 func (b *builder) param(p apigen.Param, place paramPlace, prefix string) (ParamInfo, error) {
+	return b.paramAs(p, place, prefix, nil)
+}
+
+// paramAs is param for a value the scalar core parses, when parsed names
+// its scalar: a filter's value of a date or a decimal (D106). Its kind is
+// the scalar's and its spec carries the scalar's parse in place of the
+// scalar's IR rules, which the parse decides for it.
+func (b *builder) paramAs(p apigen.Param, place paramPlace, prefix string, parsed *ParsedScalar) (ParamInfo, error) {
 	info := ParamInfo{
 		Name:  p.Name,
 		Field: rustutil.Identifier(p.Name, "value"),
@@ -306,6 +322,11 @@ func (b *builder) param(p apigen.Param, place paramPlace, prefix string) (ParamI
 				calls = append(calls, ".prepare("+validators+"::prepare_"+codegen.ToSnakeCase(p.Type)+")")
 			}
 		}
+	}
+
+	if parsed != nil {
+		kind, isScalar = parsed.Kind, false
+		calls = []string{".parse(" + parsed.Fn + ")"}
 	}
 
 	rustType := rustListType(elem, p.ArrayDepth())

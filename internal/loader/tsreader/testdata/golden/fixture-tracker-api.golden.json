@@ -1,0 +1,981 @@
+{
+  "name": "fixture-tracker-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-tracker-db",
+      "types": [
+        "IssueStatus"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-tracker-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number",
+      "typeMappings": {
+        "sql": "BIGINT"
+      }
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "VARCHAR(80)"
+      }
+    },
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "CITEXT"
+      }
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    },
+    "Temporal.Date": {
+      "name": "Temporal.Date",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "DATE"
+      }
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "TIMESTAMPTZ"
+      }
+    }
+  },
+  "types": {
+    "CommentView": {
+      "name": "CommentView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "A comment on an issue.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Comment",
+        "omittedFromSource": [
+          "issue"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "issueId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        }
+      ]
+    },
+    "CreateCommentInput": {
+      "name": "CreateCommentInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller sets to comment on an issue, which the path names.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Comment",
+        "omittedFromSource": [
+          "id",
+          "issue",
+          "createdAt"
+        ]
+      },
+      "fields": [
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1
+        }
+      ]
+    },
+    "CreateIssueInput": {
+      "name": "CreateIssueInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller sets to create an issue under a team: the team is the\npath's, and status and priority take the table's defaults when unsaid.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "id",
+          "team",
+          "status",
+          "assignee",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 200
+        },
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "priority",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "estimate",
+          "typeRef": {
+            "name": "number"
+          }
+        },
+        {
+          "name": "dueOn",
+          "typeRef": {
+            "name": "Temporal.Date"
+          }
+        },
+        {
+          "name": "assigneeId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        }
+      ]
+    },
+    "CreateMemberInput": {
+      "name": "CreateMemberInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller sets to add a member.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Member",
+        "omittedFromSource": [
+          "id"
+        ]
+      },
+      "fields": [
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        }
+      ]
+    },
+    "CreateTeamInput": {
+      "name": "CreateTeamInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller sets to create a team.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Team",
+        "omittedFromSource": [
+          "id",
+          "issues"
+        ]
+      },
+      "fields": [
+        {
+          "name": "key",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        }
+      ]
+    },
+    "IssueGuestView": {
+      "name": "IssueGuestView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "An issue as anyone sees it: fewer of the same columns.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "team",
+          "body",
+          "priority",
+          "estimate",
+          "dueOn",
+          "assignee",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "status",
+          "typeRef": {
+            "name": "IssueStatus"
+          },
+          "required": true
+        }
+      ]
+    },
+    "IssueView": {
+      "name": "IssueView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "An issue as a caller who may read issues sees it: its team and its\nassignee by their keys, and when it was created.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "team",
+          "assignee",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "teamId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "status",
+          "typeRef": {
+            "name": "IssueStatus"
+          },
+          "required": true
+        },
+        {
+          "name": "priority",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "estimate",
+          "typeRef": {
+            "name": "number"
+          }
+        },
+        {
+          "name": "dueOn",
+          "typeRef": {
+            "name": "Temporal.Date"
+          }
+        },
+        {
+          "name": "assigneeId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ]
+    },
+    "MemberView": {
+      "name": "MemberView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "A person an issue is assigned to.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Member"
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        }
+      ]
+    },
+    "TeamSummary": {
+      "name": "TeamSummary",
+      "owner": "src/tracker.schema.ts",
+      "comment": "How many issues a team has open: no view of a table, so the operation\nthat answers it is written by hand.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "teamId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "openIssues",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        }
+      ]
+    },
+    "TeamView": {
+      "name": "TeamView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "A team as the API shows it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Team",
+        "omittedFromSource": [
+          "issues"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "key",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        }
+      ]
+    },
+    "UpdateIssueInput": {
+      "name": "UpdateIssueInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller may change of an issue: each member left out leaves its\ncolumn as it is, and null clears one that may be null.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "id",
+          "team",
+          "assignee",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "validateMaxLength": 200
+        },
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "status",
+          "typeRef": {
+            "name": "IssueStatus"
+          }
+        },
+        {
+          "name": "priority",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "estimate",
+          "typeRef": {
+            "name": "number"
+          }
+        },
+        {
+          "name": "dueOn",
+          "typeRef": {
+            "name": "Temporal.Date"
+          }
+        },
+        {
+          "name": "assigneeId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "Teams",
+      "operations": [
+        {
+          "name": "listTeams",
+          "comment": "The teams, a page at a time.",
+          "typeRef": {
+            "name": "TeamView",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100
+          },
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "teams"
+        },
+        {
+          "name": "getTeam",
+          "comment": "One team.",
+          "typeRef": {
+            "name": "TeamView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "teams/{id}"
+        },
+        {
+          "name": "createTeam",
+          "comment": "A new team; a key another team holds is a conflict.",
+          "typeRef": {
+            "name": "TeamView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateTeamInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "teams.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "POST",
+          "restPath": "teams"
+        },
+        {
+          "name": "summarizeTeam",
+          "comment": "A team's open issues, counted: a set holds operations the build\nserves beside ones the implementation writes.",
+          "typeRef": {
+            "name": "TeamSummary"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "teams/{id}/summary"
+        }
+      ]
+    },
+    {
+      "name": "Members",
+      "operations": [
+        {
+          "name": "listMembers",
+          "comment": "The members, a page at a time.",
+          "typeRef": {
+            "name": "MemberView",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100
+          },
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "members"
+        },
+        {
+          "name": "createMember",
+          "comment": "A new member.",
+          "typeRef": {
+            "name": "MemberView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateMemberInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "members.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "POST",
+          "restPath": "members"
+        }
+      ]
+    },
+    {
+      "name": "Issues",
+      "operations": [
+        {
+          "name": "listIssues",
+          "comment": "A team's issues, newest first unless the caller sorts them, searched\nby their text and filtered by their fields.",
+          "typeRef": {
+            "name": "IssueView",
+            "isArray": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "teamId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "q",
+              "typeRef": {
+                "name": "string"
+              },
+              "validateMaxLength": 100,
+              "isQuery": true,
+              "search": true
+            },
+            {
+              "name": "sort",
+              "typeRef": {
+                "name": "string"
+              },
+              "isQuery": true,
+              "sort": [
+                "createdAt",
+                "priority",
+                "title"
+              ]
+            }
+          ],
+          "auth": true,
+          "filter": {
+            "argument": "filter",
+            "fields": [
+              {
+                "name": "status"
+              },
+              {
+                "name": "priority"
+              },
+              {
+                "name": "title"
+              },
+              {
+                "name": "estimate"
+              },
+              {
+                "name": "dueOn"
+              },
+              {
+                "name": "assigneeId"
+              },
+              {
+                "name": "createdAt"
+              }
+            ]
+          },
+          "page": {
+            "defaultLimit": 2,
+            "maxLimit": 5,
+            "defaultSort": "-createdAt"
+          },
+          "permissions": [
+            "issues.read"
+          ],
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "teams/{teamId}/issues"
+        },
+        {
+          "name": "getIssue",
+          "comment": "One issue.",
+          "typeRef": {
+            "name": "IssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "issues.read"
+          ],
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "issues/{id}"
+        },
+        {
+          "name": "getIssueForGuest",
+          "comment": "One issue as anyone sees it: another view of the same table behind\nanother guard.",
+          "typeRef": {
+            "name": "IssueGuestView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "public": true,
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "public/issues/{id}"
+        },
+        {
+          "name": "createIssue",
+          "comment": "A new issue of the team the path names.",
+          "typeRef": {
+            "name": "IssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "teamId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateIssueInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "issues.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "POST",
+          "restPath": "teams/{teamId}/issues"
+        },
+        {
+          "name": "updateIssue",
+          "comment": "Changes the members the body sets.",
+          "typeRef": {
+            "name": "IssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "UpdateIssueInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "issues.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "PATCH",
+          "restPath": "issues/{id}"
+        },
+        {
+          "name": "deleteIssue",
+          "comment": "Deletes the issue, which is kept, and answers it as it was.",
+          "typeRef": {
+            "name": "IssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "issues.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "DELETE",
+          "restPath": "issues/{id}"
+        }
+      ]
+    },
+    {
+      "name": "Comments",
+      "operations": [
+        {
+          "name": "listComments",
+          "comment": "An issue's comments, a page at a time.",
+          "typeRef": {
+            "name": "CommentView",
+            "isArray": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "issueId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100
+          },
+          "permissions": [
+            "issues.read"
+          ],
+          "tableOperation": {},
+          "httpMethod": "GET",
+          "restPath": "issues/{issueId}/comments"
+        },
+        {
+          "name": "createComment",
+          "comment": "A new comment on the issue the path names.",
+          "typeRef": {
+            "name": "CommentView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "issueId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateCommentInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "issues.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "POST",
+          "restPath": "issues/{issueId}/comments"
+        },
+        {
+          "name": "deleteComment",
+          "comment": "Deletes a comment of the issue the path names; one of another issue\nis not found.",
+          "typeRef": {
+            "name": "CommentView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "issueId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "issues.write"
+          ],
+          "tableOperation": {},
+          "httpMethod": "DELETE",
+          "restPath": "issues/{issueId}/comments/{id}"
+        }
+      ]
+    }
+  ]
+}

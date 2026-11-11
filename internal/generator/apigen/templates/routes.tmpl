@@ -41,7 +41,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 {{- authSnippet "routesImports" . }}
-{{- if .HasFilterableEndpoints }}
+{{- if .RoutesNeedFilters }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
 {{- end }}
 {{- if .HasBodyArgs }}
@@ -50,7 +50,7 @@ import (
 {{- if .Auth.Identity }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/identity"
 {{- end }}
-{{- if .HasPagedEndpoints }}
+{{- if .RoutesNeedPaging }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
 {{- end }}
 {{- if .RoutesNeedScalars }}
@@ -69,7 +69,7 @@ import (
 {{- end }}
 {{- if .IsPublic }}
 	orm "{{ .ORMModule }}"
-{{- else if .HasBehaviorEndpoints }}
+{{- else if .TakesDatabase }}
 	orm "{{ .Deps.ORMModule }}"
 {{- end }}
 {{- if .RoutesNeedTypes }}
@@ -98,11 +98,21 @@ type Config struct {
 {{- if .HasBehaviorEndpoints }}
 	// The behavior operations run through it too (D103).
 {{- end }}
+{{- if .HasTableEndpoints }}
+	// The table operations are served from its tables too (D106).
+{{- end }}
 	DB orm.DatabaseInterface
 {{- authSnippet "routesConfigStores" . }}
 {{- else if .HasBehaviorEndpoints }}
 	// DB is the ORM of {{ .Deps.Database }}, the API's database: the behavior
-	// operations run through it (D103).
+	// operations run through it (D103)
+{{- if .HasTableEndpoints }}, and the table operations are served
+	// from its tables (D106)
+{{- end }}.
+	DB orm.DatabaseInterface
+{{- else if .HasTableEndpoints }}
+	// DB is the ORM of {{ .Deps.Database }}, the API's database: the table
+	// operations are served from its tables (D106).
 	DB orm.DatabaseInterface
 {{- end }}
 
@@ -194,6 +204,10 @@ func (c *Config) Validate() error {
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required: it runs the behavior operations of {{ .SchemaName }} (D103)")
 	}
+{{- else if .HasTableEndpoints }}
+	if c.DB == nil {
+		return fmt.Errorf("Config.DB is required: it serves the table operations of {{ .SchemaName }} (D106)")
+	}
 {{- else if .IsPublic }}
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required")
@@ -261,7 +275,7 @@ func (c *Config) Validate() error {
 //		PayloadDecryptor:            payloadDecryptor,
 {{- end }}
 {{- else }}
-{{- if .HasBehaviorEndpoints }}
+{{- if .TakesDatabase }}
 //		DB:     db,
 {{- end }}
 //		Logger: logger,
@@ -427,10 +441,12 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 		},
 {{- end }}
 
-{{- /* routeHandler is a route's handler: the identity runtime's for a user model operation (D50), the handler factory over the ORM for a behavior operation (D103), the handler factory over the implementation for every other. */ -}}
+{{- /* routeHandler is a route's handler: the identity runtime's for a user model operation (D50), the handler factory over the ORM for a behavior operation (D103) and for a table operation (D106), behind the check for a caller when its route requires one no step of its API's checks, and the handler factory over the implementation for every other. Its data is route $ <endpoint>. */ -}}
 {{- define "routeHandler" }}
 {{- if .IdentityOperation }}identityHandler(cfg.Identity, {{ printf "%q" .IdentityOperation }})
 {{- else if .BehaviorOperation }}create{{ .HandlerName }}(cfg.DB)
+{{- else if .TableRequiresCaller }}requireTableCaller(create{{ .HandlerName }}(cfg.DB))
+{{- else if .ServedTable }}create{{ .HandlerName }}(cfg.DB)
 {{- else }}create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }})
 {{- end }}
 {{- end }}
@@ -448,7 +464,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: {{ template "routeHandler" . }},
+			Handler: {{ template "routeHandler" (route $ .) }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
@@ -469,7 +485,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: {{ template "routeHandler" . }},
+			Handler: {{ template "routeHandler" (route $ .) }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
@@ -485,7 +501,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: {{ template "routeHandler" . }},
+			Handler: {{ template "routeHandler" (route $ .) }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
@@ -511,7 +527,7 @@ func serviceAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "{{ .Method }}",
 			Path:    "{{ .RoutePath }}",
-			Handler: {{ template "routeHandler" . }},
+			Handler: {{ template "routeHandler" (route $ .) }},
 			{{- template "routeMiddlewares" (route $ .) }}
 		},
 		{{- end }}
@@ -573,8 +589,13 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // The factory of a behavior operation calls the ORM's operation instead
 // (D103).
 {{- end }}
+{{- if .TableEndpoints }}
+// The factory of a table operation calls the function of tables.go that
+// serves it from its table (D106).
+{{- end }}
 
 {{- range .HandlerEndpoints }}
+{{- $endpoint := . }}
 {{- $endpointMethod := .Method }}{{/* Used in scalar-arg impl call site below to choose local var vs requestBody.Field */}}
 
 // create{{ .HandlerName }} creates a handler for {{ .Method }} {{ .Path }}
@@ -607,7 +628,13 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // transaction: no implementation method serves it.
 {{- end }}
 {{- end }}
-{{- if .BehaviorOperation }}
+{{- with .ServedTable }}
+//
+// It serves the {{ .Kind }} of {{ .Type }}, a table of {{ .Database }}, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+{{- end }}
+{{- if or .BehaviorOperation .ServedTable }}
 func create{{ .HandlerName }}(db orm.DatabaseInterface) gohttp.HandlerFunc {
 {{- else }}
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
@@ -631,6 +658,13 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 	// the argument's).
 	{{- range .QueryListArgs }}
 	queryList{{ .GoName }}Arg := {{ .NewArg }}
+	{{- end }}
+	{{- end }}
+	{{- with .Filter }}
+	// A filter's values (D106): each field's value as an item of a query
+	// list of its type, its error recorded at filter[field].
+	{{- range .Fields }}
+	filter{{ .GoName }}Arg := {{ .Value.NewArg }}
 	{{- end }}
 	{{- end }}
 	{{- if .BodyArgs }}
@@ -925,11 +959,24 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 		{{- end }}
 
-		{{- if .Filterable }}
-		// Parse bracket-notation filters: filter[field]=value, filter[field][op]=value
-		filters, filterErrors := filterparse.ParseFilters(r.URL.Query())
-		if len(filterErrors) > 0 {
-			RespondFilterErrors(w, r, filterErrors)
+		{{- with .Filter }}
+		// Read the request's filters (FilterBy, D106): the bracket form,
+		// filter[field]=value and filter[field][op]=value, its own reader,
+		// whose refusal is the 400 every server answers at filter[field].
+		// Each value is then decoded as an item of a query list of its
+		// field's type.
+		filterRequest, ok := filterparse.Read(w, r, {{ .GoSpec }})
+		if !ok {
+			return
+		}
+		filterErrors := types.NewValidationErrors()
+		filters := {{ $endpoint.GoFilterTypeName }}{
+			{{- range .Fields }}
+			{{ .GoName }}: {{ .GoDecode }}(filterErrors, filterRequest, {{ printf "%q" .Name }}, filter{{ .GoName }}Arg),
+			{{- end }}
+		}
+		if filterErrors.HasErrors() {
+			RespondValidationErrors(w, r, filterErrors)
 			return
 		}
 		{{- end }}
@@ -1476,15 +1523,25 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 		{{- end }}
 		{{- else }}
+		{{- if .ServedTable }}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := {{ .TableFunc }}(r.Context(), db{{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filter }}, filters{{- end }}{{- if .HasInput }}, &input, rawInput{{- end }}{{- if .Page }}, page{{- end }})
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+		{{- else }}
 
 		// Call implementation
-		result, err := impl.{{ .ShortImplName }}({{ if $.Deps.Database }}callerContext(r.Context()){{ else }}r.Context(){{ end }}{{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
+		result, err := impl.{{ .ShortImplName }}({{ if $.Deps.Database }}callerContext(r.Context()){{ else }}r.Context(){{ end }}{{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filter }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
 		}
+		{{- end }}
 		{{- if and .Page .Page.Sort }}
 		// The next page's cursor names the sort the page was read in (D60,
 		// amended); a next no router reads back under it is the

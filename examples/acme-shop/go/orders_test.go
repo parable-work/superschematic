@@ -431,7 +431,7 @@ func TestPagesAndSearch(t *testing.T) {
 		}
 		return status, answer.Detail
 	}
-	for _, path := range []string{"/api/orders", "/api/orders?statuses=placed&limit=100", "/api/products", "/api/products/" + productID + "/reviews?q=smoky+SMOOTH&minRating=4"} {
+	for _, path := range []string{"/api/orders", "/api/orders?filter[status]=placed&limit=100", "/api/products", "/api/products/" + productID + "/reviews?q=smoky+SMOOTH&minRating=4"} {
 		if status, data := page(path); status != http.StatusOK || data != `{"items":[],"next":null}` {
 			t.Errorf("GET %s answered %d %s, want an empty last page", path, status, data)
 		}

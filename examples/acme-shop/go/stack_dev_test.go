@@ -40,6 +40,7 @@ import (
 	stocktypes "example.com/acme/types/go/shop-stock"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	"github.com/parable-work/superschematic/runtime/http/go/telemetry/otlptest"
 )
@@ -89,7 +90,12 @@ import (
 // message and fulfils the order (section 8.8, D53). shop-cart, through
 // shop-db's generated TypeScript repositories (D79), upserts, searches and
 // soft-deletes the shopper's review, and reorders the order in one
-// transaction with its OrderPlaced, which FulfilOrders fulfils too. It
+// transaction with its OrderPlaced, which FulfilOrders fulfils too. Its
+// catalog is three operations the build serves from shop-db's Product
+// table, with no method of its implementation (D106): anyone lists the
+// products, filtered, searched, sorted and a page at a time, and reads
+// one; staff change one, a member the body leaves out left as it is; and
+// each refuses as a hand-written route would. It
 // reads the static site shop-web, whose dev server stack dev runs behind a
 // proxy that serves shop-api on the site's origin, opens the page's
 // hot-reload socket through it, signs a shopper in with a cookie session
@@ -197,7 +203,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProduct: %v", err)
 	}
-	listed, err := products.ProductNamespace.ListProducts(ctx, &namespaces.ProductListProductsQueryParams{InStock: true})
+	inStock := true
+	listed, err := products.ProductNamespace.ListProducts(ctx, &namespaces.ProductListProductsQueryParams{
+		Filter: &namespaces.ProductListProductsFilter{InStock: &filterparse.Equals[bool]{Eq: &inStock}},
+	})
 	if err != nil {
 		t.Fatalf("ListProducts: %v", err)
 	}
@@ -557,6 +566,143 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	waitForStatus(ctx, t, orders, mustUUID(t, reordered.Data.OrderID), orderstypes.OrderStatus_Fulfilled, time.Minute)
 
+	// shop-cart's catalog (D106): the build serves its three operations
+	// from shop-db's Product table through their @source views, on the
+	// repositories the server hands the router, with no method of
+	// typescript/shop-cart. Staff add two teas on shop-api at prices no
+	// other product has, which the catalog's filter then finds among
+	// whatever else the database holds.
+	cartCatalog := carts + "/api/catalog/products"
+	type catalogProduct struct {
+		ID         string `json:"id"`
+		Sku        string `json:"sku"`
+		Name       string `json:"name"`
+		PriceCents int64  `json:"priceCents"`
+		InStock    bool   `json:"inStock"`
+	}
+	price := 1_000_000 + n%1_000_000
+	oolong, err := products.ProductNamespace.CreateProduct(ctx, apitypes.CreateProductInput{
+		Sku: apitypes.IdentitySlug(fmt.Sprintf("oolong-tea-%d", n)), Name: "Oolong tea", PriceCents: apitypes.GenericInt64(price),
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct of the oolong: %v", err)
+	}
+	dark, err := products.ProductNamespace.CreateProduct(ctx, apitypes.CreateProductInput{
+		Sku: apitypes.IdentitySlug(fmt.Sprintf("dark-tea-%d", n)), Name: "Dark tea", PriceCents: apitypes.GenericInt64(price + 1),
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct of the dark tea: %v", err)
+	}
+	// The catalog is public: no call of a list or a read carries a token.
+	listCatalog := func(query string) ([]catalogProduct, *string) {
+		t.Helper()
+		var page struct {
+			Data struct {
+				Items []catalogProduct `json:"items"`
+				Next  *string          `json:"next"`
+			} `json:"data"`
+		}
+		status, body := call(t, http.MethodGet, cartCatalog+"?"+query, "", "")
+		if status != http.StatusOK || json.Unmarshal(body, &page) != nil {
+			t.Fatalf("GET %s?%s: %d %s", cartCatalog, query, status, body)
+		}
+		return page.Data.Items, page.Data.Next
+	}
+	is := func(got []catalogProduct, want ...apitypes.IdentityUUID) bool {
+		return slices.EqualFunc(got, want, func(product catalogProduct, id apitypes.IdentityUUID) bool {
+			return mustUUID(t, product.ID) == id
+		})
+	}
+	// A range of prices keeps the two teas, by name unless the caller
+	// sorts them, and a page of one has the next page's cursor, which
+	// holds no filter: the next page is asked with the same one.
+	theTeas := fmt.Sprintf("filter[priceCents][gte]=%d&filter[priceCents][lte]=%d", price, price+1)
+	if byName, next := listCatalog(theTeas); !is(byName, dark.Id, oolong.Id) || next != nil {
+		t.Fatalf("the catalog's two teas by name: %+v, next %v", byName, next)
+	}
+	dearest, after := listCatalog(theTeas + "&sort=-priceCents&limit=1")
+	if !is(dearest, dark.Id) || after == nil {
+		t.Fatalf("the dearer tea, on a page of one: %+v, next %v", dearest, after)
+	}
+	if cheaper, last := listCatalog(theTeas + "&sort=-priceCents&limit=1&cursor=" + *after); !is(cheaper, oolong.Id) || last != nil {
+		t.Fatalf("the page after the dearer tea: %+v, next %v", cheaper, last)
+	}
+	// A search beside a filter: the products whose name holds oolong, at
+	// the oolong's price.
+	oolongs, _ := listCatalog(fmt.Sprintf("q=OOLONG&filter[priceCents]=%d", price))
+	if !is(oolongs, oolong.Id) || oolongs[0].Name != "Oolong tea" || oolongs[0].Sku != string(oolong.Sku) || !oolongs[0].InStock {
+		t.Fatalf("the catalog's oolong: %+v", oolongs)
+	}
+	if none, _ := listCatalog(fmt.Sprintf("q=oolong&filter[priceCents]=%d", price+1)); len(none) != 0 {
+		t.Fatalf("an oolong at the dark tea's price: %+v, want none", none)
+	}
+	// The list filters by the fields its FilterBy names, and no other.
+	if status, body := call(t, http.MethodGet, cartCatalog+"?filter[sku]=oolong", "", ""); status != http.StatusBadRequest || !strings.Contains(string(body), "filter[sku]") {
+		t.Fatalf("a filter on a field the catalog does not filter by: %d %s, want 400 at filter[sku]", status, body)
+	}
+
+	// One product, and the 404 of an id no product has.
+	var one struct {
+		Data catalogProduct `json:"data"`
+	}
+	status, body = call(t, http.MethodGet, cartCatalog+"/"+oolong.Id.String(), "", "")
+	if status != http.StatusOK || json.Unmarshal(body, &one) != nil || mustUUID(t, one.Data.ID) != oolong.Id || one.Data.PriceCents != price {
+		t.Fatalf("read the oolong from the catalog: %d %s", status, body)
+	}
+	const noProduct = "/00000000-0000-4000-8000-0000000000c9"
+	if status, body := call(t, http.MethodGet, cartCatalog+noProduct, "", ""); status != http.StatusNotFound {
+		t.Fatalf("read a product no one added: %d %s, want 404", status, body)
+	}
+
+	// Staff, who hold products, change a product: a member the body
+	// leaves out leaves its column as it is, and a body that sets none
+	// writes nothing and answers the product.
+	change := func(token, body string) (int, catalogProduct, []byte) {
+		t.Helper()
+		var changed struct {
+			Data catalogProduct `json:"data"`
+		}
+		status, answer := call(t, http.MethodPatch, cartCatalog+"/"+dark.Id.String(), token, body)
+		if status == http.StatusOK && json.Unmarshal(answer, &changed) != nil {
+			t.Fatalf("PATCH the dark tea with %s: %s", body, answer)
+		}
+		return status, changed.Data, answer
+	}
+	soldOut := catalogProduct{Sku: string(dark.Sku), Name: "Dark tea", PriceCents: price + 1, InStock: false}
+	for _, body := range []string{`{"inStock": false}`, `{}`} {
+		status, changed, answer := change(token, body)
+		soldOut.ID = changed.ID
+		if status != http.StatusOK || mustUUID(t, changed.ID) != dark.Id || changed != soldOut {
+			t.Fatalf("PATCH the dark tea with %s: %d %s, want it out of stock and otherwise as it was", body, status, answer)
+		}
+	}
+	// A null for a column that holds one always, a price the input's rule
+	// refuses and a request with no body are each a 400, and none writes.
+	for _, body := range []string{`{"name": null}`, `{"priceCents": -1}`, ``} {
+		if status, _, answer := change(token, body); status != http.StatusBadRequest {
+			t.Fatalf("PATCH the dark tea with %q: %d %s, want 400", body, status, answer)
+		}
+	}
+	if status, body := call(t, http.MethodPatch, cartCatalog+noProduct, token, `{"inStock": false}`); status != http.StatusNotFound {
+		t.Fatalf("change a product no one added: %d %s, want 404", status, body)
+	}
+	// The route's guard is the operation's: no caller is 401, and one
+	// whose role does not cover products.write 403.
+	if status, _, answer := change("", `{"inStock": true}`); status != http.StatusUnauthorized {
+		t.Fatalf("change a product with no session: %d %s, want 401", status, answer)
+	}
+	reader := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], "Mary Somerville", "products.read", "orders.read")
+	if status, _, answer := change(reader, `{"inStock": true}`); status != http.StatusForbidden {
+		t.Fatalf("change a product as a caller who only reads them: %d %s, want 403", status, answer)
+	}
+	// The list sees the write, and nothing a refused one asked for.
+	if inStock, _ := listCatalog(theTeas + "&filter[inStock]=true"); !is(inStock, oolong.Id) {
+		t.Fatalf("the teas in stock: %+v, want the oolong alone", inStock)
+	}
+	if outOfStock, _ := listCatalog(theTeas + "&filter[inStock]=false"); !is(outOfStock, dark.Id) || outOfStock[0].Name != "Dark tea" || outOfStock[0].PriceCents != price+1 {
+		t.Fatalf("the teas out of stock: %+v, want the dark tea as it was", outOfStock)
+	}
+
 	// shop-stock's worker ReorderStock, a Rust process (D65), claims the
 	// StockLow message the sale enqueued, and files the product's one open
 	// restock request, for enough units to bring its level of one back to
@@ -660,7 +806,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if status := browserPost(t, http.DefaultClient, site, env.servers["shop-api"]+"/api/auth/login", "same-site", loginBody); status != http.StatusForbidden {
 		t.Fatalf("a cookie login from the site's origin to shop-api's own port answered %d, want 403", status)
 	}
-	response, err := browser.Get(site + "/api/shop-api/api/products?inStock=true")
+	response, err := browser.Get(site + "/api/shop-api/api/products?filter[inStock]=true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,7 +818,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if response.StatusCode != http.StatusOK || err != nil {
 		t.Fatalf("list the products with the session cookie through the site's origin: %s, %v", response.Status, err)
 	}
-	if status, body := call(t, http.MethodGet, site+"/api/shop-api/api/products?inStock=true", "", ""); status != http.StatusUnauthorized {
+	if status, body := call(t, http.MethodGet, site+"/api/shop-api/api/products?filter[inStock]=true", "", ""); status != http.StatusUnauthorized {
 		t.Fatalf("list the products through the site's origin with no session: %d %s, want 401", status, body)
 	}
 	// shop-api answers CORS for the site's origin, which its CORS field
@@ -683,7 +829,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// config, which in Dev trusts none, and the router, which routes no
 	// OPTIONS, answers 405 with no Access-Control-Allow-Origin, so the
 	// browser refuses it.
-	listing := env.servers["shop-api"] + "/api/products?inStock=true"
+	listing := env.servers["shop-api"] + "/api/products?filter[inStock]=true"
 	if status, allowed := preflight(t, listing, site); status != http.StatusNoContent ||
 		allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
 		!strings.Contains(allowed.Get("Access-Control-Allow-Headers"), "Authorization") || !strings.Contains(allowed.Get("Access-Control-Allow-Methods"), "GET") {
@@ -845,7 +991,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if len(paged) < 3 || paged[len(paged)-3] != order.Id || paged[len(paged)-2] != reorder || paged[len(paged)-1] != next.Id {
 		t.Fatalf("ListOrdersAll = %v, want %s, %s and %s last", paged, order.Id, reorder, next.Id)
 	}
-	placedOnly := &ordersns.OrderListOrdersQueryParams{Statuses: []orderstypes.OrderStatus{orderstypes.OrderStatus_Placed}}
+	placedOnly := &ordersns.OrderListOrdersQueryParams{
+		Filter: &ordersns.OrderListOrdersFilter{Status: &filterparse.Equals[orderstypes.OrderStatus]{In: []orderstypes.OrderStatus{orderstypes.OrderStatus_Placed}}},
+	}
 	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, placedOnly, orderspages.PageRequest{Limit: 1}) {
 		if err != nil || listed.Status != orderstypes.OrderStatus_Placed {
 			t.Fatalf("ListOrdersAll of placed orders yielded %+v, %v", listed, err)

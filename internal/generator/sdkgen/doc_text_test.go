@@ -29,7 +29,7 @@ func withClosingDocs(schema *ir.Schema) error {
 
 // TestDocTextCannotCloseTheMethodComment: every line of a method's
 // description is written into its JSDoc behind the comment's " * ", and a
-// "*/" in it is escaped, on each of fixture-paged-api's four methods.
+// "*/" in it is escaped, on each of fixture-paged-api's five methods.
 func TestDocTextCannotCloseTheMethodComment(t *testing.T) {
 	_, apiOutput, parseable := loadPagedAPI(t, withClosingDocs)
 	outDir := t.TempDir()
@@ -42,8 +42,8 @@ func TestDocTextCannotCloseTheMethodComment(t *testing.T) {
 		"   * Every item, as src/*\\/items would glob them.\n" +
 		"   *\n" +
 		"   * The last line closes the comment. *\\/\n"
-	if got := strings.Count(string(source), want); got != 4 {
-		t.Errorf("the description is written %d times as\n%s\nwant 4, one per method, in\n%s", got, want, source)
+	if got := strings.Count(string(source), want); got != 5 {
+		t.Errorf("the description is written %d times as\n%s\nwant 5, one per method, in\n%s", got, want, source)
 	}
 }
 

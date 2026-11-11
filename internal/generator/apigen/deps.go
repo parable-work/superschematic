@@ -552,6 +552,8 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		seen[m.Field] = m.Service
 	}
 	o.Deps = deps
+	// tables.go reads and writes the rows of the database's tables (D106).
+	o.setTableDeps()
 	return nil
 }
 

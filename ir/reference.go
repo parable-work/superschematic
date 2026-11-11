@@ -618,7 +618,10 @@ type HeldReference struct {
 //
 // The derived reference names the one object type W of the schema whose
 // @source is the relation's type U, by its id, with every other member
-// unsaid: { type: W }. With no such type, or two or more, or when
+// unsaid: { type: W }. When two or more types are @source of U, as an API
+// whose bodies are views of the table has (D106), W is the one of them an
+// operation lists ([ReferenceCandidates]). With no such type, or two or
+// more, or when
 // [ResolveReference] refuses it (no operation lists W, or two do), or when
 // W's value is not of the key's type, the key refers to nothing. A field
 // that does not hold one value of the type of U's id is no key
@@ -661,7 +664,7 @@ func FieldReference(schema *Schema, dependencies map[string]*Schema, holder *Typ
 	if !RelationKeyFits(sourceType(schema, dependencies, target), field) {
 		return nil, false
 	}
-	candidates := SourcedBy(schema, target)
+	candidates := ReferenceCandidates(schema, dependencies, target)
 	if len(candidates) != 1 {
 		return nil, false
 	}
@@ -762,6 +765,29 @@ func SourcedBy(schema *Schema, target string) []*TypeDef {
 		}
 	}
 	return out
+}
+
+// ReferenceCandidates lists the types of schema a relation's key may
+// refer to, target being the relation's type as a @source names it: the
+// one type that is @source of it ([SourcedBy]), and, when two or more are,
+// the ones a reference to them resolves ([ResolveReference]: an operation
+// lists them), sorted by name. An API that serves a table through
+// @tableOperation has several views of it, its result and each body
+// (D106); only the one its list returns is what a key names, so the key
+// refers to it without a RefersTo. One candidate is the key's reference;
+// none or several, and it refers to nothing.
+func ReferenceCandidates(schema *Schema, dependencies map[string]*Schema, target string) []*TypeDef {
+	candidates := SourcedBy(schema, target)
+	if len(candidates) < 2 {
+		return candidates
+	}
+	var listed []*TypeDef
+	for _, candidate := range candidates {
+		if _, err := ResolveReference(schema, dependencies, &ReferenceDef{Type: candidate.Name}); err == nil {
+			listed = append(listed, candidate)
+		}
+	}
+	return listed
 }
 
 // DerivedReferences lists every reference [FieldReference] derives on the

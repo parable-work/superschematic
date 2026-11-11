@@ -630,16 +630,25 @@ async fn orders_are_filtered_by_the_get_form() {
     assert_eq!(done.status, StatusCode::SEE_OTHER, "{}", done.body);
 
     // The filter reads the query, and renders the box checked.
-    let page = send(&router, "GET", "/orders?statuses=cancelled", Some(&cookie), None).await;
+    let page = send(&router, "GET", "/orders?filter[status][in]=cancelled", Some(&cookie), None).await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="cancelled" checked="">"#), "{}", page.body);
-    assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="placed">"#), "{}", page.body);
+    assert!(page.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="cancelled" checked="">"#), "{}", page.body);
+    assert!(page.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="placed">"#), "{}", page.body);
     // A member is labeled by its title, else by its name in words.
-    assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="fulfilled">Picked and packed</label>"#), "{}", page.body);
+    assert!(page.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="fulfilled">Picked and packed</label>"#), "{}", page.body);
     assert!(page.body.contains(&format!(r#"<a href="{cancelled}">"#)), "{}", page.body);
     assert!(!page.body.contains(&placed), "{}", page.body);
-    let none = send(&router, "GET", "/orders?statuses=shipped", Some(&cookie), None).await;
+    // A browser sends a group's checked boxes one by one, and a link may
+    // name one status as an equality: each checks its box.
+    let either = send(&router, "GET", "/orders?filter[status][in]=cancelled&filter[status][in]=placed", Some(&cookie), None).await;
+    assert!(either.body.contains(&format!(r#"<a href="{cancelled}">"#)) && either.body.contains(&format!(r#"<a href="{placed}">"#)), "{}", either.body);
+    let none = send(&router, "GET", "/orders?filter[status]=shipped", Some(&cookie), None).await;
     assert!(none.body.contains("No orders match the filter."), "{}", none.body);
+    assert!(none.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="shipped" checked="">"#), "{}", none.body);
+    // A status that is none is the form's refusal, at its checkboxes.
+    let refused = send(&router, "GET", "/orders?filter[status]=lost", Some(&cookie), None).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.body);
+    assert!(refused.body.contains(r#"<p class="field-error">does not match the declared type</p>"#), "{}", refused.body);
 }
 
 #[tokio::test]
@@ -691,7 +700,7 @@ async fn a_shopper_sees_their_own_orders_and_staff_every_customers() {
         // Staff list every customer's orders, as they were placed, on the
         // orders page and the console's, each still placed, and cancel any.
         let everyone: Vec<String> = graces.iter().chain(&alans).cloned().collect();
-        let orders = send(&router, "GET", "/orders?statuses=placed", Some(&ada), None).await;
+        let orders = send(&router, "GET", "/orders?filter[status]=placed", Some(&ada), None).await;
         assert_eq!(order_links(&orders.body), everyone, "{shop}");
         let console = send(&router, "GET", "/console/orders", Some(&ada), None).await;
         assert_eq!(console_orders(&console.body), ids(&everyone), "{shop}");
@@ -894,11 +903,11 @@ async fn the_console_lists_orders_and_cancels_one_from_its_page() {
 
     // The placed orders, each linked to its console page, and the link to
     // place one.
-    let list = send(&router, "GET", "/console/orders?statuses=placed", Some(&cookie), None).await;
+    let list = send(&router, "GET", "/console/orders?filter[status][in]=placed", Some(&cookie), None).await;
     assert_eq!(list.status, StatusCode::OK, "{}", list.body);
     assert!(list.body.contains(&format!(r#"<td data-field="id"><a href="/console/orders/{id}">{id}</a></td>"#)), "{}", list.body);
     assert!(!list.body.contains(other.trim_start_matches("/orders/")), "{}", list.body);
-    assert!(list.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{}", list.body);
+    assert!(list.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="placed" checked="">"#), "{}", list.body);
     assert!(list.body.contains(r#"<a class="ss-new" href="/console/orders/new">New order</a>"#), "{}", list.body);
 
     // Its page: the order, its lines by their products' names, and the
@@ -1145,15 +1154,15 @@ async fn the_orders_page_links_its_next_page_and_its_first() {
         // The filter holds on every page, and the links carry it.
         let cancelled = send(&router, "POST", &format!("{}/cancel", placed[1]), Some(&cookie), Some("reason=")).await;
         assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{shop}: {}", cancelled.body);
-        let first = send(&router, "GET", "/orders?statuses=placed&limit=1", Some(&cookie), None).await;
+        let first = send(&router, "GET", "/orders?filter[status][in]=placed&limit=1", Some(&cookie), None).await;
         assert_eq!(order_links(&first.body), [placed[0].as_str()], "{shop}");
         let next = link(&first.body, "next").expect("a next page");
-        assert!(next.starts_with("/orders?statuses=placed&limit=1&cursor="), "{shop}: {next}");
+        assert!(next.starts_with("/orders?filter%5Bstatus%5D%5Bin%5D=placed&limit=1&cursor="), "{shop}: {next}");
         let second = send(&router, "GET", &next, Some(&cookie), None).await;
         assert_eq!(order_links(&second.body), [placed[2].as_str()], "{shop}");
-        assert!(second.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{shop}: {}", second.body);
+        assert!(second.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="placed" checked="">"#), "{shop}: {}", second.body);
         assert_eq!(link(&second.body, "next"), None, "{shop}");
-        assert_eq!(link(&second.body, "first").as_deref(), Some("/orders?statuses=placed&limit=1"), "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/orders?filter%5Bstatus%5D%5Bin%5D=placed&limit=1"), "{shop}");
     }
 }
 
@@ -1597,11 +1606,11 @@ async fn the_consoles_lists_are_live() {
 
         // The shard renders the orders a filter finds, without the layout
         // or the document.
-        let placed_only = shard(&router, "/console/_live/orders", Some(&cookie), &["statuses=placed", "/console/orders"]).await;
+        let placed_only = shard(&router, "/console/_live/orders", Some(&cookie), &["filter[status][in]=placed", "/console/orders"]).await;
         assert_eq!(placed_only.status, StatusCode::OK, "{shop}: {}", placed_only.body);
         assert_eq!(console_orders(&placed_only.body), [ids[0], ids[2]], "{shop}");
         assert!(!placed_only.body.contains("ss-nav") && !placed_only.body.contains("<html"), "{shop}: {}", placed_only.body);
-        assert!(placed_only.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{shop}: {}", placed_only.body);
+        assert!(placed_only.body.contains(r#"<input type="checkbox" name="filter[status][in]" value="placed" checked="">"#), "{shop}: {}", placed_only.body);
 
         // And a page, whose links' queries it renders in turn.
         let first = shard(&router, "/console/_live/orders", Some(&cookie), &["limit=1", "/console/orders"]).await;
@@ -1629,7 +1638,7 @@ async fn the_consoles_lists_are_live() {
         // The runtime renders the page again: its layer makes the POST the
         // page's GET, which the console's controls, registered before it,
         // meet as one.
-        let again = rerun(&router, "/console/orders?statuses=placed", &cookie).await;
+        let again = rerun(&router, "/console/orders?filter[status][in]=placed", &cookie).await;
         assert_eq!(again.status, StatusCode::OK, "{shop}: {}", again.body);
         assert!(again.body.starts_with("<!DOCTYPE html>"), "{shop}: {}", again.body);
         assert_eq!(console_orders(&again.body), [ids[0], ids[2]], "{shop}");
@@ -1697,10 +1706,10 @@ async fn the_console_goes_back_a_page_and_sets_its_size() {
 
         // A filter keeps the size: the size form holds the filter, not the
         // limit, and the links give the filter and the limit first.
-        let filtered = send(&router, "GET", "/console/orders?statuses=placed&limit=10", Some(&cookie), None).await;
-        assert_eq!(size_form(&filtered.body).map(|(_, _, hidden)| hidden), Some(vec!["statuses"]), "{shop}");
+        let filtered = send(&router, "GET", "/console/orders?filter[status][in]=placed&limit=10", Some(&cookie), None).await;
+        assert_eq!(size_form(&filtered.body).map(|(_, _, hidden)| hidden), Some(vec!["filter[status][in]"]), "{shop}");
         let next = link(&filtered.body, "next").expect("a next page");
-        assert!(next.starts_with("/console/orders?statuses=placed&limit=10&cursor="), "{shop}: {next}");
+        assert!(next.starts_with("/console/orders?filter%5Bstatus%5D%5Bin%5D=placed&limit=10&cursor="), "{shop}: {next}");
 
         // In place: the shard renders a page's Previous from the history
         // its query holds, and a new size from the first page.
@@ -1754,7 +1763,7 @@ async fn without_the_runtime_the_pages_have_no_script() {
     }
     // The console's lists are the GET forms and links they are without the
     // runtime, and a filter loads the page.
-    let filtered = send(&router, "GET", "/console/orders?statuses=placed", Some(&cookie), None).await;
+    let filtered = send(&router, "GET", "/console/orders?filter[status][in]=placed", Some(&cookie), None).await;
     assert!(filtered.body.contains(r#"<form method="get" class="ss-filter" data-ss-live="orders""#), "{}", filtered.body);
     assert_eq!(console_orders(&filtered.body).len(), 1, "{}", filtered.body);
     // No layer renders a page again: the POST is no page's.
@@ -1771,7 +1780,6 @@ async fn orders_procedure(cx: &Cx) -> topcoat::Result<impl View> {
     let query = parts(cx).uri.query().unwrap_or_default().to_owned();
     let value = |name: &str| form_urlencoded::parse(query.as_bytes()).find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
     let args = OrderListOrdersArgsRecord {
-        statuses: None,
         cursor: value("cursor"),
         limit: value("limit").and_then(|limit| limit.parse().ok()),
         sort: value("sort"),

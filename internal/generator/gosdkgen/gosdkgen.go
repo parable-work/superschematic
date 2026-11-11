@@ -25,16 +25,55 @@ import (
 //go:embed templates/*.tmpl
 var templatesFS embed.FS
 
-// SetReplacePaths sets the go.mod replace directive path for the http
-// runtime relative to the output directory. An unset path emits no
-// directive, so the module resolves the published runtime.
+// SetReplacePaths sets the go.mod replace directive paths, relative to the
+// output directory, for the HTTP runtime and the modules it requires from
+// a checkout, the schema runtime and the schema IR, which an SDK with a
+// filtered endpoint reaches (D106). An unset path emits no directive, so
+// the module resolves the published runtime.
 func SetReplacePaths(output *SDKOutput, paths naming.LocalPaths, outputDir string) error {
-	rel, err := naming.RelPath(outputDir, paths.HTTPRuntimeGo)
-	if err != nil {
-		return fmt.Errorf("http runtime replace path: %w", err)
+	for _, replace := range []struct {
+		name, target string
+		rel          *string
+	}{
+		{"http runtime", paths.HTTPRuntimeGo, &output.HTTPRuntimeReplacePath},
+		{"schema runtime", paths.SchemaRuntimeGo, &output.SchemaRuntimeReplacePath},
+		{"schema IR", paths.SchemaIR, &output.SchemaIRReplacePath},
+	} {
+		rel, err := naming.RelPath(outputDir, replace.target)
+		if err != nil {
+			return fmt.Errorf("%s replace path: %w", replace.name, err)
+		}
+		*replace.rel = rel
 	}
-	output.HTTPRuntimeReplacePath = rel
 	return nil
+}
+
+// RuntimeReplaces are the go.mod replace directives of the runtime modules
+// an SDK with a filtered endpoint reaches (D106), for the paths
+// SetReplacePaths set: the HTTP runtime, and the schema runtime and the
+// schema IR it requires, which a replaced checkout's own go.mod does not
+// replace for the SDK. A module the types module's go.mod already
+// replaces (TypeModuleReplaces) is left to that directive. An SDK without
+// a filtered endpoint has none.
+func (o *SDKOutput) RuntimeReplaces() []ModuleReplace {
+	if !o.HasFilteredEndpoints {
+		return nil
+	}
+	replaced := map[string]bool{}
+	for _, replace := range o.TypeModuleReplaces {
+		replaced[replace.Module] = true
+	}
+	var replaces []ModuleReplace
+	for _, replace := range []ModuleReplace{
+		{o.Naming.HTTPRuntimeGoModule, o.HTTPRuntimeReplacePath},
+		{o.Naming.SchemaRuntimeGoModule, o.SchemaRuntimeReplacePath},
+		{o.Naming.SchemaIRGoModule, o.SchemaIRReplacePath},
+	} {
+		if replace.RelPath != "" && !replaced[replace.Module] {
+			replaces = append(replaces, replace)
+		}
+	}
+	return replaces
 }
 
 // SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
@@ -46,7 +85,7 @@ func SetReplacePaths(output *SDKOutput, paths naming.LocalPaths, outputDir strin
 func SetReleasePins(output *SDKOutput, pins naming.Pins) {
 	n := output.Naming
 	modules := []string{n.ScalarGoModule, n.SchemaIRGoModule}
-	if output.HasFilterableEndpoints {
+	if output.HasFilteredEndpoints {
 		modules = append(modules, n.HTTPRuntimeGoModule, n.SchemaRuntimeGoModule)
 	}
 	output.Pins = pins.Of(modules...)
@@ -60,16 +99,20 @@ type SDKOutput struct {
 	TypesModule            string
 	TypesReplacePath       string
 	TypeModuleReplaces     []ModuleReplace
-	HTTPRuntimeReplacePath string      // set by SetReplacePaths; empty omits the directive
-	Pins                   naming.Pins // set by SetReleasePins; empty pins nothing
-	SDKStructName          string
-	Namespaces             []NamespaceInfo
-	HasAuth                bool
-	HasFilterableEndpoints bool
-	Runtime                RuntimeSurface
-	Timestamp              string
-	Version                string
-	Naming                 naming.Naming
+	HTTPRuntimeReplacePath string // set by SetReplacePaths; empty omits the directive
+	// SchemaRuntimeReplacePath and SchemaIRReplacePath are the paths of the
+	// modules the HTTP runtime requires, set by SetReplacePaths; empty
+	// omits the directive (RuntimeReplaces).
+	SchemaRuntimeReplacePath string
+	SchemaIRReplacePath      string
+	Pins                     naming.Pins // set by SetReleasePins; empty pins nothing
+	SDKStructName            string
+	Namespaces               []NamespaceInfo
+	HasAuth                  bool
+	Runtime                  RuntimeSurface
+	Timestamp                string
+	Version                  string
+	Naming                   naming.Naming
 
 	// IndirectModules are the Go types modules TypesModule imports,
 	// directly or through one another, sorted; the dispatch layer sets them
@@ -106,6 +149,13 @@ type SDKOutput struct {
 	// HasSortedEndpoints reports whether a paged endpoint takes a sort
 	// (SortBy, D60 amended), which the README's paged lists then name.
 	HasSortedEndpoints bool
+	// HasFilteredEndpoints reports whether an endpoint takes a filter
+	// (FilterBy, D106): its namespace then imports the HTTP runtime's
+	// filterparse, whose typed filters the method takes and whose Query
+	// writes the bracket form, so go.mod requires the HTTP runtime;
+	// namespaces/common.go carries filterMember, and the README names the
+	// filters.
+	HasFilteredEndpoints bool
 }
 
 // ModuleReplace describes a go.mod replace directive needed by generated SDK modules.
@@ -195,6 +245,7 @@ type namespaceTemplateData struct {
 	NeedsStrings     bool
 	NeedsRegexp      bool
 	NeedsFilterparse bool
+	NeedsJSON        bool
 	NeedsIter        bool
 }
 
@@ -237,7 +288,14 @@ type EndpointInfo struct {
 	HasFileUpload            bool
 	FileUploadFields         []FileUploadField
 	FilesStructName          string
-	Filterable               bool
+	// Filter is the endpoint's FilterBy (D106), nil when it takes none.
+	// The query struct then holds a *FilterStructName under FilterGoName,
+	// whose members are FilterFields, and the method writes it into the
+	// request's query as the bracket form.
+	Filter           *apigen.FilterInfo
+	FilterStructName string
+	FilterGoName     string
+	FilterFields     []FilterField
 	// FileDownload marks a FileDownload result (D81): the method returns
 	// the runtime's DownloadedFile, the bytes and the filename.
 	FileDownload bool
@@ -402,6 +460,64 @@ type FileUploadField struct {
 	Required bool
 }
 
+// FilterField is one member of a filter's struct (D106): the field's
+// filter, a filterparse.Equals, Ordered or Text as the field's operators
+// say, of the Go type an item of a list query parameter of the field's
+// type has.
+type FilterField struct {
+	// Name is the item's field, by its JSON name, and GoName the member.
+	Name   string
+	GoName string
+	// ValueGoType is the Go type of one value of the field, as
+	// queryListElemGoType gives an item of a query list of its type, which
+	// a filter's value is read as: int64, float64 or bool, string for the
+	// string primitive, and otherwise the enum's or the scalar's type in
+	// the types package (types.OrderStatus, types.IdentityUUID), as the Go
+	// server's filter holds it.
+	ValueGoType string
+	// GoType is the member's type, without its pointer:
+	// filterparse.Ordered[int64].
+	GoType string
+}
+
+// filterStructName is the struct of an endpoint's filter, named as its
+// query struct is: the namespace, the method and Filter
+// (CatalogListPartsFilter); "" without a filter.
+func filterStructName(filter *apigen.FilterInfo, prefix string) string {
+	if filter == nil {
+		return ""
+	}
+	return prefix + "Filter"
+}
+
+// filterGoName is the query struct's member that holds the filter, the
+// argument's name (Filter); "" without a filter.
+func filterGoName(filter *apigen.FilterInfo) string {
+	if filter == nil {
+		return ""
+	}
+	return goutil.GoPublicIdentifier(filter.Argument)
+}
+
+// filterFields are the members of an endpoint's filter struct, a member
+// per field a caller may filter by, in FilterBy's order.
+func filterFields(filter *apigen.FilterInfo, scalarSymbols map[string]string) []FilterField {
+	if filter == nil {
+		return nil
+	}
+	fields := make([]FilterField, len(filter.Fields))
+	for i, field := range filter.Fields {
+		value := queryListElemGoType(field.Value.Param, scalarSymbols)
+		fields[i] = FilterField{
+			Name:        field.Name,
+			GoName:      goutil.GoPublicIdentifier(field.Name),
+			ValueGoType: value,
+			GoType:      "filterparse." + field.Shape() + "[" + value + "]",
+		}
+	}
+	return fields
+}
+
 // ClientTypeName is the root client type of a service's Go SDK, which its
 // New returns: ShopApiSDK for shop-api.
 func ClientTypeName(schemaName string) string {
@@ -509,6 +625,9 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			output.HasPagedEndpoints = true
 			output.HasSortedEndpoints = output.HasSortedEndpoints || converted.Page.Sort != nil
 		}
+		if converted.Filter != nil {
+			output.HasFilteredEndpoints = true
+		}
 		if marker != nil {
 			behaviorEndpoints[endpoint.HandlerName] = converted
 			continue
@@ -545,7 +664,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			if ep.HasQueryParams || (ep.HasScalarArgs && ep.HTTPMethod == "GET") || ep.Page != nil {
 				ns.NeedsURLPkg = true
 			}
-			if ep.HasFileUpload || ep.HasEncryptedBody || ep.HasQueryParams || ep.Page != nil {
+			if ep.HasFileUpload || ep.HasEncryptedBody || len(ep.QueryParams) > 0 || ep.Page != nil {
 				ns.NeedsRuntimePkg = true
 			} else if ep.HasScalarArgs && ep.HTTPMethod == "GET" {
 				// runtime.AddQueryParam is only called for non-array scalar args;
@@ -580,13 +699,6 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		return namespaces[i].Name < namespaces[j].Name
 	})
 	output.Namespaces = namespaces
-
-	for _, ep := range apiOutput.Endpoints {
-		if ep.Filterable {
-			output.HasFilterableEndpoints = true
-			break
-		}
-	}
 
 	return output, nil
 }
@@ -716,17 +828,21 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		HasScalarArgs:         len(scalarArgs) > 0,
 		ScalarInputStructName: nsPrefix + methodName + "Input",
 		QueryStructName:       nsPrefix + methodName + "QueryParams",
-		HasQueryParams:        len(queryParams) > 0,
-		Description:           ep.Description,
-		Encrypted:             ep.Encrypted,
-		HasEncryptedBody:      hasEncryptedBody,
-		HasFileUpload:         ep.HasFileUpload,
-		FileUploadFields:      fileUploadFields,
-		FilesStructName:       nsPrefix + methodName + "Files",
-		Filterable:            ep.Filterable,
-		Page:                  ep.Page,
-		ItemGoType:            itemGoType,
-		AllMethodName:         allMethodName,
+		// The query struct holds the query parameters and the filter (D106).
+		HasQueryParams:   len(queryParams) > 0 || ep.Filter != nil,
+		Description:      ep.Description,
+		Encrypted:        ep.Encrypted,
+		HasEncryptedBody: hasEncryptedBody,
+		HasFileUpload:    ep.HasFileUpload,
+		FileUploadFields: fileUploadFields,
+		FilesStructName:  nsPrefix + methodName + "Files",
+		Filter:           ep.Filter,
+		FilterStructName: filterStructName(ep.Filter, nsPrefix+methodName),
+		FilterGoName:     filterGoName(ep.Filter),
+		FilterFields:     filterFields(ep.Filter, scalarSymbols),
+		Page:             ep.Page,
+		ItemGoType:       itemGoType,
+		AllMethodName:    allMethodName,
 	}
 }
 
@@ -941,6 +1057,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			NeedsStrings:     needsStrings,
 			NeedsRegexp:      needsRegexp,
 			NeedsFilterparse: needsFilterparse,
+			NeedsJSON:        needsFilterparse,
 			NeedsIter:        namespacePages(ns),
 		}
 		namespacePath := filepath.Join(outputDir, "namespaces", strings.ToLower(ns.Name)+".go")
@@ -1289,7 +1406,7 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 					needsRuntime = true
 				}
 			}
-			if ep.HasQueryParams {
+			if len(ep.QueryParams) > 0 {
 				needsRuntime = true
 			}
 			for _, param := range ep.QueryParams {
@@ -1316,9 +1433,12 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 		if endpointNeedsRegexp(ep) {
 			needsRegexp = true
 		}
-		if ep.Filterable {
+		if ep.Filter != nil {
+			// The filter's struct holds filterparse's typed filters and
+			// reads a tool call's JSON, naming a refused member
+			// (fmt.Errorf).
 			needsFilterparse = true
-			needsURL = true
+			needsFmt = true
 		}
 		if ep.Page != nil {
 			// The page request is sent in the query, and the page and its
@@ -1358,6 +1478,11 @@ func endpointUsesTypes(endpoint EndpointInfo) bool {
 	}
 	for _, param := range endpoint.QueryParams {
 		if strings.Contains(param.GoType, "types.") {
+			return true
+		}
+	}
+	for _, field := range endpoint.FilterFields {
+		if strings.Contains(field.ValueGoType, "types.") {
 			return true
 		}
 	}

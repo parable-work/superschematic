@@ -267,12 +267,14 @@ func skipped(result *registry.Result, reason string) bool {
 // argument forms, fixture-pages-api, whose resources make pages, and
 // fixture-console-api, whose lists page, whose ids refer to products and
 // whose lists search, fixture-engine-api, whose crate mounts its engine
-// database's engine, with its pages on, and fixture-identity-pages-api,
-// whose users are the core user model's, with its pages on, with
-// testdata/golden/<service>; -update rewrites them. A path to the
+// database's engine, with its pages on, fixture-identity-pages-api,
+// whose users are the core user model's, with its pages on, and
+// fixture-paged-api, whose parts' list filters by a field of every kind
+// (D106), with its pages on, with testdata/golden/<service>; -update
+// rewrites them. A path to the
 // repository, as the engine's crates' paths are, is written <repo>.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService, consoleService, engineService, identityPagesService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService, consoleService, engineService, identityPagesService, pagedService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, outputsOf(service)); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -1110,7 +1112,7 @@ func outputsOf(service string) map[string]any {
 	switch service {
 	case pagesService, consoleService:
 		return livePagesOutputs()
-	case engineService, identityPagesService:
+	case engineService, identityPagesService, pagedService:
 		return pagesOutputs()
 	}
 	return rustOutputs()

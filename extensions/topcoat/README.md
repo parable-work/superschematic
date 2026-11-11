@@ -449,9 +449,10 @@ decoding and their errors:
   administration routes' arguments get none: a page signs a user in
   through the identity service, as above;
 - an **argument form**, `<Ns><Op>ArgsForm`, per operation a form submits:
-  a GET operation with a query argument, whose form is a filter (a GET
-  whose path carries its arguments alone is a link, and gets none), and
-  any other operation with an argument beside its input (one whose only
+  a GET operation with a query argument or a `FilterBy` argument, whose
+  form is a filter (a GET whose path carries its arguments alone is a
+  link, and gets none), and any other operation with an argument beside
+  its input (one whose only
   argument is its path's is a button). It holds each argument, embeds the
   input's form when the operation takes one, and is parsed by the
   router's own rules (`Args::check`, [D43](../../docs/DECISIONS.md)).
@@ -551,6 +552,37 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
   out, which reads its declared default or filters nothing; a new form
   selects the default. A checkbox could not say false, nor turn off a
   flag whose default is true, since an unchecked box sends nothing.
+- A list with a **`FilterBy`** argument ([D106](../../docs/DECISIONS.md))
+  has one more control per field it filters by, after its arguments',
+  labeled by the field's name in words. The form holds what each sent in a
+  member named for the field, `filter_<field>`, and each control is named
+  as the query parameter it writes, the route's bracket form, so the
+  page's address is a filter the JSON API reads too:
+
+  | The field | Its control | The member | What it writes |
+  |-----------|-------------|------------|----------------|
+  | an enum | a group of its members' checkboxes | `Vec<String>` | `filter[status][in]=placed,shipped` |
+  | text | a text box | `Option<String>` | `filter[name][contains]=anvil` |
+  | a boolean | a `<select>` of Yes and No after a blank option | `Option<String>` | `filter[paid]=true` |
+  | a number, a decimal, a date, a time, an id | its type's control | `Option<String>` | `filter[total]=20` |
+
+  The form reads itself back from the query: an `in` sent once with
+  commas, as its links write it, or once per checked member, as a browser
+  sends a group, and an equality (`filter[status]=placed` or
+  `filter[status][eq]=placed`) as one choice, so a link an app writes by
+  hand checks its box. `parse()` builds the operation's typed filter,
+  `<Ns><Op>Filter`, each control's operator set on its field's member and
+  a blank control none, which `Args::check` holds to the route's rules;
+  `query_pairs()` writes each filter as one pair, so a pager's and a
+  header's links keep it; and an error at the route's parameter of a
+  field, `filter[status]`, the parse's or the route's own, renders at
+  that field's control. The form has no control for a range (`gt`, `gte`,
+  `lt`, `lte`) or for `isNull`, takes no choices from the app, and reads
+  nothing of the query's filters but what its controls write: a page that
+  needs those builds the `Args` itself, its `filter` member by member,
+  and calls `operations::<ns>_<op>`, or renders a form of its own beside
+  this one. A procedure, a reference's picker and a page that calls a
+  filtered list without its form send no filter.
 - Any other form's boolean is a **checkbox**, as an input's is: checked is
   true and unchecked false, whatever the argument's default, which only
   checks a new form's box when it is true.
@@ -786,8 +818,9 @@ view! { booking_input_fields(form: form, choices: choices) }
 An input type a dependency declares gets no form, nor does an operation
 whose input has none or one with an argument named as one of its input's
 fields, as its input's row buttons (`_action`) or as the form's
-`overflow`, and the build log says why. An input with a field of a name
-the form keeps for itself, `overflow`, or in a form with rows
+`overflow`, nor one with a `FilterBy` whose form already has a member
+named `filter_<field>`, and the build log says why. An input with a field
+of a name the form keeps for itself, `overflow`, or in a form with rows
 `row_action` or the JSON name `_action`, fails the build, as does a form
 with a search picker and a field or an argument named `finds`,
 `row_action`, or by the JSON names `_find` and `_action`. A form submits
@@ -1112,7 +1145,8 @@ and `limit` as the query sends them and renders neither:
   400, as the JSON API does; a cursor the implementation cannot read is
   its own 400 at `cursor`.
 - **`query_pairs()`** is the query the form holds: each argument's values
-  in control order, then `limit` when it was sent, never `cursor`, and
+  in control order, each of a `FilterBy`'s filters as one pair of the
+  bracket form, then `limit` when it was sent, never `cursor`, and
   never the console's `back`, which no form holds. A page links its next
   page with it and `cursor` set to the page's `next`, and its first page
   with it alone, so both keep the filter and the limit, and a submitted

@@ -223,6 +223,10 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	if op.ManualRouteRegistration {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("manualRouteRegistration"))
 	}
+	if op.TableOperation != nil {
+		// The loader fills what the decorator leaves unsaid (D106).
+		fmt.Fprintf(&e.body, "  @%s()\n", e.use("tableOperation"))
+	}
 	if op.Page != nil {
 		// Both limits, as the loader filled them in (D60), and the order of
 		// a request that sends none when the author wrote it (D60, amended).
@@ -246,6 +250,17 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 			item = e.renderTypeName(op.TypeRef.Name, argOwner)
 		}
 		params = append(params, fmt.Sprintf("%s: %s", e.ident(arg.Name, "argument"), e.argumentTypeExpr(arg, item, argOwner)))
+	}
+
+	if op.Filter != nil {
+		// FilterBy names the item the operation lists and the fields a
+		// caller may filter by (D106); the loader fills the rest.
+		fields := make([]string, len(op.Filter.Fields))
+		for i, field := range op.Filter.Fields {
+			fields[i] = quote(field.Name)
+		}
+		item := e.renderTypeName(op.TypeRef.Name, owner)
+		params = append(params, fmt.Sprintf("%s: %s<%s, [%s]>", e.ident(op.Filter.Argument, "argument"), e.use("FilterBy"), item, strings.Join(fields, ", ")))
 	}
 
 	returnExpr := e.operationReturnExpr(op, owner)
@@ -341,6 +356,8 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.ServiceCallers = nil
 	rest.ManualRouteRegistration = false
 	rest.Page = nil
+	rest.Filter = nil
+	rest.TableOperation = nil
 	rest.FileDownload = nil
 	rest.Middleware = nil
 	rest.Arguments = nil

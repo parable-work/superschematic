@@ -5,13 +5,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/release"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestWriteSDKReleaseGolden: in a project whose naming file has no
-// [paths], the SDK module a release writes for an API with a filterable
-// endpoint requires the HTTP runtime at the release's pin and replaces
+// [paths], the SDK module a release writes for an API with a filtered
+// endpoint (FilterBy, D106), whose namespace imports the HTTP runtime's
+// filterparse, requires the HTTP runtime at the release's pin and replaces
 // every version of it, of the schema runtime it builds on, and of the
 // scalar library and the schema IR its types module reaches with its pin,
 // so it resolves from the module proxy on its own (D47, amended).
@@ -20,12 +23,20 @@ import (
 //	go test ./internal/generator/gosdkgen -run TestWriteSDKReleaseGolden -update
 func TestWriteSDKReleaseGolden(t *testing.T) {
 	apiOutput := loadFixtureAPI(t)
-	// Only a JSON or YAML schema declares a filterable operation, and no
-	// fixture does; marking a GET one has the SDK import the HTTP runtime.
+	// fixture-api declares no filter; giving a GET operation one has the
+	// SDK import the HTTP runtime.
 	marked := false
 	for i := range apiOutput.Endpoints {
 		if apiOutput.Endpoints[i].Method == "GET" {
-			apiOutput.Endpoints[i].Filterable, marked = true, true
+			apiOutput.Endpoints[i].Filter = &apigen.FilterInfo{
+				Argument: "filter", GoName: "Filter", TypeName: "Filter", Operation: apiOutput.Endpoints[i].Name,
+				Fields: []apigen.FilterFieldInfo{{
+					Name: "name", GoName: "Name", Kind: ir.FilterKindString,
+					Operators: ir.FilterOperators(ir.FilterKindString, false),
+					Value:     apigen.BodyArg{Param: apigen.Param{Name: "filter[name]", Type: "string", GoType: "string", IsString: true}, Kind: "String"},
+				}},
+			}
+			marked = true
 			break
 		}
 	}
@@ -36,8 +47,8 @@ func TestWriteSDKReleaseGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if !sdkOutput.HasFilterableEndpoints {
-		t.Fatal("the SDK has no filterable endpoint")
+	if !sdkOutput.HasFilteredEndpoints {
+		t.Fatal("the SDK has no filtered endpoint")
 	}
 	rel := release.Release{Version: "1.2.3", ScalarGo: "v0.0.0-20260928143325-10cf493f485e"}
 	root := t.TempDir()

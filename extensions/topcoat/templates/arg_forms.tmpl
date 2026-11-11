@@ -6,11 +6,16 @@ forms: one per call in `operations` with arguments a form submits.
 {{- range .ArgForms }}
 {{- $form := . }}
 
-{{ doc (printf "The arguments of %s.%s, each as the browser sends it%s. %s" .Namespace .Operation (or (and .Input ", its input's fields beside them") "") (or (and .IsGet "A filter, sent by GET and read from the query.") "Sent by POST.")) }}
+{{ doc (printf "The arguments of %s.%s, each as the browser sends it%s%s. %s" .Namespace .Operation (or (and .Input ", its input's fields beside them") "") (or (and .Filters ", and what it filters by (D106), a member per field, read from the query's bracket form") "") (or (and .IsGet "A filter, sent by GET and read from the query.") "Sent by POST.")) }}
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct {{ .Name }} {
 {{- range .Fields }}
     pub {{ .Name }}: {{ if .IsList }}Vec<String>{{ else }}Option<String>{{ end }},
+{{- end }}
+{{- range .Filters }}
+    /// What `{{ .Field }}` is filtered by (D106), the query's `{{ .ControlName }}`:
+    /// {{ .Says }}.
+    pub {{ .Name }}: {{ if .IsGroup }}Vec<String>{{ else }}Option<String>{{ end }},
 {{- end }}
 {{- if .Paged }}
     /// The page asked for (D60): the cursor of the page before, a page's
@@ -57,6 +62,9 @@ impl {{ .Name }} {
             {{ .Name }}: {{ .NewValue }},
 {{- end }}
 {{- end }}
+{{- range .Filters }}
+            {{ .Name }}: {{ if .IsGroup }}Vec::new(){{ else }}None{{ end }},
+{{- end }}
 {{- if .Paged }}
             cursor: None,
             limit: None,
@@ -87,6 +95,9 @@ impl {{ .Name }} {
 {{- else }}
             {{ .Name }}: posted.get({{ rustString .JSONName }}).first(),
 {{- end }}
+{{- end }}
+{{- range .Filters }}
+            {{ .Name }}: {{ .PostedExpr }},
 {{- end }}
 {{- if .Paged }}
             cursor: posted.get("cursor").first(),
@@ -126,6 +137,11 @@ impl {{ .Name }} {
 {{- range .Fields }}
         let {{ .Local }} = {{ .ReadExpr }};
 {{- end }}
+{{- range .Filters }}
+{{- if .Decoded }}
+        let {{ .Name }} = {{ .ReadExpr }};
+{{- end }}
+{{- end }}
 {{- with .Input }}
 {{- if .Optional }}
         // The input is optional: absent when none of its fields was sent.
@@ -154,6 +170,13 @@ impl {{ .Name }} {
             return Err(errors);
         };
 {{- end }}
+{{- range .Filters }}
+{{- if .Decoded }}
+        let Some({{ .Name }}) = {{ .Name }} else {
+            return Err(errors);
+        };
+{{- end }}
+{{- end }}
 {{- if .Paged }}
         let Some(page) = page else {
             return Err(errors);
@@ -170,6 +193,19 @@ impl {{ .Name }} {
 {{- end }}
 {{- with .Input }}
             input,
+{{- end }}
+{{- if .Filters }}
+            // What each filter's control sent, as its field's typed filter
+            // (D106); a control that sent nothing filters by nothing.
+            {{ .Filter }}: crate::api::{{ .FilterType }} {
+{{- range .Filters }}
+                {{ .Member }}: {{ .MemberExpr }},
+{{- end }}
+            },
+{{- else }}
+{{- with .Filter }}
+            {{ . }}: Default::default(),
+{{- end }}
 {{- end }}
 {{- if .Paged }}
             page,
@@ -214,6 +250,10 @@ impl {{ .Name }} {
     /// `cursor`. A page links the next page and the first with them, so each
     /// keeps the filter and the limit.
 {{- end }}
+{{- if .Filters }}
+    /// Each filter (D106) is one pair of the bracket form, after the
+    /// arguments', its choices joined by commas: `filter[field][in]=a,b`.
+{{- end }}
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
 {{- range .QueryFields }}
@@ -222,6 +262,17 @@ impl {{ .Name }} {
 {{- else }}
         if let Some(value) = &self.{{ .Name }} {
             pairs.push(({{ rustString .JSONName }}.to_owned(), value.clone()));
+        }
+{{- end }}
+{{- end }}
+{{- range .Filters }}
+{{- if .IsGroup }}
+        if !self.{{ .Name }}.is_empty() {
+            pairs.push(({{ rustString .ControlName }}.to_owned(), self.{{ .Name }}.join(",")));
+        }
+{{- else }}
+        if let Some(value) = &self.{{ .Name }} {
+            pairs.push(({{ rustString .ControlName }}.to_owned(), value.clone()));
         }
 {{- end }}
 {{- end }}
@@ -336,6 +387,11 @@ impl {{ .Name }} {
                 {{ rustString .JSONName }} => rest.is_empty(),
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if .Filters }}
+                // A filter's errors are at the route's parameter of its
+                // field, `filter[field]` (D106).
+                "filter" => matches!(rest, [Segment::Key(field), ..] if matches!(field.as_str(), {{ .FilterNames }})),
 {{- end }}
 {{- with .Input }}
                 _ => {{ .Struct.Name }}::shows(path),

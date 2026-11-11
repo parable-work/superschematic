@@ -642,7 +642,9 @@ takes its database's repositories as `orm`, `createOrm(pool)` from the
 database's types package (`<package>/orm`), and `buildRouter` throws
 without them; `Implementations` has no method for those operations, and
 the router runs each through the repositories with the caller
-`authenticate` returned.
+`authenticate` returned. An API with a `@tableOperation` takes `orm` the
+same way, and has no method for an operation so marked
+([Operations the build serves](/superschematic/guides/api-routes/#operations-the-build-serves)).
 
 An `@hmacVerified` operation
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its

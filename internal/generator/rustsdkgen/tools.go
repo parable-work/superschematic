@@ -204,6 +204,7 @@ func endpointToTool(
 		description = fmt.Sprintf("%s (Requires authentication)", description)
 	}
 	description = toolsutil.PagedDescription(description, endpoint.Page)
+	description = toolsutil.FilteredDescription(description, endpoint.Filter, endpoint.Page)
 
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
@@ -252,6 +253,7 @@ func endpointToTool(
 		},
 		keys,
 		endpoint.Page,
+		endpoint.Filter,
 	)
 	parametersJSON, _ := json.Marshal(parameters)
 

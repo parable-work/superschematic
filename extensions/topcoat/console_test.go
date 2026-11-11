@@ -106,17 +106,13 @@ mod searched_tests {
 }
 `
 
-// TestTheCoreFixturesPageAndRefer builds the core's fixture-paged-api,
-// whose tags are a page of strings and whose items a page with a filter,
-// and fixture-refs-api, whose basket refers to items by id, through a
-// lookup that does not page, and by sku, with the pages on, and runs cargo
-// clippy and cargo test on each crate.
+// TestTheCoreFixturesPageAndRefer builds the core's fixture-refs-api,
+// whose basket refers to items by id, through a lookup that does not page,
+// and by sku, with the pages on, and runs cargo clippy and cargo test on
+// its crate. TestAFilteredListsFormFiltersIt builds fixture-paged-api's,
+// whose tags are a page of strings and whose items a page with a filter.
 func TestTheCoreFixturesPageAndRefer(t *testing.T) {
-	for _, service := range []string{"fixture-paged-api", "fixture-refs-api"} {
-		t.Run(service, func(t *testing.T) {
-			cargoTestCrateWith(t, service, "#[test]\nfn builds() {}\n", crateOptions{outputs: pagesOutputs()})
-		})
-	}
+	cargoTestCrateWith(t, "fixture-refs-api", "#[test]\nfn builds() {}\n", crateOptions{outputs: pagesOutputs()})
 }
 
 // TestReferencesBuildWithFormsOrViewsAlone builds fixture-console-api's

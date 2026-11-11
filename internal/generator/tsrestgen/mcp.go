@@ -13,6 +13,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The files of the package that serve the API's documents (D81): its
@@ -79,7 +80,10 @@ type MCPToolAnnotations struct {
 }
 
 // MCPToolArgument is where one tool argument goes: in the path, the query
-// string or the JSON body object, under its wire name.
+// string or the JSON body object, under its wire name. An operation's
+// filter (D106) goes in "filter": the argument is an object, a member per
+// field, which the runtime writes to the query string as the bracket form
+// under Name, the parameter the brackets follow.
 type MCPToolArgument struct {
 	Key  string `json:"key"`
 	In   string `json:"in"`
@@ -139,8 +143,10 @@ func jsonLiteral(value any, indent bool) (string, error) {
 // tools/mcp-binding.json's path and query arguments to the path and the
 // query string, an input type's fields and a body argument to the JSON body
 // object, and a GET operation's scalar arguments to the query string, as
-// apigen's ArgumentsInBody places them. It refuses an operation routed at
-// the endpoint's path.
+// apigen's ArgumentsInBody places them. An operation's filter (D106), which
+// the binding lists among its query arguments, goes to the query string as
+// the bracket form the route's reader reads. It refuses an operation routed
+// at the endpoint's path.
 func mcpInfo(output *APIOutput, apiOutput *apigen.APIOutput, clock codegen.Clock) (*MCPInfo, error) {
 	if len(apiOutput.Endpoints) != len(output.Endpoints) {
 		return nil, fmt.Errorf("tsrestgen: %s has %d endpoints and its router %d", output.SchemaName, len(apiOutput.Endpoints), len(output.Endpoints))
@@ -228,6 +234,11 @@ func routeTool(tool sdkgen.ToolDefinition, endpoint EndpointInfo) (MCPTool, erro
 		switch {
 		case argument.Kind == "path" && place == "path":
 			in = "path"
+		case argument.Kind == "query" && place == "query" && endpoint.Filter != nil && name == endpoint.Filter.Argument:
+			// The filter is no query parameter of one value: its members
+			// travel as filter[field] and filter[field][op], whatever the
+			// argument is named.
+			in, name = "filter", ir.FilterParam
 		case argument.Kind == "query" && place == "query":
 			in = "query"
 		case argument.Kind == "input" && place == "input":

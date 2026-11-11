@@ -10,10 +10,17 @@
 // An operation whose result is a FileDownload (D81) returns the file, its
 // body and filename, which the router answers in place of the envelope.
 {{- end }}
-{{- if .HasPages }}
+{{- if .ImplementsPages }}
 // A @paginated operation (D60) takes the page asked for as args.page and
 // returns a Page, {items, next}, next null after the last page:
 // pageFromRows builds one from up to limit + 1 rows.
+{{- end }}
+{{- if .FilteredEndpoints }}
+// A list with a filter (FilterBy, D106) takes the request's filters under
+// its filter argument, typed: a member per field the request filters by,
+// each holding the operators it sent with their values decoded, and {} for
+// a request that filters by none. An item is kept when it matches every
+// member.
 {{- end }}
 {{- if and .Identity .Identity.Routes }}
 // Nor are the user model's operations (D50), which the identity runtime
@@ -23,8 +30,13 @@
 // Nor are the operations of the @behaviorOperations sets (D103), which the
 // router runs through RouterOptions.orm, the repositories of {{ .Deps.Database }}.
 {{- end }}
+{{- if .HasTableOperations }}
+// Nor are the operations marked @tableOperation (D106), which the router
+// serves from the tables of {{ .Deps.Database }} through RouterOptions.orm, its
+// repositories: taking the decorator off one makes it a method here.
+{{- end }}
 
-import type { {{ if .HasDownloads }}FileDownload, {{ end }}OperationResult, {{ if .HasPages }}Page, PageRequest, {{ end }}RequestContext } from '{{ .RuntimePackage }}';
+import type { {{ join .InterfaceRuntimeTypes ", " }} } from '{{ .RuntimePackage }}';
 {{- if .WebhookProviders }}
 import type { WebhookVerifier } from '{{ .RuntimePackage }}/hono';
 {{- end }}
@@ -48,6 +60,20 @@ export type OperationOutcome<T> = T | OperationResult<T>;
 {{- range .Namespaces }}
 {{- $ns := . }}
 {{- range .Endpoints }}
+{{- if .Filter }}
+
+/**
+ * The filter of {{ $ns.Name }}.{{ .Name }} (FilterBy, D106): a member per field the
+ * request filters by, absent for a field it does not, each holding the
+ * operators the request sent. An item is kept when it matches them all.
+ */
+export interface {{ .Filter.TypeName }} {
+{{- range .Filter.Fields }}
+  /** By {{ .Name }}: {{ join .Operators ", " }}. */
+  readonly {{ .Name }}?: {{ .Type }};
+{{- end }}
+}
+{{- end }}
 
 /** Arguments of {{ $ns.Name }}.{{ .Name }} ({{ .Method }} {{ .Path }}). */
 {{- if .HasArgs }}
@@ -67,6 +93,10 @@ export interface {{ .ArgsTypeName }} {
 {{- if .Uploads }}
   /** The input's files (D81), each within its field's limits; an optional one the caller left out is absent. */
   files: {{ .FilesArgType }};
+{{- end }}
+{{- if .Filter }}
+  /** The request's filters (FilterBy, D106), by {{ join .Filter.FieldNames ", " }}: a member per field it filters by, {} when it filters by none. The router has read each value as its field's type; a cursor carries no filter, so each page is asked with the same ones. */
+  {{ .Filter.TSName }}: {{ .Filter.TypeName }};
 {{- end }}
 {{- if .Page }}
 {{- if .Page.Sort }}

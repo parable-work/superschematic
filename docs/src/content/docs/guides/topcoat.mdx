@@ -319,7 +319,7 @@ route's id, so a path that holds no id is a 404.
 A GET operation's form is a filter. Its `METHOD` is `"get"`, and a page
 reads it from the query with Topcoat's `Form<T>`, which reads the query on
 GET, or with `from_query(cx)`, so the controls show the filters in effect.
-A list's values are repeated keys, `statuses=placed&statuses=shipped`, and
+A list's values are repeated keys, `tags=fragile&tags=heavy`, and
 a comma-separated value is split as the router splits it. A blank field is
 absent, or its declared default. A filter's boolean is a `<select>` of Yes
 and No after a blank option, so a filter can leave a flag out, ask for
@@ -328,14 +328,34 @@ default. Any other form's boolean is a checkbox, as an input's is:
 unchecked is false, whatever the argument's default, which only checks
 the box of a new form.
 
+A list with a `FilterBy` argument
+([Filters](/superschematic/guides/api-routes/#filters)) has one more
+control per field it filters by, after its arguments': an enum's is a
+group of its members' checkboxes, text's a text box, a boolean's the
+select of Yes and No, and any other field's its type's control. Each is
+named as the query parameter it writes, the route's bracket form, so the
+page's address is a filter the JSON API reads too: `filter[status][in]`
+for the group, `filter[name][contains]` for the text, and `filter[field]`,
+an equality, for the rest. The form holds what each sent in
+`filter_<field>`, and reads it back from the query: an `in` sent once
+with commas, as `query_pairs()` writes it, or once per checked box, as a
+browser sends a group, and an equality as one choice, so a link to
+`/orders?filter[status]=placed` checks Placed. `parse()` builds the
+operation's typed filter of them, and an error at `filter[status]`, the
+parse's or the route's own, renders at that field's control. The form has
+no control for a range or for `isNull`: a page that needs one builds the
+operation's `Args` itself, its `filter` member by member, and calls
+`operations::<ns>_<op>`.
+
 An operation whose input is optional takes it only when one of its fields
 is sent, so a blank form calls it without one.
 
 The acme orders page answers with the status `submit` keeps, as the JSON
 API would: a caller the route refuses gets its 401 and the sign-in
 button, and a filter the route's rules refuse gets 422 and the message
-at its control. `listOrders` pages, so the page shows the orders a page
-at a time ([A paged list and a search box](#a-paged-list-and-a-search-box)):
+at its control. `listOrders` filters by `status`, so the form has a
+checkbox per status, which it holds in `filter_status`. It pages too, so
+the page shows the orders a page at a time ([A paged list and a search box](#a-paged-list-and-a-search-box)):
 
 <Snippet file="topcoat/src/lib.rs" symbol="show_orders" />
 
@@ -1190,8 +1210,9 @@ staff list all four orders and cancel any.
 The orders tests place an order through its form: a row button adds a
 line and renders the form again without placing the order, a quantity of
 0 comes back 422 with the message at `lines[0].quantity` and the form as
-sent, and a valid form goes to the new order's page. `/orders?statuses=cancelled`
-lists the cancelled orders alone, its box checked. `/orders?limit=2`
+sent, and a valid form goes to the new order's page.
+`/orders?filter[status][in]=cancelled` lists the cancelled orders alone,
+its box checked, as `/orders?filter[status]=shipped` checks Shipped's. `/orders?limit=2`
 lists the two oldest orders and links the next page, which links back to
 the first, both keeping the filter and the limit, and a forged cursor or
 a limit of 500 is the route's 400, the form's own message, in memory and

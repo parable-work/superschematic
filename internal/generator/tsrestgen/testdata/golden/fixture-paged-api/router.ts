@@ -5,6 +5,13 @@
 // operation table below is the schema's declaration of paths, parameters,
 // strict body parsers, auth requirements, and the @bodyLimit, @rateLimit
 // and @timeout directives, applied by @superschematic/http-runtime.
+// A list's filter (FilterBy, D106) carries the fields a caller may filter
+// by, each with its operators and the spec of one of its values: the route
+// reads the request's filters with readFilter after the query parameters,
+// the bracket form filter[field]=value and filter[field][op]=value,
+// answering their 400 at filter[field] as the Go and Rust routers do, and
+// hands the implementation the filter typed, a member per field the
+// request filters by.
 // A @paginated operation's page (D60) carries its limits: the route reads
 // the request's cursor and limit with readPage after the query parameters,
 // answering their 400 as the Go and Rust routers do, and sends the Page the
@@ -15,7 +22,7 @@
 // implementation returns to it.
 
 import { Hono, type Env } from 'hono';
-import { bindPage, readPage, type OperationSpec, type PageSpec } from '@superschematic/http-runtime';
+import { bindPage, readFilter, readPage, type FilterSpec, type OperationSpec, type PageSpec } from '@superschematic/http-runtime';
 import {
   mountOperation,
   type RouterRuntimeOptions,
@@ -31,13 +38,14 @@ import {
   parseBasketInputFromJSON,
   parseBasketInputJson,
 } from '@schemas/fixture-paged-api-types/validators';
-import type { Implementations } from './interfaces';
+import type { Implementations, ListPartsFilter } from './interfaces';
 import { openAPIJSON } from './openapi';
 
 export type OperationName =
   | 'placeBasket'
   | 'listItems'
   | 'getItem'
+  | 'listParts'
   | 'listTags';
 
 /** The operation table: what the schema declares about each route. */
@@ -77,6 +85,32 @@ export const operationSpecs = {
     auth: { public: false, required: false, permissions: [] },
     manual: false,
   },
+  listParts: {
+    name: 'listParts',
+    namespace: 'catalog',
+    method: 'GET',
+    path: '/api/parts',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    filter: {
+      fields: [
+        { name: 'id', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[id]', kind: 'uuid', required: false } },
+        { name: 'name', kind: 'string', operators: ['eq', 'in', 'contains'], value: { name: 'filter[name]', kind: 'string', required: false } },
+        { name: 'kind', kind: 'enum', operators: ['eq', 'in'], value: { name: 'filter[kind]', kind: 'enum', required: false, enumValues: ['bolt', 'nut', 'washer'] } },
+        { name: 'quantity', kind: 'int', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[quantity]', kind: 'integer', required: false, scalar: { name: 'Generic.Int64', min: -9007199254740991, max: 9007199254740991 } } },
+        { name: 'weight', kind: 'float', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[weight]', kind: 'number', required: false } },
+        { name: 'price', kind: 'decimal', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[price]', kind: 'string', required: false, scalar: { name: 'Generic.Decimal', pattern: '^[+-]?[0-9]+(\\.[0-9]+)?$' } } },
+        { name: 'discontinued', kind: 'bool', operators: ['eq', 'in'], value: { name: 'filter[discontinued]', kind: 'boolean', required: false } },
+        { name: 'madeAt', kind: 'datetime', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[madeAt]', kind: 'datetime', required: false } },
+        { name: 'retiredOn', kind: 'date', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[retiredOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } },
+        { name: 'supplierId', kind: 'uuid', operators: ['eq', 'in', 'isNull'], value: { name: 'filter[supplierId]', kind: 'uuid', required: false } },
+      ],
+    },
+    page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['name', 'quantity'], default: 'name' } },
+    auth: { public: false, required: false, permissions: [] },
+    manual: false,
+  },
   listTags: {
     name: 'listTags',
     namespace: 'catalog',
@@ -89,7 +123,7 @@ export const operationSpecs = {
     auth: { public: false, required: false, permissions: [] },
     manual: false,
   },
-} as const satisfies Record<OperationName, OperationSpec & { readonly page?: PageSpec }>;
+} as const satisfies Record<OperationName, OperationSpec & { readonly filter?: FilterSpec; readonly page?: PageSpec }>;
 
 export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions, OpenAPIOptions {
   /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
@@ -163,6 +197,32 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: options.bodyLimits?.getItem,
       rateLimitPerMinute: options.rateLimits?.getItem,
       timeoutSeconds: options.timeouts?.getItem,
+    }
+  );
+  mountOperation(
+    router,
+    operationSpecs.listParts,
+    (ctx, request) => {
+      // The request's filters, typed (D106), read before its page.
+      const filter = readFilter(ctx.query, operationSpecs.listParts.filter) as ListPartsFilter;
+      // The page names the sort it was read in (D60, amended): readPage
+      // unbinds the cursor, and bindPage binds the next.
+      const page = readPage(ctx.query, operationSpecs.listParts.page);
+      return implementations.catalog
+        .listParts(
+          {
+            filter: filter,
+            page,
+          },
+          ctx
+        )
+        .then(outcome => bindPage(outcome, page));
+    },
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.listParts,
+      rateLimitPerMinute: options.rateLimits?.listParts,
+      timeoutSeconds: options.timeouts?.listParts,
     }
   );
   mountOperation(

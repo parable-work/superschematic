@@ -219,6 +219,32 @@ export function paginated(_cfg?: PaginatedConfig): MethodDecorator {
 }
 
 /**
+ * The build writes the operation's handler (D106): the method's views are
+ * `@source` views of one table of the API's database, and the generated
+ * server reads or writes that table through the database's repositories,
+ * so the implementation has no method for it. The HTTP method and the
+ * shape say what it does: a GET whose path holds the table's key reads a
+ * row, a GET whose result is a list pages the rows (it needs @paginated),
+ * a POST with one body argument creates a row, a PATCH with the key and
+ * one body argument updates one, and a DELETE with the key deletes one.
+ * Nothing is served that a view does not list, and the route's guards are
+ * the only rule over which rows a caller reaches. Take the decorator off
+ * and the operation is one you implement, with the same route and types.
+ *
+ * ```ts
+ * @rest(HttpMethod.PATCH, "issues/{id}")
+ * @requirePermission(["issues.write"])
+ * @tableOperation()
+ * updateIssue(id: Identity.UUID, input: UpdateIssueInput): IssueView {
+ *   throw new Error("schema declaration only");
+ * }
+ * ```
+ */
+export function tableOperation(): MethodDecorator {
+  return noopMethodDecorator;
+}
+
+/**
  * Only a listed service may call. With a user clause (@auth, an
  * Authenticated set, @requirePermission, @requireOwnership), it must forward
  * an end user who meets it; without one, no end user is looked at. On a
