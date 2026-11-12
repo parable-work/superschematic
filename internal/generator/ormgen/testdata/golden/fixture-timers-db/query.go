@@ -321,10 +321,12 @@ type InvoiceFindOptions struct {
 type InvoiceSortField string
 
 const (
-	InvoiceSortById      InvoiceSortField = "id"
-	InvoiceSortByNumber  InvoiceSortField = "number"
-	InvoiceSortByStatus  InvoiceSortField = "status"
-	InvoiceSortByPayment InvoiceSortField = "payment"
+	InvoiceSortById               InvoiceSortField = "id"
+	InvoiceSortByNumber           InvoiceSortField = "number"
+	InvoiceSortByStatus           InvoiceSortField = "status"
+	InvoiceSortByStatusEnteredAt  InvoiceSortField = "statusEnteredAt"
+	InvoiceSortByPayment          InvoiceSortField = "payment"
+	InvoiceSortByPaymentEnteredAt InvoiceSortField = "paymentEnteredAt"
 )
 
 // InvoiceSort is the order FindPage reads Invoice rows in: Field,
@@ -340,10 +342,10 @@ type InvoiceSort struct {
 func ParseInvoiceSort(text string) (InvoiceSort, error) {
 	parsed := InvoiceSort{Field: InvoiceSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case InvoiceSortById, InvoiceSortByNumber, InvoiceSortByStatus, InvoiceSortByPayment:
+	case InvoiceSortById, InvoiceSortByNumber, InvoiceSortByStatus, InvoiceSortByStatusEnteredAt, InvoiceSortByPayment, InvoiceSortByPaymentEnteredAt:
 		return parsed, nil
 	}
-	return InvoiceSort{}, fmt.Errorf("orm: Invoice sorts by id, number, status and payment, not %q", text)
+	return InvoiceSort{}, fmt.Errorf("orm: Invoice sorts by id, number, status, statusEnteredAt, payment and paymentEnteredAt, not %q", text)
 }
 
 // InvoiceUniqueKey names a unique key of Invoice that UpsertOne and
@@ -525,9 +527,11 @@ type TicketFindOptions struct {
 type TicketSortField string
 
 const (
-	TicketSortById     TicketSortField = "id"
-	TicketSortByTitle  TicketSortField = "title"
-	TicketSortByStatus TicketSortField = "status"
+	TicketSortById              TicketSortField = "id"
+	TicketSortByTitle           TicketSortField = "title"
+	TicketSortByVisitAt         TicketSortField = "visitAt"
+	TicketSortByStatus          TicketSortField = "status"
+	TicketSortByStatusEnteredAt TicketSortField = "statusEnteredAt"
 )
 
 // TicketSort is the order FindPage reads Ticket rows in: Field,
@@ -543,10 +547,10 @@ type TicketSort struct {
 func ParseTicketSort(text string) (TicketSort, error) {
 	parsed := TicketSort{Field: TicketSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TicketSortById, TicketSortByTitle, TicketSortByStatus:
+	case TicketSortById, TicketSortByTitle, TicketSortByVisitAt, TicketSortByStatus, TicketSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return TicketSort{}, fmt.Errorf("orm: Ticket sorts by id, title and status, not %q", text)
+	return TicketSort{}, fmt.Errorf("orm: Ticket sorts by id, title, visitAt, status and statusEnteredAt, not %q", text)
 }
 
 // TicketUniqueKey names a unique key of Ticket that UpsertOne and

@@ -38,12 +38,16 @@ var UserQuotedFields = map[string]string{
 // userSortColumns are the columns of User's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var userSortColumns = map[UserSortField]struct{ sql, key string }{
-	UserSortById:          {`"user".id`, `page_key.id`},
-	UserSortByEmail:       {`"user".email`, `page_key.email`},
-	UserSortByDisplayName: {`"user".display_name`, `page_key.display_name`},
-	UserSortByCreatedAt:   {`"user".created_at`, `page_key.created_at`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var userSortColumns = map[UserSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	UserSortById:          {`"user".id`, `page_key.id`, false},
+	UserSortByEmail:       {`"user".email`, `page_key.email`, false},
+	UserSortByDisplayName: {`"user".display_name`, `page_key.display_name`, false},
+	UserSortByCreatedAt:   {`"user".created_at`, `page_key.created_at`, false},
 }
 
 // buildUserOrderByClause builds an ORDER BY clause for User.
@@ -635,14 +639,23 @@ func (r *UserRepository) FindPage(ctx context.Context, filter *UserFilter, opts 
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`"user".id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`"user".id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, "user".id) %s ((SELECT %s FROM "user" AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, "user".id) %s ((SELECT %s FROM "user" AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM "user" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -650,6 +663,9 @@ func (r *UserRepository) FindPage(ctx context.Context, filter *UserFilter, opts 
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, "user".id %s`, direction)
 	}

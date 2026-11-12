@@ -29,6 +29,7 @@ var tableOperationCases = []string{
 	"a parent that does not exist, or is another row's, is not found",
 	"a foreign key that names no row is refused at its member",
 	"a list pages by cursor in each sort",
+	"a list sorts by a field that may be null, its nulls last either way",
 	"a list searches its search fields",
 	"a list filters by a field of each kind",
 	"a cursor that names no row is refused",
@@ -682,6 +683,67 @@ func TestTableOperations(t *testing.T) {
 			if got, want := walk(t, reader, coreIssues, maps(query), "title"), pages(tc.want, 3); !reflect.DeepEqual(got, want) {
 				t.Errorf("sort=%s, limit=3: pages = %v, want %v", tc.sort, got, want)
 			}
+		}
+	})
+
+	t.Run("a list sorts by a field that may be null, its nulls last either way", func(t *testing.T) {
+		// The order a walk must read: the rows that hold a value by it,
+		// then the rows that hold none by id, each in the sort's
+		// direction (D112). The database says only which of two ids is
+		// the lower.
+		none := func(column string) []string {
+			rows, err := pool.Query(ctx, "SELECT title FROM issue WHERE team_id = $1 AND "+column+" IS NULL ORDER BY id", uuid(t, core["id"]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var titles []string
+			for rows.Next() {
+				var title string
+				if err := rows.Scan(&title); err != nil {
+					t.Fatal(err)
+				}
+				titles = append(titles, title)
+			}
+			if len(titles) != 2 {
+				t.Fatalf("issues with no %s = %v, want two", column, titles)
+			}
+			return titles
+		}
+		reversed := func(titles []string) []string {
+			out := slices.Clone(titles)
+			slices.Reverse(out)
+			return out
+		}
+		pages := func(titles []string, limit int) [][]string {
+			var out [][]string
+			for start := 0; start < len(titles); start += limit {
+				out = append(out, titles[start:min(start+limit, len(titles))])
+			}
+			return out
+		}
+		undated, unsized := none("due_on"), none("estimate")
+		for _, tc := range []struct {
+			sort string
+			want []string
+		}{
+			{"dueOn", append([]string{"Crash on save", "Slow_query in list"}, undated...)},
+			{"-dueOn", append([]string{"Slow_query in list", "Crash on save"}, reversed(undated)...)},
+			{"estimate", append([]string{"Crash on save", "Slowxquery at 50%"}, unsized...)},
+			{"-estimate", append([]string{"Slowxquery at 50%", "Crash on save"}, reversed(unsized)...)},
+		} {
+			// A page of one ends on each row in turn: on a value, on the
+			// last value before the nulls, on a null and on the last row.
+			for _, limit := range []int{1, 2, 3} {
+				query := url.Values{"sort": {tc.sort}, "limit": {fmt.Sprint(limit)}}
+				if got, want := walk(t, reader, coreIssues, query, "title"), pages(tc.want, limit); !reflect.DeepEqual(got, want) {
+					t.Errorf("sort=%s, limit=%d: pages = %v, want %v", tc.sort, limit, got, want)
+				}
+			}
+		}
+		// A filter holds beside the order.
+		if got, want := walk(t, reader, coreIssues, url.Values{"sort": {"-dueOn"}, "limit": {"1"}, "filter[dueOn][isNull]": {"true"}}, "title"), pages(reversed(undated), 1); !reflect.DeepEqual(got, want) {
+			t.Errorf("the undated issues, latest first: pages = %v, want %v", got, want)
 		}
 	})
 

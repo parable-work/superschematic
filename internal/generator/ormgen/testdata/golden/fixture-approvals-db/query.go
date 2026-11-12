@@ -355,13 +355,14 @@ type NoteFindOptions struct {
 type NoteSortField string
 
 const (
-	NoteSortById     NoteSortField = "id"
-	NoteSortBySlug   NoteSortField = "slug"
-	NoteSortByTitle  NoteSortField = "title"
-	NoteSortByBody   NoteSortField = "body"
-	NoteSortByAuthor NoteSortField = "author"
-	NoteSortByViews  NoteSortField = "views"
-	NoteSortByStatus NoteSortField = "status"
+	NoteSortById              NoteSortField = "id"
+	NoteSortBySlug            NoteSortField = "slug"
+	NoteSortByTitle           NoteSortField = "title"
+	NoteSortByBody            NoteSortField = "body"
+	NoteSortByAuthor          NoteSortField = "author"
+	NoteSortByViews           NoteSortField = "views"
+	NoteSortByStatus          NoteSortField = "status"
+	NoteSortByStatusEnteredAt NoteSortField = "statusEnteredAt"
 )
 
 // NoteSort is the order FindPage reads Note rows in: Field,
@@ -377,10 +378,10 @@ type NoteSort struct {
 func ParseNoteSort(text string) (NoteSort, error) {
 	parsed := NoteSort{Field: NoteSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case NoteSortById, NoteSortBySlug, NoteSortByTitle, NoteSortByBody, NoteSortByAuthor, NoteSortByViews, NoteSortByStatus:
+	case NoteSortById, NoteSortBySlug, NoteSortByTitle, NoteSortByBody, NoteSortByAuthor, NoteSortByViews, NoteSortByStatus, NoteSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, slug, title, body, author, views and status, not %q", text)
+	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, slug, title, body, author, views, status and statusEnteredAt, not %q", text)
 }
 
 // NoteUniqueKey names a unique key of Note that UpsertOne and
@@ -604,11 +605,15 @@ type TaskFindOptions struct {
 type TaskSortField string
 
 const (
-	TaskSortById       TaskSortField = "id"
-	TaskSortByTitle    TaskSortField = "title"
-	TaskSortByOwner    TaskSortField = "owner"
-	TaskSortByAttempts TaskSortField = "attempts"
-	TaskSortByStatus   TaskSortField = "status"
+	TaskSortById              TaskSortField = "id"
+	TaskSortByTitle           TaskSortField = "title"
+	TaskSortByOwner           TaskSortField = "owner"
+	TaskSortByReviewer        TaskSortField = "reviewer"
+	TaskSortByPlan            TaskSortField = "plan"
+	TaskSortByProof           TaskSortField = "proof"
+	TaskSortByAttempts        TaskSortField = "attempts"
+	TaskSortByStatus          TaskSortField = "status"
+	TaskSortByStatusEnteredAt TaskSortField = "statusEnteredAt"
 )
 
 // TaskSort is the order FindPage reads Task rows in: Field,
@@ -624,10 +629,10 @@ type TaskSort struct {
 func ParseTaskSort(text string) (TaskSort, error) {
 	parsed := TaskSort{Field: TaskSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TaskSortById, TaskSortByTitle, TaskSortByOwner, TaskSortByAttempts, TaskSortByStatus:
+	case TaskSortById, TaskSortByTitle, TaskSortByOwner, TaskSortByReviewer, TaskSortByPlan, TaskSortByProof, TaskSortByAttempts, TaskSortByStatus, TaskSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return TaskSort{}, fmt.Errorf("orm: Task sorts by id, title, owner, attempts and status, not %q", text)
+	return TaskSort{}, fmt.Errorf("orm: Task sorts by id, title, owner, reviewer, plan, proof, attempts, status and statusEnteredAt, not %q", text)
 }
 
 // TaskUniqueKey names a unique key of Task that UpsertOne and

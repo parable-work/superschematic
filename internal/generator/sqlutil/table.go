@@ -834,12 +834,14 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 // sortableColumn reports whether FindPage orders a table's rows by a
 // column other than the key (D60, amended): sortValue is ir.SortValue of
 // its type, one value of text, a time or a number. The column must also
-// hold it alone and never null, be no enum, boolean, JSON or point, and be
-// the table's own data: no internal metadata, no audit field but createdAt
-// and updatedAt, and no @secret, whose values an order would reveal.
+// hold it alone, be no enum, boolean, JSON or point, and be the table's own
+// data: no internal metadata, no audit field but createdAt and updatedAt,
+// and no @secret, whose values an order would reveal. A column that may be
+// null is one (D112): its nulls come last in either direction
+// (TableStatements.PageAfterNulls).
 func sortableColumn(c ColumnModel, sortValue bool) bool {
 	cl := c.Class
-	if c.Relation != "" || !sortValue || !c.Required || c.IsArray() || (c.Def != nil && c.Def.TypeRef.IsMap) || cl.Union || cl.JSON || cl.JSONLike {
+	if c.Relation != "" || !sortValue || c.IsArray() || (c.Def != nil && c.Def.TypeRef.IsMap) || cl.Union || cl.JSON || cl.JSONLike {
 		return false
 	}
 	return !cl.Enum && !cl.BoolLike && !cl.Point && !c.Secret && !c.Internal &&

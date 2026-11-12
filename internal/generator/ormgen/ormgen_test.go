@@ -672,17 +672,18 @@ func sortFieldNames(repo Repository) []string {
 }
 
 // TestGenerateFindPage covers FindPage's surface in the ORM (D60, amended):
-// fixture-db's Tenant sorts by its id, then by createdAt, name, slug, email
-// and seatCount, each a required column of one value, and not by its enum
-// status, its boolean isActive, its JSON metadata or its nullable
-// updatedAt; TenantUser's nullable displayName is no sort field either.
-// The repository takes its columns from a generated map, FindPage is on
-// the interface and the NoOp repository, and the README lists it.
+// fixture-db's Tenant sorts by its id, then by createdAt, updatedAt, name,
+// slug, email and seatCount, each a column of one value, and not by its
+// enum status, its boolean isActive or its JSON metadata. Its updatedAt
+// may be null, and so may TenantUser's displayName: each is a sort field
+// whose nulls a page orders last (D112). The repository takes its columns
+// from a generated map, FindPage is on the interface and the NoOp
+// repository, and the README lists it.
 func TestGenerateFindPage(t *testing.T) {
 	output := generateFixtureDB(t)
 	want := map[string][]string{
-		"Tenant":     {"id", "createdAt", "name", "slug", "email", "seatCount"},
-		"TenantUser": {"id", "createdAt"},
+		"Tenant":     {"id", "createdAt", "updatedAt", "name", "slug", "email", "seatCount"},
+		"TenantUser": {"id", "createdAt", "updatedAt", "displayName"},
 	}
 	for _, repo := range output.Repositories {
 		if got := sortFieldNames(repo); strings.Join(got, ",") != strings.Join(want[repo.TypeName], ",") {
@@ -709,9 +710,11 @@ func TestGenerateFindPage(t *testing.T) {
 		`TenantSortByCreatedAt TenantSortField = "createdAt"`,
 		`TenantSortByName      TenantSortField = "name"`,
 		`TenantSortBySeatCount TenantSortField = "seatCount"`,
-		`TenantUserSortByCreatedAt TenantUserSortField = "createdAt"`,
+		`TenantUserSortByCreatedAt   TenantUserSortField = "createdAt"`,
 		"func ParseTenantSort(text string) (TenantSort, error) {",
-		`fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)`,
+		`TenantSortByUpdatedAt TenantSortField = "updatedAt"`,
+		`TenantUserSortByDisplayName TenantUserSortField = "displayName"`,
+		`fmt.Errorf("orm: Tenant sorts by id, createdAt, updatedAt, name, slug, email and seatCount, not %q", text)`,
 		"type TenantPageKey struct {\n\tId types.IdentityUUID `json:\"id\"`\n}",
 		"return k.Id.ToUUID(), nil",
 		"func tenantPageKeyOf(row *types.Tenant) *TenantPageKey {",
@@ -722,7 +725,7 @@ func TestGenerateFindPage(t *testing.T) {
 			t.Errorf("query.go is missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"TenantSortByStatus", "TenantSortByIsActive", "TenantSortByMetadata", "TenantSortByUpdatedAt", "TenantSortByVersion", "TenantUserSortByDisplayName", "TenantUserSortByDeletedAt"} {
+	for _, unwanted := range []string{"TenantSortByStatus", "TenantSortByIsActive", "TenantSortByMetadata", "TenantSortByVersion", "TenantUserSortByDeletedAt"} {
 		if strings.Contains(query, unwanted) {
 			t.Errorf("query.go declares %s, which is no sort field", unwanted)
 		}
@@ -730,12 +733,15 @@ func TestGenerateFindPage(t *testing.T) {
 
 	repository := read("repository_tenant.go")
 	for _, want := range []string{
-		"var tenantSortColumns = map[TenantSortField]struct{ sql, key string }{",
-		"TenantSortByName:      {`tenant.\"name\"`, `page_key.\"name\"`},",
+		"var tenantSortColumns = map[TenantSortField]struct {\n\tsql, key string\n\tnulls    bool\n}{",
+		"TenantSortByName:      {`tenant.\"name\"`, `page_key.\"name\"`, false},",
+		"TenantSortByUpdatedAt: {`tenant.updated_at`, `page_key.updated_at`, true},",
+		"after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM tenant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,",
+		`orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)`,
 		"func (r *TenantRepository) FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error) {",
 		"column, ok := tenantSortColumns[field]",
-		"conditions = append(conditions, fmt.Sprintf(`tenant.id %s %s`, comparison, placeholder))",
-		"conditions = append(conditions, fmt.Sprintf(`(%s, tenant.id) %s ((SELECT %s FROM tenant AS page_key WHERE page_key.id = %s), %s)`,",
+		"afterKey := fmt.Sprintf(`tenant.id %s %s`, comparison, placeholder)",
+		"after := fmt.Sprintf(`(%s, tenant.id) %s ((SELECT %s FROM tenant AS page_key WHERE page_key.id = %s), %s)`,",
 		"query := `SELECT EXISTS (SELECT 1 FROM tenant WHERE tenant.id = $1)`",
 		"query := fmt.Sprintf(`SELECT %s FROM tenant%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)",
 		`rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)`,
@@ -828,11 +834,11 @@ func sortRulesService(t *testing.T) string {
 }
 
 // TestSortableColumns holds the sort rule (Field.Sortable, D60 amended): a
-// table sorts by its key, whatever its name, first, then by each required
-// column of one value of text, a number, a time, a date or a UUID, and by
-// createdAt and updatedAt among the audit fields; not by a nullable column,
-// a @secret one, a boolean, an enum, a point, a list, JSON or another audit
-// field.
+// table sorts by its key, whatever its name, first, then by each column of
+// one value of text, a number, a time, a date or a UUID, one that may be
+// null among them (D112), and by createdAt and updatedAt among the audit
+// fields; not by a @secret one, a boolean, an enum, a point, a list, JSON
+// or another audit field.
 func TestSortableColumns(t *testing.T) {
 	schema, err := loader.LoadService(sortRulesService(t))
 	if err != nil {
@@ -851,11 +857,11 @@ func TestSortableColumns(t *testing.T) {
 		t.Fatalf("got %d repositories, want Entry's", len(output.Repositories))
 	}
 	entry := output.Repositories[0]
-	want := []string{"entryId", "title", "rank", "score", "due", "ownerId", "createdAt", "updatedAt"}
+	want := []string{"entryId", "title", "subtitle", "rank", "score", "due", "ownerId", "createdAt", "updatedAt"}
 	if got := sortFieldNames(entry); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("Entry.SortFields = %q, want %q", got, want)
 	}
-	if got := entry.SortFieldList(); got != "entryId, title, rank, score, due, ownerId, createdAt and updatedAt" {
+	if got := entry.SortFieldList(); got != "entryId, title, subtitle, rank, score, due, ownerId, createdAt and updatedAt" {
 		t.Errorf("Entry.SortFieldList() = %q", got)
 	}
 
@@ -880,7 +886,8 @@ func TestSortableColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"EntrySortByRank:      {`entry.rank`, `page_key.rank`},",
+		"EntrySortByRank:      {`entry.rank`, `page_key.rank`, false},",
+		"EntrySortBySubtitle:  {`entry.subtitle`, `page_key.subtitle`, true},",
 		"byKey := field == EntrySortByEntryId",
 		"FROM entry AS page_key WHERE page_key.entry_id = %s",
 	} {

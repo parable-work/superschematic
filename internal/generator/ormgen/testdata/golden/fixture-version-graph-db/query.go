@@ -806,6 +806,7 @@ type NoteSortField string
 
 const (
 	NoteSortById        NoteSortField = "id"
+	NoteSortByReplyTo   NoteSortField = "replyTo"
 	NoteSortByBody      NoteSortField = "body"
 	NoteSortByEntityKey NoteSortField = "entityKey"
 )
@@ -818,15 +819,15 @@ type NoteSort struct {
 	Desc  bool
 }
 
-// ParseNoteSort reads a sort as a page request writes it, "body" or
-// "-body": an error for a field Note cannot be sorted by.
+// ParseNoteSort reads a sort as a page request writes it, "replyTo" or
+// "-replyTo": an error for a field Note cannot be sorted by.
 func ParseNoteSort(text string) (NoteSort, error) {
 	parsed := NoteSort{Field: NoteSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case NoteSortById, NoteSortByBody, NoteSortByEntityKey:
+	case NoteSortById, NoteSortByReplyTo, NoteSortByBody, NoteSortByEntityKey:
 		return parsed, nil
 	}
-	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, body and entityKey, not %q", text)
+	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, replyTo, body and entityKey, not %q", text)
 }
 
 // NoteUniqueKey names a unique key of Note that UpsertOne and
@@ -1243,8 +1244,10 @@ type RecipeCommitSortField string
 
 const (
 	RecipeCommitSortById          RecipeCommitSortField = "id"
+	RecipeCommitSortByMessage     RecipeCommitSortField = "message"
 	RecipeCommitSortBySchemaEpoch RecipeCommitSortField = "schemaEpoch"
 	RecipeCommitSortByContentHash RecipeCommitSortField = "contentHash"
+	RecipeCommitSortBySequence    RecipeCommitSortField = "sequence"
 	RecipeCommitSortByCreatedAt   RecipeCommitSortField = "createdAt"
 )
 
@@ -1256,15 +1259,15 @@ type RecipeCommitSort struct {
 	Desc  bool
 }
 
-// ParseRecipeCommitSort reads a sort as a page request writes it, "schemaEpoch" or
-// "-schemaEpoch": an error for a field RecipeCommit cannot be sorted by.
+// ParseRecipeCommitSort reads a sort as a page request writes it, "message" or
+// "-message": an error for a field RecipeCommit cannot be sorted by.
 func ParseRecipeCommitSort(text string) (RecipeCommitSort, error) {
 	parsed := RecipeCommitSort{Field: RecipeCommitSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case RecipeCommitSortById, RecipeCommitSortBySchemaEpoch, RecipeCommitSortByContentHash, RecipeCommitSortByCreatedAt:
+	case RecipeCommitSortById, RecipeCommitSortByMessage, RecipeCommitSortBySchemaEpoch, RecipeCommitSortByContentHash, RecipeCommitSortBySequence, RecipeCommitSortByCreatedAt:
 		return parsed, nil
 	}
-	return RecipeCommitSort{}, fmt.Errorf("orm: RecipeCommit sorts by id, schemaEpoch, contentHash and createdAt, not %q", text)
+	return RecipeCommitSort{}, fmt.Errorf("orm: RecipeCommit sorts by id, message, schemaEpoch, contentHash, sequence and createdAt, not %q", text)
 }
 
 // RecipeCommitUniqueKey names a unique key of RecipeCommit that UpsertOne and
@@ -1732,6 +1735,7 @@ type RecipeRefSortField string
 const (
 	RecipeRefSortById        RecipeRefSortField = "id"
 	RecipeRefSortByName      RecipeRefSortField = "name"
+	RecipeRefSortBySealedAt  RecipeRefSortField = "sealedAt"
 	RecipeRefSortByCreatedAt RecipeRefSortField = "createdAt"
 	RecipeRefSortByUpdatedAt RecipeRefSortField = "updatedAt"
 )
@@ -1749,10 +1753,10 @@ type RecipeRefSort struct {
 func ParseRecipeRefSort(text string) (RecipeRefSort, error) {
 	parsed := RecipeRefSort{Field: RecipeRefSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case RecipeRefSortById, RecipeRefSortByName, RecipeRefSortByCreatedAt, RecipeRefSortByUpdatedAt:
+	case RecipeRefSortById, RecipeRefSortByName, RecipeRefSortBySealedAt, RecipeRefSortByCreatedAt, RecipeRefSortByUpdatedAt:
 		return parsed, nil
 	}
-	return RecipeRefSort{}, fmt.Errorf("orm: RecipeRef sorts by id, name, createdAt and updatedAt, not %q", text)
+	return RecipeRefSort{}, fmt.Errorf("orm: RecipeRef sorts by id, name, sealedAt, createdAt and updatedAt, not %q", text)
 }
 
 // RecipeRefUniqueKey names a unique key of RecipeRef that UpsertOne and
@@ -2445,6 +2449,7 @@ const (
 	StepSortById          StepSortField = "id"
 	StepSortByPosition    StepSortField = "position"
 	StepSortByInstruction StepSortField = "instruction"
+	StepSortByScratch     StepSortField = "scratch"
 	StepSortByCreatedAt   StepSortField = "createdAt"
 	StepSortByUpdatedAt   StepSortField = "updatedAt"
 	StepSortByEntityKey   StepSortField = "entityKey"
@@ -2463,10 +2468,10 @@ type StepSort struct {
 func ParseStepSort(text string) (StepSort, error) {
 	parsed := StepSort{Field: StepSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case StepSortById, StepSortByPosition, StepSortByInstruction, StepSortByCreatedAt, StepSortByUpdatedAt, StepSortByEntityKey:
+	case StepSortById, StepSortByPosition, StepSortByInstruction, StepSortByScratch, StepSortByCreatedAt, StepSortByUpdatedAt, StepSortByEntityKey:
 		return parsed, nil
 	}
-	return StepSort{}, fmt.Errorf("orm: Step sorts by id, position, instruction, createdAt, updatedAt and entityKey, not %q", text)
+	return StepSort{}, fmt.Errorf("orm: Step sorts by id, position, instruction, scratch, createdAt, updatedAt and entityKey, not %q", text)
 }
 
 // StepUniqueKey names a unique key of Step that UpsertOne and

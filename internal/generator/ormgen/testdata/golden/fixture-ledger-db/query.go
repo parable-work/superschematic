@@ -335,6 +335,7 @@ const (
 	AccountSortById        AccountSortField = "id"
 	AccountSortByName      AccountSortField = "name"
 	AccountSortByCode      AccountSortField = "code"
+	AccountSortByOpenedOn  AccountSortField = "openedOn"
 	AccountSortByCreatedAt AccountSortField = "createdAt"
 	AccountSortByUpdatedAt AccountSortField = "updatedAt"
 )
@@ -352,10 +353,10 @@ type AccountSort struct {
 func ParseAccountSort(text string) (AccountSort, error) {
 	parsed := AccountSort{Field: AccountSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case AccountSortById, AccountSortByName, AccountSortByCode, AccountSortByCreatedAt, AccountSortByUpdatedAt:
+	case AccountSortById, AccountSortByName, AccountSortByCode, AccountSortByOpenedOn, AccountSortByCreatedAt, AccountSortByUpdatedAt:
 		return parsed, nil
 	}
-	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, name, code, createdAt and updatedAt, not %q", text)
+	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, name, code, openedOn, createdAt and updatedAt, not %q", text)
 }
 
 // AccountUniqueKey names a unique key of Account that UpsertOne and
@@ -620,6 +621,9 @@ const (
 	EntrySortById          EntrySortField = "id"
 	EntrySortByAmountCents EntrySortField = "amountCents"
 	EntrySortByBookedOn    EntrySortField = "bookedOn"
+	EntrySortByMemo        EntrySortField = "memo"
+	EntrySortByExternalId  EntrySortField = "externalId"
+	EntrySortByReviewedAt  EntrySortField = "reviewedAt"
 	EntrySortByCreatedAt   EntrySortField = "createdAt"
 	EntrySortByUpdatedAt   EntrySortField = "updatedAt"
 )
@@ -637,10 +641,10 @@ type EntrySort struct {
 func ParseEntrySort(text string) (EntrySort, error) {
 	parsed := EntrySort{Field: EntrySortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case EntrySortById, EntrySortByAmountCents, EntrySortByBookedOn, EntrySortByCreatedAt, EntrySortByUpdatedAt:
+	case EntrySortById, EntrySortByAmountCents, EntrySortByBookedOn, EntrySortByMemo, EntrySortByExternalId, EntrySortByReviewedAt, EntrySortByCreatedAt, EntrySortByUpdatedAt:
 		return parsed, nil
 	}
-	return EntrySort{}, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, createdAt and updatedAt, not %q", text)
+	return EntrySort{}, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, createdAt and updatedAt, not %q", text)
 }
 
 // EntryUniqueKey names a unique key of Entry that UpsertOne and

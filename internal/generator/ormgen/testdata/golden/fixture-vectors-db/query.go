@@ -537,11 +537,13 @@ type LedgerLineFindOptions struct {
 type LedgerLineSortField string
 
 const (
-	LedgerLineSortById       LedgerLineSortField = "id"
-	LedgerLineSortByAmount   LedgerLineSortField = "amount"
-	LedgerLineSortByCurrency LedgerLineSortField = "currency"
-	LedgerLineSortByRate     LedgerLineSortField = "rate"
-	LedgerLineSortByBookedAt LedgerLineSortField = "bookedAt"
+	LedgerLineSortById         LedgerLineSortField = "id"
+	LedgerLineSortByAmount     LedgerLineSortField = "amount"
+	LedgerLineSortByCurrency   LedgerLineSortField = "currency"
+	LedgerLineSortByRate       LedgerLineSortField = "rate"
+	LedgerLineSortByConfidence LedgerLineSortField = "confidence"
+	LedgerLineSortByQuantity   LedgerLineSortField = "quantity"
+	LedgerLineSortByBookedAt   LedgerLineSortField = "bookedAt"
 )
 
 // LedgerLineSort is the order FindPage reads LedgerLine rows in: Field,
@@ -557,10 +559,10 @@ type LedgerLineSort struct {
 func ParseLedgerLineSort(text string) (LedgerLineSort, error) {
 	parsed := LedgerLineSort{Field: LedgerLineSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case LedgerLineSortById, LedgerLineSortByAmount, LedgerLineSortByCurrency, LedgerLineSortByRate, LedgerLineSortByBookedAt:
+	case LedgerLineSortById, LedgerLineSortByAmount, LedgerLineSortByCurrency, LedgerLineSortByRate, LedgerLineSortByConfidence, LedgerLineSortByQuantity, LedgerLineSortByBookedAt:
 		return parsed, nil
 	}
-	return LedgerLineSort{}, fmt.Errorf("orm: LedgerLine sorts by id, amount, currency, rate and bookedAt, not %q", text)
+	return LedgerLineSort{}, fmt.Errorf("orm: LedgerLine sorts by id, amount, currency, rate, confidence, quantity and bookedAt, not %q", text)
 }
 
 // LedgerLineUniqueKey names a unique key of LedgerLine that UpsertOne and
@@ -750,6 +752,7 @@ type PassageSortField string
 const (
 	PassageSortById    PassageSortField = "id"
 	PassageSortByTitle PassageSortField = "title"
+	PassageSortByTopic PassageSortField = "topic"
 )
 
 // PassageSort is the order FindPage reads Passage rows in: Field,
@@ -765,10 +768,10 @@ type PassageSort struct {
 func ParsePassageSort(text string) (PassageSort, error) {
 	parsed := PassageSort{Field: PassageSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case PassageSortById, PassageSortByTitle:
+	case PassageSortById, PassageSortByTitle, PassageSortByTopic:
 		return parsed, nil
 	}
-	return PassageSort{}, fmt.Errorf("orm: Passage sorts by id and title, not %q", text)
+	return PassageSort{}, fmt.Errorf("orm: Passage sorts by id, title and topic, not %q", text)
 }
 
 // PassageUniqueKey names a unique key of Passage that UpsertOne and

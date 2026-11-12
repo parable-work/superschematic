@@ -245,6 +245,15 @@ other value is the 400 an enum parameter gets, `Invalid query parameter
 sort: expected one of name, -name, sku, -sku`. The router refuses a cursor's
 text first, then the limit, then the sort, then a cursor of another sort.
 
+A sort field may be `Nullable` (D112). An item that holds no value comes
+after every item that holds one, in either direction: `sort=dueOn` reads
+the earliest due date first and `sort=-dueOn` the latest, and each ends
+with the items that have none, in `id` order in the sort's direction. A
+caller who wants only the items with a value adds
+`filter[dueOn][isNull]=false`. The repositories' `findPage` reads that
+order, and an implementation that sorts its own rows reads the same, so
+a list's pages mean one thing whoever serves them.
+
 The implementation takes the sort only in its page request, its default
 filled in: Go's `page.Sort` (`paging.Sort{Field, Desc}`), TypeScript's
 `args.page.sort` (`{field, desc}`), and Rust's `args.page.sort`
@@ -918,7 +927,7 @@ export class Issues extends Authenticated {
   listIssues(
     teamId: Identity.UUID,
     q: SearchQuery<Validate<string, { maxLength: 100 }>>,
-    sort: SortBy<IssueView, ["createdAt", "priority", "title"]>,
+    sort: SortBy<IssueView, ["createdAt", "priority", "title", "dueOn", "estimate"]>,
     filter: FilterBy<IssueView, ["status", "priority", "title", "assigneeId", "createdAt"]>
   ): IssueView[] {
     throw new Error("schema declaration only");
@@ -1119,7 +1128,8 @@ through the repository's `findPage`, never the whole table
 ([Pages](#pages)). It takes three kinds of argument beside its path's
 parents:
 
-- a `SortBy`, whose fields are columns the repository pages by. Without
+- a `SortBy`, whose fields are columns the repository pages by, one that
+  may be null among them, its nulls last in either direction. Without
   one, the list reads in the repository's own order, by key;
 - a `SearchQuery`, which needs a `@searchField` on the table, and keeps
   the rows whose search fields hold each word of the text

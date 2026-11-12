@@ -507,10 +507,12 @@ type SessionFindOptions struct {
 type SessionSortField string
 
 const (
-	SessionSortById        SessionSortField = "id"
-	SessionSortByTokenHash SessionSortField = "tokenHash"
-	SessionSortByCreatedAt SessionSortField = "createdAt"
-	SessionSortByExpiresAt SessionSortField = "expiresAt"
+	SessionSortById         SessionSortField = "id"
+	SessionSortByTokenHash  SessionSortField = "tokenHash"
+	SessionSortByCreatedAt  SessionSortField = "createdAt"
+	SessionSortByExpiresAt  SessionSortField = "expiresAt"
+	SessionSortByLastSeenAt SessionSortField = "lastSeenAt"
+	SessionSortByRevokedAt  SessionSortField = "revokedAt"
 )
 
 // SessionSort is the order FindPage reads Session rows in: Field,
@@ -526,10 +528,10 @@ type SessionSort struct {
 func ParseSessionSort(text string) (SessionSort, error) {
 	parsed := SessionSort{Field: SessionSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case SessionSortById, SessionSortByTokenHash, SessionSortByCreatedAt, SessionSortByExpiresAt:
+	case SessionSortById, SessionSortByTokenHash, SessionSortByCreatedAt, SessionSortByExpiresAt, SessionSortByLastSeenAt, SessionSortByRevokedAt:
 		return parsed, nil
 	}
-	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt and expiresAt, not %q", text)
+	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt, expiresAt, lastSeenAt and revokedAt, not %q", text)
 }
 
 // SessionUniqueKey names a unique key of Session that UpsertOne and
@@ -909,6 +911,8 @@ type UserCredentialSortField string
 const (
 	UserCredentialSortById                UserCredentialSortField = "id"
 	UserCredentialSortByPasswordChangedAt UserCredentialSortField = "passwordChangedAt"
+	UserCredentialSortByDisabledAt        UserCredentialSortField = "disabledAt"
+	UserCredentialSortByPendingAt         UserCredentialSortField = "pendingAt"
 )
 
 // UserCredentialSort is the order FindPage reads UserCredential rows in: Field,
@@ -924,10 +928,10 @@ type UserCredentialSort struct {
 func ParseUserCredentialSort(text string) (UserCredentialSort, error) {
 	parsed := UserCredentialSort{Field: UserCredentialSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case UserCredentialSortById, UserCredentialSortByPasswordChangedAt:
+	case UserCredentialSortById, UserCredentialSortByPasswordChangedAt, UserCredentialSortByDisabledAt, UserCredentialSortByPendingAt:
 		return parsed, nil
 	}
-	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id and passwordChangedAt, not %q", text)
+	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id, passwordChangedAt, disabledAt and pendingAt, not %q", text)
 }
 
 // UserCredentialUniqueKey names a unique key of UserCredential that UpsertOne and

@@ -319,9 +319,10 @@ type AccountFindOptions struct {
 type AccountSortField string
 
 const (
-	AccountSortById     AccountSortField = "id"
-	AccountSortByName   AccountSortField = "name"
-	AccountSortByStatus AccountSortField = "status"
+	AccountSortById              AccountSortField = "id"
+	AccountSortByName            AccountSortField = "name"
+	AccountSortByStatus          AccountSortField = "status"
+	AccountSortByStatusEnteredAt AccountSortField = "statusEnteredAt"
 )
 
 // AccountSort is the order FindPage reads Account rows in: Field,
@@ -337,10 +338,10 @@ type AccountSort struct {
 func ParseAccountSort(text string) (AccountSort, error) {
 	parsed := AccountSort{Field: AccountSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case AccountSortById, AccountSortByName, AccountSortByStatus:
+	case AccountSortById, AccountSortByName, AccountSortByStatus, AccountSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, name and status, not %q", text)
+	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, name, status and statusEnteredAt, not %q", text)
 }
 
 // AccountUniqueKey names a unique key of Account that UpsertOne and
@@ -627,10 +628,22 @@ type JobFindOptions struct {
 type JobSortField string
 
 const (
-	JobSortById       JobSortField = "id"
-	JobSortByTitle    JobSortField = "title"
-	JobSortByRevision JobSortField = "revision"
-	JobSortByStatus   JobSortField = "status"
+	JobSortById                  JobSortField = "id"
+	JobSortByTitle               JobSortField = "title"
+	JobSortByRevision            JobSortField = "revision"
+	JobSortByLeaseHolder         JobSortField = "leaseHolder"
+	JobSortByLeaseToken          JobSortField = "leaseToken"
+	JobSortByLeaseAcquiredAt     JobSortField = "leaseAcquiredAt"
+	JobSortByLeaseRenewedAt      JobSortField = "leaseRenewedAt"
+	JobSortByLeaseExpiresAt      JobSortField = "leaseExpiresAt"
+	JobSortByLeaseExpiries       JobSortField = "leaseExpiries"
+	JobSortByRetriesTotal        JobSortField = "retriesTotal"
+	JobSortByRetriesBestScore    JobSortField = "retriesBestScore"
+	JobSortByRetriesRetryAt      JobSortField = "retriesRetryAt"
+	JobSortByRetriesFailingSince JobSortField = "retriesFailingSince"
+	JobSortByRetriesKeyedBy      JobSortField = "retriesKeyedBy"
+	JobSortByStatus              JobSortField = "status"
+	JobSortByStatusEnteredAt     JobSortField = "statusEnteredAt"
 )
 
 // JobSort is the order FindPage reads Job rows in: Field,
@@ -646,10 +659,10 @@ type JobSort struct {
 func ParseJobSort(text string) (JobSort, error) {
 	parsed := JobSort{Field: JobSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case JobSortById, JobSortByTitle, JobSortByRevision, JobSortByStatus:
+	case JobSortById, JobSortByTitle, JobSortByRevision, JobSortByLeaseHolder, JobSortByLeaseToken, JobSortByLeaseAcquiredAt, JobSortByLeaseRenewedAt, JobSortByLeaseExpiresAt, JobSortByLeaseExpiries, JobSortByRetriesTotal, JobSortByRetriesBestScore, JobSortByRetriesRetryAt, JobSortByRetriesFailingSince, JobSortByRetriesKeyedBy, JobSortByStatus, JobSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return JobSort{}, fmt.Errorf("orm: Job sorts by id, title, revision and status, not %q", text)
+	return JobSort{}, fmt.Errorf("orm: Job sorts by id, title, revision, leaseHolder, leaseToken, leaseAcquiredAt, leaseRenewedAt, leaseExpiresAt, leaseExpiries, retriesTotal, retriesBestScore, retriesRetryAt, retriesFailingSince, retriesKeyedBy, status and statusEnteredAt, not %q", text)
 }
 
 // JobUniqueKey names a unique key of Job that UpsertOne and
@@ -859,10 +872,13 @@ type SessionFindOptions struct {
 type SessionSortField string
 
 const (
-	SessionSortById     SessionSortField = "id"
-	SessionSortByDevice SessionSortField = "device"
-	SessionSortByAgent  SessionSortField = "agent"
-	SessionSortByStatus SessionSortField = "status"
+	SessionSortById                 SessionSortField = "id"
+	SessionSortByDevice             SessionSortField = "device"
+	SessionSortByAgent              SessionSortField = "agent"
+	SessionSortByPresenceDeadline   SessionSortField = "presenceDeadline"
+	SessionSortByPresenceLastBeatAt SessionSortField = "presenceLastBeatAt"
+	SessionSortByStatus             SessionSortField = "status"
+	SessionSortByStatusEnteredAt    SessionSortField = "statusEnteredAt"
 )
 
 // SessionSort is the order FindPage reads Session rows in: Field,
@@ -878,10 +894,10 @@ type SessionSort struct {
 func ParseSessionSort(text string) (SessionSort, error) {
 	parsed := SessionSort{Field: SessionSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case SessionSortById, SessionSortByDevice, SessionSortByAgent, SessionSortByStatus:
+	case SessionSortById, SessionSortByDevice, SessionSortByAgent, SessionSortByPresenceDeadline, SessionSortByPresenceLastBeatAt, SessionSortByStatus, SessionSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, device, agent and status, not %q", text)
+	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, device, agent, presenceDeadline, presenceLastBeatAt, status and statusEnteredAt, not %q", text)
 }
 
 // SessionUniqueKey names a unique key of Session that UpsertOne and

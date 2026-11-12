@@ -314,9 +314,11 @@ type ProblemFindOptions struct {
 type ProblemSortField string
 
 const (
-	ProblemSortById     ProblemSortField = "id"
-	ProblemSortByTitle  ProblemSortField = "title"
-	ProblemSortByStatus ProblemSortField = "status"
+	ProblemSortById              ProblemSortField = "id"
+	ProblemSortByTitle           ProblemSortField = "title"
+	ProblemSortByAgent           ProblemSortField = "agent"
+	ProblemSortByStatus          ProblemSortField = "status"
+	ProblemSortByStatusEnteredAt ProblemSortField = "statusEnteredAt"
 )
 
 // ProblemSort is the order FindPage reads Problem rows in: Field,
@@ -332,10 +334,10 @@ type ProblemSort struct {
 func ParseProblemSort(text string) (ProblemSort, error) {
 	parsed := ProblemSort{Field: ProblemSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case ProblemSortById, ProblemSortByTitle, ProblemSortByStatus:
+	case ProblemSortById, ProblemSortByTitle, ProblemSortByAgent, ProblemSortByStatus, ProblemSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return ProblemSort{}, fmt.Errorf("orm: Problem sorts by id, title and status, not %q", text)
+	return ProblemSort{}, fmt.Errorf("orm: Problem sorts by id, title, agent, status and statusEnteredAt, not %q", text)
 }
 
 // ProblemUniqueKey names a unique key of Problem that UpsertOne and
@@ -539,9 +541,13 @@ type SandboxFindOptions struct {
 type SandboxSortField string
 
 const (
-	SandboxSortById     SandboxSortField = "id"
-	SandboxSortByName   SandboxSortField = "name"
-	SandboxSortByStatus SandboxSortField = "status"
+	SandboxSortById                   SandboxSortField = "id"
+	SandboxSortByName                 SandboxSortField = "name"
+	SandboxSortByStatus               SandboxSortField = "status"
+	SandboxSortByStatusEnteredAt      SandboxSortField = "statusEnteredAt"
+	SandboxSortByObserved             SandboxSortField = "observed"
+	SandboxSortByObservedObservedAt   SandboxSortField = "observedObservedAt"
+	SandboxSortByObservedReconciledAt SandboxSortField = "observedReconciledAt"
 )
 
 // SandboxSort is the order FindPage reads Sandbox rows in: Field,
@@ -557,10 +563,10 @@ type SandboxSort struct {
 func ParseSandboxSort(text string) (SandboxSort, error) {
 	parsed := SandboxSort{Field: SandboxSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case SandboxSortById, SandboxSortByName, SandboxSortByStatus:
+	case SandboxSortById, SandboxSortByName, SandboxSortByStatus, SandboxSortByStatusEnteredAt, SandboxSortByObserved, SandboxSortByObservedObservedAt, SandboxSortByObservedReconciledAt:
 		return parsed, nil
 	}
-	return SandboxSort{}, fmt.Errorf("orm: Sandbox sorts by id, name and status, not %q", text)
+	return SandboxSort{}, fmt.Errorf("orm: Sandbox sorts by id, name, status, statusEnteredAt, observed, observedObservedAt and observedReconciledAt, not %q", text)
 }
 
 // SandboxUniqueKey names a unique key of Sandbox that UpsertOne and

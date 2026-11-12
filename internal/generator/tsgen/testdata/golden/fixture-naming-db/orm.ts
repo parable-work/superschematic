@@ -130,7 +130,9 @@ export const categoryTable: TableDefinition = {
     page: "SELECT %s FROM \"budgetCategory\"%s%s LIMIT %d",
     pageAfterKey: "\"budgetCategory\".id %s %s",
     pageAfter: "(%s, \"budgetCategory\".id) %s ((SELECT %s FROM \"budgetCategory\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"budgetCategory\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"budgetCategory\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"budgetCategory\" WHERE \"budgetCategory\".id = $1)",
     insert: "INSERT INTO \"budgetCategory\" (%s) VALUES (%s) RETURNING %s",
@@ -221,7 +223,7 @@ export interface LineItemFilter {
 export type LineItemOrderField = "id" | "amountCents" | "postedOn" | "memo" | "externalId" | "createdAt" | "updatedAt" | "deletedAt";
 
 /** The members findPage orders rows of LineItem by (D60, amended); ties break by id. */
-export type LineItemSortField = "id" | "amountCents" | "postedOn" | "createdAt" | "updatedAt";
+export type LineItemSortField = "id" | "amountCents" | "postedOn" | "memo" | "externalId" | "createdAt" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type LineItemUniqueKey = readonly ["id"] | readonly ["category", "externalId"];
@@ -259,8 +261,8 @@ export const lineItemTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "\"lineItem\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "amountCents", column: "\"amountCents\"", field: "amountCents", qualified: "\"lineItem\".\"amountCents\"", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, auto: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "memo", column: "memo", field: "memo", qualified: "\"lineItem\".memo", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "externalId", column: "\"externalId\"", field: "externalId", qualified: "\"lineItem\".\"externalId\"", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "memo", column: "memo", field: "memo", qualified: "\"lineItem\".memo", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "externalId", column: "\"externalId\"", field: "externalId", qualified: "\"lineItem\".\"externalId\"", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "categoryId", column: "\"categoryId\"", field: "category", qualified: "\"lineItem\".\"categoryId\"", uuid: true, relation: "Category", filter: ["eq", "in", "isNull"] },
     { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"lineItem\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"lineItem\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
@@ -282,7 +284,9 @@ export const lineItemTable: TableDefinition = {
     page: "SELECT %s FROM \"lineItem\"%s%s LIMIT %d",
     pageAfterKey: "\"lineItem\".id %s %s",
     pageAfter: "(%s, \"lineItem\".id) %s ((SELECT %s FROM \"lineItem\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"lineItem\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"lineItem\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"lineItem\" WHERE \"lineItem\".id = $1)",
     insert: "INSERT INTO \"lineItem\" (%s) VALUES (%s) RETURNING %s",
@@ -407,7 +411,9 @@ export const noteTable: TableDefinition = {
     page: "SELECT %s FROM \"ledgerNote\"%s%s LIMIT %d",
     pageAfterKey: "\"ledgerNote\".id %s %s",
     pageAfter: "(%s, \"ledgerNote\".id) %s ((SELECT %s FROM \"ledgerNote\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"ledgerNote\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"ledgerNote\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"ledgerNote\" WHERE \"ledgerNote\".id = $1)",
     insert: "INSERT INTO \"ledgerNote\" (%s) VALUES (%s) RETURNING %s",

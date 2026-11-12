@@ -319,7 +319,7 @@ export const operationSpecs = {
         { name: 'createdBy', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[createdBy]', kind: 'uuid', required: false } },
       ],
     },
-    page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['createdAt', 'priority', 'title'], default: '-createdAt' } },
+    page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['createdAt', 'priority', 'title', 'dueOn', 'estimate'], default: '-createdAt' } },
     auth: { public: false, required: true, permissions: ['issues.read'] },
     manual: false,
   },

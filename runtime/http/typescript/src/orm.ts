@@ -175,7 +175,7 @@ export interface TableColumn extends RowField {
   readonly default?: unknown;
   /** The operations of the column's filter, in the order their conditions are written. */
   readonly filter?: readonly string[];
-  /** A column findPage orders by. */
+  /** A column findPage orders by. One that is not required may be null, and its nulls come last in either direction (D112). */
   readonly sortable?: boolean;
   /** An Encrypted<T> field's column, which holds its envelope (D85). */
   readonly encrypted?: boolean;
@@ -204,7 +204,16 @@ export interface TableStatements {
   readonly page: string;
   readonly pageAfterKey: string;
   readonly pageAfter: string;
+  /**
+   * The keyset of an order by a column that may be null (D112): the key's
+   * row's column %s and the key's placeholder %s, the column %s and a filled
+   * pageAfterKey %s, the column %s and a filled pageAfter %s. Absent in
+   * types written before it.
+   */
+  readonly pageAfterNulls?: string;
   readonly pageOrder: string;
+  /** pageOrder for a column that may be null, its nulls last in either direction (D112). */
+  readonly pageOrderNulls?: string;
   readonly pageTiebreak: string;
   readonly pageKeyExists: string;
   readonly insert: string;
@@ -1632,6 +1641,12 @@ class TableRepository {
     const conditions = this.conditions(filter, args, 0);
     if (this.def.softDelete && !options.includeDeleted) conditions.push(s.liveCondition);
     const [comparison, direction] = options.sort?.desc ? ['<', 'DESC'] : ['>', 'ASC'];
+    // A column that may be null orders its nulls last in either direction
+    // (D112), by statements the types carry since.
+    const nulls = !byKey && !column.required;
+    if (nulls && (!s.pageAfterNulls || !s.pageOrderNulls)) {
+      throw new Error(`orm: ${this.def.name}.${column.name} may be null, and these types hold no statement that pages by one: build them again`);
+    }
     let after: unknown;
     if (options.after) {
       const value = options.after[this.def.key];
@@ -1641,13 +1656,16 @@ class TableRepository {
       after = this.encode(value, key, 'page key');
       args.push(after);
       const placeholder = fill(this.clauses.placeholder, args.length);
-      conditions.push(
-        byKey
-          ? fill(s.pageAfterKey, comparison, placeholder)
-          : fill(s.pageAfter, column.qualified, comparison, fill(this.clauses.pageKey, column.column), placeholder, placeholder)
-      );
+      const afterKey = fill(s.pageAfterKey, comparison, placeholder);
+      const pageKey = fill(this.clauses.pageKey, column.column);
+      // The key's row gives the sort field's value. After a null come the
+      // nulls past the key; after a value, every null and the values past
+      // it.
+      let afterValue = fill(s.pageAfter, column.qualified, comparison, pageKey, placeholder, placeholder);
+      if (nulls) afterValue = fill(s.pageAfterNulls!, pageKey, placeholder, column.qualified, afterKey, column.qualified, afterValue);
+      conditions.push(byKey ? afterKey : afterValue);
     }
-    let order = fill(s.pageOrder, column.qualified, direction);
+    let order = fill(nulls ? s.pageOrderNulls! : s.pageOrder, column.qualified, direction);
     if (!byKey) order += fill(s.pageTiebreak, direction);
     // A page reads its rows' keys whatever it selects: the next key holds
     // the last one's.

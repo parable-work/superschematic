@@ -491,6 +491,7 @@ type OrderLineSortField string
 const (
 	OrderLineSortById       OrderLineSortField = "id"
 	OrderLineSortByQuantity OrderLineSortField = "quantity"
+	OrderLineSortByNote     OrderLineSortField = "note"
 )
 
 // OrderLineSort is the order FindPage reads OrderLine rows in: Field,
@@ -506,10 +507,10 @@ type OrderLineSort struct {
 func ParseOrderLineSort(text string) (OrderLineSort, error) {
 	parsed := OrderLineSort{Field: OrderLineSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case OrderLineSortById, OrderLineSortByQuantity:
+	case OrderLineSortById, OrderLineSortByQuantity, OrderLineSortByNote:
 		return parsed, nil
 	}
-	return OrderLineSort{}, fmt.Errorf("orm: OrderLine sorts by id and quantity, not %q", text)
+	return OrderLineSort{}, fmt.Errorf("orm: OrderLine sorts by id, quantity and note, not %q", text)
 }
 
 // OrderLineUniqueKey names a unique key of OrderLine that UpsertOne and

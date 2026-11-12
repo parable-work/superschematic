@@ -120,7 +120,7 @@ export interface NoteFilter {
 export type NoteOrderField = "id" | "slug" | "title" | "body" | "author" | "pinned" | "views" | "createdBy" | "deletedAt" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Note by (D60, amended); ties break by id. */
-export type NoteSortField = "id" | "slug" | "title" | "body" | "author" | "views" | "status";
+export type NoteSortField = "id" | "slug" | "title" | "body" | "author" | "views" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type NoteUniqueKey = readonly ["id"] | readonly ["slug"];
@@ -180,7 +180,7 @@ export const noteTable: TableDefinition = {
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "note.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "note.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "status", column: "status", field: "status", qualified: "note.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "note.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "note.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "_version", column: "_version", field: "_version", qualified: "note._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -199,7 +199,9 @@ export const noteTable: TableDefinition = {
     page: "SELECT %s FROM note%s%s LIMIT %d",
     pageAfterKey: "note.id %s %s",
     pageAfter: "(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM note AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", note.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM note WHERE note.id = $1)",
     insert: "INSERT INTO note (%s) VALUES (%s) RETURNING %s",
@@ -293,7 +295,7 @@ export interface TaskFilter {
 export type TaskOrderField = "id" | "title" | "owner" | "reviewer" | "plan" | "proof" | "urgent" | "attempts" | "createdBy" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Task by (D60, amended); ties break by id. */
-export type TaskSortField = "id" | "title" | "owner" | "attempts" | "status";
+export type TaskSortField = "id" | "title" | "owner" | "reviewer" | "plan" | "proof" | "attempts" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TaskUniqueKey = readonly ["id"];
@@ -388,14 +390,14 @@ export const taskTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "task.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "title", column: "title", field: "title", qualified: "task.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "owner", column: "\"owner\"", field: "owner", qualified: "task.\"owner\"", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "reviewer", column: "reviewer", field: "reviewer", qualified: "task.reviewer", uuid: true, filter: ["eq", "in", "isNull"] },
-    { name: "plan", column: "plan", field: "plan", qualified: "task.plan", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "proof", column: "proof", field: "proof", qualified: "task.proof", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "reviewer", column: "reviewer", field: "reviewer", qualified: "task.reviewer", uuid: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "plan", column: "plan", field: "plan", qualified: "task.plan", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "proof", column: "proof", field: "proof", qualified: "task.proof", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "urgent", column: "urgent", field: "urgent", qualified: "task.urgent", boolean: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "attempts", column: "attempts", field: "attempts", qualified: "task.attempts", required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "task.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "task.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "task.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "task.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "_version", column: "_version", field: "_version", qualified: "task._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -414,7 +416,9 @@ export const taskTable: TableDefinition = {
     page: "SELECT %s FROM task%s%s LIMIT %d",
     pageAfterKey: "task.id %s %s",
     pageAfter: "(%s, task.id) %s ((SELECT %s FROM task AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM task AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", task.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM task WHERE task.id = $1)",
     insert: "INSERT INTO task (%s) VALUES (%s) RETURNING %s",

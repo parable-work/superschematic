@@ -102,7 +102,7 @@ export interface InvoiceFilter {
 export type InvoiceOrderField = "id" | "number" | "status" | "statusEnteredAt" | "payment" | "paymentEnteredAt" | "_version";
 
 /** The members findPage orders rows of Invoice by (D60, amended); ties break by id. */
-export type InvoiceSortField = "id" | "number" | "status" | "payment";
+export type InvoiceSortField = "id" | "number" | "status" | "statusEnteredAt" | "payment" | "paymentEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type InvoiceUniqueKey = readonly ["id"];
@@ -191,9 +191,9 @@ export const invoiceTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "invoice.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "number", column: "number", field: "number", qualified: "invoice.number", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "status", column: "status", field: "status", qualified: "invoice.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "invoice.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "invoice.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "payment", column: "payment", field: "payment", qualified: "invoice.payment", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "paymentEnteredAt", column: "payment_entered_at", field: "paymentEnteredAt", qualified: "invoice.payment_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "paymentEnteredAt", column: "payment_entered_at", field: "paymentEnteredAt", qualified: "invoice.payment_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "_version", column: "_version", field: "_version", qualified: "invoice._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -212,7 +212,9 @@ export const invoiceTable: TableDefinition = {
     page: "SELECT %s FROM invoice%s%s LIMIT %d",
     pageAfterKey: "invoice.id %s %s",
     pageAfter: "(%s, invoice.id) %s ((SELECT %s FROM invoice AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM invoice AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", invoice.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM invoice WHERE invoice.id = $1)",
     insert: "INSERT INTO invoice (%s) VALUES (%s) RETURNING %s",
@@ -279,7 +281,7 @@ export interface TicketFilter {
 export type TicketOrderField = "id" | "title" | "visitAt" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Ticket by (D60, amended); ties break by id. */
-export type TicketSortField = "id" | "title" | "status";
+export type TicketSortField = "id" | "title" | "visitAt" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TicketUniqueKey = readonly ["id"];
@@ -355,9 +357,9 @@ export const ticketTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "ticket.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "title", column: "title", field: "title", qualified: "ticket.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "visitAt", column: "visit_at", field: "visitAt", qualified: "ticket.visit_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "visitAt", column: "visit_at", field: "visitAt", qualified: "ticket.visit_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "status", column: "status", field: "status", qualified: "ticket.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "ticket.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "ticket.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "_version", column: "_version", field: "_version", qualified: "ticket._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -376,7 +378,9 @@ export const ticketTable: TableDefinition = {
     page: "SELECT %s FROM ticket%s%s LIMIT %d",
     pageAfterKey: "ticket.id %s %s",
     pageAfter: "(%s, ticket.id) %s ((SELECT %s FROM ticket AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM ticket AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", ticket.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM ticket WHERE ticket.id = $1)",
     insert: "INSERT INTO ticket (%s) VALUES (%s) RETURNING %s",

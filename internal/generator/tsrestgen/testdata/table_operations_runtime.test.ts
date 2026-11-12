@@ -464,6 +464,51 @@ describe('the table operations of fixture-tracker-api', () => {
     expect((await refused('GET', `/api/teams/${core.id}/issues?sort=status`)).details).toMatchObject({ parameter: 'sort' });
   });
 
+  test('a list sorts by a field that may be null, its nulls last either way, and pages through them', async () => {
+    // The order a walk must read, worked out here and not by the
+    // database: the rows that hold a value by it, ties by id, then the
+    // rows that hold none by id, both in the sort's direction. Postgres
+    // orders a uuid by its bytes, as its hyphenated text orders.
+    const ids = new Map<string, string>();
+    for (const row of (await pool.query('SELECT id::text AS id, title FROM issue')).rows) ids.set(row.title, row.id);
+    const byId = (a: any, b: any) => (ids.get(a.title)! < ids.get(b.title)! ? -1 : 1);
+    const nullsLast = (field: 'dueOn' | 'estimate', desc: boolean) => {
+      const way = desc ? -1 : 1;
+      const held = issues.filter(issue => issue[field] !== null);
+      const none = issues.filter(issue => issue[field] === null);
+      held.sort((a, b) => (a[field] < b[field] ? -1 : a[field] > b[field] ? 1 : byId(a, b)) * way);
+      none.sort((a, b) => byId(a, b) * way);
+      return [...held, ...none];
+    };
+    // Two issues are due on one day, two have no due date and two no
+    // estimate, so a page ends on a value, on a tie, on the last value
+    // before the nulls, on a null, and on the last row.
+    expect(issues.filter(issue => issue.dueOn === null).length).toBe(2);
+    expect(issues.filter(issue => issue.dueOn === '2026-03-01').length).toBe(2);
+    for (const field of ['dueOn', 'estimate'] as const) {
+      for (const desc of [false, true]) {
+        const want = titles(nullsLast(field, desc));
+        for (const [limit, sizes] of [[1, [1, 1, 1, 1, 1, 1]], [2, [2, 2, 2]], [4, [4, 2]], [5, [5, 1]]] as const) {
+          const sorted = await walk(`/api/teams/${core.id}/issues?sort=${desc ? '-' : ''}${field}&limit=${limit}`);
+          expect(titles(sorted.items)).toEqual(want);
+          expect(sorted.sizes).toEqual([...sizes]);
+        }
+      }
+    }
+    expect(titles(nullsLast('dueOn', false)).slice(0, 1)).toEqual(['100% done']);
+    expect(titles(nullsLast('dueOn', true)).slice(0, 1)).toEqual(['100 percent']);
+    expect(titles(nullsLast('dueOn', true)).slice(4).sort()).toEqual(['Slow search', 'snake_case names']);
+
+    // The cursor of a page that ends on a null is the row's key, as any is.
+    const last = nullsLast('dueOn', false);
+    const page = await ok('GET', `/api/teams/${core.id}/issues?sort=dueOn&limit=5`);
+    expect(JSON.parse(Buffer.from(page.next, 'base64url').toString())).toEqual({ sort: 'dueOn', key: { id: last[4].id } });
+    // A filter holds beside the order: the issues with no due date alone,
+    // and the ones with one.
+    expect(titles((await walk(`/api/teams/${core.id}/issues?sort=-dueOn&limit=1&filter[dueOn][isNull]=true`)).items)).toEqual(titles(nullsLast('dueOn', true).slice(4)));
+    expect(titles((await walk(`/api/teams/${core.id}/issues?sort=-dueOn&limit=1&filter[dueOn][isNull]=false`)).items)).toEqual(titles(nullsLast('dueOn', true).slice(0, 4)));
+  });
+
   test('a list searches by its text', async () => {
     const found = async (q: string) => titles((await walk(`/api/teams/${core.id}/issues?limit=5&q=${encodeURIComponent(q)}`)).items).sort();
     // Each word, in the title or the body, in any case.

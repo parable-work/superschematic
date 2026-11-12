@@ -17793,3 +17793,43 @@ Status: built. `TestTableOperationsDocumentThemselves`;
 summaries and whose endpoints the tools; `TestSchemaValidateChecksOperationMCP`;
 and `examples/tracker`, whose sixty-seven table operations carry no
 `@docs` and whose MCP endpoint lists their tools.
+
+## D112. A list sorts by a column that may be null, its nulls last in either direction (D60, D79, D106 amended)
+
+A tracker's list by due date is the list its users open most, and most
+issues have no due date. `SortBy` refused a `Nullable` field ("a page's
+order has no place for a null"), and both ORMs left a column that may be
+null out of their sort fields, because the keyset they share compares
+`(column, key)` as a row value with the row the page key names, and a row
+value that holds a null compares as unknown: the rows with no value fall
+out of every page after the first, and a key that lands on one reads
+nothing after it. D110 left it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A page orders a column that may be null with its nulls last, ascending and descending alike, and the rows that hold a null in key order among themselves, in the sort's direction. `sort=dueOn` reads the earliest date first, `sort=-dueOn` the latest, and each ends with the rows that have none. | The database's own order. Postgres puts a null after every value going up and before every value going down, so "latest first" would open with every undated issue, and SQLite does the reverse, so the statements both ORMs carry would read two orders. Nulls first, which makes the common list read worst. A `nulls` option on `SortBy`, a second thing to bind a cursor to, for a choice no list of the tracker wanted both ways. |
+| The page key stays the row's key alone (D60, amended), and the cursor is unchanged: `{"sort":"dueOn","key":{"id":...}}`. The keyset reads the key's row for its value, as it did, and now also for whether that value is null. | The value in the key, with a null marked. Every reader of a cursor, in three runtimes, and their parity vectors would change for a fact the row already holds, and a key that carries a value goes stale when the row changes, which D60 chose the key alone to avoid. |
+| `sqlutil.TableStatements` gains `PageAfterNulls` and `PageOrderNulls`, used for a column that may be null, and `PageAfter` and `PageOrder` stay as they were for one that may not. The keyset is `CASE (SELECT page_key.c IS NULL FROM t AS page_key WHERE page_key.id = $n) WHEN TRUE THEN t.c IS NULL AND t.id > $n WHEN FALSE THEN (t.c IS NULL OR (t.c, t.id) > ((SELECT page_key.c ...), $n)) END`, written from the two keysets there already were: after a null come the nulls past the key, and after a value come every null and the values past it. A key whose row is gone answers neither branch, so it places no row and is still `ErrPageKey`. The order is `ORDER BY t.c ASC NULLS LAST, t.id ASC`, with `DESC` both times going down. | One statement for every column. A column that is never null keeps a keyset Postgres seeks an index with, and a `CASE` is a condition on each row. `COALESCE` to a sentinel past every value, which needs one per type and is wrong for the value that equals it. A second query that reads the key's row first, a round trip per page. |
+| Both ORMs take the column's nullability from the table as sqlutil models it: the Go ORM's `<type>SortColumns` holds `nulls` beside each column's SQL, and the TypeScript runtime reads a sortable column that is not `required`. `sqlutil`'s `sortableColumn` no longer leaves out a column that may be null, so `updatedAt` sorts where it is `Nullable`, and so does a projection's column. Types written before this entry carry no such statement, and the TypeScript runtime says so by name instead of paging wrongly. | Sorting only the columns an API's `SortBy` names. The ORM's sort fields are the table's, whoever reads them. |
+| `SortBy` takes a `Nullable` field. `verify.checkSortFields` refuses a `Secret` field, a list, a map and a field that is no text, number or time, as before. An implementation that sorts its own rows reads the same order, so a list's pages mean one thing whoever serves them. | A warning on a hand-written list, which the loader cannot check the order of. |
+| The statements are SQL both Postgres and SQLite read: `NULLS LAST`, a row value and a searched `CASE`. The repositories run on Postgres alone (D79); `page.test.ts` fills the statements a table's types carry and runs them on SQLite, where a null orders before every value by default, and reads the same pages. | Leaving SQLite to the day a repository runs on it, with an order that would then differ silently. |
+
+Left: an index-served keyset over a column that may be null. The keyset
+is a condition on each row the order passes, so a deep page of a large
+table reads the rows before it; two seeks joined by `UNION ALL`, one over
+the values and one over the nulls, would seek, in both ORMs' page
+statements and their selections. A `nulls: "first"` option. A `@query`'s
+pages (D86), whose keyset is its own.
+
+Status: built. `TestTableStatementsOfALedger`, `TestTablesOfModelsALedger`
+and `TestViewsOfAProjection`; `TestSortVerifies`; `TestGenerateFindPage`
+and `TestSortableColumns`; on Postgres, the Go ORM's
+`TestGeneratedFindPageOnPostgres` and the TypeScript ORM's `page.test.ts`,
+each a walk by `updatedAt` a row at a time and by pages that end on a
+value, on a tie, on the last value before the nulls, on a null and on the
+last row, ascending and descending, with a filter and a search beside it
+and a key of no row refused; `page.test.ts` again on SQLite, through the
+statements; and over HTTP on both servers,
+`TestGeneratedTableOperationsEndToEnd` and
+`TestTableOperationsGoServerServesItsTables`, `fixture-tracker-api`'s
+`listIssues` by `dueOn` and `estimate`.

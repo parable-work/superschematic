@@ -125,7 +125,9 @@ export const roleTable: TableDefinition = {
     page: "SELECT %s FROM role%s%s LIMIT %d",
     pageAfterKey: "role.id %s %s",
     pageAfter: "(%s, role.id) %s ((SELECT %s FROM role AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM role AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", role.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM role WHERE role.id = $1)",
     insert: "INSERT INTO role (%s) VALUES (%s) RETURNING %s",
@@ -206,7 +208,7 @@ export interface SessionFilter {
 export type SessionOrderField = "id" | "tokenHash" | "createdAt" | "expiresAt" | "lastSeenAt" | "revokedAt";
 
 /** The members findPage orders rows of Session by (D60, amended); ties break by id. */
-export type SessionSortField = "id" | "tokenHash" | "createdAt" | "expiresAt";
+export type SessionSortField = "id" | "tokenHash" | "createdAt" | "expiresAt" | "lastSeenAt" | "revokedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type SessionUniqueKey = readonly ["id"] | readonly ["tokenHash"];
@@ -246,8 +248,8 @@ export const sessionTable: TableDefinition = {
     { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "\"session\".token_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
@@ -265,7 +267,9 @@ export const sessionTable: TableDefinition = {
     page: "SELECT %s FROM \"session\"%s%s LIMIT %d",
     pageAfterKey: "\"session\".id %s %s",
     pageAfter: "(%s, \"session\".id) %s ((SELECT %s FROM \"session\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"session\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"session\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"session\" WHERE \"session\".id = $1)",
     insert: "INSERT INTO \"session\" (%s) VALUES (%s) RETURNING %s",
@@ -393,7 +397,9 @@ export const userTable: TableDefinition = {
     page: "SELECT %s FROM \"user\"%s%s LIMIT %d",
     pageAfterKey: "\"user\".id %s %s",
     pageAfter: "(%s, \"user\".id) %s ((SELECT %s FROM \"user\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"user\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"user\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"user\" WHERE \"user\".id = $1)",
     insert: "INSERT INTO \"user\" (%s) VALUES (%s) RETURNING %s",
@@ -476,7 +482,7 @@ export interface UserCredentialFilter {
 export type UserCredentialOrderField = "id" | "passwordHash" | "passwordChangedAt" | "disabledAt" | "pendingAt";
 
 /** The members findPage orders rows of UserCredential by (D60, amended); ties break by id. */
-export type UserCredentialSortField = "id" | "passwordChangedAt";
+export type UserCredentialSortField = "id" | "passwordChangedAt" | "disabledAt" | "pendingAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserCredentialUniqueKey = readonly ["id"] | readonly ["user"];
@@ -515,8 +521,8 @@ export const userCredentialTable: TableDefinition = {
     { name: "userId", column: "user_id", field: "user", qualified: "user_credential.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "passwordHash", column: "password_hash", field: "passwordHash", qualified: "user_credential.password_hash", required: true, filter: ["eq", "in", "ilike", "isNull"] },
     { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
@@ -534,7 +540,9 @@ export const userCredentialTable: TableDefinition = {
     page: "SELECT %s FROM user_credential%s%s LIMIT %d",
     pageAfterKey: "user_credential.id %s %s",
     pageAfter: "(%s, user_credential.id) %s ((SELECT %s FROM user_credential AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM user_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", user_credential.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM user_credential WHERE user_credential.id = $1)",
     insert: "INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s",
@@ -661,7 +669,9 @@ export const userRoleGrantTable: TableDefinition = {
     page: "SELECT %s FROM user_role_grant%s%s LIMIT %d",
     pageAfterKey: "user_role_grant.id %s %s",
     pageAfter: "(%s, user_role_grant.id) %s ((SELECT %s FROM user_role_grant AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM user_role_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", user_role_grant.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM user_role_grant WHERE user_role_grant.id = $1)",
     insert: "INSERT INTO user_role_grant (%s) VALUES (%s) RETURNING %s",

@@ -147,7 +147,9 @@ export const coverTable: TableDefinition = {
     page: "SELECT %s FROM cover%s%s LIMIT %d",
     pageAfterKey: "cover.id %s %s",
     pageAfter: "(%s, cover.id) %s ((SELECT %s FROM cover AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM cover AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", cover.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM cover WHERE cover.id = $1)",
     insert: "INSERT INTO cover (%s) VALUES (%s) RETURNING %s",
@@ -298,7 +300,9 @@ export const ingredientTable: TableDefinition = {
     page: "SELECT %s FROM ingredient%s%s LIMIT %d",
     pageAfterKey: "ingredient.id %s %s",
     pageAfter: "(%s, ingredient.id) %s ((SELECT %s FROM ingredient AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM ingredient AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", ingredient.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM ingredient WHERE ingredient.id = $1)",
     insert: "INSERT INTO ingredient (%s) VALUES (%s) RETURNING %s",
@@ -383,7 +387,7 @@ export interface NoteFilter {
 export type NoteOrderField = "id" | "replyTo" | "body" | "entityKey" | "deletedOnRef" | "_version";
 
 /** The members findPage orders rows of Note by (D60, amended); ties break by id. */
-export type NoteSortField = "id" | "body" | "entityKey";
+export type NoteSortField = "id" | "replyTo" | "body" | "entityKey";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type NoteUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
@@ -421,7 +425,7 @@ export const noteTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "note.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "recipeId", column: "recipe_id", field: "recipe", qualified: "note.recipe_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
-    { name: "replyTo", column: "reply_to", field: "replyTo", qualified: "note.reply_to", uuid: true, filter: ["eq", "in", "isNull"] },
+    { name: "replyTo", column: "reply_to", field: "replyTo", qualified: "note.reply_to", uuid: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "body", column: "body", field: "body", qualified: "note.body", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "note.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "note.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
@@ -444,7 +448,9 @@ export const noteTable: TableDefinition = {
     page: "SELECT %s FROM note%s%s LIMIT %d",
     pageAfterKey: "note.id %s %s",
     pageAfter: "(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM note AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", note.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM note WHERE note.id = $1)",
     insert: "INSERT INTO note (%s) VALUES (%s) RETURNING %s",
@@ -589,7 +595,9 @@ export const recipeTable: TableDefinition = {
     page: "SELECT %s FROM recipe%s%s LIMIT %d",
     pageAfterKey: "recipe.id %s %s",
     pageAfter: "(%s, recipe.id) %s ((SELECT %s FROM recipe AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM recipe AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", recipe.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM recipe WHERE recipe.id = $1)",
     insert: "INSERT INTO recipe (%s) VALUES (%s) RETURNING %s",
@@ -711,7 +719,7 @@ export interface RecipeCommitFilter {
 export type RecipeCommitOrderField = "id" | "message" | "schemaEpoch" | "contentHash" | "sequence" | "createdAt" | "createdBy";
 
 /** The members findPage orders rows of RecipeCommit by (D60, amended); ties break by id. */
-export type RecipeCommitSortField = "id" | "schemaEpoch" | "contentHash" | "createdAt";
+export type RecipeCommitSortField = "id" | "message" | "schemaEpoch" | "contentHash" | "sequence" | "createdAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeCommitUniqueKey = readonly ["id"] | readonly ["root", "sequence"];
@@ -758,10 +766,10 @@ export const recipeCommitTable: TableDefinition = {
     { name: "rootId", column: "root_id", field: "root", qualified: "recipe_commit.root_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
     { name: "refId", column: "ref_id", field: "ref", qualified: "recipe_commit.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
     { name: "parentCommitId", column: "parent_commit_id", field: "parentCommit", qualified: "recipe_commit.parent_commit_id", uuid: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
-    { name: "message", column: "message", field: "message", qualified: "recipe_commit.message", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "message", column: "message", field: "message", qualified: "recipe_commit.message", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "schemaEpoch", column: "schema_epoch", field: "schemaEpoch", qualified: "recipe_commit.schema_epoch", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "contentHash", column: "content_hash", field: "contentHash", qualified: "recipe_commit.content_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "sequence", column: "\"sequence\"", field: "sequence", qualified: "recipe_commit.\"sequence\"", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "sequence", column: "\"sequence\"", field: "sequence", qualified: "recipe_commit.\"sequence\"", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_commit.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_commit.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
   ],
@@ -781,7 +789,9 @@ export const recipeCommitTable: TableDefinition = {
     page: "SELECT %s FROM recipe_commit%s%s LIMIT %d",
     pageAfterKey: "recipe_commit.id %s %s",
     pageAfter: "(%s, recipe_commit.id) %s ((SELECT %s FROM recipe_commit AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM recipe_commit AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", recipe_commit.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM recipe_commit WHERE recipe_commit.id = $1)",
     insert: "INSERT INTO recipe_commit (%s) VALUES (%s) RETURNING %s",
@@ -938,7 +948,9 @@ export const recipePatchTable: TableDefinition = {
     page: "SELECT %s FROM recipe_patch%s%s LIMIT %d",
     pageAfterKey: "recipe_patch.id %s %s",
     pageAfter: "(%s, recipe_patch.id) %s ((SELECT %s FROM recipe_patch AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM recipe_patch AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", recipe_patch.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM recipe_patch WHERE recipe_patch.id = $1)",
     insert: "INSERT INTO recipe_patch (%s) VALUES (%s) RETURNING %s",
@@ -1054,7 +1066,7 @@ export interface RecipeRefFilter {
 export type RecipeRefOrderField = "id" | "name" | "sealedAt" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "deletedAt" | "deletedBy" | "_version";
 
 /** The members findPage orders rows of RecipeRef by (D60, amended); ties break by id. */
-export type RecipeRefSortField = "id" | "name" | "createdAt" | "updatedAt";
+export type RecipeRefSortField = "id" | "name" | "sealedAt" | "createdAt" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeRefUniqueKey = readonly ["id"] | readonly ["root", "name"];
@@ -1106,7 +1118,7 @@ export const recipeRefTable: TableDefinition = {
     { name: "baseCommitId", column: "base_commit_id", field: "baseCommit", qualified: "recipe_ref.base_commit_id", uuid: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
     { name: "headCommitId", column: "head_commit_id", field: "headCommit", qualified: "recipe_ref.head_commit_id", uuid: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
     { name: "name", column: "\"name\"", field: "name", qualified: "recipe_ref.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "sealedAt", column: "sealed_at", field: "sealedAt", qualified: "recipe_ref.sealed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "sealedAt", column: "sealed_at", field: "sealedAt", qualified: "recipe_ref.sealed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_ref.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_ref.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_ref.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
@@ -1131,7 +1143,9 @@ export const recipeRefTable: TableDefinition = {
     page: "SELECT %s FROM recipe_ref%s%s LIMIT %d",
     pageAfterKey: "recipe_ref.id %s %s",
     pageAfter: "(%s, recipe_ref.id) %s ((SELECT %s FROM recipe_ref AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM recipe_ref AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", recipe_ref.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM recipe_ref WHERE recipe_ref.id = $1)",
     insert: "INSERT INTO recipe_ref (%s) VALUES (%s) RETURNING %s",
@@ -1295,7 +1309,9 @@ export const recipeReleaseTable: TableDefinition = {
     page: "SELECT %s FROM recipe_release%s%s LIMIT %d",
     pageAfterKey: "recipe_release.id %s %s",
     pageAfter: "(%s, recipe_release.id) %s ((SELECT %s FROM recipe_release AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM recipe_release AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", recipe_release.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM recipe_release WHERE recipe_release.id = $1)",
     insert: "INSERT INTO recipe_release (%s) VALUES (%s) RETURNING %s",
@@ -1431,7 +1447,9 @@ export const recipeSnapshotEntryTable: TableDefinition = {
     page: "SELECT %s FROM recipe_snapshot_entry%s%s LIMIT %d",
     pageAfterKey: "recipe_snapshot_entry.id %s %s",
     pageAfter: "(%s, recipe_snapshot_entry.id) %s ((SELECT %s FROM recipe_snapshot_entry AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM recipe_snapshot_entry AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", recipe_snapshot_entry.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM recipe_snapshot_entry WHERE recipe_snapshot_entry.id = $1)",
     insert: "INSERT INTO recipe_snapshot_entry (%s) VALUES (%s) RETURNING %s",
@@ -1533,7 +1551,7 @@ export interface StepFilter {
 export type StepOrderField = "id" | "position" | "instruction" | "timings" | "scratch" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "entityKey" | "deletedOnRef" | "_version";
 
 /** The members findPage orders rows of Step by (D60, amended); ties break by id. */
-export type StepSortField = "id" | "position" | "instruction" | "createdAt" | "updatedAt" | "entityKey";
+export type StepSortField = "id" | "position" | "instruction" | "scratch" | "createdAt" | "updatedAt" | "entityKey";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type StepUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
@@ -1574,7 +1592,7 @@ export const stepTable: TableDefinition = {
     { name: "position", column: "position", field: "position", qualified: "step.position", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "instruction", column: "instruction", field: "instruction", qualified: "step.instruction", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "timings", column: "timings", field: "timings", qualified: "step.timings", json: true, required: true, filter: ["eq", "in", "isNull"] },
-    { name: "scratch", column: "scratch", field: "scratch", qualified: "step.scratch", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "scratch", column: "scratch", field: "scratch", qualified: "step.scratch", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "step.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "step.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "step.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
@@ -1600,7 +1618,9 @@ export const stepTable: TableDefinition = {
     page: "SELECT %s FROM step%s%s LIMIT %d",
     pageAfterKey: "step.id %s %s",
     pageAfter: "(%s, step.id) %s ((SELECT %s FROM step AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM step AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", step.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM step WHERE step.id = $1)",
     insert: "INSERT INTO step (%s) VALUES (%s) RETURNING %s",
@@ -1800,7 +1820,9 @@ export const tastingTable: TableDefinition = {
     page: "SELECT %s FROM tasting%s%s LIMIT %d",
     pageAfterKey: "tasting.id %s %s",
     pageAfter: "(%s, tasting.id) %s ((SELECT %s FROM tasting AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM tasting AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", tasting.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM tasting WHERE tasting.id = $1)",
     insert: "INSERT INTO tasting (%s) VALUES (%s) RETURNING %s",
@@ -1942,7 +1964,9 @@ export const utensilTable: TableDefinition = {
     page: "SELECT %s FROM utensil%s%s LIMIT %d",
     pageAfterKey: "utensil.id %s %s",
     pageAfter: "(%s, utensil.id) %s ((SELECT %s FROM utensil AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM utensil AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", utensil.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM utensil WHERE utensil.id = $1)",
     insert: "INSERT INTO utensil (%s) VALUES (%s) RETURNING %s",

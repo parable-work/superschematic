@@ -350,11 +350,15 @@ type AccountFindOptions struct {
 type AccountSortField string
 
 const (
-	AccountSortById     AccountSortField = "id"
-	AccountSortByOwner  AccountSortField = "owner"
-	AccountSortByName   AccountSortField = "name"
-	AccountSortByVendor AccountSortField = "vendor"
-	AccountSortByRank   AccountSortField = "rank"
+	AccountSortById               AccountSortField = "id"
+	AccountSortByOwner            AccountSortField = "owner"
+	AccountSortByName             AccountSortField = "name"
+	AccountSortByVendor           AccountSortField = "vendor"
+	AccountSortByRank             AccountSortField = "rank"
+	AccountSortByPoolAvailability AccountSortField = "poolAvailability"
+	AccountSortByPoolOutUntil     AccountSortField = "poolOutUntil"
+	AccountSortByPoolOutReason    AccountSortField = "poolOutReason"
+	AccountSortByPoolCheckedAt    AccountSortField = "poolCheckedAt"
 )
 
 // AccountSort is the order FindPage reads Account rows in: Field,
@@ -370,10 +374,10 @@ type AccountSort struct {
 func ParseAccountSort(text string) (AccountSort, error) {
 	parsed := AccountSort{Field: AccountSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case AccountSortById, AccountSortByOwner, AccountSortByName, AccountSortByVendor, AccountSortByRank:
+	case AccountSortById, AccountSortByOwner, AccountSortByName, AccountSortByVendor, AccountSortByRank, AccountSortByPoolAvailability, AccountSortByPoolOutUntil, AccountSortByPoolOutReason, AccountSortByPoolCheckedAt:
 		return parsed, nil
 	}
-	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, owner, name, vendor and rank, not %q", text)
+	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, owner, name, vendor, rank, poolAvailability, poolOutUntil, poolOutReason and poolCheckedAt, not %q", text)
 }
 
 // AccountUniqueKey names a unique key of Account that UpsertOne and

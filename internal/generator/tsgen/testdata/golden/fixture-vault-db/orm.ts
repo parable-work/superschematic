@@ -72,7 +72,7 @@ export interface ApiCredentialFilter {
 export type ApiCredentialOrderField = "id" | "service" | "rotatedAt";
 
 /** The members findPage orders rows of ApiCredential by (D60, amended); ties break by id. */
-export type ApiCredentialSortField = "id" | "service";
+export type ApiCredentialSortField = "id" | "service" | "rotatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ApiCredentialUniqueKey = readonly ["id"] | readonly ["service"];
@@ -109,7 +109,7 @@ export const apiCredentialTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "api_credential.id", uuid: true, key: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "service", column: "service", field: "service", qualified: "api_credential.service", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "secret", column: "secret", field: "secret", qualified: "api_credential.secret", required: true, encrypted: true },
-    { name: "rotatedAt", column: "rotated_at", field: "rotatedAt", qualified: "api_credential.rotated_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "rotatedAt", column: "rotated_at", field: "rotatedAt", qualified: "api_credential.rotated_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"service\", \"secret\", \"rotated_at\"",
@@ -127,7 +127,9 @@ export const apiCredentialTable: TableDefinition = {
     page: "SELECT %s FROM api_credential%s%s LIMIT %d",
     pageAfterKey: "api_credential.id %s %s",
     pageAfter: "(%s, api_credential.id) %s ((SELECT %s FROM api_credential AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM api_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", api_credential.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM api_credential WHERE api_credential.id = $1)",
     insert: "INSERT INTO api_credential (%s) VALUES (%s) RETURNING %s",
@@ -260,7 +262,9 @@ export const plaidItemTable: TableDefinition = {
     page: "SELECT %s FROM plaid_item%s%s LIMIT %d",
     pageAfterKey: "plaid_item.id %s %s",
     pageAfter: "(%s, plaid_item.id) %s ((SELECT %s FROM plaid_item AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM plaid_item AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", plaid_item.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM plaid_item WHERE plaid_item.id = $1)",
     insert: "INSERT INTO plaid_item (%s) VALUES (%s) RETURNING %s",

@@ -510,8 +510,10 @@ type CategoryFindOptions struct {
 type CategorySortField string
 
 const (
-	CategorySortById   CategorySortField = "id"
-	CategorySortByName CategorySortField = "name"
+	CategorySortById          CategorySortField = "id"
+	CategorySortByName        CategorySortField = "name"
+	CategorySortByBudget      CategorySortField = "budget"
+	CategorySortByBudgetSince CategorySortField = "budgetSince"
 )
 
 // CategorySort is the order FindPage reads Category rows in: Field,
@@ -527,10 +529,10 @@ type CategorySort struct {
 func ParseCategorySort(text string) (CategorySort, error) {
 	parsed := CategorySort{Field: CategorySortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case CategorySortById, CategorySortByName:
+	case CategorySortById, CategorySortByName, CategorySortByBudget, CategorySortByBudgetSince:
 		return parsed, nil
 	}
-	return CategorySort{}, fmt.Errorf("orm: Category sorts by id and name, not %q", text)
+	return CategorySort{}, fmt.Errorf("orm: Category sorts by id, name, budget and budgetSince, not %q", text)
 }
 
 // CategoryUniqueKey names a unique key of Category that UpsertOne and
@@ -908,7 +910,8 @@ type TransferGroupFindOptions struct {
 type TransferGroupSortField string
 
 const (
-	TransferGroupSortById TransferGroupSortField = "id"
+	TransferGroupSortById   TransferGroupSortField = "id"
+	TransferGroupSortByNote TransferGroupSortField = "note"
 )
 
 // TransferGroupSort is the order FindPage reads TransferGroup rows in: Field,
@@ -919,15 +922,15 @@ type TransferGroupSort struct {
 	Desc  bool
 }
 
-// ParseTransferGroupSort reads a sort as a page request writes it, "id" or
-// "-id": an error for a field TransferGroup cannot be sorted by.
+// ParseTransferGroupSort reads a sort as a page request writes it, "note" or
+// "-note": an error for a field TransferGroup cannot be sorted by.
 func ParseTransferGroupSort(text string) (TransferGroupSort, error) {
 	parsed := TransferGroupSort{Field: TransferGroupSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TransferGroupSortById:
+	case TransferGroupSortById, TransferGroupSortByNote:
 		return parsed, nil
 	}
-	return TransferGroupSort{}, fmt.Errorf("orm: TransferGroup sorts by id, not %q", text)
+	return TransferGroupSort{}, fmt.Errorf("orm: TransferGroup sorts by id and note, not %q", text)
 }
 
 // TransferGroupUniqueKey names a unique key of TransferGroup that UpsertOne and

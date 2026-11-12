@@ -196,7 +196,8 @@ export class Members extends Authenticated {
 
 export class Issues extends Authenticated {
   // A team's issues, newest first unless the caller sorts them, searched
-  // by their text and filtered by their fields.
+  // by their text and filtered by their fields. An issue with no due date
+  // or no estimate comes last in a sort by either, in either direction.
   @rest(HttpMethod.GET, "teams/{teamId}/issues")
   @requirePermission(["issues.read"])
   @paginated({ defaultLimit: 2, maxLimit: 5, defaultSort: "-createdAt" })
@@ -204,7 +205,7 @@ export class Issues extends Authenticated {
   listIssues(
     teamId: Identity.UUID,
     q: SearchQuery<Validate<string, { maxLength: 100 }>>,
-    sort: SortBy<IssueView, ["createdAt", "priority", "title"]>,
+    sort: SortBy<IssueView, ["createdAt", "priority", "title", "dueOn", "estimate"]>,
     filter: FilterBy<IssueView, ["status", "priority", "title", "estimate", "dueOn", "assigneeId", "createdAt", "createdBy"]>
   ): IssueView[] {
     throw new Error("schema declaration only");

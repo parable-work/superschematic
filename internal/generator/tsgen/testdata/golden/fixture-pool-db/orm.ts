@@ -131,7 +131,7 @@ export interface AccountFilter {
 export type AccountOrderField = "id" | "owner" | "name" | "vendor" | "kind" | "rank" | "poolAvailability" | "poolOutUntil" | "poolOutReason" | "poolCheckedAt" | "_version";
 
 /** The members findPage orders rows of Account by (D60, amended); ties break by id. */
-export type AccountSortField = "id" | "owner" | "name" | "vendor" | "rank";
+export type AccountSortField = "id" | "owner" | "name" | "vendor" | "rank" | "poolAvailability" | "poolOutUntil" | "poolOutReason" | "poolCheckedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type AccountUniqueKey = readonly ["id"];
@@ -317,10 +317,10 @@ export const accountTable: TableDefinition = {
     { name: "vendor", column: "vendor", field: "vendor", qualified: "account.vendor", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "kind", column: "kind", field: "kind", qualified: "account.kind", required: true, filter: ["eq", "in", "ilike", "isNull"] },
     { name: "rank", column: "rank", field: "rank", qualified: "account.rank", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "poolAvailability", column: "pool_availability", field: "poolAvailability", qualified: "account.pool_availability", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "poolOutUntil", column: "pool_out_until", field: "poolOutUntil", qualified: "account.pool_out_until", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "poolOutReason", column: "pool_out_reason", field: "poolOutReason", qualified: "account.pool_out_reason", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "poolCheckedAt", column: "pool_checked_at", field: "poolCheckedAt", qualified: "account.pool_checked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "poolAvailability", column: "pool_availability", field: "poolAvailability", qualified: "account.pool_availability", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "poolOutUntil", column: "pool_out_until", field: "poolOutUntil", qualified: "account.pool_out_until", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "poolOutReason", column: "pool_out_reason", field: "poolOutReason", qualified: "account.pool_out_reason", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "poolCheckedAt", column: "pool_checked_at", field: "poolCheckedAt", qualified: "account.pool_checked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "_version", column: "_version", field: "_version", qualified: "account._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -339,7 +339,9 @@ export const accountTable: TableDefinition = {
     page: "SELECT %s FROM account%s%s LIMIT %d",
     pageAfterKey: "account.id %s %s",
     pageAfter: "(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", account.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM account WHERE account.id = $1)",
     insert: "INSERT INTO account (%s) VALUES (%s) RETURNING %s",

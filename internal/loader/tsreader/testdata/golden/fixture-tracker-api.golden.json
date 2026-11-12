@@ -798,7 +798,7 @@
       "operations": [
         {
           "name": "listIssues",
-          "comment": "A team's issues, newest first unless the caller sorts them, searched\nby their text and filtered by their fields.",
+          "comment": "A team's issues, newest first unless the caller sorts them, searched\nby their text and filtered by their fields. An issue with no due date\nor no estimate comes last in a sort by either, in either direction.",
           "typeRef": {
             "name": "IssueView",
             "isArray": true
@@ -830,7 +830,9 @@
               "sort": [
                 "createdAt",
                 "priority",
-                "title"
+                "title",
+                "dueOn",
+                "estimate"
               ]
             }
           ],

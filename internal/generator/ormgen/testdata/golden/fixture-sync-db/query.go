@@ -562,13 +562,14 @@ type LineItemFindOptions struct {
 type LineItemSortField string
 
 const (
-	LineItemSortById        LineItemSortField = "id"
-	LineItemSortByReference LineItemSortField = "reference"
-	LineItemSortByName      LineItemSortField = "name"
-	LineItemSortByAmount    LineItemSortField = "amount"
-	LineItemSortByPostedAt  LineItemSortField = "postedAt"
-	LineItemSortByCreatedAt LineItemSortField = "createdAt"
-	LineItemSortByUpdatedAt LineItemSortField = "updatedAt"
+	LineItemSortById                 LineItemSortField = "id"
+	LineItemSortByPlaidTransactionId LineItemSortField = "plaidTransactionId"
+	LineItemSortByReference          LineItemSortField = "reference"
+	LineItemSortByName               LineItemSortField = "name"
+	LineItemSortByAmount             LineItemSortField = "amount"
+	LineItemSortByPostedAt           LineItemSortField = "postedAt"
+	LineItemSortByCreatedAt          LineItemSortField = "createdAt"
+	LineItemSortByUpdatedAt          LineItemSortField = "updatedAt"
 )
 
 // LineItemSort is the order FindPage reads LineItem rows in: Field,
@@ -579,15 +580,15 @@ type LineItemSort struct {
 	Desc  bool
 }
 
-// ParseLineItemSort reads a sort as a page request writes it, "reference" or
-// "-reference": an error for a field LineItem cannot be sorted by.
+// ParseLineItemSort reads a sort as a page request writes it, "plaidTransactionId" or
+// "-plaidTransactionId": an error for a field LineItem cannot be sorted by.
 func ParseLineItemSort(text string) (LineItemSort, error) {
 	parsed := LineItemSort{Field: LineItemSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case LineItemSortById, LineItemSortByReference, LineItemSortByName, LineItemSortByAmount, LineItemSortByPostedAt, LineItemSortByCreatedAt, LineItemSortByUpdatedAt:
+	case LineItemSortById, LineItemSortByPlaidTransactionId, LineItemSortByReference, LineItemSortByName, LineItemSortByAmount, LineItemSortByPostedAt, LineItemSortByCreatedAt, LineItemSortByUpdatedAt:
 		return parsed, nil
 	}
-	return LineItemSort{}, fmt.Errorf("orm: LineItem sorts by id, reference, name, amount, postedAt, createdAt and updatedAt, not %q", text)
+	return LineItemSort{}, fmt.Errorf("orm: LineItem sorts by id, plaidTransactionId, reference, name, amount, postedAt, createdAt and updatedAt, not %q", text)
 }
 
 // LineItemUniqueKey names a unique key of LineItem that UpsertOne and

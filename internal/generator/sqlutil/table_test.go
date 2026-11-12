@@ -70,7 +70,9 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	for _, c := range entry.SortColumns() {
 		sorts = append(sorts, c.Field)
 	}
-	if want := "id amountCents bookedOn createdAt updatedAt"; strings.Join(sorts, " ") != want {
+	// memo, externalId and reviewedAt may be null, and sort all the same,
+	// their nulls last (D112).
+	if want := "id amountCents bookedOn memo externalId reviewedAt createdAt updatedAt"; strings.Join(sorts, " ") != want {
 		t.Errorf("Entry sorts by %s, want %s", strings.Join(sorts, " "), want)
 	}
 	if key := entry.UniqueKeyNamed("account,externalId"); key == nil || key.Conflict != "(account_id, external_id) WHERE deleted_at IS NULL" || key.Keep != "account_id = entry.account_id" {
@@ -103,6 +105,9 @@ func TestTableStatementsOfALedger(t *testing.T) {
 		"liveCondition":  "entry.deleted_at IS NULL",
 		"findMany":       "SELECT %s FROM entry%s%s%s",
 		"pageAfter":      "(%s, entry.id) %s ((SELECT %s FROM entry AS page_key WHERE page_key.id = %s), %s)",
+		"pageAfterNulls": "CASE (SELECT %s IS NULL FROM entry AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+		"pageOrder":      " ORDER BY %s %s",
+		"pageOrderNulls": " ORDER BY %s %s NULLS LAST",
 		"insertMany":     "INSERT INTO entry (%s) VALUES %s RETURNING %s",
 		"softDelete":     "UPDATE entry SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
 		"softDeleteMany": "UPDATE entry SET deleted_at = $1, deleted_by = $2%s",

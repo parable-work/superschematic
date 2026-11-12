@@ -399,11 +399,19 @@ var SandboxQuotedFields = map[string]string{
 // sandboxSortColumns are the columns of Sandbox's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var sandboxSortColumns = map[SandboxSortField]struct{ sql, key string }{
-	SandboxSortById:     {`sandbox.id`, `page_key.id`},
-	SandboxSortByName:   {`sandbox."name"`, `page_key."name"`},
-	SandboxSortByStatus: {`sandbox.status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var sandboxSortColumns = map[SandboxSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	SandboxSortById:                   {`sandbox.id`, `page_key.id`, false},
+	SandboxSortByName:                 {`sandbox."name"`, `page_key."name"`, false},
+	SandboxSortByStatus:               {`sandbox.status`, `page_key.status`, false},
+	SandboxSortByStatusEnteredAt:      {`sandbox.status_entered_at`, `page_key.status_entered_at`, true},
+	SandboxSortByObserved:             {`sandbox.observed`, `page_key.observed`, true},
+	SandboxSortByObservedObservedAt:   {`sandbox.observed_observed_at`, `page_key.observed_observed_at`, true},
+	SandboxSortByObservedReconciledAt: {`sandbox.observed_reconciled_at`, `page_key.observed_reconciled_at`, true},
 }
 
 // buildSandboxOrderByClause builds an ORDER BY clause for Sandbox.
@@ -1239,7 +1247,7 @@ func (r *SandboxRepository) FindPage(ctx context.Context, filter *SandboxFilter,
 	}
 	column, ok := sandboxSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Sandbox sorts by id, name and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Sandbox sorts by id, name, status, statusEnteredAt, observed, observedObservedAt and observedReconciledAt, not %q", string(field))
 	}
 	byKey := field == SandboxSortById
 
@@ -1269,14 +1277,23 @@ func (r *SandboxRepository) FindPage(ctx context.Context, filter *SandboxFilter,
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`sandbox.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`sandbox.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, sandbox.id) %s ((SELECT %s FROM sandbox AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, sandbox.id) %s ((SELECT %s FROM sandbox AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM sandbox AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1284,6 +1301,9 @@ func (r *SandboxRepository) FindPage(ctx context.Context, filter *SandboxFilter,
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, sandbox.id %s`, direction)
 	}

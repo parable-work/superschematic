@@ -18,10 +18,13 @@ import (
 // out of every page and kept with IncludeDeleted, and its key still places
 // a page; a page hydrates a hasMany relation as FindMany does, and reads in
 // a transaction. A key is the row's id alone: its row gives its value in
-// any order, a row the filter no longer finds among them. A key without an
-// id, or whose row no longer exists in an order by a sort field, is
-// ErrPageKey, and a sort field the table has no column for is refused
-// before any SQL runs.
+// any order, a row the filter no longer finds among them. A column that
+// may be null orders its nulls last in either direction (D112), in id
+// order among themselves: a walk a row at a time ends a page on a value,
+// on a tie, on the last value before the nulls, on a null and on the last
+// row, and drops and repeats none. A key without an id, or whose row no
+// longer exists in an order by a sort field, is ErrPageKey, and a sort
+// field the table has no column for is refused before any SQL runs.
 func TestGeneratedFindPageOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -144,6 +147,7 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	}
 	text := func(s string) *string { return &s }
 	number := func(n float64) *float64 { return &n }
+	boolean := func(b bool) *bool { return &b }
 	names := func(rows []*types.Tenant) string {
 		got := make([]string, 0, len(rows))
 		for _, row := range rows {
@@ -217,6 +221,44 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 		}
 	}
 
+	// updatedAt may be null (D112). Chisel was updated last, Easel and
+	// Bellows at one time before it, and Anvil and Drill never: the two
+	// that tie read in id order, Easel's 1 before Bellows' 4, and the two
+	// that hold a null come last, Drill's 2 before Anvil's 3, each pair
+	// turned round in a descending order, where the nulls are still last.
+	for name, at := range map[string]time.Time{"Chisel": created(12), "Easel": created(11), "Bellows": created(11)} {
+		if _, err := pool.Exec(ctx, "UPDATE tenant SET updated_at = $1 WHERE name = $2", at, name); err != nil {
+			t.Fatalf("update %s: %v", name, err)
+		}
+	}
+	updated := &TenantFilter{UpdatedAt: &DateTimeFilter{IsNull: boolean(false)}}
+	never := &TenantFilter{UpdatedAt: &DateTimeFilter{IsNull: boolean(true)}}
+	for _, tc := range []struct {
+		name   string
+		filter *TenantFilter
+		sort   string
+		limit  int
+		want   string
+	}{
+		{"by updatedAt, a row at a time", nil, "updatedAt", 1, "[Easel] [Bellows] [Chisel] [Drill] [Anvil]"},
+		{"by updatedAt", nil, "updatedAt", 2, "[Easel Bellows] [Chisel Drill] [Anvil]"},
+		{"by updatedAt, a page that ends on the last value", nil, "updatedAt", 3, "[Easel Bellows Chisel] [Drill Anvil]"},
+		{"by updatedAt, a page that ends on a null", nil, "updatedAt", 4, "[Easel Bellows Chisel Drill] [Anvil]"},
+		{"by updatedAt, every row", nil, "updatedAt", 5, "[Easel Bellows Chisel Drill Anvil]"},
+		{"by updatedAt, descending, a row at a time", nil, "-updatedAt", 1, "[Chisel] [Bellows] [Easel] [Anvil] [Drill]"},
+		{"by updatedAt, descending", nil, "-updatedAt", 2, "[Chisel Bellows] [Easel Anvil] [Drill]"},
+		{"by updatedAt, descending, a page that ends on the last value", nil, "-updatedAt", 3, "[Chisel Bellows Easel] [Anvil Drill]"},
+		{"by updatedAt, descending, a page that ends on a null", nil, "-updatedAt", 4, "[Chisel Bellows Easel Anvil] [Drill]"},
+		{"the rows that hold a value", updated, "-updatedAt", 1, "[Chisel] [Bellows] [Easel]"},
+		{"the rows that hold none", never, "updatedAt", 1, "[Drill] [Anvil]"},
+		{"the rows that hold none, descending", never, "-updatedAt", 1, "[Anvil] [Drill]"},
+		{"a search beside the nulls", &TenantFilter{SearchText: text("l")}, "-updatedAt", 1, "[Chisel] [Bellows] [Easel] [Anvil] [Drill]"},
+	} {
+		if got := walk(tc.filter, tc.sort, tc.limit); got != tc.want {
+			t.Errorf("%s: pages %s, want %s", tc.name, got, tc.want)
+		}
+	}
+
 	// A key is the row's id alone, under its schema name, in every order.
 	first, err := db.Tenant.FindPage(ctx, nil, &TenantPageOptions{Fields: TenantFields{}.All(), Sort: TenantSort{Field: TenantSortByName}, Limit: 2})
 	if err != nil {
@@ -256,6 +298,8 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	}{
 		{"by seatCount, descending", TenantSort{Field: TenantSortBySeatCount, Desc: true}, "Chisel Anvil Drill Easel"},
 		{"by createdAt", TenantSort{Field: TenantSortByCreatedAt}, "Anvil"},
+		{"by updatedAt, after Bellows' value", TenantSort{Field: TenantSortByUpdatedAt}, "Chisel Drill Anvil"},
+		{"by updatedAt, descending", TenantSort{Field: TenantSortByUpdatedAt, Desc: true}, "Easel Anvil Drill"},
 		{"by id", TenantSort{}, "Chisel"},
 	} {
 		if got, err := pageAfter(nil, tc.sort, first.Next); err != nil || got != tc.want {
@@ -301,6 +345,8 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 		{"a key of no row, by name", nil, TenantSort{Field: TenantSortByName}, &gone},
 		{"a key of no row, by seatCount, descending", nil, TenantSort{Field: TenantSortBySeatCount, Desc: true}, &gone},
 		{"a key of no row, with a filter", fiveSeats, TenantSort{Field: TenantSortByCreatedAt}, &gone},
+		{"a key of no row, by a column that may be null", nil, TenantSort{Field: TenantSortByUpdatedAt}, &gone},
+		{"a key of no row, by a column that may be null, descending", never, TenantSort{Field: TenantSortByUpdatedAt, Desc: true}, &gone},
 	} {
 		if _, err := pageAfter(tc.filter, tc.sort, tc.key); !errors.Is(err, ErrPageKey) {
 			t.Errorf("%s: FindPage = %v, want ErrPageKey", tc.name, err)
@@ -319,7 +365,7 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	// before a query runs, and the table is as it was.
 	for _, field := range []TenantSortField{"status", "is_active", "name; DROP TABLE tenant; --"} {
 		_, err := db.Tenant.FindPage(ctx, nil, &TenantPageOptions{Fields: TenantFields{Name: true}, Sort: TenantSort{Field: field}})
-		if err == nil || errors.Is(err, ErrPageKey) || !strings.Contains(err.Error(), "Tenant sorts by id, createdAt, name, slug, email and seatCount") {
+		if err == nil || errors.Is(err, ErrPageKey) || !strings.Contains(err.Error(), "Tenant sorts by id, createdAt, updatedAt, name, slug, email and seatCount") {
 			t.Errorf("FindPage by %q = %v, want the refusal that lists Tenant's sort fields", field, err)
 		}
 	}
@@ -339,10 +385,10 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	if got, err := ParseTenantSort("id"); err != nil || got != (TenantSort{Field: TenantSortById}) {
 		t.Errorf("ParseTenantSort(id) = %+v, %v", got, err)
 	}
-	for _, refused := range []string{"status", "isActive", "metadata", "updatedAt", "", "-", "--name", "Name", "seat_count"} {
+	for _, refused := range []string{"status", "isActive", "metadata", "", "-", "--name", "Name", "seat_count"} {
 		if got, err := ParseTenantSort(refused); err == nil || got != (TenantSort{}) {
 			t.Errorf("ParseTenantSort(%q) = %+v, %v; want an error", refused, got, err)
-		} else if want := fmt.Sprintf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", refused); err.Error() != want {
+		} else if want := fmt.Sprintf("orm: Tenant sorts by id, createdAt, updatedAt, name, slug, email and seatCount, not %q", refused); err.Error() != want {
 			t.Errorf("ParseTenantSort(%q) = %q, want %q", refused, err, want)
 		}
 	}

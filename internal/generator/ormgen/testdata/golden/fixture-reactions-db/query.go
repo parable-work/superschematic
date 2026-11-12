@@ -308,9 +308,10 @@ type ProjectFindOptions struct {
 type ProjectSortField string
 
 const (
-	ProjectSortById     ProjectSortField = "id"
-	ProjectSortByName   ProjectSortField = "name"
-	ProjectSortByStatus ProjectSortField = "status"
+	ProjectSortById              ProjectSortField = "id"
+	ProjectSortByName            ProjectSortField = "name"
+	ProjectSortByStatus          ProjectSortField = "status"
+	ProjectSortByStatusEnteredAt ProjectSortField = "statusEnteredAt"
 )
 
 // ProjectSort is the order FindPage reads Project rows in: Field,
@@ -326,10 +327,10 @@ type ProjectSort struct {
 func ParseProjectSort(text string) (ProjectSort, error) {
 	parsed := ProjectSort{Field: ProjectSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case ProjectSortById, ProjectSortByName, ProjectSortByStatus:
+	case ProjectSortById, ProjectSortByName, ProjectSortByStatus, ProjectSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return ProjectSort{}, fmt.Errorf("orm: Project sorts by id, name and status, not %q", text)
+	return ProjectSort{}, fmt.Errorf("orm: Project sorts by id, name, status and statusEnteredAt, not %q", text)
 }
 
 // ProjectUniqueKey names a unique key of Project that UpsertOne and
@@ -522,9 +523,11 @@ type TaskFindOptions struct {
 type TaskSortField string
 
 const (
-	TaskSortById     TaskSortField = "id"
-	TaskSortByTitle  TaskSortField = "title"
-	TaskSortByStatus TaskSortField = "status"
+	TaskSortById              TaskSortField = "id"
+	TaskSortByTitle           TaskSortField = "title"
+	TaskSortByPriority        TaskSortField = "priority"
+	TaskSortByStatus          TaskSortField = "status"
+	TaskSortByStatusEnteredAt TaskSortField = "statusEnteredAt"
 )
 
 // TaskSort is the order FindPage reads Task rows in: Field,
@@ -540,10 +543,10 @@ type TaskSort struct {
 func ParseTaskSort(text string) (TaskSort, error) {
 	parsed := TaskSort{Field: TaskSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TaskSortById, TaskSortByTitle, TaskSortByStatus:
+	case TaskSortById, TaskSortByTitle, TaskSortByPriority, TaskSortByStatus, TaskSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return TaskSort{}, fmt.Errorf("orm: Task sorts by id, title and status, not %q", text)
+	return TaskSort{}, fmt.Errorf("orm: Task sorts by id, title, priority, status and statusEnteredAt, not %q", text)
 }
 
 // TaskUniqueKey names a unique key of Task that UpsertOne and

@@ -116,8 +116,9 @@ func TestViewsOfAProjection(t *testing.T) {
 			t.Errorf("%s filters as %q, want %q", field, kinds[field], want)
 		}
 	}
-	if !sorts["date"] || !sorts["amount"] || sorts["categoryName"] {
-		t.Errorf("the view sorts by %v: a nullable column is no sort", sorts)
+	// A column that may be null is a sort too (D112).
+	if !sorts["date"] || !sorts["amount"] || !sorts["categoryName"] {
+		t.Errorf("the view sorts by %v, want date, amount and the nullable categoryName among them", sorts)
 	}
 	if c := view.Column("parent_category_name"); c == nil || c.Qualified != "transaction_list.parent_category_name" || c.Required {
 		t.Errorf("parentCategoryName's column = %+v", c)

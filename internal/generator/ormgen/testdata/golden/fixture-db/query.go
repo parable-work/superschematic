@@ -357,6 +357,7 @@ type TenantSortField string
 const (
 	TenantSortById        TenantSortField = "id"
 	TenantSortByCreatedAt TenantSortField = "createdAt"
+	TenantSortByUpdatedAt TenantSortField = "updatedAt"
 	TenantSortByName      TenantSortField = "name"
 	TenantSortBySlug      TenantSortField = "slug"
 	TenantSortByEmail     TenantSortField = "email"
@@ -376,10 +377,10 @@ type TenantSort struct {
 func ParseTenantSort(text string) (TenantSort, error) {
 	parsed := TenantSort{Field: TenantSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TenantSortById, TenantSortByCreatedAt, TenantSortByName, TenantSortBySlug, TenantSortByEmail, TenantSortBySeatCount:
+	case TenantSortById, TenantSortByCreatedAt, TenantSortByUpdatedAt, TenantSortByName, TenantSortBySlug, TenantSortByEmail, TenantSortBySeatCount:
 		return parsed, nil
 	}
-	return TenantSort{}, fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)
+	return TenantSort{}, fmt.Errorf("orm: Tenant sorts by id, createdAt, updatedAt, name, slug, email and seatCount, not %q", text)
 }
 
 // TenantUniqueKey names a unique key of Tenant that UpsertOne and
@@ -584,8 +585,10 @@ type TenantUserFindOptions struct {
 type TenantUserSortField string
 
 const (
-	TenantUserSortById        TenantUserSortField = "id"
-	TenantUserSortByCreatedAt TenantUserSortField = "createdAt"
+	TenantUserSortById          TenantUserSortField = "id"
+	TenantUserSortByCreatedAt   TenantUserSortField = "createdAt"
+	TenantUserSortByUpdatedAt   TenantUserSortField = "updatedAt"
+	TenantUserSortByDisplayName TenantUserSortField = "displayName"
 )
 
 // TenantUserSort is the order FindPage reads TenantUser rows in: Field,
@@ -601,10 +604,10 @@ type TenantUserSort struct {
 func ParseTenantUserSort(text string) (TenantUserSort, error) {
 	parsed := TenantUserSort{Field: TenantUserSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TenantUserSortById, TenantUserSortByCreatedAt:
+	case TenantUserSortById, TenantUserSortByCreatedAt, TenantUserSortByUpdatedAt, TenantUserSortByDisplayName:
 		return parsed, nil
 	}
-	return TenantUserSort{}, fmt.Errorf("orm: TenantUser sorts by id and createdAt, not %q", text)
+	return TenantUserSort{}, fmt.Errorf("orm: TenantUser sorts by id, createdAt, updatedAt and displayName, not %q", text)
 }
 
 // TenantUserUniqueKey names a unique key of TenantUser that UpsertOne and

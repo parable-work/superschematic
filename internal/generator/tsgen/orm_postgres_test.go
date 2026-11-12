@@ -73,6 +73,8 @@ var repositoryCases = []repositoryCase{
 		"pages by text, a number and a time, each way, ties broken by the key in the sort's direction",
 		"a filter and a search sit beside the keyset, and a deleted member is out of every page unless included",
 		"a key is the row's id alone, which places a page however the row changed since",
+		"a column that may be null sorts its nulls last either way, and a page ends on any row without dropping or repeating one",
+		"the nulls are last either way, and the rows after each key are the rest of the order",
 		"a page reads in a transaction",
 		"a JSON column holds a string, a number, a list, an object and the JSON null as they are, with the pool's parsers on and off",
 		"eq and in on a JSON column compare JSON values as JSONB does",

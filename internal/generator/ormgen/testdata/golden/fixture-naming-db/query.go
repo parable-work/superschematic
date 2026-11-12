@@ -528,6 +528,8 @@ const (
 	LineItemSortById          LineItemSortField = "id"
 	LineItemSortByAmountCents LineItemSortField = "amountCents"
 	LineItemSortByPostedOn    LineItemSortField = "postedOn"
+	LineItemSortByMemo        LineItemSortField = "memo"
+	LineItemSortByExternalId  LineItemSortField = "externalId"
 	LineItemSortByCreatedAt   LineItemSortField = "createdAt"
 	LineItemSortByUpdatedAt   LineItemSortField = "updatedAt"
 )
@@ -545,10 +547,10 @@ type LineItemSort struct {
 func ParseLineItemSort(text string) (LineItemSort, error) {
 	parsed := LineItemSort{Field: LineItemSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case LineItemSortById, LineItemSortByAmountCents, LineItemSortByPostedOn, LineItemSortByCreatedAt, LineItemSortByUpdatedAt:
+	case LineItemSortById, LineItemSortByAmountCents, LineItemSortByPostedOn, LineItemSortByMemo, LineItemSortByExternalId, LineItemSortByCreatedAt, LineItemSortByUpdatedAt:
 		return parsed, nil
 	}
-	return LineItemSort{}, fmt.Errorf("orm: LineItem sorts by id, amountCents, postedOn, createdAt and updatedAt, not %q", text)
+	return LineItemSort{}, fmt.Errorf("orm: LineItem sorts by id, amountCents, postedOn, memo, externalId, createdAt and updatedAt, not %q", text)
 }
 
 // LineItemUniqueKey names a unique key of LineItem that UpsertOne and

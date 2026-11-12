@@ -106,7 +106,7 @@ export interface QuestionFilter {
 export type QuestionOrderField = "id" | "prompt" | "askedOf" | "createdBy" | "status" | "statusEnteredAt" | "review" | "reviewEnteredAt" | "_version";
 
 /** The members findPage orders rows of Question by (D60, amended); ties break by id. */
-export type QuestionSortField = "id" | "prompt" | "askedOf" | "status" | "review";
+export type QuestionSortField = "id" | "prompt" | "askedOf" | "status" | "statusEnteredAt" | "review" | "reviewEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type QuestionUniqueKey = readonly ["id"];
@@ -176,9 +176,9 @@ export const questionTable: TableDefinition = {
     { name: "askedOf", column: "asked_of", field: "askedOf", qualified: "question.asked_of", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "question.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "question.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "question.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "question.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "review", column: "review", field: "review", qualified: "question.review", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "reviewEnteredAt", column: "review_entered_at", field: "reviewEnteredAt", qualified: "question.review_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "reviewEnteredAt", column: "review_entered_at", field: "reviewEnteredAt", qualified: "question.review_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "_version", column: "_version", field: "_version", qualified: "question._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -197,7 +197,9 @@ export const questionTable: TableDefinition = {
     page: "SELECT %s FROM question%s%s LIMIT %d",
     pageAfterKey: "question.id %s %s",
     pageAfter: "(%s, question.id) %s ((SELECT %s FROM question AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM question AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", question.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM question WHERE question.id = $1)",
     insert: "INSERT INTO question (%s) VALUES (%s) RETURNING %s",

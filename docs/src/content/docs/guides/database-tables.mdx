@@ -455,12 +455,20 @@ orders reads its pages through it:
 <Snippet file="go/shop-orders/orders.go" symbol="Orders.ListOrders" />
 
 A table sorts by its key, and by each column of the table's own that
-holds one value of text, a number, a time, a date or a UUID and is never
-null: `createdAt` among them, and `updatedAt` when it is required.
-`OrderSortByPlacedAt` names one, and
+holds one value of text, a number, a time, a date or a UUID: `createdAt`
+and `updatedAt` among them. `OrderSortByPlacedAt` names one, and
 `orm.OrderSort{Field: orm.OrderSortByPlacedAt, Desc: true}` reads the
-newest orders first. A column that may be null, or holds an enum, a
-boolean, JSON, a list, a map, a union or a point, is not a sort field.
+newest orders first. A column that may be null is a sort field too
+(D112): the rows that hold a null come after every row that holds a
+value, in either direction, in key order among themselves, so "latest
+first" never opens with the rows that have no date. The keyset reads
+whether the key's own row holds a null, so the page after a null holds
+only nulls past the key, and the page after a value the values past it
+and then every null. That keyset is a condition on each row the order
+passes, not a seek into an index, so a deep page by a column that may be
+null reads the rows before it; a page by a column that is never null
+seeks, as before. A column that holds an enum, a boolean, JSON, a list, a
+map, a union or a point is not a sort field.
 Neither is a relation's key, an audit actor (`createdBy`, `updatedBy`,
 `deletedBy`), internal metadata such as `_version`, or a `@secret`
 column, whose values an order by it would reveal. `ParseOrderSort` reads a sort as a

@@ -121,7 +121,9 @@ export const orderTable: TableDefinition = {
     page: "SELECT %s FROM \"order\"%s%s LIMIT %d",
     pageAfterKey: "\"order\".id %s %s",
     pageAfter: "(%s, \"order\".id) %s ((SELECT %s FROM \"order\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"order\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"order\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"order\" WHERE \"order\".id = $1)",
     insert: "INSERT INTO \"order\" (%s) VALUES (%s) RETURNING %s",
@@ -199,7 +201,7 @@ export interface OrderLineFilter {
 export type OrderLineOrderField = "id" | "quantity" | "note";
 
 /** The members findPage orders rows of OrderLine by (D60, amended); ties break by id. */
-export type OrderLineSortField = "id" | "quantity";
+export type OrderLineSortField = "id" | "quantity" | "note";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderLineUniqueKey = readonly ["id"];
@@ -239,7 +241,7 @@ export const orderLineTable: TableDefinition = {
     { name: "orderId", column: "order_id", field: "order", qualified: "order_line.order_id", uuid: true, required: true, relation: "Order", filter: ["eq", "in", "isNull"] },
     { name: "productId", column: "product_id", field: "product", qualified: "order_line.product_id", uuid: true, relation: "Product", filter: ["eq", "in", "isNull"] },
     { name: "quantity", column: "quantity", field: "quantity", qualified: "order_line.quantity", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "note", column: "note", field: "note", qualified: "order_line.note", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "note", column: "note", field: "note", qualified: "order_line.note", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
@@ -257,7 +259,9 @@ export const orderLineTable: TableDefinition = {
     page: "SELECT %s FROM order_line%s%s LIMIT %d",
     pageAfterKey: "order_line.id %s %s",
     pageAfter: "(%s, order_line.id) %s ((SELECT %s FROM order_line AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM order_line AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", order_line.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM order_line WHERE order_line.id = $1)",
     insert: "INSERT INTO order_line (%s) VALUES (%s) RETURNING %s",
@@ -371,7 +375,9 @@ export const productTable: TableDefinition = {
     page: "SELECT %s FROM product%s%s LIMIT %d",
     pageAfterKey: "product.id %s %s",
     pageAfter: "(%s, product.id) %s ((SELECT %s FROM product AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM product AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", product.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM product WHERE product.id = $1)",
     insert: "INSERT INTO product (%s) VALUES (%s) RETURNING %s",

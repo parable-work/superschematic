@@ -314,9 +314,11 @@ type OrderFindOptions struct {
 type OrderSortField string
 
 const (
-	OrderSortById     OrderSortField = "id"
-	OrderSortByTitle  OrderSortField = "title"
-	OrderSortByStatus OrderSortField = "status"
+	OrderSortById              OrderSortField = "id"
+	OrderSortByTitle           OrderSortField = "title"
+	OrderSortByPlacedAt        OrderSortField = "placedAt"
+	OrderSortByStatus          OrderSortField = "status"
+	OrderSortByStatusEnteredAt OrderSortField = "statusEnteredAt"
 )
 
 // OrderSort is the order FindPage reads Order rows in: Field,
@@ -332,10 +334,10 @@ type OrderSort struct {
 func ParseOrderSort(text string) (OrderSort, error) {
 	parsed := OrderSort{Field: OrderSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case OrderSortById, OrderSortByTitle, OrderSortByStatus:
+	case OrderSortById, OrderSortByTitle, OrderSortByPlacedAt, OrderSortByStatus, OrderSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return OrderSort{}, fmt.Errorf("orm: Order sorts by id, title and status, not %q", text)
+	return OrderSort{}, fmt.Errorf("orm: Order sorts by id, title, placedAt, status and statusEnteredAt, not %q", text)
 }
 
 // OrderUniqueKey names a unique key of Order that UpsertOne and
@@ -524,10 +526,12 @@ type ShipmentFindOptions struct {
 type ShipmentSortField string
 
 const (
-	ShipmentSortById            ShipmentSortField = "id"
-	ShipmentSortByReference     ShipmentSortField = "reference"
-	ShipmentSortByStatus        ShipmentSortField = "status"
-	ShipmentSortByPaymentStatus ShipmentSortField = "paymentStatus"
+	ShipmentSortById                     ShipmentSortField = "id"
+	ShipmentSortByReference              ShipmentSortField = "reference"
+	ShipmentSortByStatus                 ShipmentSortField = "status"
+	ShipmentSortByStatusEnteredAt        ShipmentSortField = "statusEnteredAt"
+	ShipmentSortByPaymentStatus          ShipmentSortField = "paymentStatus"
+	ShipmentSortByPaymentStatusEnteredAt ShipmentSortField = "paymentStatusEnteredAt"
 )
 
 // ShipmentSort is the order FindPage reads Shipment rows in: Field,
@@ -543,10 +547,10 @@ type ShipmentSort struct {
 func ParseShipmentSort(text string) (ShipmentSort, error) {
 	parsed := ShipmentSort{Field: ShipmentSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case ShipmentSortById, ShipmentSortByReference, ShipmentSortByStatus, ShipmentSortByPaymentStatus:
+	case ShipmentSortById, ShipmentSortByReference, ShipmentSortByStatus, ShipmentSortByStatusEnteredAt, ShipmentSortByPaymentStatus, ShipmentSortByPaymentStatusEnteredAt:
 		return parsed, nil
 	}
-	return ShipmentSort{}, fmt.Errorf("orm: Shipment sorts by id, reference, status and paymentStatus, not %q", text)
+	return ShipmentSort{}, fmt.Errorf("orm: Shipment sorts by id, reference, status, statusEnteredAt, paymentStatus and paymentStatusEnteredAt, not %q", text)
 }
 
 // ShipmentUniqueKey names a unique key of Shipment that UpsertOne and

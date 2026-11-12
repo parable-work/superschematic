@@ -342,26 +342,33 @@ type LineListEntryFindOptions struct {
 }
 
 // LineListEntrySortField is a field FindPage orders LineListEntry rows by: its key
-// id, or a column of one value of text, a number or a time that is
-// never null.
+// id, or a column of one value of text, a number or a time. A page
+// orders a column's nulls last in either direction (D112).
 type LineListEntrySortField string
 
 const (
-	LineListEntrySortById          LineListEntrySortField = "id"
-	LineListEntrySortByDate        LineListEntrySortField = "date"
-	LineListEntrySortByName        LineListEntrySortField = "name"
-	LineListEntrySortByAccountId   LineListEntrySortField = "accountId"
-	LineListEntrySortByAccountName LineListEntrySortField = "accountName"
+	LineListEntrySortById           LineListEntrySortField = "id"
+	LineListEntrySortByDate         LineListEntrySortField = "date"
+	LineListEntrySortByName         LineListEntrySortField = "name"
+	LineListEntrySortByAccountId    LineListEntrySortField = "accountId"
+	LineListEntrySortByAccountName  LineListEntrySortField = "accountName"
+	LineListEntrySortByCategoryId   LineListEntrySortField = "categoryId"
+	LineListEntrySortByCategoryName LineListEntrySortField = "categoryName"
 )
 
 // lineListEntrySortColumns are the columns of the sort fields, qualified by the
 // view, and by page_key, the alias of the subquery that reads the key's row.
-var lineListEntrySortColumns = map[LineListEntrySortField]struct{ sql, key string }{
-	LineListEntrySortById:          {`line_list.id`, `page_key.id`},
-	LineListEntrySortByDate:        {`line_list."date"`, `page_key."date"`},
-	LineListEntrySortByName:        {`line_list."name"`, `page_key."name"`},
-	LineListEntrySortByAccountId:   {`line_list.account_id`, `page_key.account_id`},
-	LineListEntrySortByAccountName: {`line_list.account_name`, `page_key.account_name`},
+var lineListEntrySortColumns = map[LineListEntrySortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	LineListEntrySortById:           {`line_list.id`, `page_key.id`, false},
+	LineListEntrySortByDate:         {`line_list."date"`, `page_key."date"`, false},
+	LineListEntrySortByName:         {`line_list."name"`, `page_key."name"`, false},
+	LineListEntrySortByAccountId:    {`line_list.account_id`, `page_key.account_id`, false},
+	LineListEntrySortByAccountName:  {`line_list.account_name`, `page_key.account_name`, false},
+	LineListEntrySortByCategoryId:   {`line_list.category_id`, `page_key.category_id`, true},
+	LineListEntrySortByCategoryName: {`line_list.category_name`, `page_key.category_name`, true},
 }
 
 // LineListEntrySort is the order FindPage reads LineListEntry rows in: Field,
@@ -379,7 +386,7 @@ func ParseLineListEntrySort(text string) (LineListEntrySort, error) {
 	if _, ok := lineListEntrySortColumns[parsed.Field]; ok {
 		return parsed, nil
 	}
-	return LineListEntrySort{}, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId and accountName, not %q", text)
+	return LineListEntrySort{}, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId, accountName, categoryId and categoryName, not %q", text)
 }
 
 // LineListEntryPageKey is the position of a LineListEntry row in a FindPage order:
@@ -515,7 +522,7 @@ func (r *LineListEntryRepository) FindPage(ctx context.Context, filter *LineList
 	}
 	column, ok := lineListEntrySortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId and accountName, not %q", string(field))
+		return nil, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId, accountName, categoryId and categoryName, not %q", string(field))
 	}
 	byKey := field == LineListEntrySortById
 	var args []interface{}
@@ -532,14 +539,23 @@ func (r *LineListEntryRepository) FindPage(ctx context.Context, filter *LineList
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`line_list.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`line_list.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
-			conditions = append(conditions, fmt.Sprintf(`(%s, line_list.id) %s ((SELECT %s FROM line_list AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, line_list.id) %s ((SELECT %s FROM line_list AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM line_list AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, line_list.id %s`, direction)
 	}

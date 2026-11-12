@@ -41,10 +41,16 @@ var CategoryQuotedFields = map[string]string{
 // categorySortColumns are the columns of Category's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var categorySortColumns = map[CategorySortField]struct{ sql, key string }{
-	CategorySortById:   {`category.id`, `page_key.id`},
-	CategorySortByName: {`category."name"`, `page_key."name"`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var categorySortColumns = map[CategorySortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	CategorySortById:          {`category.id`, `page_key.id`, false},
+	CategorySortByName:        {`category."name"`, `page_key."name"`, false},
+	CategorySortByBudget:      {`category.budget`, `page_key.budget`, true},
+	CategorySortByBudgetSince: {`category.budget_since`, `page_key.budget_since`, true},
 }
 
 // buildCategoryOrderByClause builds an ORDER BY clause for Category.
@@ -915,7 +921,7 @@ func (r *CategoryRepository) FindPage(ctx context.Context, filter *CategoryFilte
 	}
 	column, ok := categorySortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Category sorts by id and name, not %q", string(field))
+		return nil, fmt.Errorf("orm: Category sorts by id, name, budget and budgetSince, not %q", string(field))
 	}
 	byKey := field == CategorySortById
 
@@ -945,14 +951,23 @@ func (r *CategoryRepository) FindPage(ctx context.Context, filter *CategoryFilte
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`category.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`category.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, category.id) %s ((SELECT %s FROM category AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, category.id) %s ((SELECT %s FROM category AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM category AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -960,6 +975,9 @@ func (r *CategoryRepository) FindPage(ctx context.Context, filter *CategoryFilte
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, category.id %s`, direction)
 	}

@@ -299,8 +299,9 @@ type ApiCredentialFindOptions struct {
 type ApiCredentialSortField string
 
 const (
-	ApiCredentialSortById      ApiCredentialSortField = "id"
-	ApiCredentialSortByService ApiCredentialSortField = "service"
+	ApiCredentialSortById        ApiCredentialSortField = "id"
+	ApiCredentialSortByService   ApiCredentialSortField = "service"
+	ApiCredentialSortByRotatedAt ApiCredentialSortField = "rotatedAt"
 )
 
 // ApiCredentialSort is the order FindPage reads ApiCredential rows in: Field,
@@ -316,10 +317,10 @@ type ApiCredentialSort struct {
 func ParseApiCredentialSort(text string) (ApiCredentialSort, error) {
 	parsed := ApiCredentialSort{Field: ApiCredentialSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case ApiCredentialSortById, ApiCredentialSortByService:
+	case ApiCredentialSortById, ApiCredentialSortByService, ApiCredentialSortByRotatedAt:
 		return parsed, nil
 	}
-	return ApiCredentialSort{}, fmt.Errorf("orm: ApiCredential sorts by id and service, not %q", text)
+	return ApiCredentialSort{}, fmt.Errorf("orm: ApiCredential sorts by id, service and rotatedAt, not %q", text)
 }
 
 // ApiCredentialUniqueKey names a unique key of ApiCredential that UpsertOne and

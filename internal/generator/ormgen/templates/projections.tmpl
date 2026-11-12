@@ -164,8 +164,8 @@ type {{ .TypeName }}FindOptions struct {
 }
 
 // {{ .TypeName }}SortField is a field FindPage orders {{ .TypeName }} rows by: its key
-// {{ $pk.Name }}, or a column of one value of text, a number or a time that is
-// never null.
+// {{ $pk.Name }}, or a column of one value of text, a number or a time. A page
+// orders a column's nulls last in either direction (D112).
 type {{ .TypeName }}SortField string
 
 const (
@@ -176,9 +176,12 @@ const (
 
 // {{ lowerFirst .TypeName }}SortColumns are the columns of the sort fields, qualified by the
 // view, and by page_key, the alias of the subquery that reads the key's row.
-var {{ lowerFirst .TypeName }}SortColumns = map[{{ .TypeName }}SortField]struct{ sql, key string }{
+var {{ lowerFirst .TypeName }}SortColumns = map[{{ .TypeName }}SortField]struct {
+	sql, key string
+	nulls    bool
+}{
 	{{- range .SortFields }}
-	{{ $p.TypeName }}SortBy{{ toGoName .Name }}: { {{- goRawString .SQL.Qualified }}, {{ goRawString .SQL.PageKey -}} },
+	{{ $p.TypeName }}SortBy{{ toGoName .Name }}: { {{- goRawString .SQL.Qualified }}, {{ goRawString .SQL.PageKey }}, {{ .SortNulls -}} },
 	{{- end }}
 }
 
@@ -350,14 +353,23 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf({{ goRawString .SQL.PageAfterKey }}, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL.PageAfterKey }}, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
-			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL.PageAfter }},
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf({{ goRawString .SQL.PageAfter }},
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				after = fmt.Sprintf({{ goRawString .SQL.PageAfterNulls }},
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	orderByClause := fmt.Sprintf({{ printf "%q" .SQL.PageOrder }}, column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf({{ printf "%q" .SQL.PageOrderNulls }}, column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf({{ goRawString .SQL.PageTiebreak }}, direction)
 	}

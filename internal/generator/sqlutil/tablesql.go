@@ -55,12 +55,27 @@ type TableStatements struct {
 	// by the column %s in the direction %s, and PageTiebreak then by the key
 	// in the direction %s. PageKeyExists reads whether the key $1 names a
 	// row, deleted or not.
-	Page          string
-	PageAfterKey  string
-	PageAfter     string
-	PageOrder     string
-	PageTiebreak  string
-	PageKeyExists string
+	//
+	// PageAfterNulls and PageOrderNulls are the keyset and the order of a
+	// column that may be null (D112), whose nulls come last in either
+	// direction, in key order among themselves. PageAfterNulls reads
+	// whether the key's row holds a null, its PageKey %s and the key's
+	// placeholder %s: after a null come the rows that hold one, the column
+	// %s, past the key, a filled PageAfterKey %s; after a value come the
+	// rows that hold a null, the column %s, and the rows past the value, a
+	// filled PageAfter %s. A key that names no row answers neither, so it
+	// places no row, as PageAfter's does. PageOrderNulls takes what
+	// PageOrder takes. Postgres orders a null after every value going up
+	// and before every value going down, and SQLite the other way, so the
+	// order says where nulls go rather than leave it to either.
+	Page           string
+	PageAfterKey   string
+	PageAfter      string
+	PageAfterNulls string
+	PageOrder      string
+	PageOrderNulls string
+	PageTiebreak   string
+	PageKeyExists  string
 
 	// Insert inserts one row: the columns %s, their placeholders %s and the
 	// columns returned %s. InsertMany inserts the rows %s, each a tuple of
@@ -301,7 +316,9 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		Page:             "SELECT %s FROM " + t + "%s%s LIMIT %d",
 		PageAfterKey:     t + "." + key + " %s %s",
 		PageAfter:        "(%s, " + t + "." + key + ") %s ((SELECT %s FROM " + t + " AS page_key WHERE page_key." + key + " = %s), %s)",
+		PageAfterNulls:   "CASE (SELECT %s IS NULL FROM " + t + " AS page_key WHERE page_key." + key + " = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
 		PageOrder:        " ORDER BY %s %s",
+		PageOrderNulls:   " ORDER BY %s %s NULLS LAST",
 		PageTiebreak:     ", " + t + "." + key + " %s",
 		PageKeyExists:    "SELECT EXISTS (SELECT 1 FROM " + t + " WHERE " + t + "." + key + " = $1)",
 		Insert:           "INSERT INTO " + t + " (%s) VALUES (%s) RETURNING %s",
@@ -451,8 +468,8 @@ func (s TableStatements) AllStatements() []NamedStatement {
 		{"getOne", s.GetOne}, {"getOneFields", s.GetOneFields}, {"getMany", s.GetMany},
 		{"live", s.Live}, {"liveWhere", s.LiveWhere}, {"liveCondition", s.LiveCondition},
 		{"findOne", s.FindOne}, {"findMany", s.FindMany}, {"count", s.Count},
-		{"page", s.Page}, {"pageAfterKey", s.PageAfterKey}, {"pageAfter", s.PageAfter},
-		{"pageOrder", s.PageOrder}, {"pageTiebreak", s.PageTiebreak}, {"pageKeyExists", s.PageKeyExists},
+		{"page", s.Page}, {"pageAfterKey", s.PageAfterKey}, {"pageAfter", s.PageAfter}, {"pageAfterNulls", s.PageAfterNulls},
+		{"pageOrder", s.PageOrder}, {"pageOrderNulls", s.PageOrderNulls}, {"pageTiebreak", s.PageTiebreak}, {"pageKeyExists", s.PageKeyExists},
 		{"insert", s.Insert}, {"insertMany", s.InsertMany},
 		{"update", s.Update}, {"versionFence", s.VersionFence}, {"returning", s.Returning},
 		{"updateMany", s.UpdateMany}, {"updatedAt", s.UpdatedAt}, {"updatedBy", s.UpdatedBy},
