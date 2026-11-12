@@ -18263,6 +18263,16 @@ builds and runs a job and a worker on a file the build's SQLite DDL
 creates, and `TestRustTimersWorkerOnSQLite` drains fixture-timers-api's
 behavior worker with no async runtime.
 
+Built, of the user model on a file. A Rust API over the user model on a
+sqlite-first database keeps its users, their sessions and their API keys
+in the runtime's identity store on the file: the API crate's
+`identity::store_on_file` builds it on a connection of the store's own
+(`identity::Rusqlite::open`), since a store's transaction holds its
+connection across its statements, and a server's entrypoint wires it
+(`TestRustIdentityEntrypointServesOnSQLite`, which registers a user, signs
+her in and serves the file again after a restart). The identity service
+hashes a password on the calling thread under a host with no runtime.
+
 Built, of step 6. The runner, `runtime/migrate/rust`, with the start a
 binary calls, the copy before a contract step and the adoption; its tests
 replay the compiler's SQLite vectors and, beside the Go runner's binary,
@@ -18297,11 +18307,18 @@ every interface only with `--every-interface`, over the data directory
 the site's files into the crate, builds it and prints the binary's path;
 `stack dev` runs the environment as one process; and a call from one API
 of the binary to another is the SDK's over the runtime's
-`in_process::transport`, with the caller's loopback key. The example
-`examples/embedded-notes` is one binary: `TestEmbeddedNotesIsOneBinary`
-builds it, starts it on a fresh data directory, which its recorded plan
-migrates, serves its APIs and its site on one origin, stops it and starts
-it again on the same files.
+`in_process::transport`, with the caller's loopback key. The binary runs
+its environment's workers: the library gives each `@worker` and
+`@behaviorWorker` as a `Worker` over the file the binary opened, whose
+`drain` a host with no async runtime calls and whose `run` is the loop
+`main.rs` spawns beside the server and stops within the worker's grace
+(`TestEmbeddedCrateWithABehaviorWorker`, `TestAWorkerRunsInsideTheBinary`).
+The example `examples/embedded-notes` is one binary:
+`TestEmbeddedNotesIsOneBinary` builds it, starts it on a fresh data
+directory, which its recorded plans migrate, serves its APIs and its site
+on one origin, sees a message a request enqueued handled by its worker,
+stops it and starts it again on the same files, and starts it on a file
+the first release's plan made, which the second takes forward.
 
 Not built. Of steps 1 and 2: an upsert, an `update_many` and a
 `hard_delete_one` of a table that composes behaviors, each refused by
@@ -18321,11 +18338,12 @@ from, not the time its claims go by; a drain extends no claim, and a
 handler still running when a stopping worker's grace is over is left to
 its claim's expiry; and an event handed to a `Workers` method on a SQLite
 file is compiled and not run by a test. For a Rust API on a SQLite file
-the identity store, an engine, and a deriver, an engine's runner and an
-app stay refused by name. Of step 7: a worker in the binary and the
-library's `drain`; an API over the user model; the runtime's in-process
-memory store, every memory store being refused; in the example, a table
-that composes behaviors, an MCP endpoint and a chain of two releases run
-end to end; a command that writes the target's authoring types; a route's
-own limits under `main.rs`, which reads every body up to 2 MiB; and the
-manual-route operations, which the build names.
+an engine, and a deriver, an engine's runner and an app stay refused by
+name, and an identity store's write that waits out the busy timeout for
+the file's writer is the store's database error, not a 503. Of step 7: an
+API over the user model in the binary; the runtime's in-process memory
+store, every memory store being refused; in the example, a table that
+composes behaviors and an MCP endpoint; a test of a worker's `drain`
+driven by a host with no runtime; a command that writes the target's
+authoring types; a route's own limits under `main.rs`, which reads every
+body up to 2 MiB; and the manual-route operations, which the build names.
