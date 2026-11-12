@@ -1,0 +1,23 @@
+# Naming file for the embedded-notes example. Every command reads it from
+# the schemas root (this directory). A key left out keeps the core default.
+
+# Coordinates of the generated packages.
+go_module_root = "example.com/notes"
+npm_scope = "@notes"
+rust_crate_prefix = "notes-"
+
+# Where the runtime crates live, relative to the parent of the schemas root
+# (examples/embedded-notes), so the example builds against this checkout.
+# migrate_rust is the migration runner the environment's binary links
+# (D116).
+[paths]
+scalar_go = "../../third_party/superscalar/go"
+scalar_typescript = "../../third_party/superscalar/bindings/typescript"
+scalar_rust = "../../third_party/superscalar/crates/core"
+schema_ir = "../../ir"
+schema_runtime_go = "../../runtime/schema/go"
+schema_runtime_rust = "../../runtime/schema/rust"
+http_runtime_rust = "../../runtime/http/rust"
+http_runtime_typescript = "../../runtime/http/typescript"
+migrate_rust = "../../runtime/migrate/rust"
+build_context = "../.."

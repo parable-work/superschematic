@@ -90,6 +90,8 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   extensions/cloudflare/go.mod        require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
+  extensions/embedded/go.mod          require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
   extensions/pulumi/go.mod            require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../extensions/gcp vX.Y.Z and
@@ -98,14 +100,16 @@ Version sites (relative to the repository root):
   cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../extensions/gcp vX.Y.Z,
-                                      .../extensions/cloudflare vX.Y.Z and
+                                      .../extensions/cloudflare vX.Y.Z,
+                                      .../extensions/embedded vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
   extensions/topcoat/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../cmd/superschematic vX.Y.Z (the
                                       official extensions its binary links),
                                       .../extensions/gcp vX.Y.Z,
-                                      .../extensions/cloudflare vX.Y.Z and
+                                      .../extensions/cloudflare vX.Y.Z,
+                                      .../extensions/embedded vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
 
 The Go requires carry the release version so a consumer at a tag resolves
@@ -163,6 +167,7 @@ GO_MODULES = [
     "",
     "extensions/gcp",
     "extensions/cloudflare",
+    "extensions/embedded",
     "extensions/pulumi",
     "cmd/superschematic",
     "extensions/topcoat",
@@ -511,7 +516,7 @@ def sites():
     # The extension modules and the installed binary, for the same reason,
     # and because each is tagged: a consumer at a tag resolves its siblings
     # from theirs.
-    for ext in ("gcp", "cloudflare"):
+    for ext in ("gcp", "cloudflare", "embedded"):
         out.append(
             (
                 ROOT / "extensions" / ext / "go.mod",
@@ -542,6 +547,7 @@ def sites():
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/embedded"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",
@@ -559,6 +565,7 @@ def sites():
                 (go_require_pattern(GO_MODULE + "/cmd/superschematic"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/embedded"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",

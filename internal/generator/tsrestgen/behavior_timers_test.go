@@ -251,8 +251,8 @@ func TestGeneratedTimersAPICompiles(t *testing.T) {
 // timersCases are the cases behavior_timers_runtime.test.ts runs, by
 // name: D103's Timers scenario, which the Go and Rust servers and workers
 // run too, with the writes past the core its change queue hears (cases 6
-// to 8 of D103's end-to-end tests), and the MCP endpoint's, which only the
-// TypeScript server serves.
+// to 8 of D103's end-to-end tests), and the MCP endpoint's, which the
+// TypeScript server's cases alone run.
 var timersCases = []string{
 	"a create arms the deadline: its sub-table row and its queue message with its due time",
 	"a due deadline the worker runs moves the status and records the outcome",

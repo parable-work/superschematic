@@ -427,6 +427,10 @@ type APIOutput struct {
 	// writes no handler for yet (D106, D116), each with why: it stays a
 	// method of its namespace's trait.
 	UnservedTables []UnservedTable
+	// MCP is the API's MCP endpoint with outputs.api.mcp on (D81, D116),
+	// nil otherwise: src/router/mcp.rs declares its tools and the router
+	// serves them at POST /api/mcp.
+	MCP *MCPInfo
 
 	// ScalarParse is how the router reads a filter's dates and decimals by
 	// the scalar core (D106): nil unless a filter has a field of either
@@ -630,6 +634,9 @@ type Options struct {
 	// When it has a User table, the crate authenticates with the identity
 	// runtime and serves the user model's routes (D50).
 	AuthDB *ir.Schema
+	// MCP is outputs.api.mcp: the router serves the API's visible @mcp
+	// tools at POST /api/mcp (D81, D116).
+	MCP bool
 }
 
 // Generate produces Rust REST API metadata for a schema. Each mounted
@@ -726,6 +733,15 @@ type Options struct {
 // Implementations holds the Behaviors its handlers run on. The crate's
 // Deps must name the database's layout and the adapter's and the
 // behaviors' crates (DepsBehaviors), or WriteAPI refuses it.
+//
+// With opts.MCP, outputs.api.mcp, the router serves the API's visible @mcp
+// tools at POST /api/mcp (D81, D116). src/router/mcp.rs holds the tool
+// table the TypeScript router's mcp.ts holds, which the runtime's Mount
+// serves: a call is a request to its operation's route, answered by the
+// router's own routes as the caller the endpoint's request authenticated.
+// When a tool asks the person first (D93), the module also holds each
+// route's check, its controls but the rate limit and its decoding, which a
+// call goes through before anyone is asked (D98).
 //
 // The endpoints and the OpenAPI document come from api, the apigen output
 // generator.Run builds once for the Go and TypeScript servers and every
@@ -862,6 +878,11 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		return nil, err
 	}
 	output.Apps = appsOf(schema)
+	if opts.MCP {
+		if output.MCP, err = mcpInfo(output, api, opts.Clock); err != nil {
+			return nil, err
+		}
+	}
 
 	return output, nil
 }
@@ -997,7 +1018,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"identity.tmpl", "identity.rs", output.Identity != nil},
 		{"deps.tmpl", "deps.rs", output.Deps != nil},
 		{"apps.tmpl", "apps.rs", output.HasApps()},
-		{"behaviors.tmpl", "behaviors.rs", output.HasBehaviors()},
+		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 	} {
 		path := filepath.Join("src", module.file)
@@ -1015,6 +1036,12 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		if err := generateFile(file.templateName, filepath.Join(outputDir, file.outputName), output); err != nil {
 			return fmt.Errorf("generate %s: %w", file.outputName, err)
 		}
+	}
+
+	// The MCP endpoint's module, which the router declares with
+	// outputs.api.mcp on (D116).
+	if err := writeMCP(output, outputDir); err != nil {
+		return err
 	}
 
 	// The document every server's build writes; src/openapi.rs embeds it.

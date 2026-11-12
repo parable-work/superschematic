@@ -28,18 +28,57 @@ use crate::runtime::{ApiError, Principal};
 /// {{ .TableDatabase }} in the SQLite file `Deps.db` holds.
 pub type Tables = crate::runtime::orm::sqlite::Tables;
 
-/// The tables of {{ .TableDatabase }}, in the file `db` holds.
-pub fn tables(db: std::sync::Arc<crate::runtime::orm::sqlite::Database>) -> Tables {
-    Tables::new(db, database_types::orm::sqlite_definition)
+/// The tables of {{ .TableDatabase }}, in the file `db` holds, as its Rust types
+/// open them: a table that composes behaviors is written through the
+/// behaviors' core (D103), which the types bind.
+{{- if .TableFieldKeys }} An `Encrypted<T>` field is
+/// sealed and opened with `field_keys` (D85).
+pub fn tables(
+    db: std::sync::Arc<crate::runtime::orm::sqlite::Database>,
+    field_keys: std::sync::Arc<crate::runtime::orm::FieldKeyring>,
+) -> Tables {
+    database_types::orm::sqlite::tables(db).with_keys(field_keys)
 }
+{{- else }}
+pub fn tables(db: std::sync::Arc<crate::runtime::orm::sqlite::Database>) -> Tables {
+    database_types::orm::sqlite::tables(db)
+}
+{{- end }}
 {{- else }}
 /// What the router serves the table operations from: the repositories of
 /// {{ .TableDatabase }} over the pool `Deps.db` holds.
 pub type Tables = crate::runtime::orm::postgres::Tables;
 
-/// The tables of {{ .TableDatabase }}, reached through `db`.
+/// The tables of {{ .TableDatabase }}, reached through `db`, as its Rust types
+/// open them: a table that composes behaviors is written through the
+/// behaviors' core (D103), which the types bind.
+{{- if .TableFieldKeys }} An `Encrypted<T>` field is
+/// sealed and opened with `field_keys` (D85).
+pub fn tables(
+    db: crate::runtime::postgres::Pool,
+    field_keys: std::sync::Arc<crate::runtime::orm::FieldKeyring>,
+) -> Tables {
+    database_types::orm::postgres::tables(db).with_keys(field_keys)
+}
+{{- else }}
 pub fn tables(db: crate::runtime::postgres::Pool) -> Tables {
-    Tables::new(db, database_types::orm::postgres_definition)
+    database_types::orm::postgres::tables(db)
+}
+{{- end }}
+{{- end }}
+
+{{- if .TableFieldKeys }}
+
+/// The keys of the `Encrypted<T>` fields of {{ .TableDatabase }} (D85): the keyring
+/// of the secret the API's config holds in `{{ .FieldKeysField }}`, which its DB
+/// service's config names (`outputs.sql.encryption.key`). The server's
+/// entrypoint passes it to `Implementations::new`, and an implementation
+/// opens its own repositories with it (`with_keys`).
+pub fn field_keys(
+    config: &crate::config::EnvConfig,
+) -> Result<std::sync::Arc<crate::runtime::orm::FieldKeyring>, crate::runtime::orm::fieldcrypt::FieldEncryptionError>
+{
+    crate::runtime::orm::FieldKeyring::parse(&config.{{ .FieldKeysField }}).map(std::sync::Arc::new)
 }
 {{- end }}
 

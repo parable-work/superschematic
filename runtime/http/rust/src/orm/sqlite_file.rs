@@ -7,6 +7,8 @@
 //! would meet `SQLITE_BUSY`; one that waits past the busy timeout for
 //! another process's write is [`Error::Busy`], a 503 its caller may try
 //! again (D58). A read runs on a reading connection, beside the writer.
+//! Each write that commits notifies the file's [`Wake`], which a worker of
+//! the same process sleeps on between its drains (D116).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,6 +19,7 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
 use super::sqlite::failure;
 use super::Error;
+use crate::worker::Wake;
 
 /// How a [`Database`] opens its file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +45,9 @@ pub struct Database {
     writer: Mutex<Connection>,
     readers: Vec<Mutex<Connection>>,
     next: AtomicUsize,
+    /// What a sleeping worker of the process waits on, notified after each
+    /// write the file commits (D116).
+    wake: Arc<Wake>,
 }
 
 impl std::fmt::Debug for Database {
@@ -118,7 +124,15 @@ impl Database {
             writer: Mutex::new(writer),
             readers,
             next: AtomicUsize::new(0),
+            wake: Arc::new(Wake::new()),
         })
+    }
+
+    /// What wakes a worker of this process that sleeps between its drains
+    /// (D116): notified after each write the file commits, a write to a
+    /// table a behavior hears among them, so the worker runs it at once.
+    pub fn wake(&self) -> &Arc<Wake> {
+        &self.wake
     }
 
     /// The file.
@@ -142,6 +156,7 @@ impl Database {
         transaction
             .commit()
             .map_err(|err| failure(&context(), &err))?;
+        self.wake.notify();
         Ok(out)
     }
 

@@ -219,8 +219,12 @@ A server, job or worker platform says what a deploy builds for the
 deployables it places in `Artifact` (D64): `ir.ArtifactImage`, the
 default, an image the target's `Builder` builds from the Dockerfile a
 stack's build writes, which the platform writes into the graph as its
-repository path; or `ir.ArtifactBundle`, the files `bun bundle.ts <dir>`
-writes in the deployable's package, which the target's `Bundles` keeps.
+repository path; `ir.ArtifactBundle`, the files `bun bundle.ts <dir>`
+writes in the deployable's package, which the target's `Bundles` keeps;
+or `ir.ArtifactBinary`, the environment's one binary (D116), which holds
+every server and worker placed on such a platform: the stack's build
+writes its crate, `stack build` builds it, and a deploy builds, pins and
+rolls out nothing for it, as the `embedded` target has it.
 Resolution records it as the deployable's `artifact`. A bundle's platform
 names each file it reads relative to the provisioner's program, with
 `ir.BundlePath(deployable, file)`, `artifacts/<deployable>/{bundle-digest}/<file>`,

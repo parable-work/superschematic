@@ -1,8 +1,11 @@
 //! The handlers of a `@tableOperation` (D106, D116): a read, a list, a
 //! create, an update and a delete of a table's rows through its
 //! repository, as the TypeScript runtime's table routes serve them, with
-//! the path's parents, the row rule (D108) and a list's filter (D110,
-//! D112) held beside each.
+//! the path's parents, the row rule (D108), a create's start state (D109)
+//! and a list's filter (D110, D112) held beside each. A table that
+//! composes behaviors is written through the behaviors' core (D103), as
+//! the route's caller with the permissions it holds, and the core's
+//! refusal is the problem of its status, code, message and details.
 //!
 //! A generated router carries each operation as data
 //! ([`TableOperation::parse`]) and hands its handler what the route
@@ -14,7 +17,9 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::run::{Client, Runner};
-use super::{Column, Constraint, ConstraintKind, Error, PageOptions, Table, Values, WriteOptions};
+use super::{
+    Column, Constraint, ConstraintKind, Error, PageOptions, Refusal, Table, Values, WriteOptions,
+};
 use crate::auth::{covers, Principal};
 use crate::error::ApiError;
 use crate::page::{refused_cursor, Cursor, Page, PageRequest};
@@ -313,21 +318,31 @@ impl From<Error> for ApiError {
             Error::Invalid(message) => ApiError::bad_request(message),
             Error::Constraint(constraint) => ApiError::conflict(constraint.message),
             Error::Busy(_) => ApiError::service_unavailable("The database is busy; try again"),
+            // A refusal of the behaviors' core is the problem of its
+            // status, code, message and details, as a behavior operation's
+            // route answers it; one of status 500, or of no error status,
+            // is the server's own.
             Error::Refused(refusal) => {
-                let status = match refusal.code.as_str() {
-                    "not_found" => http::StatusCode::NOT_FOUND,
-                    "unauthorized" => http::StatusCode::UNAUTHORIZED,
-                    "forbidden" => http::StatusCode::FORBIDDEN,
-                    "conflict" => http::StatusCode::CONFLICT,
-                    "precondition_failed" => http::StatusCode::PRECONDITION_FAILED,
-                    "invalid" | "bad_request" => http::StatusCode::BAD_REQUEST,
-                    _ => http::StatusCode::UNPROCESSABLE_ENTITY,
+                let status = http::StatusCode::from_u16(refusal.status)
+                    .ok()
+                    .filter(|status| {
+                        (status.is_client_error() || status.is_server_error())
+                            && *status != http::StatusCode::INTERNAL_SERVER_ERROR
+                    });
+                let Some(status) = status else {
+                    return ApiError::internal(format!("{}: {}", refusal.code, refusal.message));
                 };
-                let refused = ApiError::new(status, refusal.code, refusal.message);
-                if refusal.details.is_null() {
+                let Refusal {
+                    code,
+                    message,
+                    details,
+                    ..
+                } = *refusal;
+                let refused = ApiError::new(status, code, message);
+                if details.is_null() {
                     refused
                 } else {
-                    refused.with_details(refusal.details)
+                    refused.with_details(details)
                 }
             }
             Error::Encryption(message) | Error::Definition(message) | Error::Database(message) => {
@@ -468,12 +483,6 @@ impl<C: Client> Routes<'_, C> {
     /// Runs the operation, and answers the repository's error as the
     /// route answers it.
     pub(crate) async fn serve(&self, request: &TableRequest) -> Result<TableOutcome, ApiError> {
-        if !self.operation.starts.is_empty() {
-            return Err(ApiError::not_implemented(format!(
-                "a create of {} that names the state its row starts in (D109) is not served by the Rust server yet",
-                self.operation.table
-            )));
-        }
         match self.operation.kind {
             Kind::Read => self.read(request).await.map(TableOutcome::Row),
             Kind::List => self.list(request).await.map(TableOutcome::Page),
@@ -667,6 +676,10 @@ impl<C: Client> Routes<'_, C> {
         let body = body_of(operation, request)?;
         let mut input = Values::new();
         for member in &operation.body {
+            // The state a row starts in is its Workflow's to set, below.
+            if operation.starts.contains(member) {
+                continue;
+            }
             if let Some(value) = body.get(member).filter(|value| !value.is_null()) {
                 input.insert(member.clone(), value.clone());
             }
@@ -698,7 +711,44 @@ impl<C: Client> Routes<'_, C> {
             Ok(created) => created,
             Err(err) => return Err(self.refused_write(err, &input).await),
         };
-        Ok(view_of(operation, &created))
+        // The state the body names for the row to start in (D109): the row
+        // is created in its Workflow's initial state, and moved by the
+        // Workflow's own transition, in this transaction and as the
+        // route's caller, so the transition's permission, its by and every
+        // behavior that hears the move hold as they do for a caller who
+        // makes it. A refusal of the move rolls the create back.
+        let key = created.get(&table.key).cloned().unwrap_or(Value::Null);
+        let mut moved = false;
+        for member in &operation.starts {
+            let Some(to) = body.get(member).filter(|to| !to.is_null()) else {
+                continue;
+            };
+            if created.get(member) == Some(to) {
+                continue;
+            }
+            let mut params = Map::new();
+            params.insert("to".to_owned(), to.clone());
+            self.runner
+                .operation(
+                    member,
+                    "transition",
+                    &key,
+                    &Value::Object(params),
+                    &WriteOptions::default(),
+                )
+                .await
+                .map_err(|err| self.refused(err))?;
+            moved = true;
+        }
+        if !moved {
+            return Ok(view_of(operation, &created));
+        }
+        let row = self
+            .runner
+            .get_one(&key)
+            .await
+            .map_err(|err| self.refused(err))?;
+        Ok(view_of(operation, &row))
     }
 
     /// An update (D106): of the live row under the path's key and parents,

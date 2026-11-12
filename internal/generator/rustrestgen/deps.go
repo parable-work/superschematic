@@ -47,6 +47,13 @@ type DepsInfo struct {
 	// operations from are SQLite's.
 	SQLite bool
 
+	// FieldKeys is the field of the API's EnvConfig that holds the keys of
+	// Database's Encrypted<T> fields (D85), the secret its DB service's
+	// config names, when the API serves table operations from its
+	// repositories, which seal and open with them; empty for a database
+	// without such a field.
+	FieldKeys string
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 
@@ -625,8 +632,10 @@ func (o *APIOutput) DepsUses() []string {
 // NewSignature is the signature of Implementations::new, indented as a
 // method of an impl: the handlers, the identity runtime's authenticator for
 // an API over the user model (D50), the service authenticator for an API
-// with a service clause (D37) and the pool of its database for an API with
-// behavior operations (D103), on one line when it fits.
+// with a service clause (D37), the pool of its database for an API with
+// behavior operations (D103) or table operations (D106), and the keyring
+// of the database's Encrypted<T> fields for table operations over one
+// (D85), on one line when it fits.
 func (o *APIOutput) NewSignature() string {
 	params := []string{"handlers: Handlers"}
 	if o.Identity != nil {
@@ -638,7 +647,26 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasBehaviorOperations() || o.HasTableOperations() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
+	if o.TableFieldKeys() {
+		params = append(params, "field_keys: Arc<crate::runtime::orm::FieldKeyring>")
+	}
 	return rustFn("    ", "pub fn new", params, "Self")
+}
+
+// TableFieldKeys reports whether the router's table operations seal and
+// open Encrypted<T> fields (D85): Implementations::new then takes the
+// keyring of the database's key secret, which src/tables.rs reads from the
+// API's config (field_keys).
+func (o *APIOutput) TableFieldKeys() bool {
+	return o.HasTableOperations() && o.Deps != nil && o.Deps.FieldKeys != ""
+}
+
+// FieldKeysField is the field of EnvConfig that holds the key secret.
+func (o *APIOutput) FieldKeysField() string {
+	if o.Deps == nil {
+		return ""
+	}
+	return o.Deps.FieldKeys
 }
 
 // DatabaseType is the type of Deps.db: a pool of the API's database, or,

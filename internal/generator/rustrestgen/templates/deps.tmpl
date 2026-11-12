@@ -157,7 +157,12 @@ impl Implementations {
     /// `service_authenticator` verifies the calling services' credentials
     /// (D37); the entrypoint builds it from the API's callers field.
 {{- end }}
-{{- if .HasBehaviorOperations }}
+{{- if and .HasBehaviorOperations .Deps.SQLite }}
+    ///
+    /// `db` is the SQLite file of {{ .BehaviorDatabase }}, on whose writing
+    /// connection the behavior operations run (D103, D116): what `Deps.db`
+    /// holds.
+{{- else if .HasBehaviorOperations }}
     ///
     /// `db` is the pool of {{ .BehaviorDatabase }}, on which the behavior operations
     /// run (D103): the pool `Deps.db` holds.
@@ -165,6 +170,12 @@ impl Implementations {
     ///
     /// `db` is {{ .TableDatabase }}, from whose repositories the table operations
     /// are served (D106): what `Deps.db` holds.
+{{- end }}
+{{- if .TableFieldKeys }}
+    ///
+    /// `field_keys` are the keys of the `Encrypted<T>` fields of {{ .TableDatabase }}
+    /// (D85), which the table operations' repositories seal and open with:
+    /// `tables::field_keys` reads them from the API's config.
 {{- end }}
 {{ .NewSignature }}
 {{- if not $handlers }}
@@ -184,7 +195,7 @@ impl Implementations {
             behaviors: crate::behaviors::Behaviors::new(db{{ if .HasTableOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasTableOperations }}
-            tables: crate::tables::tables(db),
+            tables: crate::tables::tables(db{{ if .TableFieldKeys }}, field_keys{{ end }}),
 {{- end }}
         }
     }

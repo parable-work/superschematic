@@ -369,13 +369,14 @@ it in place of the old one, for a stamp no database has applied. It names
 a stamp a projection of the target declares, and builds a DB service
 alone, without `--with-deps`.
 
-`outputs.api.mcp: true` makes a TypeScript API's router serve the API's
-visible `@mcp` operations as MCP tools at `POST /api/mcp`, beside its
-OpenAPI document at `GET /api/openapi.json`, which every server serves
+`outputs.api.mcp: true` makes a TypeScript or a Rust API's router serve
+the API's visible `@mcp` operations as MCP tools at `POST /api/mcp`,
+beside its OpenAPI document at `GET /api/openapi.json`, which every
+server serves
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
-The Go and Rust servers serve no MCP endpoint yet, so the config fails to
-load with it on another language, `--api-language` included:
-`outputs.api.mcp is on and the API's language is RUST: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+The Go server serves no MCP endpoint yet, so the config fails to load
+with it on a Go API, `--api-language` included:
+`outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
 With a tool whose `invocationPolicy` is `"ask"`, the build needs
 `outputs.api.mcpConfirmationKey`, the `@envVars` secret the endpoint signs
 its confirmations with
@@ -1016,6 +1017,15 @@ quoted string. The `.superschematic` directory ignores itself in git, and
 also holds the Ed25519 key pair each server signs its calls to another
 with; no secret and no private key reaches the output root.
 
+An environment that builds as one binary (D116) runs as the one process
+it is: `--environment` names it, or it is the stack's one such
+environment when the stack has none on the local target. Dev migrates
+each database's SQLite file under the state directory with
+superschematic-migrate, from the model the file recorded to the schema's,
+builds the binary as `stack build` builds one that is no release, and
+runs it on `127.0.0.1` at the environment's port until Ctrl-C. It needs
+cargo, and Bun for a site, and no Docker.
+
 Without a directory, dev runs the working directory when it is a Stack
 service, else the one Stack service under `./schemas/services`. It needs
 Docker and Go.
@@ -1205,6 +1215,11 @@ target only when it links the target's extension and the provisioner's
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
 `prepare` reaches no target and takes its own flags.
+
+An environment that builds as one binary, as one on the `embedded` target
+does (D116), is built by `stack build` and run by `stack dev`. Every
+other command here refuses it and names `stack build`: its target makes a
+file a person installs, and rolls nothing out.
 
 A stack with an app whose `@app` names an extension the binary does not
 link (D78) is refused by `prepare`, `build` and `deploy`, a deploy with
@@ -1396,11 +1411,31 @@ $ superschematic stack build Staging --stack schemas/services/storefront-stack
 
 A build writes no deploy manifest.
 
+For an environment that builds as one binary (D116), build builds the
+stack and every service it reaches, runs the site's build, plans the step
+each database's SQLite file takes, writes the plans and the site's files
+into the environment's crate at
+`<output-root>/embedded/<stack>/<environment>/`, builds it with `cargo
+build --release --locked` in the output root's Cargo workspace, and
+prints the binary's path, alone, on its standard output. `--release`
+records each database's step in the Stack service's
+`plans/<environment>/<db>/`, numbered, and refuses one with a hazard no
+`--allow` names; without it the binary carries the step and nothing is
+recorded. `--prepared` and the other flags below do not apply to it.
+
+```sh
+$ superschematic stack build Desktop --release
+/work/notes/schemas/dist/target/release/notes-stack-desktop
+```
+
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--deployable` | every server, job and worker with a Dockerfile, and every site | build this server, job, worker or site only; repeatable |
 | `--server` | none | build this server only; repeatable. `--deployable` takes a job, a worker or a site too |
 | `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
+| `--release` | false | for an environment that builds as one binary: record the plan of each database in the Stack service's `plans/<environment>/<db>/`, to commit |
+| `--fail-on` | `all` | with `--release`: the hazard classes that stop the release unless `--allow` names each hazard; `none` for no gate |
+| `--allow` | none | with `--release`: a hazard id to acknowledge, as the refusal lists it; repeatable |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image`, `--site` and `--bundle` flags (`text`) or the result as `json` |
 | `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |

@@ -49,6 +49,11 @@ import (
 // Shutdown that SIGTERM cancels, and exits 1 when it fails; a worker's
 // (worker.rs.tmpl) calls `create_workers` and runs the HTTP runtime's claim
 // loop over its queue, by the descriptor its database's Rust types carry.
+// Over a database whose DB service lists sqlite first (D116), a job and a
+// worker open the database's SQLite file in a pool's place, as a server
+// does, and a worker's main.rs (worker_sqlite.rs.tmpl, and for a behavior
+// worker behavior_worker_sqlite.rs.tmpl) runs the runtime's loop over the
+// worker's drain, on connections of the worker's own to the file.
 //
 // A Rust app's entrypoint (D78) is a crate beside the servers' too,
 // `<output-root>/server/<stack>/<app>/`. Its main.rs (app_main.rs.tmpl)
@@ -183,6 +188,13 @@ type RustInput struct {
 	// runs the behaviors of, nil when the core's behaviors are every
 	// behavior its engine databases compose (D58).
 	EngineProject *EngineProject
+
+	// Embedded plans the wiring of every API of an environment's one
+	// binary (D116; embedded.go): Server is then the binary's name, and
+	// APIs the APIs of every server of the environment. The binary serves
+	// each API under a path of its own, so PlanEmbedded checks the routes
+	// of each server's APIs, and this plan checks none.
+	Embedded bool
 }
 
 // RustServer is a planned Rust entrypoint, what the templates read: a
@@ -324,6 +336,26 @@ func (w *RustWorker) Emits() bool {
 // emit no events.
 func (w *RustWorker) bare() bool {
 	return w != nil && w.Behavior != nil && !w.Behavior.Emits()
+}
+
+// OnSQLite reports whether the worker's queue is of a database on a SQLite
+// file (D116): its main.rs then runs the HTTP runtime's loop over the
+// worker's drain, on connections of its own to the file, in the claim
+// loop's place.
+func (w *RustWorker) OnSQLite() bool {
+	return w != nil && w.Database != nil && w.Database.SQLite
+}
+
+// DrainLet is main.rs's statement that builds a behavior worker on a
+// SQLite file as a worker the runtime drains (D116), by the function the
+// API crate's behaviors module holds, which takes the implementation's
+// Workers when the table's behaviors emit events (D104).
+func (w *RustWorker) DrainLet() string {
+	var args []string
+	if w.Emits() {
+		args = append(args, "workers")
+	}
+	return rustLetCall("queues", w.API+"::behaviors::"+rustutil.ToSnakeCase(w.Name)+"_worker", "?", args...)
 }
 
 // QueueNames are the behavior worker's queues, as its log names them.
@@ -475,8 +507,13 @@ type RustAPI struct {
 
 	// Tables is true when the API serves table operations (D106):
 	// Implementations::new then takes Database's pool too, from whose
-	// repositories the router's handlers serve each.
-	Tables bool
+	// repositories the router's handlers serve each. FieldKeys is true
+	// when those repositories seal and open Encrypted<T> fields (D85):
+	// Implementations::new then takes the keyring of the database's key
+	// secret too, which the API crate's tables::field_keys reads from its
+	// config.
+	Tables    bool
+	FieldKeys bool
 
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
@@ -494,6 +531,11 @@ type RustAPI struct {
 	MemoryStores   []RustMemoryStoreUse
 	RateLimitStore *RustMemoryStore
 	RouterOptions  string
+
+	// MCPConfirmationKey is the expression of its config that holds the key
+	// its MCP endpoint signs confirmations with, which its router options
+	// carry (D93, D116); empty for an API whose endpoint confirms no tool.
+	MCPConfirmationKey string
 }
 
 // MountsEngine reports whether the API's server mounts the routes of its
@@ -567,16 +609,29 @@ func (m *RustMemoryStore) OpenLet() string {
 }
 
 // RouterOptionsLet is main.rs's statement that builds the router options
-// of an API with a rateLimitStore: a registry whose limiters count in the
-// store (D75).
+// of an API with a rateLimitStore, a registry whose limiters count in the
+// store (D75), and of one whose MCP endpoint confirms a tool, the key it
+// signs its confirmations with (D93, D116).
 func (a *RustAPI) RouterOptionsLet() string {
 	const indent = "    "
-	limits := "RateLimits::with_store(" + rustString(a.Service) + ", Arc::clone(&" + a.RateLimitStore.Var + "))"
-	field := indent + indent + "rate_limits: " + limits + ","
-	if len(field) > rustWidth {
-		field = indent + indent + "rate_limits: RateLimits::with_store(\n" + indent + indent + indent + rustString(a.Service) + ",\n" + indent + indent + indent + "Arc::clone(&" + a.RateLimitStore.Var + "),\n" + indent + indent + "),"
+	var fields []string
+	if a.RateLimitStore != nil {
+		limits := "RateLimits::with_store(" + rustString(a.Service) + ", Arc::clone(&" + a.RateLimitStore.Var + "))"
+		field := indent + indent + "rate_limits: " + limits + ","
+		if len(field) > rustWidth {
+			field = indent + indent + "rate_limits: RateLimits::with_store(\n" + indent + indent + indent + rustString(a.Service) + ",\n" + indent + indent + indent + "Arc::clone(&" + a.RateLimitStore.Var + "),\n" + indent + indent + "),"
+		}
+		fields = append(fields, field)
 	}
-	return indent + "let " + a.RouterOptions + " = " + a.Alias + "::RouterOptions {\n" + field + "\n" + indent + indent + ".." + a.Alias + "::RouterOptions::default()\n" + indent + "};"
+	if a.MCPConfirmationKey != "" {
+		root, call := "EndpointOptions::default()", ".with_confirmation_key("+a.MCPConfirmationKey+".as_str()),"
+		field := indent + indent + "mcp: " + root + call
+		if len(field) > rustWidth {
+			field = indent + indent + "mcp: " + root + "\n" + indent + indent + indent + call
+		}
+		fields = append(fields, field)
+	}
+	return indent + "let " + a.RouterOptions + " = " + a.Alias + "::RouterOptions {\n" + strings.Join(fields, "\n") + "\n" + indent + indent + ".." + a.Alias + "::RouterOptions::default()\n" + indent + "};"
 }
 
 // RouterOptionsExpr is the router options main.rs builds the API's router
@@ -674,6 +729,8 @@ var rustReserved = []string{
 	"unread", "derivation_answer",
 	// An app's (D78).
 	"parts", "served", "addr",
+	// A worker's on a SQLite file (D116).
+	"queues", "connections", "wake", "sqlite", "open_file", "block_on",
 }
 
 // rustNames hands out snake_case identifiers no other declaration of
@@ -801,6 +858,8 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		s.Package = n.RustAppCrate(in.Stack, in.Server)
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
+	case in.Embedded:
+		// PlanEmbedded checked each server's routes.
 	default:
 		routes := Input{Stack: in.Stack, Server: in.Server}
 		for _, a := range in.APIs {
@@ -906,8 +965,8 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				}
 				databases[db] = d
 				switch {
-				case o.Deps.SQLite && (background || s.App != nil):
-					return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Rust server opens a SQLite file, and a job, a worker and an app do not yet (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
+				case o.Deps.SQLite && (s.Runner != nil || s.Deriver != nil || s.App != nil):
+					return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Rust server, job and worker open a SQLite file, and a deriver, an engine's runner and an app do not yet (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
 				case o.Deps.SQLite:
 					d.SQLite = true
 					s.Files = append(s.Files, d)
@@ -928,6 +987,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose table operations are served from %s (D106), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.TableDatabase())
 			}
 			api.Tables = true
+			api.FieldKeys = o.TableFieldKeys()
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
@@ -1013,6 +1073,21 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			// count.
 			if o.Deps.RateLimitStore == m.Service && !background {
 				api.RateLimitStore = h
+				api.RouterOptions = taken.take(stem + "_router_options")
+			}
+		}
+		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
+			// The MCP endpoint signs the confirmations of its tools that
+			// ask with the secret its config names (D93, D116).
+			tools := strings.Join(o.MCP.Confirming, ", ")
+			if s.App != nil {
+				return nil, fmt.Errorf("stack %s: app %s hosts %s, whose MCP endpoint runs %s only once the person confirms the call; an app's program builds the API's router itself, and the build hands it no confirmation key yet (D116); serve %s from a Rust server, or turn outputs.api.mcp off in its config", in.Stack, in.Server, o.SchemaName, tools, o.SchemaName)
+			}
+			if o.MCP.ConfirmationKey == "" || api.Config == "" {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, whose MCP endpoint runs %s only once the person confirms the call, and whose config holds no confirmation key; set outputs.api.mcpConfirmationKey (D93)", in.Stack, in.Server, o.SchemaName, tools)
+			}
+			api.MCPConfirmationKey = api.Config + "." + envgen.RustFieldName(o.MCP.ConfirmationKey)
+			if api.RouterOptions == "" {
 				api.RouterOptions = taken.take(stem + "_router_options")
 			}
 		}
@@ -1612,6 +1687,9 @@ func (s *RustServer) RuntimeUses() []string {
 		uses = append(uses, rustutil.UseLine(runtime+"::identity", []string{"PostgresPool", "Store"}))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.MCPConfirmationKey != "" }) {
+		uses = append(uses, rustutil.UseLine(runtime+"::mcp", []string{"EndpointOptions"}))
+	}
 	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Files) > 0 {
 		uses = append(uses, "use "+runtime+"::orm::sqlite::{self, Database as SqliteFile};")
@@ -1656,25 +1734,44 @@ func (s *RustServer) RuntimeUses() []string {
 func (s *RustServer) backgroundUses(runtime string) []string {
 	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	uses = append(uses, s.memoryStoreUses(runtime)...)
+	if len(s.Files) > 0 {
+		// A database on a SQLite file (D116), which a job and a worker
+		// open as a server does.
+		uses = append(uses, "use "+runtime+"::orm::sqlite::{self, Database as SqliteFile};")
+	}
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
-	if s.Worker != nil && s.Worker.Behavior == nil {
+	switch {
+	case s.Worker == nil || s.Worker.Behavior != nil:
 		// A behavior worker's queues are its API crate's to open (D103).
+	case s.Worker.OnSQLite():
+		uses = append(uses, "use "+runtime+"::queue::QueueDefinition;")
+	default:
 		uses = append(uses, rustutil.UseLine(runtime+"::queue", []string{"PostgresQueue", "QueueDefinition"}))
 	}
 	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::stackconfig", stackconfig))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
-	if s.Worker != nil {
+	root := []string{"Shutdown"}
+	switch {
+	case s.Worker == nil:
+	case !s.Worker.OnSQLite():
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
+	case s.Worker.Behavior != nil:
+		// On a SQLite file a worker is drained (D116).
+		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "DrainOptions"}))
+	default:
+		// Its method's future is driven where the drain runs.
+		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "DrainOptions", "SqliteWorker"}))
+		root = append(root, "block_on")
 	}
 	if s.Deriver != nil {
 		// The deriver reads its concurrency as a worker does (D74).
 		uses = append(uses, "use "+runtime+"::worker;")
 	}
-	return append(uses, "use "+runtime+"::Shutdown;")
+	return append(uses, rustutil.UseLine(runtime, root))
 }
 
 // appUses are the use declarations of an app's main.rs from the HTTP
@@ -1793,6 +1890,9 @@ func (a *RustAPI) ImplementationsArgs() []string {
 	if a.Behaviors || a.Tables {
 		args = append(args, a.Database.Var+".clone()")
 	}
+	if a.FieldKeys {
+		args = append(args, a.Alias+"::tables::field_keys(&"+a.Config+")?")
+	}
 	return args
 }
 
@@ -1819,8 +1919,12 @@ func WriteRust(s *RustServer, dir string) error {
 	switch {
 	case s.Job != nil:
 		main = "job.rs.tmpl"
+	case s.Worker != nil && s.Worker.Behavior != nil && s.Worker.OnSQLite():
+		main = "behavior_worker_sqlite.rs.tmpl"
 	case s.Worker != nil && s.Worker.Behavior != nil:
 		main = "behavior_worker.rs.tmpl"
+	case s.Worker != nil && s.Worker.OnSQLite():
+		main = "worker_sqlite.rs.tmpl"
 	case s.Worker != nil:
 		main = "worker.rs.tmpl"
 	case s.Runner != nil:

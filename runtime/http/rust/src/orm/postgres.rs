@@ -29,9 +29,9 @@ use super::plan::{Plan, Statement};
 use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
-    row, values, wire, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete, CoreUpdate,
-    Definition, Dialect, Error, FieldKeys, FindOptions, Found, PageOptions, RowPage, Session,
-    Table, UpsertOptions, Upserted, Values, WriteOptions,
+    row, values, wire, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
+    CoreOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found,
+    PageOptions, RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -48,9 +48,11 @@ pub type CoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Sen
 
 /// What runs a table's behaviors on a Postgres client (D103): the
 /// behaviors' core, through its adapter's `postgres` module, which a
-/// generated types crate binds for the client it runs on. Each runs in
+/// generated types crate binds (its `orm::postgres::Rules`) for a client
+/// that says whether it is a transaction ([`CoreClient`]). Each runs in
 /// the caller's transaction, writes the row with the columns the command
-/// carries, and answers the core's refusal as [`Error::Refused`].
+/// carries ([`core_columns`]), and answers the core's refusal as
+/// [`Error::Refused`].
 pub trait Rules<C>: Send + Sync {
     /// Creates a row, and answers its key in its wire form.
     fn create<'a>(&'a self, client: &'a C, create: CoreCreate<'a>) -> CoreFuture<'a, String>;
@@ -58,6 +60,92 @@ pub trait Rules<C>: Send + Sync {
     fn update<'a>(&'a self, client: &'a C, update: CoreUpdate<'a>) -> CoreFuture<'a, ()>;
     /// Deletes the live row a command names, or stamps it deleted.
     fn delete<'a>(&'a self, client: &'a C, delete: CoreDelete<'a>) -> CoreFuture<'a, ()>;
+    /// Runs an operation of one of the table's behaviors on the live row
+    /// a command names, and answers its result.
+    fn operation<'a>(
+        &'a self,
+        client: &'a C,
+        operation: CoreOperation<'a>,
+    ) -> CoreFuture<'a, Value>;
+}
+
+/// A client a behavior's command may run on (D103): either client the
+/// repositories take, which says whether it is a transaction. The core's
+/// adapter applies a change set in a savepoint, so a command runs in a
+/// transaction its caller opened.
+pub trait CoreClient: GenericClient + Sync {
+    /// The transaction the client is, or none for a connection outside
+    /// one.
+    fn as_transaction(&self) -> Option<&tokio_postgres::Transaction<'_>>;
+}
+
+impl CoreClient for deadpool_postgres::Transaction<'_> {
+    fn as_transaction(&self) -> Option<&tokio_postgres::Transaction<'_>> {
+        Some(&**self)
+    }
+}
+
+impl CoreClient for deadpool_postgres::Client {
+    fn as_transaction(&self) -> Option<&tokio_postgres::Transaction<'_>> {
+        None
+    }
+}
+
+/// The transaction a command through the core of `table`'s behaviors runs
+/// in, or the refusal of a client that is none.
+pub fn core_transaction<'c, C: CoreClient>(
+    client: &'c C,
+    table: &Table,
+) -> Result<&'c tokio_postgres::Transaction<'c>, Error> {
+    client.as_transaction().ok_or_else(|| {
+        Error::Invalid(format!(
+            "a write of {}, which composes behaviors (D103), runs in a transaction, since the core applies its change set in a savepoint: open the repositories over one",
+            table.name
+        ))
+    })
+}
+
+/// The columns a command through the behaviors' core writes of its own
+/// row (D103), as the core's adapter binds them on Postgres: each value
+/// the text the repository's own statement would bind for its column's
+/// type, which a statement over the columns is prepared to read, once a
+/// connection, and NULL null.
+pub async fn core_columns<C: GenericClient + Sync>(
+    client: &C,
+    table: &Table,
+    columns: &[(String, Option<Bound>)],
+) -> Result<Values, Error> {
+    let mut out = Values::new();
+    if columns.is_empty() {
+        return Ok(out);
+    }
+    let quoted = |column: &String| {
+        table
+            .columns
+            .iter()
+            .find(|candidate| candidate.unquoted() == column)
+            .map(|candidate| candidate.column.clone())
+            .ok_or_else(|| Error::Definition(format!("{} has no column {column}", table.name)))
+    };
+    let names = columns
+        .iter()
+        .map(|(column, _)| quoted(column))
+        .collect::<Result<Vec<_>, _>>()?;
+    let sql = format!("SELECT {} FROM {}", names.join(", "), table.table);
+    let prepared = client
+        .prepare_cached(&sql)
+        .await
+        .map_err(|err| failure(&format!("{}: {sql}", table.name), &err))?;
+    for ((column, bound), read) in columns.iter().zip(prepared.columns()) {
+        let value = match bound {
+            None => Value::Null,
+            Some(bound) => param_text(&bound.value, read.type_(), bound.marks.json)
+                .map_err(|err| Error::Invalid(format!("{}: {column}: {err}", table.name)))?
+                .map_or(Value::Null, Value::String),
+        };
+        out.insert(column.clone(), value);
+    }
+    Ok(out)
 }
 
 /// The repositories of a database on a Postgres client, acting as a user
@@ -131,6 +219,15 @@ impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
     #[must_use]
     pub fn with_rules(mut self, rules: &'a dyn Rules<C>) -> Self {
         self.rules = Some(rules);
+        self
+    }
+
+    /// The repositories running each behavior's command as `caller`, whose
+    /// permissions the core's guards read (D103); the acting user, holding
+    /// none, unless set.
+    #[must_use]
+    pub fn with_caller(mut self, caller: Caller) -> Self {
+        self.session.caller = Some(caller);
         self
     }
 
@@ -259,8 +356,12 @@ impl Tables {
             .await
             .map_err(|err| unreachable(&err))?;
         let outcome = {
+            // The route's caller acts, and runs a behavior's command with
+            // the permissions it holds, as the TypeScript server's table
+            // routes bind it.
             let mut repositories = Repositories::new(&transaction, (self.definition)()?)?
-                .acting(routes::acting(principal.as_ref()));
+                .acting(routes::acting(principal.as_ref()))
+                .with_caller(Caller::of(principal.as_ref()));
             if let Some(keys) = self.keys.as_deref() {
                 repositories = repositories.with_keys(keys);
             }
@@ -390,6 +491,26 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// table; [`Error::NotFound`] when there is none.
     pub async fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         self.runner().hard_delete_one(key).await
+    }
+
+    /// Runs `operation` of the behavior under `member`, the use's field
+    /// or the behavior's own member, on the live row whose key is `key`,
+    /// through the behaviors' core (D103), in the caller's transaction: a
+    /// Workflow's `transition` of `status`, say, with its parameters in
+    /// their wire form. It answers the operation's result; the core's
+    /// refusal is [`Error::Refused`], and a key no live row holds
+    /// [`Error::NotFound`].
+    pub async fn operation(
+        &self,
+        member: &str,
+        operation: &str,
+        key: &Value,
+        params: &Value,
+        options: &WriteOptions,
+    ) -> Result<Value, Error> {
+        self.runner()
+            .operation(member, operation, key, params, options)
+            .await
     }
 }
 
@@ -548,6 +669,29 @@ where
     pub async fn hard_delete_one(&self, key: &Key) -> Result<(), Error> {
         self.repository.hard_delete_one(&wire(key)?).await
     }
+
+    /// Runs `operation` of the behavior under `member` on the live row
+    /// whose key is `key`, through the behaviors' core (D103), with
+    /// `params`, and answers its result as `R`.
+    pub async fn operation<P, R>(
+        &self,
+        member: &str,
+        operation: &str,
+        key: &Key,
+        params: &P,
+        options: &WriteOptions,
+    ) -> Result<R, Error>
+    where
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let result = self
+            .repository
+            .operation(member, operation, &wire(key)?, &wire(params)?, options)
+            .await?;
+        serde_json::from_value(result)
+            .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
+    }
 }
 
 /// A Postgres client as a repository's runner drives it.
@@ -560,7 +704,7 @@ impl<C: GenericClient + Sync> PostgresClient<'_, C> {
     fn rules(&self, table: &str) -> Result<&dyn Rules<C>, Error> {
         self.rules.ok_or_else(|| {
             Error::Definition(format!(
-                "{table} composes behaviors (D103), and the repositories were opened with nothing to run them: pass the types crate's rules"
+                "{table} composes behaviors (D103), and the repositories were opened with nothing to run them: open them through the types crate's orm::postgres::Repositories, which binds the behaviors' core, or pass with_rules a core of your own"
             ))
         })
     }
@@ -673,15 +817,27 @@ impl<C: GenericClient + Sync> Client for PostgresClient<'_, C> {
     }
 
     async fn core_create(&self, create: CoreCreate<'_>) -> Result<String, Error> {
-        self.rules(create.table)?.create(self.client, create).await
+        self.rules(&create.table.name)?
+            .create(self.client, create)
+            .await
     }
 
     async fn core_update(&self, update: CoreUpdate<'_>) -> Result<(), Error> {
-        self.rules(update.table)?.update(self.client, update).await
+        self.rules(&update.table.name)?
+            .update(self.client, update)
+            .await
     }
 
     async fn core_delete(&self, delete: CoreDelete<'_>) -> Result<(), Error> {
-        self.rules(delete.table)?.delete(self.client, delete).await
+        self.rules(&delete.table.name)?
+            .delete(self.client, delete)
+            .await
+    }
+
+    async fn core_operation(&self, operation: CoreOperation<'_>) -> Result<Value, Error> {
+        self.rules(&operation.table.name)?
+            .operation(self.client, operation)
+            .await
     }
 }
 

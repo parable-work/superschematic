@@ -7,6 +7,7 @@ use axum::routing::get;
 use axum::Router;
 use serde_json::{json, Map, Value};
 
+use crate::mcp::EndpointOptions;
 use crate::RateLimits;
 
 /// The `info.version` a served document states when the service sets none,
@@ -22,7 +23,8 @@ pub const DEFAULT_OPENAPI_BASE_URL: &str = "http://localhost:8080";
 ///
 /// Two options are equal when their fields are and they share one
 /// registry: `RateLimits` compares by identity, so a clone of an options
-/// value is equal to it, while two `RouterOptions::default()` are not.
+/// value is equal to it, while two `RouterOptions::default()` are not. The
+/// MCP endpoint's confirmation store compares by identity too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouterOptions {
     /// Serve the OpenAPI document at `GET /api/openapi.json` and its RapiDoc
@@ -43,6 +45,11 @@ pub struct RouterOptions {
     /// Off, those are the host's, which has the socket, the clock and the
     /// store of counts they need.
     pub transport: bool,
+    /// The MCP endpoint of an API with `outputs.api.mcp` on (D81, D116):
+    /// its server info, its own rate limit and timeout, and the key and
+    /// the store of its confirmations (D93). A router of an API with it
+    /// off reads none of it.
+    pub mcp: EndpointOptions,
 }
 
 impl Default for RouterOptions {
@@ -53,6 +60,7 @@ impl Default for RouterOptions {
             openapi_base_url: DEFAULT_OPENAPI_BASE_URL.to_owned(),
             rate_limits: RateLimits::new(),
             transport: true,
+            mcp: EndpointOptions::default(),
         }
     }
 }

@@ -18,10 +18,15 @@
 //! soft-deletable table's deleted rows out, fences a write on `_version`
 //! when asked, pages a column that may be null with its nulls last and
 //! negates a filter with a null kept (D112), seals and opens an
-//! `Encrypted<T>` column with the keys it was given (D85), and writes a
-//! table that composes behaviors through the behaviors' core, which a
-//! [`Rules`] its caller passes runs (D103).
+//! `Encrypted<T>` column with the keys it was given (D85), the
+//! [`FieldKeyring`] of the DB service's key secret, whose envelopes are
+//! the Go ORM's and the TypeScript repositories' byte for byte
+//! ([`fieldcrypt`]), and writes a table that composes behaviors through
+//! the behaviors' core (D103): a create, an update, a delete and an
+//! operation of one of its behaviors, each run by the `Rules` of its
+//! dialect, which a generated types crate binds to the core's adapter.
 
+pub mod fieldcrypt;
 mod plan;
 #[cfg(feature = "postgres")]
 pub mod postgres;
@@ -38,11 +43,15 @@ use std::time::SystemTime;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Map;
 
 use crate::civil::from_days;
 
+pub use fieldcrypt::FieldKeyring;
 pub use plan::fill;
+// A value in its wire form, as a member of [`Values`] holds one, for a
+// types crate's `orm` module to name without a serde_json of its own.
+pub use serde_json::Value;
 
 /// A row, a create's input, an update's and a filter, as the repositories
 /// read them: a JSON object by member.
@@ -262,7 +271,7 @@ pub struct Table {
     pub unsupported: Option<String>,
     /// The table composes behaviors (D103): a create, an update and a
     /// delete of a row go through the behaviors' core, which the
-    /// repository's [`Rules`] runs.
+    /// repository's `Rules` runs.
     #[serde(default)]
     pub behaviors: Option<Behaviors>,
 }
@@ -459,9 +468,9 @@ pub enum Error {
     /// SQLite's writer was held past the busy timeout: the write may be
     /// tried again (D58).
     Busy(String),
-    /// The behaviors' core refused the command (D103), as its [`Rules`]
-    /// says it.
-    Refused(Refusal),
+    /// The behaviors' core refused the command (D103), as its `Rules`
+    /// says it. Boxed, so a result that may hold one stays small.
+    Refused(Box<Refusal>),
     /// An `Encrypted<T>` column's value could not be sealed or opened.
     Encryption(String),
     /// The definition, or a row the database holds, is not what the
@@ -471,12 +480,14 @@ pub enum Error {
     Database(String),
 }
 
-/// A refusal of the behaviors' core (D16, D103): its code, its message and
-/// the details a problem carries.
+/// A refusal of the behaviors' core (D16, D103): its code, its status, its
+/// message and the details a problem carries.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Refusal {
-    /// The refusal's code, `not_found`, `precondition_failed`, `conflict`.
+    /// The refusal's code, `not_found`, `forbidden`, `vetoed`.
     pub code: String,
+    /// The HTTP status the code answers with, the core's for each.
+    pub status: u16,
     /// What it says.
     pub message: String,
     /// The details of the problem it is answered as.
@@ -528,6 +539,31 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl Error {
+    /// A refusal of the behaviors' core (D103) as a repository's error:
+    /// its code, the status the code answers with, its message and the
+    /// details its problem carries. The core's `busy`, a row that kept
+    /// moving or a writer held past its timeout, is [`Error::Busy`], which
+    /// the caller may try again.
+    pub fn refused(
+        code: &str,
+        status: u16,
+        message: impl Into<String>,
+        details: Option<Values>,
+    ) -> Self {
+        let message = message.into();
+        if code == "busy" {
+            return Error::Busy(message);
+        }
+        Error::Refused(Box::new(Refusal {
+            code: code.to_owned(),
+            status,
+            message,
+            details: details.map_or(Value::Null, Value::Object),
+        }))
+    }
+}
 
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
@@ -884,7 +920,8 @@ pub struct FieldCell<'a> {
 }
 
 /// The keys of a database's `Encrypted<T>` fields (D85): what seals a
-/// value into the envelope its column holds, and opens one.
+/// value into the envelope its column holds, and opens one. A server's
+/// are the [`FieldKeyring`] of the DB service's key secret.
 pub trait FieldKeys: Send + Sync {
     /// The envelope of `plaintext` in `cell`, under the current key.
     fn seal(&self, cell: FieldCell<'_>, plaintext: &str) -> Result<String, String>;
@@ -901,37 +938,71 @@ pub struct Caller {
     pub subject: String,
     /// The permissions the caller holds.
     pub permissions: Vec<String>,
+    /// A service standing in for an end user (D37), which holds no
+    /// permission.
+    pub stands_in: bool,
 }
+
+impl Caller {
+    /// The caller a route's principal is: its subject and the permissions
+    /// it holds, each once; no one, an empty subject, without one.
+    pub fn of(principal: Option<&crate::auth::Principal>) -> Self {
+        let Some(principal) = principal else {
+            return Self::default();
+        };
+        let mut permissions: Vec<String> = Vec::new();
+        for permission in &principal.permissions {
+            if !permissions.contains(permission) {
+                permissions.push(permission.clone());
+            }
+        }
+        Self {
+            subject: principal.subject.clone(),
+            permissions,
+            stands_in: false,
+        }
+    }
+}
+
+/// The columns a command through the core writes of its own row, each by
+/// its unquoted name with the value its statement binds, `None` for NULL:
+/// what the repository encoded of its input, its audit stamps among them,
+/// which the core's write of the row binds in place of its own fields.
+pub type CoreColumns = Vec<(String, Option<Bound>)>;
 
 /// A create of a row of a table that composes behaviors, as the core takes
 /// it (D103).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct CoreCreate<'a> {
-    /// The table type.
-    pub table: &'a str,
+    /// The table.
+    pub table: &'a Table,
     /// The key the create names, in its wire form, when it names one.
     pub key: Option<String>,
-    /// The fields the core reads, by member: the row's own and any owned
-    /// field the input names, which the core refuses.
+    /// The fields the core reads, in their wire form, by unquoted column:
+    /// every column the input names but an encrypted one, whose plaintext
+    /// the core has no use for. What runs the command hands the core the
+    /// ones the behaviors' layout names, the row's own and any owned field
+    /// the input names, which the core refuses.
     pub fields: Values,
     /// The own columns as the insert binds them, by unquoted column.
-    pub columns: Vec<(String, Bound)>,
+    pub columns: CoreColumns,
     /// Who the command runs as.
     pub caller: Caller,
 }
 
 /// An update of a row through the core (D103).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct CoreUpdate<'a> {
-    /// The table type.
-    pub table: &'a str,
+    /// The table.
+    pub table: &'a Table,
     /// The row's key, in its wire form.
     pub key: String,
-    /// The fields the update sets, by member, as the core reads them.
+    /// The fields the update sets, in their wire form, by unquoted column,
+    /// as a create's are.
     pub fields: Values,
     /// The own columns as the update binds them, by unquoted column, a
     /// `None` setting NULL, with `updated_at` and `updated_by`.
-    pub columns: Vec<(String, Option<Bound>)>,
+    pub columns: CoreColumns,
     /// The caller's preconditions.
     pub preconditions: Option<&'a Values>,
     /// Who the command runs as.
@@ -939,16 +1010,85 @@ pub struct CoreUpdate<'a> {
 }
 
 /// A delete of a row through the core (D103).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct CoreDelete<'a> {
-    /// The table type.
-    pub table: &'a str,
+    /// The table.
+    pub table: &'a Table,
     /// The row's key, in its wire form.
     pub key: String,
     /// The stamps of a soft delete, by unquoted column, which the core
     /// writes in place of deleting the row; `None` for a table without
     /// `deletedAt`.
-    pub soft_delete: Option<Vec<(String, Bound)>>,
+    pub soft_delete: Option<CoreColumns>,
+    /// The caller's preconditions.
+    pub preconditions: Option<&'a Values>,
+    /// Who the command runs as.
+    pub caller: Caller,
+}
+
+/// A field of a table as the behaviors' layout names it (D103): the name
+/// the core gives it, its unquoted column, and whether the core holds it
+/// as epoch milliseconds, a timestamp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoreField<'a> {
+    /// The field, as the core names it.
+    pub field: &'a str,
+    /// Its column, unquoted.
+    pub column: &'a str,
+    /// The core holds it as epoch milliseconds.
+    pub epoch_millis: bool,
+}
+
+/// The fields of a command as the core reads them (D103), by the names
+/// the layout gives them: each of `layout`'s fields, the table's own and
+/// its behaviors' owned ones, that `fields` holds by its column, a
+/// timestamp as epoch milliseconds and any other value as it is, as the
+/// TypeScript repositories hand the core an input's.
+pub fn core_own<'a>(
+    table: &Table,
+    fields: &Values,
+    layout: impl IntoIterator<Item = CoreField<'a>>,
+) -> Result<Values, Error> {
+    let mut own = Values::new();
+    for field in layout {
+        let Some(value) = fields.get(field.column) else {
+            continue;
+        };
+        let value = match value {
+            Value::String(text) if field.epoch_millis => {
+                Value::from(epoch_millis(text).ok_or_else(|| {
+                    invalid(format!(
+                        "{}.{}: {text:?} is no RFC 3339 timestamp",
+                        table.name, field.field
+                    ))
+                })?)
+            }
+            other => other.clone(),
+        };
+        own.insert(field.field.to_owned(), value);
+    }
+    Ok(own)
+}
+
+/// An operation of one of a table's behaviors on a row, through the core
+/// (D103): a Workflow's `transition`, a Timers' `set`.
+#[derive(Clone, Debug)]
+pub struct CoreOperation<'a> {
+    /// The table.
+    pub table: &'a Table,
+    /// The row's key, in its wire form.
+    pub key: String,
+    /// The member the use's operations sit under: its field, or the
+    /// behavior's own for a use the table implements (`timers`).
+    pub member: &'a str,
+    /// The operation, as the behavior declares it.
+    pub operation: &'a str,
+    /// The operation's parameters, in their wire form.
+    pub params: Value,
+    /// The stamps the operation's write of the row sets, by unquoted
+    /// column: `updated_at`, and `updated_by` when the repositories act as
+    /// a user.
+    pub columns: CoreColumns,
     /// The caller's preconditions.
     pub preconditions: Option<&'a Values>,
     /// Who the command runs as.
@@ -1052,6 +1192,7 @@ impl Session<'_> {
         self.caller.clone().unwrap_or_else(|| Caller {
             subject: self.user.clone().unwrap_or_default(),
             permissions: Vec::new(),
+            stands_in: false,
         })
     }
 }
@@ -1082,6 +1223,80 @@ pub fn rfc3339_millis(time: SystemTime) -> String {
         of_day % 3600 / 60,
         of_day % 60
     )
+}
+
+/// A timestamp's RFC 3339 text as epoch milliseconds, the form the
+/// behaviors' core holds one in (D103), a fraction past the millisecond
+/// truncated; none for text that is no timestamp.
+pub fn epoch_millis(text: &str) -> Option<i64> {
+    let b = text.as_bytes();
+    if b.len() < 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || !matches!(b[10], b'T' | b't' | b' ')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return None;
+    }
+    let number = |range: std::ops::Range<usize>| -> Option<i64> {
+        let digits = text.get(range)?;
+        if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse().ok()
+    };
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let mut rest = text.get(19..)?;
+    let mut millis = 0;
+    if let Some(after) = rest.strip_prefix('.') {
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        let mut fraction: String = after[..digits].chars().take(3).collect();
+        while fraction.len() < 3 {
+            fraction.push('0');
+        }
+        millis = fraction.parse().ok()?;
+        rest = &after[digits..];
+    }
+    let offset = match rest.as_bytes() {
+        [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] | [sign @ (b'+' | b'-'), h1, h2, m1, m2] => {
+            let digits = [*h1, *h2, *m1, *m2];
+            if !digits.iter().all(u8::is_ascii_digit) {
+                return None;
+            }
+            let value = |pair: &[u8]| i64::from(pair[0] - b'0') * 10 + i64::from(pair[1] - b'0');
+            let minutes = value(&digits[..2]) * 60 + value(&digits[2..]);
+            if *sign == b'+' {
+                minutes * 60
+            } else {
+                -minutes * 60
+            }
+        }
+        _ => return None,
+    };
+    // Howard Hinnant's `days_from_civil`.
+    let shifted = if month <= 2 { year - 1 } else { year };
+    let era = shifted.div_euclid(400);
+    let yoe = shifted.rem_euclid(400);
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset;
+    Some(seconds * 1000 + millis)
 }
 
 /// `value` as the JSON object a repository reads: a create's input, an
@@ -1120,6 +1335,20 @@ mod tests {
         );
         let before = SystemTime::UNIX_EPOCH - Duration::from_millis(1);
         assert_eq!(rfc3339_millis(before), "1969-12-31T23:59:59.999Z");
+    }
+
+    #[test]
+    fn a_timestamp_is_the_cores_epoch_milliseconds() {
+        assert_eq!(
+            epoch_millis("2026-10-14T12:00:00.125Z"),
+            Some(1_791_979_200_125)
+        );
+        assert_eq!(
+            epoch_millis("2026-10-14T14:00:00+02:00"),
+            Some(1_791_979_200_000)
+        );
+        assert_eq!(epoch_millis("1969-12-31T23:59:59.999Z"), Some(-1));
+        assert_eq!(epoch_millis("yesterday"), None);
     }
 
     #[test]

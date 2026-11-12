@@ -60,7 +60,7 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{ .Crate }} = { path = "{{ .Path }}", default-features = false, features = ["background"] }
 {{- end }}
 {{- with .Behaviors }}
-{{ rulesAdapterCrate }} = { path = "{{ .AdapterPath }}", features = ["postgres"] }
+{{ rulesAdapterCrate }} = { path = "{{ .AdapterPath }}", features = ["{{ $.DatabaseDialect }}"] }
 {{ rulesBehaviorsCrate }} = { path = "{{ .BehaviorsPath }}" }
 {{- end }}
 {{- end }}

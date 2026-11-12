@@ -168,7 +168,7 @@ func TestGeneratedApprovalsAPICompiles(t *testing.T) {
 // approvalsCases are the cases behavior_approvals_runtime.test.ts runs, by
 // name: D104's end-to-end cases of Constants, StateRules and Approvals,
 // which the Go and Rust servers run too, in one wording, and the MCP
-// endpoint's, which only the TypeScript server serves.
+// endpoint's, which the TypeScript server's cases alone run.
 var approvalsCases = []string{
 	"a oneWay field moved back is refused as one_way, and moved forward is saved",
 	"a caller holding tasks.admin moves a oneWay field back",

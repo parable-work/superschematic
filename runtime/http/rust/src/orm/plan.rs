@@ -9,12 +9,12 @@ use std::fmt::Display;
 use serde_json::Value;
 
 use super::{
-    invalid, Bound, Column, CoreCreate, CoreDelete, CoreUpdate, Definition, Dialect, Error,
-    FieldCell, FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey, Values,
+    invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreUpdate, Definition, Dialect,
+    Error, FieldCell, FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey, Values,
     WriteOptions,
 };
 use crate::search::{like_pattern, terms};
-use crate::uuid62::parse_uuid;
+use crate::uuid62::{parse_uuid, uuid_to_base62};
 
 /// Fills a format string's `%s` and `%d`, in order, with `args`, and `%%`
 /// with `%`, as Go's `fmt.Sprintf` fills the statements `sqlutil` writes.
@@ -1399,17 +1399,18 @@ impl<'a> Plan<'a> {
             .map_or(&[], |behaviors| behaviors.owned.as_slice())
     }
 
-    /// The fields of `input` as the core reads them, by member: each
-    /// column's member the input names but an encrypted one, whose
-    /// plaintext the core has no use for.
+    /// The fields of `input` as the core reads them, by unquoted column:
+    /// each column's member the input names but an encrypted one, whose
+    /// plaintext the core has no use for, as the TypeScript repositories
+    /// hand it an input's.
     fn core_fields(&self, input: &Values) -> Values {
         let mut fields = Values::new();
         for column in &self.table.columns {
-            if column.encrypted || column.internal || column.audit.is_some() {
+            if column.encrypted {
                 continue;
             }
             if let Some(value) = input.get(&column.name) {
-                fields.insert(column.name.clone(), value.clone());
+                fields.insert(column.unquoted().to_owned(), value.clone());
             }
         }
         fields
@@ -1430,18 +1431,18 @@ impl<'a> Plan<'a> {
                 continue;
             }
             if let Some(bound) = self.insert_value(&sealed, column)? {
-                columns.push((column.unquoted().to_owned(), bound));
+                columns.push((column.unquoted().to_owned(), Some(bound)));
             }
         }
         let key = match sealed.get(&table.key) {
-            Some(Value::String(text)) if !text.is_empty() => Some(text.clone()),
-            Some(Value::Number(number)) => Some(number.to_string()),
-            _ => None,
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) if text.is_empty() => None,
+            Some(key) => Some(self.wire_key(key)?),
         };
         Ok(CoreCreate {
-            table: &table.name,
+            table,
             key,
-            fields: self.core_fields(input),
+            fields: self.core_fields(&sealed),
             columns,
             caller: self.session.caller(),
         })
@@ -1489,7 +1490,7 @@ impl<'a> Plan<'a> {
                 Some(self.bind(value, column, "update")?),
             ));
         }
-        let fields = self.core_fields(update);
+        let fields = self.core_fields(&sealed);
         if fields.is_empty() && columns.is_empty() {
             return Err(invalid(format!(
                 "update {}: no fields to update",
@@ -1523,7 +1524,7 @@ impl<'a> Plan<'a> {
             }
         }
         Ok(CoreUpdate {
-            table: &table.name,
+            table,
             key: self.wire_key(key)?,
             fields,
             columns,
@@ -1549,16 +1550,16 @@ impl<'a> Plan<'a> {
             if let Some(deleted_at) = table.audit("deletedAt") {
                 stamps.push((
                     deleted_at.unquoted().to_owned(),
-                    Bound {
+                    Some(Bound {
                         value: Value::String(self.session.now()),
                         marks: Marks::TIMESTAMP,
-                    },
+                    }),
                 ));
             }
             if let Some(deleted_by) = table.audit("deletedBy") {
                 stamps.push((
                     deleted_by.unquoted().to_owned(),
-                    self.bind(&Value::String(user), deleted_by, "deletedBy")?,
+                    Some(self.bind(&Value::String(user), deleted_by, "deletedBy")?),
                 ));
             }
             Some(stamps)
@@ -1566,7 +1567,7 @@ impl<'a> Plan<'a> {
             None
         };
         Ok(CoreDelete {
-            table: &table.name,
+            table,
             key: self.wire_key(key)?,
             soft_delete,
             preconditions: options.preconditions.as_ref(),
@@ -1574,16 +1575,103 @@ impl<'a> Plan<'a> {
         })
     }
 
-    /// The key a command names, in its wire form.
+    /// An operation of one of the table's behaviors on a row, through the
+    /// core: its parameters, and the stamps its write of the row sets,
+    /// updatedAt and, when the repositories act as a user, updatedBy, as
+    /// the TypeScript repositories' operations stamp them.
+    pub(crate) fn core_operation<'p>(
+        &self,
+        member: &'p str,
+        operation: &'p str,
+        key: &Value,
+        params: &Value,
+        options: &'p WriteOptions,
+    ) -> Result<CoreOperation<'p>, Error>
+    where
+        'a: 'p,
+    {
+        let table = self.table;
+        if table.behaviors.is_none() {
+            return Err(invalid(format!(
+                "{} composes no behaviors (D103), so it has no operation {member}.{operation}",
+                table.name
+            )));
+        }
+        let mut columns = Vec::new();
+        if let Some(updated_at) = table.audit("updatedAt") {
+            columns.push((
+                updated_at.unquoted().to_owned(),
+                Some(Bound {
+                    value: Value::String(self.session.now()),
+                    marks: Marks::TIMESTAMP,
+                }),
+            ));
+        }
+        if let (Some(updated_by), Some(user)) = (table.audit("updatedBy"), self.user()) {
+            columns.push((
+                updated_by.unquoted().to_owned(),
+                Some(self.bind(&Value::String(user), updated_by, "updatedBy")?),
+            ));
+        }
+        Ok(CoreOperation {
+            table,
+            key: self.wire_key(key)?,
+            member,
+            operation,
+            params: match params {
+                Value::Null => Value::Object(Values::new()),
+                params => params.clone(),
+            },
+            columns,
+            preconditions: options.preconditions.as_ref(),
+            caller: self.session.caller(),
+        })
+    }
+
+    /// The key a command names, in its wire form: a UUID in base62, which
+    /// the core names a row by, in whichever form the caller wrote it.
     fn wire_key(&self, key: &Value) -> Result<String, Error> {
-        match key {
-            Value::String(text) if !text.is_empty() => Ok(text.clone()),
-            Value::Number(number) => Ok(number.to_string()),
-            _ => Err(invalid(format!(
+        let refused = || {
+            invalid(format!(
                 "{} is keyed by {}, not {key}",
                 self.table.name, self.table.key
-            ))),
+            ))
+        };
+        match key {
+            Value::String(text) if self.table.key_column().uuid => {
+                parse_uuid(text).map(uuid_to_base62).ok_or_else(refused)
+            }
+            Value::String(text) if !text.is_empty() => Ok(text.clone()),
+            Value::Number(number) => Ok(number.to_string()),
+            _ => Err(refused()),
         }
+    }
+
+    /// The statements a delete through the core of a versioned table's row
+    /// runs around it, on a table that keeps no deleted rows: the one that
+    /// sets the transaction's history actor to the acting user, which the
+    /// history trigger reads the tombstone's actor from, and the one that
+    /// clears it (D17, D32), as a hard delete's do. None for any other
+    /// table.
+    pub(crate) fn core_delete_actor(&self) -> Option<(Statement, Statement)> {
+        if self.table.soft_delete || !self.table.history_actor {
+            return None;
+        }
+        let set = Statement {
+            sql: format!(
+                "{}SELECT _history_actor FROM history_actor",
+                self.definition.history_actor_cte
+            ),
+            args: vec![Bound {
+                value: self.user().map_or(Value::Null, Value::String),
+                marks: Marks::TEXT,
+            }],
+        };
+        let clear = Statement {
+            sql: self.definition.clear_history_actor.clone(),
+            args: Vec::new(),
+        };
+        Some((set, clear))
     }
 }
 

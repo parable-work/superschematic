@@ -1,0 +1,22 @@
+# fixture-tracker-api in Rust as one binary (D116): the environment Desktop
+# is on a target whose server platform builds no artifact of its own, so
+# the stack's build writes the environment's crate, which holds the API's
+# server and opens fixture-tracker-db's SQLite file under its data
+# directory.
+kind: Stack
+types:
+  Tracker:
+    name: Tracker
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-tracker-api, kind: API }
+      expose:
+        - service: { name: fixture-tracker-api, kind: API }
+  Desktop:
+    name: Desktop
+    role: EmbeddedStruct
+    environment:
+      target: embedded
+      values:
+        port: 4170

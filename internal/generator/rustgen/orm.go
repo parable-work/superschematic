@@ -47,8 +47,13 @@ type ORMInfo struct {
 	SQLiteRefused []ORMRefusal
 
 	// Rules is whether a table composes behaviors (D103), whose writes go
-	// through the core.
-	Rules bool
+	// through the core, RulesTables those tables, and RulesLayout the
+	// layout document of them (behaviorlayout), as the Rust raw string
+	// literal a constant holds: where the core's names live, which the
+	// behaviors' adapter reads.
+	Rules       bool
+	RulesTables []string
+	RulesLayout string
 }
 
 // ORMRefusal is a table with no repository in a dialect, and why.
@@ -280,7 +285,10 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		key := t.KeyColumn()
 		switch {
 		case key.Def == nil && uuidType == "":
-			return nil, fmt.Errorf("rustgen: table %s has no key field, and schema %s has no Identity.UUID scalar for the key the generator adds", t.Type, schema.Name)
+			// The key the generator adds is a UUID, which a schema that
+			// names no Identity.UUID has no type of: its repository takes
+			// the key as the text a row carries it in.
+			keyTypes[t.Type] = "String"
 		case key.Def == nil:
 			keyTypes[t.Type] = uuidType
 		default:
@@ -327,6 +335,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				}
 			}
 			typed.Behaviors, info.Rules = true, true
+			info.RulesTables = append(info.RulesTables, t.Type)
 		}
 		table.Behaviors = behaviors
 		for _, c := range t.Columns {
@@ -410,6 +419,13 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	}
 	if len(info.Tables) == 0 {
 		return nil, nil
+	}
+	if info.Rules {
+		encoded, err := json.MarshalIndent(layout, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("rustgen: the behaviors' layout of %s: %w", schema.Name, err)
+		}
+		info.RulesLayout = rustutil.RawString(string(encoded))
 	}
 	if info.Postgres, err = definitionLiteral(postgres); err != nil {
 		return nil, err
@@ -524,8 +540,16 @@ func rustORMColumn(c sqlutil.ColumnModel, info *TypeInfo, uuidType string, keyTy
 		if member.Type == "" {
 			member.Type = uuidType
 		}
+		if member.Type == "" {
+			member.Type = "String"
+		}
 	case c.Def == nil && c.Key:
+		// The key the generator adds: the schema's UUID, or its text in
+		// a schema that names none.
 		member.Type = uuidType
+		if member.Type == "" {
+			member.Type = "String"
+		}
 	case c.Def == nil:
 		member.Type = "i64"
 	default:

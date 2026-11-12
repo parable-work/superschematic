@@ -11,7 +11,9 @@
 //! user (D87): `acting(Some(id))` acts as one, and `as_system()` as the
 //! system actor, for a job's or a worker's writes. An update sets the
 //! members that are `Some`, and `Some(None)` sets a column that may be null
-//! to NULL.
+//! to NULL. An `Encrypted<T>` column holds its envelope (D85), which
+//! `with_keys` seals and opens with: a server's keys are the
+//! [`FieldKeyring`] of the DB service's key secret.
 //!
 //! With its `postgres` feature, `postgres::Repositories::new` opens them
 //! over a tokio-postgres client, asynchronously.
@@ -24,9 +26,9 @@ use superschematic_http_runtime::orm;
 // What a repository's caller names beside the table's own types: its
 // options, what it answers and what it fails with.
 pub use orm::{
-    Caller, Constraint, ConstraintKind, Equals, Error, FieldCell, FieldKeys, FindOptions, Found,
-    OrderBy, Ordered, PageOptions, ReferencedBy, Refusal, RowPage, Text, UpsertOptions,
-    UpsertStatus, Upserted, Values, WriteOptions,
+    Caller, Constraint, ConstraintKind, Equals, Error, FieldCell, FieldKeyring, FieldKeys,
+    FindOptions, Found, OrderBy, Ordered, PageOptions, ReferencedBy, Refusal, RowPage, Text,
+    UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 #[allow(unused_imports)]
@@ -1543,6 +1545,12 @@ pub mod postgres {
     pub type UserRoleGrantRepository<'a, C> =
         orm::postgres::Typed<'a, C, UserRoleGrantRow, UserRoleGrantCreate, UserRoleGrantUpdate, UserRoleGrantFilter, IdentityUUID>;
 
+    /// The tables of `fixture-user-model-db` over `pool`, as a generated router serves
+    /// its table operations from them (D106).
+    pub fn tables(pool: deadpool_postgres::Pool) -> orm::postgres::Tables {
+        orm::postgres::Tables::new(pool, postgres_definition)
+    }
+
     /// The repositories of `fixture-user-model-db` on a Postgres client, acting as a
     /// user or as no one.
     pub struct Repositories<'a, C>(orm::postgres::Repositories<'a, C>);
@@ -1579,6 +1587,14 @@ pub mod postgres {
         #[must_use]
         pub fn with_rules(self, rules: &'a dyn orm::postgres::Rules<C>) -> Self {
             Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories running each behavior's command as `caller`,
+        /// whose permissions the core's guards read (D103); the acting
+        /// user, holding none, unless set.
+        #[must_use]
+        pub fn with_caller(self, caller: orm::Caller) -> Self {
+            Self(self.0.with_caller(caller))
         }
 
         /// The repositories telling `trace` each statement's text as it

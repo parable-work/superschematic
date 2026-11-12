@@ -229,6 +229,9 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 		return fail(fmt.Errorf("environment %s is on the %s target, which `stack %s` does not deploy: run it with `superschematic stack dev --environment %s`",
 			environment, local.Target, cmd.Name(), environment))
 	}
+	if err := refuseBinary(cmd, c.env); err != nil {
+		return fail(err)
+	}
 	c.dir = flags.programDir
 	if c.dir == "" {
 		c.dir = programDir(p.outputRoot, st.Name, environment)
@@ -787,6 +790,7 @@ func newStackBuildCmd(a *app) *cobra.Command {
 	var deployables, servers []string
 	var force bool
 	var out, format string
+	binary := &binaryBuildFlags{}
 	cmd := &cobra.Command{
 		Use:   "build <environment>",
 		Short: "Build the images of an environment's servers and jobs, and its sites' files, without deploying them",
@@ -813,7 +817,21 @@ result, and --out writes it to a file. --deployable builds the servers,
 jobs and sites it names only, and --force builds one whose context or
 files did not change. A build writes no deploy manifest. A stack with an
 app that needs an extension this binary does not link is refused, as
-build-all refuses it: run the binary that links it (D78).`,
+build-all refuses it: run the binary that links it (D78).
+
+An environment that builds as one binary, as one on the embedded target
+does (D116), is built otherwise: build builds the stack and every service
+it reaches, runs the site's build, plans the step each database's SQLite
+file takes from the model the last recorded plan ends at to the schema's
+model, writes the plans and the site's files into the environment's crate
+at <output-root>/embedded/<stack>/<environment>/, builds it with cargo
+build --release --locked in the output root's Cargo workspace, and prints
+the binary's path, alone, on its standard output. The binary carries
+every recorded plan of each database, and migrates its files with them as
+it starts. --release records the step, numbered, in the Stack service's
+plans/<environment>/<db>/, to commit, and refuses one with a hazard no
+--allow names; without it the binary carries the step and nothing is
+recorded.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
@@ -830,6 +848,12 @@ build-all refuses it: run the binary that links it (D78).`,
 			defer c.close()
 			if err := checkAppExtensions(c.reg, c.stack, c.services); err != nil {
 				return err
+			}
+			if c.env.IsBinary() {
+				return c.buildBinary(cmd, binary)
+			}
+			if binary.used(cmd) {
+				return fmt.Errorf("--release, --fail-on and --allow are for an environment that builds as one binary (D116), and environment %s, on the %s target, builds none", args[0], c.env.Target)
 			}
 			src, err := c.sources()
 			if err != nil {
@@ -884,6 +908,7 @@ build-all refuses it: run the binary that links it (D78).`,
 	cmd.Flags().BoolVar(&force, "force", false, "build a server or job whose context did not change")
 	cmd.Flags().StringVar(&out, "out", "", "write the result as JSON to this file")
 	cmd.Flags().StringVar(&format, "format", "text", "print --image flags (text) or the result as json")
+	binary.register(cmd)
 	return cmd
 }
 

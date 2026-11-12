@@ -645,3 +645,246 @@ func (o *APIOutput) checkBehaviorDeps(deps *DepsInfo) error {
 	}
 	return nil
 }
+
+// The behaviors of a Rust API on a SQLite file (D116): Deps.db is the
+// file, so src/behaviors.rs is written from a template of its own. Its
+// behavior operations run through the adapter's sqlite module in a
+// transaction of the file's writing connection. It holds each
+// @behaviorWorker as a worker a host drains, the HTTP runtime's
+// SqliteWorker, which <stem>_worker builds from the table's behavior
+// queues, deadlines first, each with the handler that runs a claimed
+// message through the adapter's sqlite module in the unit the drain runs
+// it in, at the time the drain was given, the message spent in that unit.
+// The worker's main runs the runtime's loop over its drain, and a host
+// with no runtime calls the drain itself.
+
+// BehaviorsTemplate is the template src/behaviors.rs is written from: the
+// behaviors on a Postgres pool, or, for a database on a SQLite file, on
+// its writing connection and as workers a host drains (D116).
+func (o *APIOutput) BehaviorsTemplate() string {
+	if o.Deps != nil && o.Deps.SQLite {
+		return "behaviors-sqlite.tmpl"
+	}
+	return "behaviors.tmpl"
+}
+
+// SQLiteBehaviorUses are src/behaviors.rs's use declarations on a SQLite
+// file (D116), in the order rustfmt sorts them: the adapter's items, the
+// HTTP runtime's, and the queues' messages and descriptors from the
+// database's Rust types.
+func (o *APIOutput) SQLiteBehaviorUses() []string {
+	adapter := []string{"sqlite", "Caller", "Core", "Host", "Layout"}
+	var root, types, uses []string
+	if o.HasBehaviorOperations() {
+		// The operations run on the file's writing connection, and answer
+		// its failure beside the core's.
+		adapter = append(adapter, "Error", "Refusal")
+		root = append(root, "ApiError", "RequestContext")
+		uses = append(uses,
+			"use "+o.RuntimeCrateIdent+"::orm;",
+			"use "+o.RuntimeCrateIdent+"::orm::sqlite::Database;",
+		)
+	}
+	if o.HasBehaviorPreconditions() || o.HasTableBehaviorOperations() {
+		adapter = append(adapter, "ExecuteOptions")
+	}
+	if len(o.BehaviorWorkers) > 0 {
+		adapter = append(adapter, "Claim")
+		root = append(root, "BoxError")
+		uses = append(uses,
+			"use "+o.RuntimeCrateIdent+"::queue::QueueDefinition;",
+			"use "+o.RuntimeCrateIdent+"::worker::{Claimed, SqliteWorker, Unit};",
+		)
+	}
+	if o.HasDeadlineQueues() {
+		adapter = append(adapter, "Deadline", "DeadlineRun")
+	}
+	if o.HasChangeQueues() {
+		adapter = append(adapter, "TableChange")
+	}
+	if o.EmitsEvents() {
+		// EventRun's operation answers the adapter's Error, its `with`
+		// lends the unit's connection, and an event's method is awaited
+		// where the drain runs (D104).
+		if !o.HasBehaviorOperations() {
+			adapter = append(adapter, "Error", "Refusal")
+		}
+		root = append(root, "block_on")
+		uses = append(uses, "use "+o.RuntimeCrateIdent+"::orm::sqlite::rusqlite::Connection;")
+	}
+	for _, w := range o.BehaviorWorkers {
+		for _, q := range w.BehaviorQueues {
+			types = append(types, q.Queue, q.Const)
+		}
+	}
+	uses = append(uses,
+		rustutil.UseLine(strings.ReplaceAll(RulesAdapterCrate, "-", "_"), adapter),
+		rustutil.UseLine(o.RuntimeCrateIdent, root),
+	)
+	slices.SortFunc(uses, compareUses)
+	if len(types) > 0 {
+		slices.SortFunc(types, func(a, b string) int {
+			if ca, cb := a == strings.ToUpper(a), b == strings.ToUpper(b); ca != cb {
+				if ca {
+					return 1
+				}
+				return -1
+			}
+			return strings.Compare(a, b)
+		})
+		uses = append(uses, "\n"+bracedUse("crate::"+DatabaseTypesModule, types))
+	}
+	return uses
+}
+
+// compareUses orders two use declarations as rustfmt does: by their
+// paths, a module before a type of the same parent, and a braced list
+// after both.
+func compareUses(a, b string) int {
+	key := func(use string) []string {
+		path := strings.TrimSuffix(strings.TrimPrefix(use, "use "), ";")
+		return strings.Split(path, "::")
+	}
+	rank := func(segment string) int {
+		switch {
+		case strings.HasPrefix(segment, "{"):
+			return 2
+		case segment != "" && strings.ToLower(segment[:1]) != segment[:1]:
+			return 1
+		}
+		return 0
+	}
+	ka, kb := key(a), key(b)
+	for i := 0; i < len(ka) && i < len(kb); i++ {
+		if ka[i] == kb[i] {
+			continue
+		}
+		if ra, rb := rank(ka[i]), rank(kb[i]); ra != rb {
+			return ra - rb
+		}
+		return strings.Compare(ka[i], kb[i])
+	}
+	return len(ka) - len(kb)
+}
+
+// WorkerFunc is the function of src/behaviors.rs that builds a behavior
+// worker on a SQLite file as a worker a host drains (D116):
+// ticket_timers_worker.
+func (w WorkerInfo) WorkerFunc() string {
+	return rustutil.ToSnakeCase(w.Name) + "_worker"
+}
+
+// SQLiteWorkerSignature is the signature of the function that builds the
+// behavior worker on a SQLite file, through its opening brace: it takes the
+// API's Workers when the table's behaviors emit events, each of which goes
+// to a method of them (D104).
+func (w WorkerInfo) SQLiteWorkerSignature() string {
+	var params []string
+	if w.Behavior.Emits() {
+		params = append(params, "workers: Arc<dyn crate::Workers>")
+	}
+	return rustFn("", "pub fn "+w.WorkerFunc(), params, "Result<SqliteWorker, BoxError>")
+}
+
+// SQLiteQueueVar is the variable the worker's function holds a behavior
+// queue's descriptor in, named after what the queue holds: deadlines.
+func (w WorkerInfo) SQLiteQueueVar(q BehaviorQueue) string {
+	return strings.TrimPrefix(q.Func, rustutil.ToSnakeCase(w.Name)+"_")
+}
+
+// SQLiteHandlerSignature is the signature of the function that runs a
+// message claimed from the queue on a SQLite file, through its opening
+// brace: it takes the unit the drain runs the message in and the time the
+// drain was given, and an event queue's the API's Workers too (D104).
+func (q BehaviorQueue) SQLiteHandlerSignature() string {
+	params := []string{"unit: &Unit<'_>"}
+	if q.Events() {
+		params = append(params, "workers: &dyn crate::Workers")
+	}
+	params = append(params, "claimed: Claimed<"+q.Queue+">", "now: SystemTime")
+	return rustFn("", "pub fn "+q.Handler, params, "Result<(), BoxError>")
+}
+
+// sqliteUnitCall is a handler's statement `let name = unit.with(|connection|
+// fn(args))?;`, as rustfmt lays it out: on one line when its arguments take
+// 60 columns at most and the line 100; the call on the line below the `=`
+// when that fits; and in the closure's block, an argument to a line,
+// otherwise.
+func sqliteUnitCall(name, fn string, args []string) string {
+	const indent = "    "
+	head := indent + "let " + name + " ="
+	call := "unit.with(|connection| " + fn + "(" + strings.Join(args, ", ") + "))?;"
+	if len(strings.Join(args, ", ")) <= 60 {
+		if line := head + " " + call; len(line) <= 100 {
+			return line
+		}
+		if line := indent + indent + call; len(line) <= 100 {
+			return head + "\n" + line
+		}
+	}
+	return head + " unit.with(|connection| {\n" + rustCall(indent+indent, fn, args, "") + "\n" + indent + "})?;"
+}
+
+// SQLiteRunDeadlineCall is the handler's call of the adapter's
+// sqlite::run_deadline for the worker's table, as rustfmt lays it out.
+func (w WorkerInfo) SQLiteRunDeadlineCall() string {
+	return sqliteUnitCall("run", "sqlite::run_deadline", []string{"&host", "connection", rustString(w.Behavior.Table), "&deadline", w.CallerFunc() + "()", "Some(&claim)"})
+}
+
+// SQLiteRunChangeCall is the handler's call of the adapter's
+// sqlite::run_change for the worker's table, as rustfmt lays it out.
+func (w WorkerInfo) SQLiteRunChangeCall() string {
+	return sqliteUnitCall("run", "sqlite::run_change", []string{"&host", "connection", rustString(w.Behavior.Table), "&change", w.CallerFunc() + "()", "Some(&claim)"})
+}
+
+// SQLiteSpendEventCall is the event handler's call of the adapter's
+// sqlite::spend_event for the worker's table, as rustfmt lays it out.
+func (w WorkerInfo) SQLiteSpendEventCall() string {
+	return sqliteUnitCall("spent", "sqlite::spend_event", []string{"&host", "connection", rustString(w.Behavior.Table), "Some(&claim)"})
+}
+
+// SQLiteModuleDoc is the paragraph of src/behaviors.rs's module doc that
+// says what the behavior worker runs on a SQLite file and how (D116), its
+// lines of "//! " text wrapped at 80 columns.
+func (w WorkerInfo) SQLiteModuleDoc(schemaName, database string) string {
+	var runs, queues, handlers []string
+	for _, q := range w.BehaviorQueues {
+		queues = append(queues, q.Queue)
+		handlers = append(handlers, "`"+q.Handler+"`")
+		switch {
+		case q.Changes():
+			runs = append(runs, "the writes of its rows "+w.hearers()+" hear")
+		case q.Events():
+			runs = append(runs, "the events "+w.emitters()+" about its rows")
+		default:
+			runs = append(runs, "its deadlines")
+		}
+	}
+	queue := "queue " + queues[0]
+	if len(queues) > 1 {
+		queue = "queues " + andList(queues)
+	}
+	decisions, how, served := "D103, D116", "run through the behaviors' core by superschematic-rules-adapter's sqlite module", " No implementation method serves it."
+	if w.Behavior.EventQueue != "" {
+		// An emitting table's events reach the project's Workers (D104).
+		decisions = "D103, D104, D116"
+		how = "run as the worker: a deadline or a change through the behaviors' core by superschematic-rules-adapter's sqlite module, and an event handed to the Workers method of its use and kind, " + andList(w.eventMethods()) + ", which the implementation writes"
+		served = ""
+	}
+	text := fmt.Sprintf("The behavior worker %s of %s on %s's SQLite file (%s): %s's behavior queues, %s, as a worker its host drains, `%s`, the HTTP runtime's `SqliteWorker`. A drain takes a connection, the time and a limit, claims what is due of %s's %s, in that order, and answers how many messages it ran and when the next falls due. Each message is %s, in a transaction of the connection its message is spent in, at the time the drain was given (%s).%s Its main runs the HTTP runtime's loop over the drain on tokio, and a host with no async runtime calls the drain on a thread of its own.",
+		w.Name, schemaName, database, decisions, w.Behavior.Table, andList(runs), w.WorkerFunc(), database, queue, how, andList(handlers), served)
+	return docLines("//!", text, 80)
+}
+
+// SQLiteWorkerDoc is the doc comment of the function that builds the
+// behavior worker on a SQLite file, its lines of "/// " text wrapped at 80
+// columns.
+func (w WorkerInfo) SQLiteWorkerDoc(database string) string {
+	takes := ""
+	if w.Behavior.Emits() {
+		takes = " `workers` are the API's Workers, whose methods its events go to (D104)."
+	}
+	text := fmt.Sprintf("The behavior worker %s as a worker a host drains (D116): %s's behavior queues on %s's SQLite file, deadlines first, each with the handler that completes its messages itself. Its `drain` takes a connection of the worker's own, the time and a limit, and answers how many messages it ran and when the next falls due.%s",
+		w.Name, w.Behavior.Table, database, takes)
+	return docLines("///", text, 80)
+}

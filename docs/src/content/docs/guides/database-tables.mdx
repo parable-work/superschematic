@@ -603,11 +603,16 @@ So each API's servers, jobs and workers read the one secret each
 environment sets, and the generated entrypoints open the ORM with it:
 `ConnectWithPool(pool, WithFieldKeys(config.FinancesDbFieldKeys))` in Go,
 `createOrm(pool, { fieldKeys: config.FINANCES_DB_FIELD_KEYS })` in
-TypeScript. The build refuses a database whose config names no key and an
+TypeScript. A Rust server whose API has table operations reads the
+keyring with the API crate's `tables::field_keys(&config)` and hands it
+to `Implementations::new`, and a Rust implementation opens its own
+repositories with it (`Repositories::new(...)?.with_keys(&keys)`, the
+keys a `FieldKeyring::parse` of the secret); the Rust repositories seal
+and open the envelopes the other two do, byte for byte (D116). The build refuses a database whose config names no key and an
 API on the database whose `@envVars` lacks it, each saying where the class
 goes, and a stack refuses a deployable that reads no binding of it.
 Without the keys, a read or a write of the field fails with a typed error (`fieldcrypt.ErrNoKeys` in Go,
-`FieldEncryptionError` with reason `no-keys` in TypeScript); an envelope
+`FieldEncryptionError` with reason `no-keys` in TypeScript, `orm::Error::Encryption` in Rust); an envelope
 under a key the keyring does not hold fails with `ErrUnknownKey`
 (`unknown-key`), one that does not open with `ErrDecrypt` (`decrypt`).
 None of them carries the value or a key.
@@ -1085,8 +1090,9 @@ every insert, update and delete of a row, whoever makes it: the
 repositories, a bulk, hard or soft delete, a script or psql. The trigger
 never refuses a write, and the API's `@behaviorWorker` of the table runs
 the messages after the commit, one row's in the order they were written.
-No behavior worker claims on SQLite or D1 yet, where the messages
-accumulate until one does. Such a table has no upserts when its behaviors
+A Rust API's behavior worker claims on a SQLite file too (D116); no
+TypeScript or Go one claims on SQLite yet, and none on D1, where the
+messages accumulate until one does. Such a table has no upserts when its behaviors
 keep sub-tables or arm deadlines. A table whose behaviors emit events
 about its rows (Schedules' runs, Pool's rechecks) gets an event queue,
 `<table>_event_queue`, one message per event, written in the command's

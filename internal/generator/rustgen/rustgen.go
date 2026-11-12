@@ -280,6 +280,16 @@ type ModuleOutput struct {
 	// SetHTTPRuntimePath. Empty names the crate's version instead.
 	HTTPRuntimeDepPath string
 
+	// RulesAdapterDepPath and RulesBehaviorsDepPath are the Cargo.toml path
+	// entries for the behaviors' adapter and the behaviors' own crate
+	// (superschematic-rules-adapter and superschematic-rules-behaviors),
+	// through which src/orm.rs writes a table that composes behaviors
+	// (D103, D116), relative to the output directory, set by
+	// SetRulesPaths. Both crates are unpublished, so a crate with either
+	// unset binds no core, and says so (BindsRules).
+	RulesAdapterDepPath   string
+	RulesBehaviorsDepPath string
+
 	// Behaviors are the types that compose behaviors, each with its
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as src/behaviors.rs. Nil when no type composes one.
@@ -517,6 +527,40 @@ func SetHTTPRuntimePath(output *ModuleOutput, paths naming.LocalPaths, outputDir
 	return nil
 }
 
+// SetRulesPaths points the behaviors' adapter and the behaviors' crate,
+// through which the repositories write a table that composes behaviors
+// (D103, D116), at their directories under paths, relative to outputDir.
+// Either left unset in paths leaves the crate binding no core.
+func SetRulesPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	adapter, err := naming.RelPath(outputDir, paths.RulesAdapterRust)
+	if err != nil {
+		return fmt.Errorf("behaviors' adapter crate path: %w", err)
+	}
+	behaviors, err := naming.RelPath(outputDir, paths.RulesBehaviorsRust)
+	if err != nil {
+		return fmt.Errorf("behaviors' crate path: %w", err)
+	}
+	output.RulesAdapterDepPath, output.RulesBehaviorsDepPath = adapter, behaviors
+	return nil
+}
+
+// RulesAdapterCrate and RulesBehaviorsCrate are the unpublished crates the
+// repositories of a database with a table that composes behaviors run its
+// writes through (D103, D116): the adapter, the pure core's host loop in
+// the caller's transaction, and the behaviors, which build the core.
+const (
+	RulesAdapterCrate   = "superschematic-rules-adapter"
+	RulesBehaviorsCrate = "superschematic-rules-behaviors"
+)
+
+// BindsRules reports whether src/orm.rs binds the behaviors' core to its
+// repositories (D103, D116): the schema has a table that composes
+// behaviors, and the build names both unpublished crates the binding
+// depends on by path.
+func (o *ModuleOutput) BindsRules() bool {
+	return o.ORM != nil && o.ORM.Rules && o.RulesAdapterDepPath != "" && o.RulesBehaviorsDepPath != ""
+}
+
 // HTTPRuntimeIdent is the HTTP runtime crate as a Rust path names it.
 func (o *ModuleOutput) HTTPRuntimeIdent() string {
 	return strings.ReplaceAll(o.Naming.HTTPRuntimeRustCrate, "-", "_")
@@ -524,8 +568,9 @@ func (o *ModuleOutput) HTTPRuntimeIdent() string {
 
 // SetLocalPaths points every runtime crate the types crate depends on at
 // its directory under paths: the scalar library, the version graph's
-// engine, the schema runtime and the HTTP runtime. An unset path names the
-// crate's version instead.
+// engine, the schema runtime, the HTTP runtime and the behaviors' two
+// crates. An unset path names the crate's version instead, but the
+// behaviors' crates', which have none: a crate without them binds no core.
 func SetLocalPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
 	if err := SetScalarLibPath(output, paths, outputDir); err != nil {
 		return err
@@ -534,6 +579,9 @@ func SetLocalPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir stri
 		return err
 	}
 	if err := SetHTTPRuntimePath(output, paths, outputDir); err != nil {
+		return err
+	}
+	if err := SetRulesPaths(output, paths, outputDir); err != nil {
 		return err
 	}
 	return SetSchemaRuntimePath(output, paths, outputDir)

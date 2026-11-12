@@ -574,6 +574,11 @@ let internal = build_router_with(implementations, options);
 let get_product = limits.of(&PRODUCT_GET_PRODUCT);
 ```
 
+With `outputs.api.mcp` on, the options carry the MCP endpoint's too, as
+`mcp`: its server info, its own rate limit and timeout, and the key and
+the store of its confirmations
+([A Rust API's endpoint](/superschematic/reference/mcp-tools/#a-rust-apis-endpoint)).
+
 A registry is meant for one app's operations. It keys each limiter by
 the operation's method, path, namespace, name and rate, so two APIs'
 operations of one name on different routes keep their own budgets; an
@@ -818,7 +823,13 @@ opens the pool, the SDK clients and the buckets, builds `Deps` and calls your
 failed`, and exits 1 on a failure; a worker runs the runtime's
 `worker::run_worker` over a `queue::PostgresQueue` of its queue's
 descriptor, with `WORKER_CONCURRENCY` or the decorator's concurrency and
-its grace. Neither serves a port or builds an identity service or a
+its grace. Over a database whose DB service lists `sqlite` first (D116),
+`Deps.db` is the database's SQLite file, which a job and a worker open as
+the server does, and a worker runs `worker::run_drain` over a
+`worker::SqliteWorker` of its queue, on a connection of its own per
+message it handles at a time
+([Queues on SQLite](/superschematic/guides/queues/#on-sqlite)). Neither
+serves a port or builds an identity service or a
 router, so a stack gives neither the callers, identity or CORS field. For
 an API with a callers field, the crate's config module adds
 `load_background_env_config()`, which the job's and the worker's

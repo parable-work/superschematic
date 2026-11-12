@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -108,6 +110,29 @@ func (r run) fieldKeysField(db string, dbSchema *ir.Schema) (*ir.FieldDef, error
 		return nil, fmt.Errorf("generator: %s, and %s; %s", needs, problem, r.envVarsSecretFix(typeName, field, EncryptionKeyDocs))
 	}
 	return fd, nil
+}
+
+// rustFieldKeys sets in deps the field of the Rust API's EnvConfig that
+// holds the keys of the Encrypted<T> fields of db, its database, when the
+// API serves table operations (D106, D116): the router's handlers serve
+// them from the database's repositories, which seal and open such a field
+// with the keyring the entrypoint reads from that secret (D85). An API
+// with no table operation opens no repository of the build's, and is left
+// as it is; it refuses what fieldKeysField refuses.
+func (r run) rustFieldKeys(db string, deps *rustrestgen.DepsInfo) error {
+	if !r.Schema.HasTableOperations() {
+		return nil
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return fmt.Errorf("generator: load %s, the database whose repositories serve the table operations of %s: %w", db, r.Config.Name, err)
+	}
+	keys, err := r.fieldKeysField(db, schema)
+	if err != nil || keys == nil {
+		return err
+	}
+	deps.FieldKeys = envgen.RustFieldName(keys.Name)
+	return nil
 }
 
 // envVarsSecret is the field of schema's config, its @envVars class

@@ -46,6 +46,14 @@
 //! `unfinished` as it stops. The `logging` module writes them as JSON
 //! lines. With the `otel` feature and export on, each message's handling is
 //! a consumer span, `process <queue>`, the root of a trace of its own (D67).
+//!
+//! On a SQLite file a worker is instead a function its host calls (D116),
+//! [`SqliteWorker::drain`], with the `sqlite` feature: the `drain` module
+//! has it, the [`Wake`] a commit of the host's own process wakes a sleeping
+//! worker with, and [`run_drain`], the loop over it on tokio.
+
+#[cfg(feature = "sqlite")]
+pub mod drain;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -72,6 +80,9 @@ use crate::queue::SqliteQueue;
 use crate::queue::{Claim, QueueError};
 use crate::stackconfig::{quote, StackConfigError};
 use crate::{BoxError, Shutdown};
+
+#[cfg(feature = "sqlite")]
+pub use drain::{run_drain, DrainOptions, Drained, SqliteWorker, Unit, Wake, DEFAULT_DRAIN_LIMIT};
 
 /// The environment variable a platform sets to the number of messages a
 /// worker handles at a time in its environment: the worker's settings or

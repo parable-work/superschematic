@@ -104,7 +104,7 @@ func TestARustServerServesItsTableOperations(t *testing.T) {
 		"pub(crate) async fn issues_list_issues(",
 		"pub(crate) async fn notes_update_note(",
 		`"by":["owner","sharedWith"],"overridePermission":"notes.admin"`,
-		"Tables::new(db, database_types::orm::postgres_definition)",
+		"database_types::orm::postgres::tables(db)",
 	} {
 		if !strings.Contains(string(tables), want) {
 			t.Errorf("src/tables.rs lacks %q", want)

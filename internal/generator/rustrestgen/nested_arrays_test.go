@@ -167,11 +167,12 @@ func cargoTestAPICrate(t *testing.T, service string, schema *ir.Schema, testName
 }
 
 // cargoOptions are what a test of the API crate adds to its build: the
-// crate's features, which clippy and cargo test turn on, and lines of the
-// manifest's [dev-dependencies].
+// crate's features, which clippy and cargo test turn on, lines of the
+// manifest's [dev-dependencies], and outputs.api.mcp (D116).
 type cargoOptions struct {
 	features        []string
 	devDependencies string
+	mcp             bool
 }
 
 // cargoTestAPICrateWith is cargoTestAPICrate with options.
@@ -207,6 +208,7 @@ func cargoTestAPICrateWith(t *testing.T, service string, schema *ir.Schema, test
 		TypesDir:   typesDir,
 		OutputDir:  apiDir,
 		Clock:      nestedArraysClock,
+		MCP:        options.mcp,
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)

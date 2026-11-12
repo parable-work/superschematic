@@ -141,7 +141,10 @@ type PlatformSpec struct {
 	// files `bun bundle.ts <dir>` writes in the deployable's package, which
 	// the target's Bundles keeps, and whose digest and files' hashes the
 	// platform writes into its nodes as ir.BundleDigestToken and
-	// ir.BundleFileToken (D64). Refused for any other platform.
+	// ir.BundleFileToken (D64); or ir.ArtifactBinary, the environment's one
+	// binary, which holds every server and worker of the environment and
+	// which `stack build` builds from the crate the stack's build writes
+	// (D116). Refused for any other platform.
 	Artifact ir.Artifact
 
 	// Settings is the JSON Schema of a deployable's settings on this
@@ -755,7 +758,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job, worker, runner, deriver or app platform builds one", spec.Kind, spec.Name)
 		}
 		if !spec.Artifact.Valid() {
-			return fmt.Errorf("registry: platform %q declares artifact %q (want %s or %s)", spec.Name, spec.Artifact, ir.ArtifactImage, ir.ArtifactBundle)
+			return fmt.Errorf("registry: platform %q declares artifact %q (want %s, %s or %s)", spec.Name, spec.Artifact, ir.ArtifactImage, ir.ArtifactBundle, ir.ArtifactBinary)
 		}
 	}
 	if spec.IdentityConfig != "" {

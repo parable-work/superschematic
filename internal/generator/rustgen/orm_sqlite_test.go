@@ -20,13 +20,17 @@ var ledgerSQLiteTest string
 //go:embed testdata/orm/pantry_sqlite.rs
 var pantrySQLiteTest string
 
-// TestRepositoriesOnSQLite generates the Rust types of fixture-ledger-db
-// and fixture-optimistic-db with their repositories on SQLite (D116),
-// builds each database from the SQLite DDL the build writes for it, and
-// runs the repositories over it: every method, a page across the nulls of
-// a column that may be null in both directions, a negated filter that
-// keeps a null (D112), the acting user's stamps (D87), a soft delete, and
-// a write fenced on _version.
+//go:embed testdata/orm/vault_sqlite.rs
+var vaultSQLiteTest string
+
+// TestRepositoriesOnSQLite generates the Rust types of fixture-ledger-db,
+// fixture-optimistic-db and fixture-vault-db with their repositories on
+// SQLite (D116), builds each database from the SQLite DDL the build writes
+// for it, and runs the repositories over it: every method, a page across
+// the nulls of a column that may be null in both directions, a negated
+// filter that keeps a null (D112), the acting user's stamps (D87), a soft
+// delete, a write fenced on _version, and an Encrypted<T> column sealed
+// and opened with the runtime's keyring (D85).
 //
 // It needs cargo and the crates the HTTP runtime's lockfile names, which
 // it skips without, and runs outside -short.
@@ -41,6 +45,7 @@ func TestRepositoriesOnSQLite(t *testing.T) {
 	for _, c := range []struct{ fixture, name, source string }{
 		{"fixture-ledger-db", "ledger", ledgerSQLiteTest},
 		{"fixture-optimistic-db", "pantry", pantrySQLiteTest},
+		{"fixture-vault-db", "vault", vaultSQLiteTest},
 	} {
 		t.Run(c.fixture, func(t *testing.T) {
 			runRepositoriesOnSQLite(t, cargo, c.fixture, c.name, c.source)

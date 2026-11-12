@@ -408,6 +408,22 @@ func (s *session) buildSite(ctx context.Context, src *Sources, d *ir.ResolvedDep
 	return filepath.Join(dir, filepath.FromSlash(d.Site.Output)), nil
 }
 
+// BuildSite builds site d as a deploy builds it, after the frozen install
+// of the workspace, and digests the files its build wrote. A target that
+// publishes no site takes them from here: the embedded target compiles
+// them into the environment's binary (D116).
+func BuildSite(ctx context.Context, src *Sources, d *ir.ResolvedDeployable, log io.Writer) (*ArtifactFiles, error) {
+	if log == nil {
+		log = io.Discard
+	}
+	s := &session{log: log}
+	dir, err := s.buildSite(ctx, src, d)
+	if err != nil {
+		return nil, err
+	}
+	return DigestSite(dir)
+}
+
 // planSitesFor plans the sites of a deploy: it refuses an environment
 // with a site on a target that publishes none, and a site the plan gives
 // no files.

@@ -145,3 +145,61 @@ func TestADatabaseOfTwoFirstDialectsStaysOnTheKindsPlatform(t *testing.T) {
 	_, errs := resolve(t, reg, s, services, "Dev")
 	mustFail(t, errs, stack.CodeUnrealizable, "environment Dev places notes-db on Main, a postgres database")
 }
+
+// backgroundNotes is the notes stack with a job, a worker of notes-db's
+// queue NoteWritten and a behavior worker of its table Note, whose queue
+// the loader filled with the table's deadline queue (D103), on notes-db,
+// whose DB service lists sqlite first.
+func backgroundNotes(lang string) (*ir.Stack, []stack.Service) {
+	s, services := notesStack(lang, registry.SQLDialectSQLite, registry.SQLDialectPostgres)
+	service(services, "notes-db").Queues = []string{"NoteDeadline", "NoteWritten"}
+	notes := service(services, "notes")
+	notes.Jobs = []ir.Job{{Name: "PruneNotes"}}
+	notes.Workers = []ir.Worker{
+		{Name: "IndexNotes", Queue: "NoteWritten"},
+		{Name: "NoteTimers", Queue: "NoteDeadline", Queues: []string{"NoteDeadline"}, BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Note"}, Origin: ir.OriginBehavior},
+	}
+	return s, services
+}
+
+// TestARustJobAndWorkerRunOnTheirDatabasesSQLiteFile: a Rust job, a Rust
+// worker and a Rust behavior worker of a sqlite-first database resolve on
+// the local target (D116), each connected to the database's SQLite file,
+// which the worker claims on and the behavior worker drains; the same in
+// Go stay refused, since a Go API's Deps reach Postgres alone.
+func TestARustJobAndWorkerRunOnTheirDatabasesSQLiteFile(t *testing.T) {
+	reg := assemble(t)
+	s, services := backgroundNotes(registry.APILanguageRust)
+	env := mustResolve(t, reg, s, services, "Dev")
+	connectors := map[string]string{}
+	for _, e := range env.Edges {
+		if e.Kind == ir.EdgeSQL {
+			connectors[e.From] = e.Connector
+		}
+	}
+	for deployable, want := range map[string]string{
+		"notes":             "local.process-sqlite",
+		"notes-prune-notes": "local.job-sqlite",
+		"notes-index-notes": "local.worker-sqlite",
+		"notes-note-timers": "local.worker-sqlite",
+	} {
+		d := env.Deployable(deployable)
+		if d == nil || d.Language != registry.APILanguageRust {
+			t.Fatalf("%s = %+v, want a Rust deployable of the environment", deployable, d)
+		}
+		if got := connectors[deployable]; got != want {
+			t.Errorf("the sql edge of %s goes through %q, want %s", deployable, got, want)
+		}
+	}
+	for worker, queue := range map[string]string{"notes-index-notes": "NoteWritten", "notes-note-timers": "NoteDeadline"} {
+		if w := env.Deployable(worker).Worker; w == nil || w.Database != "notes-db" || w.Queue != queue {
+			t.Errorf("%s runs %+v, want queue %s of notes-db", worker, w, queue)
+		}
+	}
+
+	s, services = backgroundNotes(registry.APILanguageGo)
+	_, errs := resolve(t, reg, s, services, "Dev")
+	for _, refused := range []string{"server notes is a GO server", "job notes-prune-notes is a GO job", "worker notes-index-notes is a GO worker", "worker notes-note-timers is a GO worker"} {
+		mustFail(t, errs, stack.CodeUnrealizable, refused+" on notes-db, and environment Dev places notes-db on notes-db, a sqlite database; a Go API's Deps reach Postgres alone, through the Go ORM (D64)")
+	}
+}

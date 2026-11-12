@@ -316,7 +316,8 @@ func TestGeneratedBehaviorOperationsAPICompiles(t *testing.T) {
 
 // behaviorCases are the cases behavior_operations_runtime.test.ts runs,
 // by name: D103's end-to-end scenario, which the Go and Rust servers run
-// too, and the MCP endpoint's, which only the TypeScript server serves.
+// too, and the MCP endpoint's, which the TypeScript server's cases alone
+// run.
 var behaviorCases = []string{
 	"a transition moves the field and returns the result",
 	"a move the config has no transition for is refused with the core's status, code and message",

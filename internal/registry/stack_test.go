@@ -64,7 +64,7 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		{"no NameOf", func(s *PlatformSpec) { s.NameOf = nil }, "needs NameOf, AddressOf and Lower"},
 		{"bad settings schema", func(s *PlatformSpec) { s.Settings = json.RawMessage(`{"type": 7}`) }, "Settings"},
 		{"identity config not an object", func(s *PlatformSpec) { s.IdentityConfig = `["cookie"]` }, "IdentityConfig is not a JSON object"},
-		{"unknown artifact", func(s *PlatformSpec) { s.Artifact = "tarball" }, `declares artifact "tarball" (want image or bundle)`},
+		{"unknown artifact", func(s *PlatformSpec) { s.Artifact = "tarball" }, `declares artifact "tarball" (want image, bundle or binary)`},
 		{"no identity beside an identity config", func(s *PlatformSpec) {
 			s.NoIdentity = "its isolates hash no passwords"
 			s.IdentityConfig = `{"cookie": {"secure": false}}`

@@ -1,0 +1,15 @@
+{
+  "name": "@notes/notes-web-site",
+  "version": "0.0.0",
+  "description": "The notes-web site.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify",
+    "dev": "bun --port=${PORT:-3000} ./index.html",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

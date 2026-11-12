@@ -305,8 +305,14 @@ async fn run() -> Result<(), Failure> {
         .map_err(|err| format!("implementation of {{ .Service }}: {err}"))?;
 {{- end }}
 {{- if .RouterOptions }}
+{{- if .RateLimitStore }}
     // Its @rateLimit routes count in {{ .RateLimitStore.Service }}, its rateLimitStore, so its
     // replicas share each operation's budget (D75).
+{{- end }}
+{{- if .MCPConfirmationKey }}
+    // Its MCP endpoint signs the confirmations of its tools that ask with
+    // the secret outputs.api.mcpConfirmationKey names (D93, D116).
+{{- end }}
 {{ .RouterOptionsLet }}
 {{- end }}
 {{- if .ManualRoutes }}

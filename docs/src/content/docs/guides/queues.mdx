@@ -28,7 +28,7 @@ schema's instances into claimable work, are another thing.
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
+| `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
 | `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
 D53, D68, D80, D88 and D96 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
@@ -340,6 +340,19 @@ interactive transaction, and `sqliteQueue(db, queue)` claims over one. The
 Rust runtime's `sqlite` feature adds `queue::enqueue_sqlite` and
 `queue::SqliteQueue`.
 
+A Rust worker on a SQLite file is a function its host calls (D116):
+`worker::SqliteWorker::drain` takes a connection of the worker's own, the
+time and a limit, claims and runs what is due, a message at a time, and
+answers how many it ran and when the next falls due. It needs no async
+runtime. A stack's Rust worker runs `worker::run_drain`, the loop over it
+on tokio, on as many connections as its concurrency; a process with no
+runtime calls `drain` on a thread of its own and sleeps until that time,
+or until a write of its own process wakes it, which the file your `Deps`
+hold signals after each write it commits (`db.wake()`). A write another
+process made is heard at the next poll, a second on. A drain extends no
+claim, so a method has its queue's lease to finish, after which its
+message is due again.
+
 A Worker or a Cron job on Cloudflare enqueues on D1 this way, but no
 worker claims there: a worker on Workers claims on Postgres through
 Hyperdrive ([On Cloudflare](#on-cloudflare)), so an environment that places
@@ -479,7 +492,11 @@ worker as the behavior caller, TypeScript's `tx` is the database's
 repositories in it, as the worker, and Rust's `run` holds it
 (`run.client()`) and runs a behavior operation in it as the worker
 (`run.operation(type, &key, use, operation, &params)`). Write through it,
-and your writes commit with the completion or not at all:
+and your writes commit with the completion or not at all. On a SQLite
+file (D116), Rust's `run` lends the transaction's connection to a closure,
+`run.with(|connection| ...)`, and its `operation` returns at once: the
+transaction holds the file's one writer, so a write through `Deps.db`
+there would wait for it, and for nothing.
 
 ```ts
 export const createWorkers: WorkersConstructor = deps => ({
@@ -716,9 +733,10 @@ which the platform sets.
 
 The claims run on Postgres, or on SQLite where `stack dev` places the
 queue's database on the environment's SQLite file and the worker is in
-TypeScript; a Go worker there does not resolve, since its `Deps` reach
-Postgres alone, and a Rust worker does not build, since it claims on
-Postgres alone so far (D116). An environment that places the queue's database on
+TypeScript or Rust; a Go worker there does not resolve, since its `Deps`
+reach Postgres alone. A Rust API's `Deps.db` is then the file, its job
+opens it as its server does, and its worker is drained on connections of
+its own ([On SQLite](#on-sqlite), D116). An environment that places the queue's database on
 a platform of another dialect, or on D1, does not resolve either. On
 Cloudflare the database is a Postgres reached through Hyperdrive
 ([On Cloudflare](#on-cloudflare)).

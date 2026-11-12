@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use super::plan::{DeletePlan, Plan, Statement};
 use super::{
-    CoreCreate, CoreDelete, CoreUpdate, Dialect, Error, FindOptions, Found, PageOptions, RowPage,
-    Table, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    CoreCreate, CoreDelete, CoreOperation, CoreUpdate, Dialect, Error, FindOptions, Found,
+    PageOptions, RowPage, Table, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 /// The alias a Postgres upsert returns whether it inserted a row as,
@@ -58,6 +58,13 @@ pub(crate) trait Client {
 
     /// Deletes a row through the core, or stamps it deleted.
     fn core_delete(&self, delete: CoreDelete<'_>) -> impl Future<Output = Result<(), Error>>;
+
+    /// Runs an operation of one of the table's behaviors on a row through
+    /// the core, and answers its result.
+    fn core_operation(
+        &self,
+        operation: CoreOperation<'_>,
+    ) -> impl Future<Output = Result<Value, Error>>;
 }
 
 /// The repository of one table over a client.
@@ -258,11 +265,21 @@ impl<C: Client> Runner<'_, C> {
         options: &WriteOptions,
     ) -> Result<(), Error> {
         if self.table.behaviors.is_some() {
-            return self
-                .client
-                .core_delete(self.plan.core_delete(key, options)?)
+            let delete = self.plan.core_delete(key, options)?;
+            // A versioned table's delete records who made it, as the
+            // repository's own deletes do.
+            let actor = self.plan.core_delete_actor();
+            if let Some((set, _)) = &actor {
+                self.execute(set).await?;
+            }
+            self.client
+                .core_delete(delete)
                 .await
-                .map_err(|err| self.core_miss(err, key));
+                .map_err(|err| self.core_miss(err, key))?;
+            if let Some((_, clear)) = &actor {
+                self.execute(clear).await?;
+            }
+            return Ok(());
         }
         self.plan.refuse_preconditions(options)?;
         let delete = self.plan.delete_one(key, options)?;
@@ -272,6 +289,25 @@ impl<C: Client> Runner<'_, C> {
             0 => Err(self.miss(key, options).await?),
             _ => Ok(()),
         }
+    }
+
+    /// Runs `operation` of the behavior under `member` on the row whose
+    /// key is `key`, through the core (D103), and answers its result.
+    pub(crate) async fn operation(
+        &self,
+        member: &str,
+        operation: &str,
+        key: &Value,
+        params: &Value,
+        options: &WriteOptions,
+    ) -> Result<Value, Error> {
+        let command = self
+            .plan
+            .core_operation(member, operation, key, params, options)?;
+        self.client
+            .core_operation(command)
+            .await
+            .map_err(|err| self.core_miss(err, key))
     }
 
     /// Clears the history actor a versioned table's hard delete set, so a

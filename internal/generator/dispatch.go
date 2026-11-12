@@ -416,6 +416,13 @@ func (r run) generateRustTypes() error {
 	if err := rustgen.SetLocalPaths(output, r.Options.Paths, dir); err != nil {
 		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
 	}
+	// The repositories write a table that composes behaviors through the
+	// core (D103, D116), by two unpublished crates the naming file names;
+	// without them the crate binds no core, and such a write is refused.
+	if output.ORM != nil && output.ORM.Rules && !output.BindsRules() {
+		r.Warnf("%s: the Rust repositories of %s write no row: each composes behaviors (D103), which they run through %s and %s, unpublished crates the naming file's [paths] rules_adapter_rust and rules_behaviors_rust name, and one is unset; set them to a superschematic checkout's runtime/engine/rust/rules-adapter and runtime/engine/rust/rules-behaviors, or a create, an update and a delete of such a row are refused (D116)",
+			r.Config.Name, joinAnd(output.ORM.RulesTables), rustgen.RulesAdapterCrate, rustgen.RulesBehaviorsCrate)
+	}
 	if err := rustgen.WriteTypes(output, dir); err != nil {
 		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
 	}
@@ -1547,12 +1554,27 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
 		AuthDB:       authDB,
+		// The router serves the visible @mcp tools at POST /api/mcp (D81,
+		// D116).
+		MCP: r.Outputs.APIEnabled() && r.Outputs.API.MCP,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if output == nil {
 		return nil, nil, nil
+	}
+	if output.MCP != nil {
+		// The MCP endpoint signs the confirmations of the tools that ask
+		// with the secret the API's config names, which its @envVars holds
+		// (D93).
+		confirmationKey, err := r.mcpConfirmationKeyField(output.MCP.Endpoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		if confirmationKey != nil {
+			output.MCP.ConfirmationKey = confirmationKey.Name
+		}
 	}
 	rustDeps, err := r.rustDeps(deps)
 	if err != nil {
@@ -1638,6 +1660,9 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 			}
 		}
 		if err := r.rustQueueTypes(db, apiDir, &deps); err != nil {
+			return deps, err
+		}
+		if err := r.rustFieldKeys(db, &deps); err != nil {
 			return deps, err
 		}
 	} else if len(r.Schema.Workers) > 0 {

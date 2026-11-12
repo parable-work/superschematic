@@ -38,9 +38,9 @@ use super::plan::{Plan, Statement};
 use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{finish, Client, Runner};
 use super::{
-    row, values, wire, Bound, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
-    CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found, Marks, PageOptions,
-    RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
+    row, values, wire, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
+    CoreOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found, Marks,
+    PageOptions, RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -50,9 +50,10 @@ use crate::uuid62::{parse_uuid, uuid_to_base62};
 
 /// What runs a table's behaviors on a SQLite connection (D103): the
 /// behaviors' core, through its adapter's `sqlite` module, which a
-/// generated types crate binds. Each runs in the caller's transaction,
-/// writes the row with the columns the command carries, and answers the
-/// core's refusal as [`Error::Refused`].
+/// generated types crate binds (its `orm::sqlite::Rules`). Each runs in
+/// the caller's transaction, writes the row with the columns the command
+/// carries ([`core_columns`]), and answers the core's refusal as
+/// [`Error::Refused`].
 pub trait Rules: Send + Sync {
     /// Creates a row, and answers its key in its wire form.
     fn create(&self, connection: &Connection, create: CoreCreate<'_>) -> Result<String, Error>;
@@ -60,6 +61,13 @@ pub trait Rules: Send + Sync {
     fn update(&self, connection: &Connection, update: CoreUpdate<'_>) -> Result<(), Error>;
     /// Deletes the live row a command names, or stamps it deleted.
     fn delete(&self, connection: &Connection, delete: CoreDelete<'_>) -> Result<(), Error>;
+    /// Runs an operation of one of the table's behaviors on the live row
+    /// a command names, and answers its result.
+    fn operation(
+        &self,
+        connection: &Connection,
+        operation: CoreOperation<'_>,
+    ) -> Result<Value, Error>;
 }
 
 /// The repositories of a database on a SQLite connection, acting as a
@@ -133,6 +141,15 @@ impl<'a> Repositories<'a> {
     #[must_use]
     pub fn with_rules(mut self, rules: &'a dyn Rules) -> Self {
         self.rules = Some(rules);
+        self
+    }
+
+    /// The repositories running each behavior's command as `caller`, whose
+    /// permissions the core's guards read (D103); the acting user, holding
+    /// none, unless set.
+    #[must_use]
+    pub fn with_caller(mut self, caller: Caller) -> Self {
+        self.session.caller = Some(caller);
         self
     }
 
@@ -260,8 +277,12 @@ impl Tables {
     ) -> Result<TableOutcome, ApiError> {
         let tables = self.clone();
         let work = move |connection: &Connection| {
+            // The route's caller acts, and runs a behavior's command with
+            // the permissions it holds, as the TypeScript server's table
+            // routes bind it.
             let mut repositories = Repositories::new(connection, (tables.definition)()?)?
-                .acting(routes::acting(principal.as_ref()));
+                .acting(routes::acting(principal.as_ref()))
+                .with_caller(Caller::of(principal.as_ref()));
             if let Some(keys) = tables.keys.as_deref() {
                 repositories = repositories.with_keys(keys);
             }
@@ -424,6 +445,28 @@ where
     pub fn hard_delete_one(&self, key: &Key) -> Result<(), Error> {
         self.repository.hard_delete_one(&wire(key)?)
     }
+
+    /// Runs `operation` of the behavior under `member` on the live row
+    /// whose key is `key`, through the behaviors' core (D103), with
+    /// `params`, and answers its result as `R`.
+    pub fn operation<P, R>(
+        &self,
+        member: &str,
+        operation: &str,
+        key: &Key,
+        params: &P,
+        options: &WriteOptions,
+    ) -> Result<R, Error>
+    where
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let result =
+            self.repository
+                .operation(member, operation, &wire(key)?, &wire(params)?, options)?;
+        serde_json::from_value(result)
+            .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
+    }
 }
 
 /// The repository of one table on a SQLite connection.
@@ -535,6 +578,26 @@ impl Repository<'_> {
     pub fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         finish(self.runner().hard_delete_one(key))
     }
+
+    /// Runs `operation` of the behavior under `member`, the use's field
+    /// or the behavior's own member, on the live row whose key is `key`,
+    /// through the behaviors' core (D103): a Workflow's `transition` of
+    /// `status`, say, with its parameters in their wire form. It answers
+    /// the operation's result; the core's refusal is [`Error::Refused`],
+    /// and a key no live row holds [`Error::NotFound`].
+    pub fn operation(
+        &self,
+        member: &str,
+        operation: &str,
+        key: &Value,
+        params: &Value,
+        options: &WriteOptions,
+    ) -> Result<Value, Error> {
+        finish(
+            self.runner()
+                .operation(member, operation, key, params, options),
+        )
+    }
 }
 
 /// A SQLite connection as a repository's runner drives it: each statement
@@ -548,7 +611,7 @@ impl SqliteClient<'_> {
     fn rules(&self, table: &str) -> Result<&dyn Rules, Error> {
         self.rules.ok_or_else(|| {
             Error::Definition(format!(
-                "{table} composes behaviors (D103), and the repositories were opened with nothing to run them: pass the types crate's rules"
+                "{table} composes behaviors (D103), and the repositories were opened with nothing to run them: open them through the types crate's orm::sqlite::Repositories, which binds the behaviors' core, or pass with_rules a core of your own"
             ))
         })
     }
@@ -637,15 +700,23 @@ impl Client for SqliteClient<'_> {
     }
 
     async fn core_create(&self, create: CoreCreate<'_>) -> Result<String, Error> {
-        self.rules(create.table)?.create(self.connection, create)
+        self.rules(&create.table.name)?
+            .create(self.connection, create)
     }
 
     async fn core_update(&self, update: CoreUpdate<'_>) -> Result<(), Error> {
-        self.rules(update.table)?.update(self.connection, update)
+        self.rules(&update.table.name)?
+            .update(self.connection, update)
     }
 
     async fn core_delete(&self, delete: CoreDelete<'_>) -> Result<(), Error> {
-        self.rules(delete.table)?.delete(self.connection, delete)
+        self.rules(&delete.table.name)?
+            .delete(self.connection, delete)
+    }
+
+    async fn core_operation(&self, operation: CoreOperation<'_>) -> Result<Value, Error> {
+        self.rules(&operation.table.name)?
+            .operation(self.connection, operation)
     }
 }
 
@@ -688,6 +759,34 @@ pub fn param(bound: &Bound) -> Result<SqlValue, String> {
         };
     }
     column_value(&bound.value, &field(marks))
+}
+
+/// The columns a command through the behaviors' core writes of its own
+/// row (D103), as the core's adapter binds them on SQLite: each value the
+/// JSON scalar of what the repository's own statement would bind, a UUID
+/// its hyphenated text, a timestamp its text to the millisecond, a boolean
+/// 1 or 0, a list and a JSON value their JSON text, and NULL null.
+pub fn core_columns(table: &Table, columns: &[(String, Option<Bound>)]) -> Result<Values, Error> {
+    let mut out = Values::new();
+    for (column, bound) in columns {
+        let refused = |err: String| Error::Invalid(format!("{}: {column}: {err}", table.name));
+        let value = match bound {
+            None => Value::Null,
+            Some(bound) => match param(bound).map_err(refused)? {
+                SqlValue::Null => Value::Null,
+                SqlValue::Integer(n) => Value::from(n),
+                SqlValue::Real(x) => serde_json::Number::from_f64(x)
+                    .map(Value::Number)
+                    .ok_or_else(|| refused(format!("{x} is no number a column holds")))?,
+                SqlValue::Text(text) => Value::String(text),
+                SqlValue::Blob(_) => {
+                    return Err(refused("a blob is no value of a table's column".to_owned()))
+                }
+            },
+        };
+        out.insert(column.clone(), value);
+    }
+    Ok(out)
 }
 
 /// A timestamp in UTC with exactly three digits of fraction, the form a

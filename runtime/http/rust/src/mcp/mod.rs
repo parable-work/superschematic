@@ -22,14 +22,15 @@
 //! whose body is read and answers a response whose body is bytes, so it
 //! needs no HTTP server; it awaits its tool set and its confirmation store
 //! and nothing else, so it needs no executor beyond one that polls it. A
-//! generated router mounts it as a route of its own, with a tool set whose
-//! call is a request to the tool's route as the caller the endpoint's own
-//! request authenticated (D116): [`RouteTool`] is a tool of that table,
-//! [`tool_request`] the request a call makes, and [`outcome_of`] what the
-//! route's response comes to. A call the route refuses returns a tool error
-//! (`isError`) whose structured content is the problem document the route
-//! answered; a tool the caller has not got is a JSON-RPC invalid-params
-//! error.
+//! generated router mounts it as a route of its own ([`Mount`], which its
+//! [`crate::RouterOptions`]' [`EndpointOptions`] configure), with a tool
+//! set whose call is a request to the tool's route as the caller the
+//! endpoint's own request authenticated (D116): [`RouteTool`] is a tool of
+//! that table, [`tool_request`] the request a call makes, and
+//! [`outcome_of`] what the route's response comes to. A call the route
+//! refuses returns a tool error (`isError`) whose structured content is the
+//! problem document the route answered; a tool the caller has not got is a
+//! JSON-RPC invalid-params error.
 //!
 //! A tool whose invocation policy is ask runs only once the person confirms
 //! the call (D93; [`ToolSet::confirms`], [`Confirmations`]):
@@ -59,6 +60,7 @@
 
 mod confirm;
 mod json;
+mod mount;
 mod route;
 mod transport;
 
@@ -77,6 +79,7 @@ pub use confirm::{
     MIN_CONFIRMATION_KEY_BYTES,
 };
 pub use json::canonical_json;
+pub use mount::{reached, ConfirmationKey, EndpointOptions, Mount};
 pub use route::{
     caller_of, check_route_tools, outcome_of, problem_of, tool_request, with_confirmation_argument,
     ArgumentLocation, RouteTool, ToolArgument,

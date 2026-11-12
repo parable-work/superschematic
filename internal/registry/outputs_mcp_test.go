@@ -6,38 +6,34 @@ import (
 )
 
 // outputs.api.mcp (D81) serves the API's tools over MCP from the
-// TypeScript router alone: a Go or Rust API with it fails to load, saying
-// what to change and that support follows, and a TypeScript one reads it.
-func TestParseOutputsServesMCPOnATypeScriptAPIAlone(t *testing.T) {
+// TypeScript router and from the Rust one (D116): a Go API with it fails
+// to load, saying what to change and that support follows, and a
+// TypeScript or a Rust one reads it.
+func TestParseOutputsServesMCPOnATypeScriptOrARustAPI(t *testing.T) {
 	enabled := map[string]any{"enabled": true}
-	for _, tc := range []struct {
-		language string
-		types    string
-	}{{"", "go"}, {"GO", "go"}, {"RUST", "rust"}} {
+	for _, language := range []string{"", "GO"} {
 		api := map[string]any{"enabled": true, "mcp": true}
-		if tc.language != "" {
-			api["language"] = tc.language
+		if language != "" {
+			api["language"] = language
 		}
-		_, err := ParseOutputs(map[string]any{"api": api, "types": map[string]any{tc.types: enabled}}, coreOutputRegistry(t))
-		language := tc.language
-		if language == "" {
-			language = APILanguageGo
-		}
-		want := "outputs.api.mcp is on and the API's language is " + language + ": a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)"
+		_, err := ParseOutputs(map[string]any{"api": api, "types": map[string]any{"go": enabled}}, coreOutputRegistry(t))
+		want := "outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)"
 		if err == nil || err.Error() != want {
-			t.Errorf("mcp on a %s API: error = %v, want %q", language, err, want)
+			t.Errorf("mcp on a Go API (language %q): error = %v, want %q", language, err, want)
 		}
 	}
 
-	outputs, err := ParseOutputs(map[string]any{
-		"api":   map[string]any{"enabled": true, "language": "TYPESCRIPT", "mcp": true},
-		"types": map[string]any{"typescript": enabled},
-	}, coreOutputRegistry(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !outputs.API.MCP {
-		t.Error("outputs.api.mcp was not read")
+	for language, types := range map[string]string{"TYPESCRIPT": "typescript", "RUST": "rust"} {
+		outputs, err := ParseOutputs(map[string]any{
+			"api":   map[string]any{"enabled": true, "language": language, "mcp": true, "mcpConfirmationKey": "McpKeys.MCP_CONFIRMATION_KEY"},
+			"types": map[string]any{types: enabled},
+		}, coreOutputRegistry(t))
+		if err != nil {
+			t.Fatalf("mcp on a %s API: %v", language, err)
+		}
+		if !outputs.API.MCP || outputs.MCPConfirmationKey() != "McpKeys.MCP_CONFIRMATION_KEY" {
+			t.Errorf("outputs.api.mcp and its key were not read on a %s API: %+v", language, outputs.API)
+		}
 	}
 	// A disabled API serves nothing, so its mcp is not checked.
 	if _, err := ParseOutputs(map[string]any{"api": map[string]any{"enabled": false, "mcp": true}}, coreOutputRegistry(t)); err != nil {
