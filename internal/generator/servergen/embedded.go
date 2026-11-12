@@ -25,8 +25,10 @@ import (
 // The library holds every server of the environment in one process. It
 // opens the data directory, migrates each database's SQLite file with the
 // plans the binary carries (superschematic-migrate's start), loads each
-// API's EnvConfig, opens each file once for every API on it, builds each
-// API's Deps and calls its `create`, and gives its host `handle`, which
+// API's EnvConfig, opens each file once for every API on it, builds the
+// identity store of a database that holds the user model on a connection
+// of its own to the file (D50), builds each API's Deps and calls its
+// `create`, builds the identity service of each API over the user model, and gives its host `handle`, which
 // sends a request under `/api/<service>` to that API's `handle` and
 // answers any other path from the site, on one origin (D91), each
 // worker's `drain`, and `close`. A worker is its queues over the file the
@@ -428,8 +430,8 @@ type EmbeddedStore struct {
 
 // PlanEmbedded plans the crate of an environment's one binary. It refuses
 // by name what the binary does not hold: a database that is no SQLite
-// file, an engine, a bucket, a memory store that is on, an API over
-// the user model, and two servers that bind one variable to two values.
+// file, an engine, a bucket, a memory store that is on, and two servers
+// that bind one variable to two values.
 func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 	where := fmt.Sprintf("stack %s: environment %s builds as one binary (D116)", in.Stack, in.Environment)
 	if in.Paths.MigrateRust == "" {
@@ -510,15 +512,15 @@ func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 	}
 	for _, d := range server.Files {
 		taken[d.Var] = true
+		if d.Store != "" {
+			taken[d.Store] = true
+		}
 	}
 	for _, m := range server.MemoryStores {
 		taken[m.Var] = true
 	}
 	wired := map[string]*EmbeddedAPI{}
 	for i, a := range server.APIs {
-		if a.Identity != "" {
-			return nil, fmt.Errorf("%s, and %s authenticates its users with the identity runtime, whose store on a SQLite file a Rust API does not open yet (D116)", where, a.Service)
-		}
 		if a.RateLimitStore != nil {
 			return nil, fmt.Errorf("%s, and %s counts its rate limits in %s, a memory store, which the binary does not reach", where, a.Service, a.RateLimitStore.Service)
 		}
@@ -796,6 +798,11 @@ func (c *EmbeddedCrate) OpensFiles() bool { return len(c.Files) > 0 }
 func (c *EmbeddedCrate) LibUses() []string {
 	runtime := c.Runtime()
 	var uses []string
+	if c.AnyIdentity() {
+		// The identity store runs on a connection of its own to a
+		// database's file, which the API crate's identity module opens.
+		uses = append(uses, "use "+runtime+"::identity::Store;")
+	}
 	if c.Calls() {
 		uses = append(uses, "use "+runtime+"::in_process;")
 	}
@@ -836,6 +843,9 @@ func (c *EmbeddedCrate) LibUses() []string {
 	var root []string
 	if slices.ContainsFunc(c.Workers, func(w *EmbeddedWorker) bool { return w.Func != "" }) {
 		root = append(root, "block_on")
+	}
+	if c.AnyIdentity() {
+		root = append(root, "IdentityAuthenticator")
 	}
 	if c.ServiceAuth() {
 		root = append(root, "JwtServiceAuthenticator")

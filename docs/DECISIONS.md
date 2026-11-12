@@ -18313,7 +18313,12 @@ its environment's workers: the library gives each `@worker` and
 `drain` a host with no async runtime calls and whose `run` is the loop
 `main.rs` spawns beside the server and stops within the worker's grace
 (`TestEmbeddedCrateWithABehaviorWorker`, `TestAWorkerRunsInsideTheBinary`).
-The example `examples/embedded-notes` is one binary:
+It serves an API over the user model: the library builds the identity
+store on the database's file and each API's identity service over it,
+with the identity config the target binds, a cookie without `Secure`
+(`TestEmbeddedBinaryServesTheUserModel`, in which a user registers, signs
+in, calls an authenticated route, and is still signed in after the binary
+stops and starts on the same files). The example `examples/embedded-notes` is one binary:
 `TestEmbeddedNotesIsOneBinary` builds it, starts it on a fresh data
 directory, which its recorded plans migrate, serves its APIs and its site
 on one origin, sees a message a request enqueued handled by its worker,
@@ -18340,10 +18345,10 @@ its claim's expiry; and an event handed to a `Workers` method on a SQLite
 file is compiled and not run by a test. For a Rust API on a SQLite file
 an engine, and a deriver, an engine's runner and an app stay refused by
 name, and an identity store's write that waits out the busy timeout for
-the file's writer is the store's database error, not a 503. Of step 7: an
-API over the user model in the binary; the runtime's in-process memory
-store, every memory store being refused; in the example, a table that
-composes behaviors and an MCP endpoint; a test of a worker's `drain`
-driven by a host with no runtime; a command that writes the target's
+the file's writer is the store's database error, not a 503. Of step 7:
+the runtime's in-process memory store, every memory store being refused;
+in the example, a table that composes behaviors and an MCP endpoint; a
+test of a worker's `drain` driven by a host with no runtime, and of a
+cookie's sign-in from the site's page and an API key through the binary; a command that writes the target's
 authoring types; a route's own limits under `main.rs`, which reads every
 body up to 2 MiB; and the manual-route operations, which the build names.

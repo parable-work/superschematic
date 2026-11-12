@@ -15,6 +15,16 @@
 //! configuration, opens each file once for every API on it, in WAL mode
 //! with one writing connection, and builds each API's implementation from
 //! its Deps.
+{{- if .AnyIdentity }}
+//!
+//! An API whose authDb has a User table authenticates its end users with
+//! the identity runtime (D50): its users, their sessions and their API
+//! keys are kept in the runtime's identity store on the database's file,
+//! on a connection of its own, with the identity config its identity
+//! config field holds. The binary serves plain HTTP on the machine it is
+//! installed on, so the environment binds a session cookie without
+//! `Secure` unless its settings say otherwise.
+{{- end }}
 //!
 //! [`Embedded::handle`] answers a request it holds whole: one under
 //! `/api/<service>` by that API's own `handle`, with the prefix taken off,
@@ -426,6 +436,18 @@ async fn open(options: Options) -> Result<Embedded, Failure> {
 {{- range .Files }}
 {{ rustLetCall .Var "open_file" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
 {{- end }}
+{{- range .Files }}
+{{- if .Store }}
+
+    // The identity store of the user model in {{ .Service }} (D50, D116), on a
+    // connection of its own to the file, for every API that authenticates
+    // its users against it.
+    let {{ .Store }}: Arc<dyn Store> = Arc::new(
+        {{ .StoreAPI }}::identity::store_on_file(&{{ .Var }})
+            .map_err(|err| format!("identity store of {{ .Service }}: {err}"))?,
+    );
+{{- end }}
+{{- end }}
 {{- end }}
 
     let apis = Arc::new(Apis::default());
@@ -459,6 +481,15 @@ async fn open(options: Options) -> Result<Embedded, Failure> {
     // {{ .Service }}: its implementation, built from its Deps.
 {{ .ServerDepsLet }}
 {{ rustLet .Handlers (printf "%s::create(%s)" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"implementation of %s: {err}\"))?" .Service) }}
+{{- if .Identity }}
+    // The identity runtime authenticates its callers and serves its user
+    // model's routes, with the config its identity config field holds.
+    let {{ .Identity }} = {{ .Alias }}::identity::service(
+        Arc::clone(&{{ .Database.Store }}),
+        {{ .Config }}.{{ .IdentityField }}.clone(),
+    )
+    .map_err(|err| format!("identity of {{ .Service }}: {err}"))?;
+{{- end }}
 {{- if .ServiceAuthenticator }}
     // It verifies a calling service's credential against its callers
     // field, and each calling server's own against its loopback key.

@@ -1,0 +1,29 @@
+# The identity fixture as one binary (D116): one server, Accounts, serves
+# both APIs over users-db, and the environment Desktop is on a target whose
+# server platform builds no artifact of its own, so the stack's build
+# writes the environment's crate. The binary keeps the user model in the
+# runtime's identity store on users-db's SQLite file, and the target's
+# platform gives each API's identity config a cookie without Secure.
+kind: Stack
+types:
+  Users:
+    name: Users
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: users-api, kind: API }
+        - { name: users-admin, kind: API }
+      expose:
+        - deployable: Accounts
+  Accounts:
+    name: Accounts
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: users-api, kind: API }
+        - { name: users-admin, kind: API }
+  Desktop:
+    name: Desktop
+    role: EmbeddedStruct
+    environment:
+      target: embedded

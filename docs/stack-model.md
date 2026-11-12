@@ -7111,6 +7111,18 @@ that calls it, so the clause holds as it does between two servers.
 An API whose MCP endpoint runs a tool that asks is built with its router
 options, whose confirmation key its config holds (D93).
 
+An API over the user model (D50) keeps its users, their sessions and
+their API keys in the runtime's identity store on the database's file:
+the library builds one store per such database, on a connection of its
+own to the file, by the API crate's `identity::store_on_file`, and each
+API's identity service over it, with the config its identity config
+field holds. `embedded.process` binds that field to a session cookie
+without `Secure`, since the binary serves plain HTTP on the machine it is
+installed on, unless the environment sets it; the binary carries the
+bound value, and the process's environment overrides it. The identity
+tables are in the database's plan, so the start migrates them with the
+rest.
+
 ### 19.3 Plans a binary carries
 
 `superschematic stack build <environment>` builds the stack and every
@@ -7168,9 +7180,6 @@ the environment's port until Ctrl-C.
 
 ### 19.5 Not built
 
-- An API over the user model: the binary does not open the identity
-  store on its file yet, which a Rust server's entrypoint does (section
-  18.6).
 - A memory store on the runtime's in-process store, a bucket on a local
   directory, a job in the process, and an engine on a SQLite file.
 - An operation that is `@manualRouteRegistration`: `handle` routes none,

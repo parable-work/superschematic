@@ -1,6 +1,7 @@
 package embedded_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -248,6 +249,32 @@ func TestAWorkerRunsInsideTheBinary(t *testing.T) {
 	}
 	if url != "sqlite:databases/notes_db.sqlite" {
 		t.Errorf("the worker reaches its queue at %v, want the database's file under the data directory", url)
+	}
+}
+
+// TestAnAPIOverTheUserModelGetsACookieWithoutSecure: the binary serves
+// plain HTTP on the machine it is installed on, so the target binds the
+// identity config of an API over the user model to a session cookie
+// without Secure unless the environment sets the field (D50, D116).
+func TestAnAPIOverTheUserModelGetsACookieWithoutSecure(t *testing.T) {
+	svcs := services()
+	service(svcs, notesAPI.Name).Identity = true
+	env := mustResolve(t, notes(), svcs)
+	var identity *ir.Binding
+	for _, b := range env.Deployable(notesAPI.Name).Bindings {
+		if b.IdentityOf == notesAPI.Name {
+			identity = b
+		}
+	}
+	if identity == nil || identity.Source != ir.BindingLiteral {
+		t.Fatalf("notes-api's identity config field is not bound to a literal: %+v", identity)
+	}
+	data, err := json.Marshal(identity.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, `secure`) || !strings.Contains(got, `false`) {
+		t.Errorf("the identity config = %s, want a cookie without Secure", got)
 	}
 }
 

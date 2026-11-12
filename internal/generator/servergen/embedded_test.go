@@ -2,17 +2,22 @@ package servergen_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 	publicregistry "github.com/parable-work/superschematic/registry"
@@ -46,9 +51,12 @@ func (binaryTarget) Register(r *publicregistry.Registry) error {
 	for _, spec := range []publicregistry.PlatformSpec{
 		{
 			Name: "embedded.process", Kind: ir.DeployableServer, Languages: []string{publicregistry.APILanguageRust},
-			Artifact:  ir.ArtifactBinary,
-			NameOf:    func(ctx publicregistry.PlatformContext) any { return ctx.Deployable.Name },
-			AddressOf: origin, PublicAddressOf: origin,
+			Artifact: ir.ArtifactBinary,
+			// The binary serves plain HTTP on loopback, as the extension's
+			// platform says.
+			IdentityConfig: `{"cookie":{"secure":false}}`,
+			NameOf:         func(ctx publicregistry.PlatformContext) any { return ctx.Deployable.Name },
+			AddressOf:      origin, PublicAddressOf: origin,
 			Lower: func(publicregistry.PlatformContext) (publicregistry.Lowered, error) {
 				return publicregistry.Lowered{}, nil
 			},
@@ -492,4 +500,208 @@ func (w rustBehaviorWorkerOnSQLite) checkEmbeddedCompiles(t *testing.T, cargo st
 	// writes; here it is a workspace of its own.
 	appendManifest(t, in.Dir, "\n[workspace]\n\n"+testpaths.RustPatch(paths, names))
 	cargoCommand(t, cargo, in.Dir, rustTargetDir(t), "clippy", "--quiet", "--all-targets", "--", "-D", "warnings")
+}
+
+// The identity fixture as one binary (D116): users-db with the sqlite
+// dialect listed first, users-api and users-admin in Rust, and
+// users-embedded-stack, whose environment Desktop builds as one binary.
+const (
+	embeddedIdentityStack      = "users-embedded-stack"
+	embeddedIdentityGoldenRoot = "testdata/golden/identity/embedded"
+)
+
+var embeddedIdentityOrder = []string{"users-db", "users-api", "users-admin", embeddedIdentityStack}
+
+// loadEmbeddedIdentityFixture loads the fixture with the core registry and
+// the stand-in target. users-api's job is left out: a binary runs none,
+// and the embedded target refuses an environment with one.
+func loadEmbeddedIdentityFixture(t *testing.T) fixture {
+	t.Helper()
+	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), binaryTarget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
+	for _, name := range embeddedIdentityOrder {
+		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(identityRoot, name), loader.WithRegistry(reg))
+		if err != nil {
+			t.Fatalf("load %s: %v", name, err)
+		}
+		f.schemas[name], f.configs[name] = schema, cfg
+	}
+	f.schemas["users-api"].Jobs = nil
+	enabled := map[string]any{"enabled": true}
+	f.configs["users-db"].Outputs = map[string]any{
+		"types": map[string]any{"go": enabled, "rust": enabled},
+		"sql":   map[string]any{"dialects": []any{"sqlite", "postgres"}},
+	}
+	for _, api := range []string{"users-api", "users-admin"} {
+		f.configs[api].Outputs = map[string]any{
+			"types": map[string]any{"rust": enabled},
+			"api":   map[string]any{"enabled": true, "language": "RUST"},
+		}
+	}
+	return f
+}
+
+// TestEmbeddedCrateOverTheUserModelGolden: the crate of a binary whose
+// APIs authenticate with the identity runtime (D50, D116) builds one
+// identity store on a connection of its own to the database's file, by
+// the API crate's `identity::store_on_file`, and each API's identity
+// service over it, with the config its identity config field holds, which
+// the environment binds to a cookie without Secure and the binary carries.
+// Its crate takes the runtime's identity-sqlite feature. Regenerate with:
+//
+//	go test ./internal/generator/servergen -run TestEmbeddedCrateOverTheUserModelGolden -update
+func TestEmbeddedCrateOverTheUserModelGolden(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadEmbeddedIdentityFixture(t)
+	paths := rustFakePaths(repoRoot)
+	paths.MigrateRust = filepath.Join(repoRoot, "runtime", "migrate", "rust")
+	f.build(t, repoRoot, paths, embeddedIdentityOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	dir := servergen.EmbeddedDir(out, embeddedIdentityStack, "Desktop")
+	files := map[string]string{}
+	for _, file := range []string{servergen.RustManifestFile, servergen.EmbeddedLibFile} {
+		files[filepath.FromSlash(file)] = filepath.Join(dir, filepath.FromSlash(file))
+	}
+	compareGoldens(t, embeddedIdentityGoldenRoot, files)
+	read := func(file string) string {
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(file)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	lib := read(servergen.EmbeddedLibFile)
+	for _, want := range []string{
+		"use superschematic_http_runtime::identity::Store;",
+		"IdentityAuthenticator",
+		"let users_db_identity_store: Arc<dyn Store> = Arc::new(\n        users_admin_api::identity::store_on_file(&users_db_pool)",
+		"users_api_api::identity::service(\n        Arc::clone(&users_db_identity_store),",
+		"users_admin_api::identity::service(\n        Arc::clone(&users_db_identity_store),",
+		`("USERS_API_IDENTITY", "{\"cookie\":{\"secure\":false}}"),`,
+		`("USERS_ADMIN_IDENTITY", "{\"cookie\":{\"secure\":false}}"),`,
+	} {
+		if !strings.Contains(lib, want) {
+			t.Errorf("lib.rs does not contain %q:\n%s", want, lib)
+		}
+	}
+	if manifest := read(servergen.RustManifestFile); !strings.Contains(manifest, `"identity-sqlite"`) || !strings.Contains(manifest, `"identity"`) {
+		t.Errorf("the crate does not take the runtime's identity-sqlite feature:\n%s", manifest)
+	}
+	if rustfmt, err := exec.LookPath("rustfmt"); err == nil {
+		source := filepath.Join(dir, filepath.FromSlash(servergen.EmbeddedLibFile))
+		if diff, err := exec.Command(rustfmt, "--edition", "2021", "--check", source).CombinedOutput(); err != nil {
+			t.Errorf("rustfmt lays out %s otherwise: %v\n%s", source, err, diff)
+		}
+	}
+}
+
+// TestEmbeddedBinaryServesTheUserModel: the binary of the identity fixture
+// builds in the output root's workspace, passes clippy, and keeps
+// users-db's user model in the runtime's identity store on the file it
+// migrates as it starts, from the plan it carries (D116): an end user
+// registers through users-api under its path on the binary's origin and
+// signs in, the session authenticates the project's route, which the
+// scaffold answers, and me; users-admin, under its own path, over the same
+// store, refuses the user a permission they do not hold; a second user's
+// login taken is a conflict; a signed-out session is refused; and the user
+// and her session outlive the binary, which a second start over the data
+// directory signs in again.
+//
+// The test needs cargo, which it skips without, and runs outside -short.
+func TestEmbeddedBinaryServesTheUserModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cargo build in -short mode")
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not available; skipping the Rust build")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := testpaths.TempDir(t)
+	f := loadEmbeddedIdentityFixture(t)
+	f.build(t, repoRoot, paths, embeddedIdentityOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	dir := servergen.EmbeddedDir(out, embeddedIdentityStack, "Desktop")
+
+	// What `stack build` carries: the plan from an empty database to the
+	// schema's model on SQLite, which holds the user model's tables.
+	outputs, err := registry.ParseOutputs(f.configs["users-db"].Outputs, f.reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := sqlmigrate.BuildModel(f.schemas["users-db"], generator.SQLOptions(f.configs["users-db"], outputs, nil, naming.Default()), sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := sqlmigrate.Diff(nil, model, sqlmigrate.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := plan.CanonicalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := servergen.WriteEmbeddedCarried(dir, servergen.EmbeddedCarried{
+		Stack: embeddedIdentityStack, Environment: "Desktop",
+		Databases: []servergen.EmbeddedCarriedDatabase{{Service: "users-db", Plans: [][]byte{document}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target := rustTargetDir(t)
+	cargoCommand(t, cargo, out, target, "clippy", "--workspace", "--all-targets", "--quiet", "--", "-D", "warnings")
+	crate := strings.TrimSuffix(naming.Default().RustServerCrate(embeddedIdentityStack, "Desktop"), "-server") + "-embedded"
+	cargoCommand(t, cargo, out, target, "build", "--quiet", "-p", crate)
+	binary := filepath.Join(target, "debug", servergen.EmbeddedBinary(embeddedIdentityStack, "Desktop"))
+
+	// The process's environment says each API's identity config over the
+	// one the binary carries: a password hash a test can afford.
+	identityConfig := `{"cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
+	env := []string{"USERS_API_IDENTITY=" + identityConfig, "USERS_ADMIN_IDENTITY=" + identityConfig}
+	data := filepath.Join(testpaths.TempDir(t), "data")
+	port := freePort(t)
+	startBinary := func() (api, admin *started) {
+		t.Helper()
+		log := &syncBuilder{}
+		cmd := exec.Command(binary, "--data", data)
+		cmd.Env = append(os.Environ(), append(env, "PORT="+port)...)
+		cmd.Stdout, cmd.Stderr = log, log
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+		origin := "http://127.0.0.1:" + port
+		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			if resp, err := http.Get(origin + "/"); err == nil {
+				_ = resp.Body.Close()
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s did not serve at %s:\n%s", binary, origin, log.String())
+			}
+		}
+		// Each API is under its own path on the binary's one origin.
+		return &started{cmd: cmd, base: origin + "/api/users-api", out: log}, &started{cmd: cmd, base: origin + "/api/users-admin", out: log}
+	}
+
+	api, admin := startBinary()
+	api.expect(t, http.MethodGet, "/api/greeting", http.StatusUnauthorized)
+	api.send(t, http.MethodPost, "/api/auth/register", `{"login": "ada@example.com", "name": "Ada", "password": "ada's password"}`, http.StatusOK, `"token"`)
+	api.send(t, http.MethodPost, "/api/auth/register", `{"login": "ADA@example.com", "name": "Ada too", "password": "another password"}`, http.StatusConflict)
+	token := api.login(t, "ada@example.com", "ada's password")
+	api.authorized(t, token, http.MethodGet, "/api/greeting", http.StatusNotImplemented, "greet")
+	api.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusOK, `"login":"ada@example.com"`)
+	admin.authorized(t, token, http.MethodGet, "/api/auth/admin/users", http.StatusForbidden, `"code":"forbidden"`)
+	api.authorized(t, token, http.MethodPost, "/api/auth/logout", http.StatusOK, `"data":true`)
+	api.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusUnauthorized)
+	kept := api.login(t, "ada@example.com", "ada's password")
+	api.stop(t)
+
+	// A second start over the data directory serves what the first wrote.
+	api, _ = startBinary()
+	api.authorized(t, kept, http.MethodGet, "/api/auth/me", http.StatusOK, `"login":"ada@example.com"`)
+	api.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusUnauthorized)
+	api.stop(t)
 }
