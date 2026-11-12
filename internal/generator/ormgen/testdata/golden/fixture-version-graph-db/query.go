@@ -4267,6 +4267,7 @@ type RecipeFilter struct {
 	Id        *UUIDFilter
 	Title     *StringFilter
 	CreatedAt *DateTimeFilter
+	CreatedBy *UUIDFilter
 	// ReferencedByCoverRecipe filters on the presence or absence of a
 	// Cover whose recipe points at this row.
 	ReferencedByCoverRecipe *ReferencedByFilter
@@ -4466,6 +4467,29 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `recipe.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.ReferencedByCoverRecipe != nil {
 		probe := `SELECT 1 FROM cover WHERE cover.recipe_id = recipe.id`
 		if f.ReferencedByCoverRecipe.Exists {
@@ -4585,6 +4609,7 @@ type RecipeCommitFilter struct {
 	ContentHash *StringFilter
 	Sequence    *Int64Filter
 	CreatedAt   *DateTimeFilter
+	CreatedBy   *UUIDFilter
 	// RootID allows filtering by foreign key
 	RootID *UUIDFilter
 	// RefID allows filtering by foreign key
@@ -4972,6 +4997,29 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 				conditions = append(conditions, `recipe_commit.created_at IS NULL`)
 			} else {
 				conditions = append(conditions, `recipe_commit.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_commit.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_commit.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `recipe_commit.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_commit.created_by IS NOT NULL`)
 			}
 		}
 	}
@@ -5525,7 +5573,9 @@ type RecipeRefFilter struct {
 	Name      *StringFilter
 	SealedAt  *DateTimeFilter
 	CreatedAt *DateTimeFilter
+	CreatedBy *UUIDFilter
 	UpdatedAt *DateTimeFilter
+	UpdatedBy *UUIDFilter
 	Version   *Int64Filter
 	// RootID allows filtering by foreign key
 	RootID *UUIDFilter
@@ -5854,6 +5904,29 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `recipe_ref.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_ref.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.UpdatedAt != nil {
 		if f.UpdatedAt.Eq != nil {
 			paramNum++
@@ -5902,6 +5975,29 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 				conditions = append(conditions, `recipe_ref.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `recipe_ref.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `recipe_ref.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_ref.updated_by IS NOT NULL`)
 			}
 		}
 	}
@@ -6196,7 +6292,9 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 type RecipeReleaseFilter struct {
 	Id        *UUIDFilter
 	CreatedAt *DateTimeFilter
+	CreatedBy *UUIDFilter
 	UpdatedAt *DateTimeFilter
+	UpdatedBy *UUIDFilter
 	Version   *Int64Filter
 	// RootID allows filtering by foreign key
 	RootID *UUIDFilter
@@ -6362,6 +6460,29 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `recipe_release.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.UpdatedAt != nil {
 		if f.UpdatedAt.Eq != nil {
 			paramNum++
@@ -6410,6 +6531,29 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 				conditions = append(conditions, `recipe_release.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `recipe_release.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `recipe_release.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.updated_by IS NOT NULL`)
 			}
 		}
 	}
@@ -6894,7 +7038,9 @@ type StepFilter struct {
 	Timings      *StringFilter
 	Scratch      *StringFilter
 	CreatedAt    *DateTimeFilter
+	CreatedBy    *UUIDFilter
 	UpdatedAt    *DateTimeFilter
+	UpdatedBy    *UUIDFilter
 	EntityKey    *UUIDFilter
 	DeletedOnRef *BoolFilter
 	Version      *Int64Filter
@@ -7236,6 +7382,29 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`step.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `step.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `step.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.UpdatedAt != nil {
 		if f.UpdatedAt.Eq != nil {
 			paramNum++
@@ -7284,6 +7453,29 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `step.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `step.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`step.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `step.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `step.updated_by IS NOT NULL`)
 			}
 		}
 	}

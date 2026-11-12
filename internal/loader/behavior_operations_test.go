@@ -679,20 +679,26 @@ func TestASourceViewProjectsTheFieldsABehaviorOwns(t *testing.T) {
 		t.Errorf("OrderView omits %v from its source, want [placedAt]", view.Source.OmittedFromSource)
 	}
 
-	dir := t.TempDir()
+	// The API beside its database, which its @tableOperation reads.
+	root := t.TempDir()
+	dir := filepath.Join(root, "fixture-workflow-view-api")
 	source, err := os.ReadFile(filepath.FromSlash("tsreader/testdata/services/fixture-workflow-view-api/src/orders.schema.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.CopyFS(dir, os.DirFS(filepath.FromSlash("tsreader/testdata/services/fixture-workflow-view-api"))); err != nil {
-		t.Fatal(err)
+	for _, service := range []string{"fixture-workflow-view-api", "fixture-workflow-db"} {
+		if err := os.CopyFS(filepath.Join(root, service), os.DirFS(filepath.FromSlash("tsreader/testdata/services/"+service))); err != nil {
+			t.Fatal(err)
+		}
 	}
 	broken := strings.Replace(string(source), "  statusEnteredAt?: Temporal.DateTime;\n", "  statusEnteredAt?: Temporal.DateTime;\n  statusLeftAt?: Temporal.DateTime;\n", 1)
 	if err := os.WriteFile(filepath.Join(dir, "src", "orders.schema.ts"), []byte(broken), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(viewTSConfig(t)), 0o644); err != nil {
-		t.Fatal(err)
+	for _, service := range []string{"fixture-workflow-view-api", "fixture-workflow-db"} {
+		if err := os.WriteFile(filepath.Join(root, service, "tsconfig.json"), []byte(viewTSConfig(t)), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_, err = LoadService(dir)
 	if want := "OrderView.statusLeftAt is not in source type fixture-workflow-db.Order and is not marked @virtual"; err == nil || !strings.Contains(err.Error(), want) {

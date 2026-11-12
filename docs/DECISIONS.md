@@ -17652,3 +17652,144 @@ ormgen's and tsgen's goldens of `fixture-queries-db`; `TestJoinTableNames`;
 `queue-sqlite.test.ts`, and on Postgres
 `TestQueueParityOfGoTypeScriptAndRustOnPostgres` and
 `TestNamedTablesAcrossGoAndTypeScriptOnPostgres`.
+
+## D108. A `@tableOperation` names the row's members that hold who may reach it, and reaches only those rows (D106 amended)
+
+D106 left a generated operation with one rule over its rows: the route's
+guards. A caller the route admits reaches every live row the path holds.
+The tracker's inbox showed what that costs. `GET /notifications` behind
+`inbox.read` lists everyone's notifications to anyone who holds the
+permission, and any holder of `issues.write` edits any comment. A private
+row was a hand-written operation: the tracker's own inbox is two, a list
+that adds `userId: { eq: caller }` to the request's filter and an update
+that does the same, twenty-five lines that say one thing, "the rows whose
+user is the caller". D106 named this its step 4 and did not design it.
+
+The rule is a fact about the table as the operation reads it, so the
+operation says it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@tableOperation` takes one optional argument, the row rule: `{ by: [...], overridePermission? }`. `by` lists members of the row, named as a view names them: a field of the table that holds an id or text, a to-one relation's key (`assigneeId`), or `createdBy`. `ir.TableOperation` keeps both as written (`by`, `overridePermission`). | A decorator of its own, `@rowRule`, which would let a rule sit on an operation no handler of the build's serves and so check nothing. A rule on the table, in the DB schema: the database does not know the API's callers, and one table's read and update often differ, as a shared note's do. Postgres row-level security, which SQLite and D1 do not have, and which would need each request's caller set on the database's session. |
+| A read, an update and a delete find the live row under the path's key and parents that one member of `by` also holds the caller in. A row that names someone else is the 404 `not_found` of a row that is not there, and nothing is written. A list keeps the same rows beside the path's parents and the request's filter, in an `allOf` of its own, so no filter widens it. | A 403 for a row that exists and names another, which tells a caller which keys are taken. Checking the row after it is read, which a list cannot do without reading past its page. |
+| The caller is the request's principal, by its subject. A member that holds an id is compared with a subject that reads as one, in either of its forms, and a member that holds text with the subject as it is. A request with no caller, and a caller whose subject no member can hold, reach no row: an empty page, and a 404. | Reading a service caller's name as a subject. A service that needs every row holds the override permission, or the operation is written by hand. |
+| A create sets each member of `by` but `createdBy` to the caller, and its body's view may not hold one: the member is the rule's. `createdBy` stays the repository's stamp. A create whose caller is no one is a 401, and one whose caller has no id for a member that holds one a 403. The loader refuses a create whose rule names the table's key or a relation its path sets. | Leaving the member to the body and refusing a value that is not the caller's, a second way to say one thing. Skipping the rule on a create, which would let a caller write a row they then cannot read. |
+| `overridePermission` names one permission whose holder the rule does not hold back, matched as a route's permission is (`notes` covers `notes.admin`). The permission catalog lists it under the operation, and it counts among the permissions the API requires when the build checks what a seeded role's permissions cover. Without it the rule holds for every caller. | A list of permissions, or a role: one permission is what a route's own guard names, and a role is a set of them. An implicit override for an admin, which no schema would show. |
+| The loader holds the rule to the table (`verify.checkRowRule`): the route requires a caller (`@auth`, `@requirePermission`, an `Authenticated` set); each member is one of the table's, holds a subject, and is no secret, no field a behavior owns and no audit field but `createdBy`; no member is named twice; and the table is no projection. `@requireOwnership` on a `@tableOperation` still fails the load, and its message now names the rule. | Leaving a member's kind to the generators, which would surface a mistake at a build or a request. |
+| `createdBy` and `updatedBy` keep a filter in both ORMs, as `createdAt` and `updatedAt` do: `sqlutil.tableOf` gives every column but `deletedAt`, `deletedBy` and an encrypted one its filter, and the Go ORM's filter struct declares them. A rule by `createdBy` is a filter the repository already had the column for. | A filter only the generated handlers reach, which the Go ORM's typed filter has no place for. |
+| The TypeScript handlers build the rule from the router's table (`by`, `overridePermission` on each `TableOperation`) and the repository's own columns. A member the repository keeps no equality filter for throws before anything is read, for every caller: a repository drops a filter's member it does not know, and a rule that dropped one would reach every row. | Trusting the loader's check alone, when the router and the types package are built apart and one may be stale. |
+| The Go handlers write the rule into `tables.go`, typed: `where.AllOf = append(where.AllOf, orm.NoteFilter{AnyOf: ...})` under `if !tableLifted(ctx, "notes.admin")`, and `row.Owner = caller` on a create. A member that holds text, and a create whose member holds an id of another scalar than `Identity.UUID`, stay operations the project implements, with the build's warning (D106's last rule). | Refusing such a rule at the load, which would fail a TypeScript API for what only the Go server lacks. |
+| A TypeScript table operation acts as no one for a principal whose subject is no id, as the Go server's `WithCaller` does: a read is served, and a write that stamps its caller is a 401. Before, `orm.as` threw and the route answered 500. | Leaving the two servers to differ on a caller a custom authenticator establishes. |
+
+Left: a caller named through another table (a team's members), which
+needs the repositories' path filters (D90) in a rule and a way to say
+which relation holds the caller; a behavior's seat as a member, which
+needs a filter over the Seats sub-table, whose subject is text (D107);
+the Go handlers for a member that holds text; a rule over a projection;
+and the Rust server, which serves no table operation yet (D106).
+
+Status: built. `TestTableOperationsAreFilledFromTheirDeclarations` and
+`TestTableOperationsAreHeldToTheirTable`; `table-routes.test.ts`;
+`fixture-tracker-api`'s `Notes`, in tsrestgen's, apigen's and servergen's
+goldens; and on Postgres, over HTTP, one scenario on both servers,
+`TestGeneratedTableOperationsEndToEnd` and
+`TestTableOperationsGoServerServesItsTables`: a create names the caller,
+a list, a read, an update and a delete keep to the caller's rows, the
+override permission and a grant that covers it reach every row, and a
+caller with no id reaches none.
+
+## D109. A table's Workflow lists states in a transition, a build holds a Workflow to its own rules, and a create names the state its row starts in (D103, D106 amended)
+
+The tracker's issues move among five open states and into three closed
+ones. A transition is one move, so that was thirty-five lines, and an
+edit to the set of open states an edit to most of them. A create could
+not say where its row starts: an issue filed as a todo was a create and
+then a `transition`, two calls and a row that existed in the wrong state
+between them. And a transition that named a state the Workflow does not
+have built, as the Timers config of D107 did, and failed every create.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| In a TypeScript schema, a transition of a table's Workflow may list states in `from`, in `to`, or in both: `{ from: ["backlog", "todo"]; to: ["started", "done"] }` is a transition from each to each, in the lists' order, each with the transition's `permission` and `by`. A state both lists hold moves to the others and not to itself, so one list in both is every move among its states. `@superschematic/db`'s `WorkflowTransitionOn` types it. | A wildcard, `from: "*"`, which makes every state one a row can leave, a terminal state among them, by a character. A separate member, `anyOf`, which says the same in more words. A set of named groups of states in the config, which is a second vocabulary for one list. |
+| The TypeScript reader writes the transitions out (`ir.ExpandTransitionLists`) before it holds the config to its schema, so the configSchema, the build's checks, the generators, the behavior operations and the core read plain transitions and none of them knows the short form. | Teaching each of them the short form. Changing Workflow's declaration, which the engine shares: its configSchema, the engine's own parser and the recorded scenarios would all change for a way of writing that changes no behavior. |
+| What only the short form gets wrong fails the load, at the config: a list with no state or with one twice, lists that leave no move, and a move two transitions make when one of them lists it, naming both as written. Two plain transitions that repeat each other stay the core's to refuse. | Letting a later transition replace an earlier one's permission, which a reader of the config would not see. |
+| A JSON or YAML schema file writes each transition out. Its document schema holds a config to the declaration, which takes one state in each. | A second document schema for tables' configs. |
+| The build holds a table's Workflow to the rules the core's `WorkflowConfig::parse` holds it to, in its words and its order, the first only (`verify.workflowRulesProblem`): the initial state is a state; each transition's `from` and `to` are states, it leads somewhere else, and it is listed once; and `outcomes` names states no transition leaves. | Leaving them to the core's define check at a row's first command, where a mistake is every create's 422 (D107 closed the same of Timers and left this). |
+| A create's body may hold the field of a Workflow of its table: the state the row starts in. The loader records it (`ir.TableOperation.Starts`). The handler creates the row in the initial state and makes the Workflow's `transition` to the state the body names, in the create's transaction and as its caller. A body that leaves the member out, sends null or names the initial state makes no move. | Writing the status column at the insert, which would pass over the transition's permission, its `by`, StateRules, Approvals and every behavior that hears a move. A `startIn` option on the decorator, which fixes one state per operation where a body lets a caller choose among the ones the Workflow allows. |
+| The move is one transition from the initial state, held to all a caller's is. A move the Workflow refuses is its refusal, and the transaction keeps no row. | A path of transitions to a state farther away, which would run each one's side effects for a row no caller saw there. |
+| An update's body still may not hold the field, and its refusal now says where a row changes state (`issue.status.transition`). The OpenAPI document leaves the member writable in the create's body, where every other view of an owned field is `readOnly`. | An update that makes a transition, which would give one field two ways to move with different guards. |
+| The TypeScript server serves it. The Go server leaves such a create to the implementation, with the build's warning (D106's last rule). | Holding the feature until both write it. |
+
+Left: a state that a transition leaves and that still counts as finished,
+so an issue may be reopened and still close its parent through
+`allTerminal`. `outcomes` on such a state is refused by the engine and
+the core alike, on purpose, and both of their recorded scenarios hold the
+rule, so changing it is a change to the engine, the core, the scenario
+corpus and this build's mirror of the rule together. Also left: a team's
+own named states tied to the Workflow's; the Go server's create that
+names a state; and the short form in a JSON or YAML schema file.
+
+Status: built. `TestExpandTransitionLists*` in `ir`;
+`TestAWorkflowsListedTransitionsAreWrittenOut`; `TestWorkflowRulesProblem`;
+`TestACreateNamesTheStateItsRowStartsIn`; `table-routes.test.ts`;
+`TestOpenAPIMarksAViewsOwnedFieldsReadOnly`; and on Postgres, over HTTP
+and through the behaviors' core, `TestGeneratedStartStateCreateEndToEnd`:
+a create that names `paid` answers a paid order at its second version, a
+state the initial one does not lead to is the 409 `vetoed` and keeps no
+row, and so does a state the Workflow does not have.
+
+## D110. A list over a view filters by who created a row and who last wrote it (D106 amended)
+
+"What I filed" is a list every tracker has, and D106's `FilterBy` refused
+it: a field of a `@source` view that is an audit field other than
+`createdAt` and `updatedAt` had no filter, because the repositories kept
+none for it. D108 gave `createdBy` and `updatedBy` their filters in both
+ORMs, for a row rule to read. The refusal outlived its reason.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `FilterBy` over a `@source` view takes `createdBy` and `updatedBy`, as an id (`eq`, `in`, and `isNull` where the column may be null), beside `createdAt` and `updatedAt`. The generated handlers of both servers read them as any id's filter. | A "mine" flag on a list, which D108's row rule is when the list should hold nothing else, and which a filter is when it should. |
+| `deletedAt` and `deletedBy` are still refused, and the message says why: they say a row is deleted, and a list holds no deleted row to compare them on. | Filters that could only ever match nothing. |
+
+Left, of what the tracker could not say of its lists: a sort by a column
+that may be null, which needs a keyset that orders nulls and compares
+them, in the statements both ORMs share; a filter that negates (`ne`,
+`notIn`) or joins its members with "or", which is an operator in both
+ORMs' filters, the three servers' filter readers, the OpenAPI
+parameters, the four SDKs and the tool schemas; and a filter through a
+relation without a projection.
+
+Status: built. `TestFilterFillsEachFieldsKindAndOperators` and
+`TestFiltersAreHeldToTheirListAndItem`; `fixture-tracker-api`'s
+`listIssues`; and on Postgres, on both servers,
+`TestGeneratedTableOperationsEndToEnd` and
+`TestTableOperationsGoServerServesItsTables`.
+
+## D111. A table operation documents itself: its docs and its tool come from its declaration (D106 amended)
+
+The tracker declares seventy-two operations, sixty-seven of them
+`@tableOperation`. Each carried five decorators, and two of the five said
+nothing its method did not: `@docs({ title: "List issues", description:
+..., capability: "issues.list", lifecycle: "active", visibility:
+"public", replayMode: "read_only" })` and `@mcp({ handle: "list_issues"
+})`, above a method named `listIssues` with a comment that was the
+description. An operation the loader adds for a behavior has had both
+from its declaration since D103. One the build serves from a table knows
+as much about itself.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `@tableOperation` that declares no `@docs` is given them once the loader has filled it (`verify.documentTableOperations`): the title is the method's name as words (`List issues`), the description its comment as one paragraph, or a sentence of its kind and its table without one, the capability its set and its method (`issues.list-issues`), `active`, `public` and `mapped`, and a read and a list replay as `read_only`. | A title from the kind and the table, "List Issue", which two reads of one table would share and which says less than the name its author chose. Requiring `@docs` and offering a snippet, which is the boilerplate. |
+| One that declares no `@mcp` is a visible tool: its handle the method's name in snake_case (`list_issues`), its invocation the policy's default. An operation only a calling service reaches is hidden with that reason (D37), and so is one whose payload is encrypted, which no tool call seals. | Tools only on request, as a hand-written operation's are. The route's guards hold a tool's call as they hold a request's, so a tool reaches nothing its caller could not; and `@mcp({ hidden: true, reason })` says otherwise in one line. `ask` for a delete by default, which would fail the build of an API that names no confirmation key (D93). |
+| A name another operation of the API holds takes its set's before it, in the handle and the title: two sets that each declare `list` are `teams_list` and `members_list`, "Teams: list" and "Members: list". So does a default that would repeat a handle or a title another operation declares. | Failing the build for a clash between two defaults, which no declaration the author wrote would explain. |
+| What the operation declares is kept: `@docs` and `@mcp` are each the author's when written and each given when only the other is, so a `@tableOperation`'s visible `@mcp` stands without `@docs`, where `Schema.Validate` refuses any other operation's. An operation the project implements is given neither. | Defaults for every operation of an API, whose hand-written ones the loader cannot describe beyond their names. |
+
+Left: one declaration that serves a whole table, its five operations
+from the table, its views and a path (D106's list), which would take the
+`@rest` lines too; and a per-kind invocation policy for a set.
+
+Status: built. `TestTableOperationsDocumentThemselves`;
+`TestTableOperationEndpoints`, whose OpenAPI document carries the
+summaries and whose endpoints the tools; `TestSchemaValidateChecksOperationMCP`;
+and `examples/tracker`, whose sixty-seven table operations carry no
+`@docs` and whose MCP endpoint lists their tools.

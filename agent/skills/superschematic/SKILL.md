@@ -40,6 +40,10 @@ does. You never write, edit or duplicate:
   rows through `@source` views: mark the method `@tableOperation()` and
   the TypeScript and Go servers serve it from the repositories, in one
   transaction and as the caller.
+- The check that a row is the caller's: `@tableOperation({ by:
+  ["ownerId"] })` keeps a read, a list, an update and a delete to the
+  rows one of the named members holds the caller in, and sets them on a
+  create.
 - Routing, argument decoding, 400s, auth and permission checks, rate,
   body and time limits, pagination plumbing, a list's filter parsing,
   webhook signature checks.
@@ -159,11 +163,16 @@ path for when the store is unavailable.
   `@source` views of one table take `@tableOperation()` and no handler:
   a path parameter named for a relation's key (`teams/{teamId}/issues`)
   holds the row to its parent, a body view lists only the columns a
-  caller may set, and an update's members are all `Nullable`. Write the
-  operation by hand, with the same route and types, when it needs a
-  `@virtual` field, an ownership check, a rule over which rows the caller
-  sees, or a Rust server. `superschematic catalog decorators` has its
-  rules.
+  caller may set, and an update's members are all `Nullable`. A create's
+  body may hold a `Workflow` field, the state the row starts in: the
+  handler creates the row and makes the transition, as the caller. Write the
+  `@tableOperation({ by: ["ownerId"], overridePermission: "notes.admin"
+  })` holds it to the rows a member names the caller in, a row of
+  someone else's a 404, and sets those members on a create; a rule needs
+  a route that requires a caller. Write the operation by hand, with the
+  same route and types, when it needs a `@virtual` field, a rule that
+  names the caller through another table, or a Rust server.
+  `superschematic catalog decorators` has its rules.
 - **A list's page, sort, search and filters are declared.** `@paginated`
   on a `GET` that returns a list, with a `SortBy<Item, [...]>`, a
   `SearchQuery` and a `FilterBy<Item, [...]>` argument. Don't add a
@@ -220,6 +229,13 @@ path for when the store is unavailable.
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors
   with `@behavior("Workflow", {...})` (`superschematic catalog behaviors`).
+- **A `@tableOperation` documents itself.** Without `@docs` it takes its
+  title from the method's name, its description from the method's
+  comment and its capability from the set and the method; without `@mcp`
+  it is a tool under the method's name in snake_case (`list_issues`).
+  Write the comment for the reader, add `@mcp({ invocationPolicy: "ask"
+  })` to a tool a person should confirm, and `@mcp({ hidden: true,
+  reason })` to keep one out.
 - **Tools for agents are declared too.** `@mcp` with `@docs` makes an
   operation an MCP tool, and `outputs.api.mcp` serves the tools from a
   TypeScript API. Mark a tool that moves money or changes data in bulk
@@ -255,6 +271,12 @@ Most are load errors; knowing them saves a build round-trip:
   class and the params and row types it names, and a type that composes
   a behavior with `@behavior` (an engine type) are not tables; one that
   implements a behavior or types a field as one stays a table.
+- A Workflow transition may list states in `from` and `to`, in a
+  TypeScript schema: `{ from: ["backlog", "todo"]; to: ["done",
+  "canceled"]; permission: "issues.close" }` is four transitions, and the
+  same list in both is every move among its states. The build holds the
+  config to the core's rules (states exist, no move to itself or listed
+  twice, outcomes only on states nothing leaves).
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read

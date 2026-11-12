@@ -224,8 +224,21 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("manualRouteRegistration"))
 	}
 	if op.TableOperation != nil {
-		// The loader fills what the decorator leaves unsaid (D106).
-		fmt.Fprintf(&e.body, "  @%s()\n", e.use("tableOperation"))
+		// The loader fills what the decorator leaves unsaid (D106); the
+		// row rule is the author's (D108).
+		rule := ""
+		if len(op.TableOperation.By) > 0 {
+			by := make([]string, len(op.TableOperation.By))
+			for i, member := range op.TableOperation.By {
+				by[i] = quote(member)
+			}
+			rule = "{ by: [" + strings.Join(by, ", ") + "]"
+			if op.TableOperation.OverridePermission != "" {
+				rule += ", overridePermission: " + quote(op.TableOperation.OverridePermission)
+			}
+			rule += " }"
+		}
+		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.use("tableOperation"), rule)
 	}
 	if op.Page != nil {
 		// Both limits, as the loader filled them in (D60), and the order of

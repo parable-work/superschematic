@@ -144,8 +144,9 @@ func checkSeededRoles(schema, authDB *ir.Schema, sessions *ir.OperationSet, pref
 
 // apiPermissions are the permissions schema's operations require, the
 // ones a behavior operation's config names, which its core checks (D103),
-// and the user model's administration routes' under prefix, sorted and
-// each once.
+// the one that lifts a table operation's row rule, which its handler
+// checks (D108), and the user model's administration routes' under
+// prefix, sorted and each once.
 func apiPermissions(schema *ir.Schema, prefix string) []string {
 	set := map[string]bool{}
 	for _, p := range []string{ir.IdentityPermissionUsersRead, ir.IdentityPermissionUsersWrite, ir.IdentityPermissionRolesRead, ir.IdentityPermissionRolesWrite} {
@@ -166,6 +167,9 @@ func apiPermissions(schema *ir.Schema, prefix string) []string {
 				for _, p := range marker.Permissions {
 					set[p] = true
 				}
+			}
+			if rule := op.TableOperation; rule != nil && rule.OverridePermission != "" {
+				set[rule.OverridePermission] = true
 			}
 		}
 	}

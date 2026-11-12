@@ -776,7 +776,10 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 		if class.Enum && f.Required && !ref.IsArray && f.Default != nil {
 			c.EnumDefault = *f.Default
 		}
-		if (c.Audit == "" || c.Audit == AuditCreatedAt || c.Audit == AuditUpdatedAt) && !c.Encrypted {
+		// deletedAt and deletedBy keep no filter: a read leaves deleted
+		// rows out, and includeDeleted says otherwise. Who created a row
+		// and who last wrote it are filtered by as any id is (D108).
+		if c.Audit != AuditDeletedAt && c.Audit != AuditDeletedBy && !c.Encrypted {
 			c.Filter = class.FilterKind(ref.IsArray)
 		}
 		c.Sortable = c.Key || sortableColumn(c, ir.SortValue(schema, ref))

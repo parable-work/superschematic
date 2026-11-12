@@ -6524,6 +6524,13 @@
     "TableOperation": {
       "additionalProperties": false,
       "properties": {
+        "by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "database": {
           "default": "",
           "type": "string"
@@ -6540,6 +6547,10 @@
           "default": "",
           "type": "string"
         },
+        "overridePermission": {
+          "default": "",
+          "type": "string"
+        },
         "parents": {
           "default": [],
           "items": {
@@ -6550,6 +6561,13 @@
         "projection": {
           "default": false,
           "type": "boolean"
+        },
+        "starts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "type": {
           "default": "",

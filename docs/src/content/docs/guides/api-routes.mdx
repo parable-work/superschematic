@@ -341,8 +341,12 @@ filter can compare. The loader refuses:
 - a list or a map, a `Secret`, a `@decrypted` field, whose column holds
   ciphertext, JSON, an object type, a union and a duration;
 - on an item that is a `@source` view, a `@virtual` field, which no column
-  of the table holds, and an audit field other than `createdAt` and
-  `updatedAt`.
+  of the table holds, and `deletedAt` and `deletedBy`, which no row a
+  list holds has a value in.
+
+The other audit fields filter as any field of their type: `createdBy` and
+`updatedBy` as an id (`filter[createdBy]=<id>` is "what I filed"), and
+`createdAt` and `updatedAt` as a time.
 
 So a list filters by nothing its view does not show, and narrowing a list
 cannot probe a column no view returns. The refusal names the operation,
@@ -951,16 +955,18 @@ export class Issues extends Authenticated {
 ```
 
 The method stays an ordinary declaration. Its `@rest` route, its guards,
-its `@docs`, `@mcp` and `@rateLimit`, its arguments and its result are
-what it writes, and the OpenAPI document, the SDKs, the permission catalog
-and the tool documents read it as any operation. The decorator changes one
+its `@rateLimit`, its arguments and its result are what it writes, its
+`@docs` and `@mcp` what it writes or what [its declaration gives
+it](#docs-and-tools), and the OpenAPI document, the SDKs, the permission
+catalog and the tool documents read it as any operation. The decorator changes one
 thing: the server mounts the route on a handler the build writes, and the
 implementation's interface and its scaffold leave the method out. Take the
 decorator off and the operation is one you implement, with the same route,
 types, SDK method and tool. A set may hold both kinds, so one operation
 that needs code of yours does not cost the others theirs. The decorator
-takes no argument; the JSON and YAML forms write `tableOperation: {}` on
-the operation.
+takes no argument, or one, its [row rule](#row-rules); the JSON and YAML
+forms write `tableOperation: {}` on the operation, with the rule's `by`
+and `overridePermission` inside it.
 
 ### The table and the kind
 
@@ -1031,7 +1037,7 @@ loader refuses, in it and in an update's body:
 | the key of a table that generates its own; in an update, any key | the table generates it; it names the row and never changes |
 | an audit field: `createdAt`, `createdBy`, `updatedAt`, `updatedBy`, `deletedAt`, `deletedBy` | the repository stamps it |
 | internal metadata, `_version` | no write sets it |
-| a field a behavior owns, such as a `Workflow` field | only the behavior's operations change it |
+| a field a behavior owns | only the behavior's operations change it. A create's body may hold a `Workflow` field: [the state a row starts in](#the-state-a-row-starts-in) |
 | the relation a path parameter sets, `teamId` under `teams/{teamId}/issues` | the path sets it |
 | `@virtual` | no column holds it |
 
@@ -1044,6 +1050,51 @@ Issues.createIssue: its body CreateIssueInput leaves out title, which Issue requ
 
 A member of a create's body that the request leaves out, or sends as
 null, is left unset, so its column takes the table's default, or null.
+
+### The state a row starts in
+
+A table's `Workflow` field starts every row in its initial state, and
+only the Workflow's `transition` moves it. A create's body may hold the
+field all the same, as the state the row starts in:
+
+```ts
+// What a caller sets to place an order: its title and, when it is not a
+// draft, the state it starts in.
+@source(Order)
+export abstract class PlaceOrderInput {
+  title: string;
+  status: Nullable<string>;
+}
+
+@rest(HttpMethod.POST, "orders")
+@tableOperation()
+placeOrder(input: PlaceOrderInput): OrderView {
+  throw new Error("schema declaration only");
+}
+```
+
+The handler creates the row in the initial state and then makes the
+Workflow's own transition to the state the body names, in the create's
+transaction and as its caller. So the move is held to everything a
+caller's transition is: it needs a transition from the initial state to
+that state, the transition's permission and its `by`, and every behavior
+that hears a move hears this one. A move the Workflow refuses is its
+refusal, the 409 `vetoed` a `transition` answers, and no row is kept. A
+body that leaves the member out, sends null, or names the initial state
+makes no move.
+
+It is one move. A state the initial one does not lead to in one
+transition is refused: list a transition to it, or create the row and
+move it. An update's body may not hold the field: a row that exists
+changes state through the Workflow's operations
+([A table's behavior operations](#a-tables-behavior-operations)), and the
+loader says so. The OpenAPI document leaves the member writable in the
+create's body, where every other view of the field is `readOnly`.
+
+The TypeScript server serves it. A Go server leaves such a create to the
+implementation, with the build's warning.
+
+### An update's members
 
 An update's members are all optional, `Nullable` each, and the loader
 refuses a required one. The request's own JSON says what to write:
@@ -1161,10 +1212,10 @@ A route's guards are the method's, as on any operation: `@auth`,
 `@requirePermission`, `@publicRoute`, `@requireService`, `@allowService`,
 `@rateLimit`, `@bodyLimit` and `@timeout`
 ([Auth and permissions](/superschematic/guides/auth-and-permissions/)).
-They are the only rule over which rows a caller reaches: a caller the
-route admits reaches every live row the path holds. `@requireOwnership`
-fails the load on a `@tableOperation`, since no implementation of yours
-runs to check what the caller owns, and so does
+A caller the route admits reaches every live row the path holds, unless
+the operation names a [row rule](#row-rules). `@requireOwnership` fails
+the load on a `@tableOperation`, since no implementation of yours runs to
+check what the caller owns: a row rule says it instead. So does
 `@manualRouteRegistration`, which hands the route to a handler of yours.
 
 Different callers get different views through different operations. A
@@ -1191,6 +1242,137 @@ getIssueForGuest(id: Identity.UUID): IssueGuestView {
 Several views of one table do not confuse a relation's key: it refers to
 the one of them an operation lists
 ([What a value refers to](/superschematic/reference/references-and-search/#what-a-value-refers-to)).
+
+### Row rules
+
+A permission says who may call a route. A row rule says which rows that
+caller reaches. `@tableOperation({ by: [...] })` lists the row's members
+that name who the row is for, and the operation then reaches only the
+rows one of them holds the caller in:
+
+```ts
+export class Notes extends Authenticated {
+  // The caller's notes, their own and the ones shared with them.
+  @rest(HttpMethod.GET, "notes")
+  @paginated({ defaultSort: "createdAt" })
+  @tableOperation({ by: ["owner", "sharedWith"], overridePermission: "notes.admin" })
+  listNotes(sort: SortBy<NoteView, ["createdAt"]>, filter: FilterBy<NoteView, ["issueId", "owner"]>): NoteView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // A new note on the issue the path names, the caller's own.
+  @rest(HttpMethod.POST, "issues/{issueId}/notes")
+  @tableOperation({ by: ["owner"] })
+  createNote(issueId: Identity.UUID, input: CreateNoteInput): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes a note of the caller's own.
+  @rest(HttpMethod.PATCH, "notes/{id}")
+  @tableOperation({ by: ["owner"] })
+  updateNote(id: Identity.UUID, input: UpdateNoteInput): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // Deletes a note the caller wrote, or any note for an admin.
+  @rest(HttpMethod.DELETE, "notes/{id}")
+  @tableOperation({ by: ["createdBy"], overridePermission: "notes.admin" })
+  deleteNote(id: Identity.UUID): NoteView {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+| Kind | With a rule |
+| --- | --- |
+| read, update, delete | the live row under the path's key and parents that also names the caller; a row that names someone else is the 404 of a row that is not there, and nothing is written |
+| list | the rows that name the caller, beside the path's parents and whatever the request's filter says: `filter[owner]=<someone else>` finds only what the rule already reaches |
+| create | each member the rule names is set to the caller, and the body's view may not hold one; `createdBy` is the repository's stamp as on any create |
+
+A member of `by` is named as a view names it: a field of the table that
+holds an id (`Identity.UUID`, `Identity.UserID`), a to-one relation's
+key (`assigneeId`), text, or `createdBy`. The caller is the request's
+principal, by its subject: a user's id. A row is reached when any one
+member holds it, so `["owner", "sharedWith"]` is "mine or shared with
+me". An operation carries its own rule, so a table's read may reach the
+rows shared with the caller while its update reaches only the owner's.
+
+`overridePermission` names one permission whose holder the rule does not
+hold back: they reach every row, as an operation without a rule does. A
+grant covers it as it covers a route's permission (`notes` covers
+`notes.admin`), and the permission catalog lists it under the operation.
+Without it the rule holds for every caller.
+
+The loader holds the rule to the table. It fails the load for a rule on a
+route that admits a request with no caller (`@publicRoute`, or no guard
+at all), for a member the table does not have, for one that holds no
+subject (a number, a time, `updatedBy`, a secret, a field a behavior
+owns), for a rule over a projection, for an `overridePermission` with no
+`by`, and for a create whose rule names the table's key or a relation its
+path sets.
+
+What a rule does not say yet:
+
+- A caller named through another table: "the rows of a team I am a
+  member of". Give the row the member itself, or write the operation by
+  hand.
+- A behavior's seat (`Seats`): the same.
+- A caller that is a service, or any principal whose subject is no id.
+  It is named by no member that holds an id, so it lists nothing, reads
+  a 404 and cannot create; give it the override permission.
+- On a Go server, a member that holds text. The Go handlers compare the
+  caller with an id; the operation stays one you implement, with a
+  warning. The TypeScript server serves it.
+
+A row rule is the generated handler's. An operation you write by hand,
+an ORM call in a worker and SQL of your own reach every row, as before.
+
+### Docs and tools
+
+A table operation says what it does in its declaration, so it documents
+itself. One that declares no `@docs` is given them, and one that declares
+no `@mcp` is a tool, as an operation of a `@behaviorOperations` set is:
+
+| | From | `listIssues` in `Issues` |
+| --- | --- | --- |
+| title | the method's name, as words | `List issues` |
+| description | the method's comment; without one, a sentence of its kind and its table | `A team's issues, newest first unless the caller sorts them, searched by their text and filtered by their fields.` |
+| capability | the set and the method | `issues.list-issues` |
+| lifecycle, visibility | | `active`, `public` |
+| replay mode | a read and a list | `read_only` |
+| tool handle | the method's name in snake_case | `list_issues` |
+| invocation policy | the policy's default | `auto` |
+
+So a table's five operations are five `@rest` lines, their guards and
+their views. Write the comment for the person and the agent who will read
+it: it is the OpenAPI description and the tool's.
+
+What the operation declares is kept. `@docs` replaces the docs, `@mcp`
+the tool, and each is given when only the other is written:
+
+```ts
+// Deletes the issue, which is kept, and answers it as it was.
+@rest(HttpMethod.DELETE, "issues/{id}")
+@requirePermission(["issues.write"])
+@mcp({ handle: "delete_issue", invocationPolicy: "ask" })
+@tableOperation()
+deleteIssue(id: Identity.UUID): IssueView {
+  throw new Error("schema declaration only");
+}
+```
+
+`@mcp({ hidden: true, reason: "..." })` keeps an operation out of the
+tools. An operation only a calling service reaches (`@requireService`) is
+hidden without being asked, and so is one whose payload is encrypted.
+
+An API's tools are told apart by their handles and their names. When two
+sets each declare a method of one name, `list` say, or a default would
+repeat a handle or a title another operation declares, the defaults take
+the set's before them: `teams_list` and `members_list`, "Teams: list" and
+"Members: list".
+
+An operation you implement by hand is given neither: take `@tableOperation`
+off and its `@docs` and `@mcp` are yours to write.
 
 ### The servers
 
@@ -1249,13 +1431,13 @@ Each of these has something that stands in until it is:
 
 | Not built | Until then |
 | --- | --- |
-| a row rule: an operation that reads or writes only the rows a field or a seat names the caller in | the route's guards are the only rule; an operation that needs one is written by hand |
+| a row rule that names the caller through another table (a team's members) or a behavior's seat | a [row rule](#row-rules) names members of the row itself; an operation that needs more is written by hand |
 | a view of a relation's rows nested in a result, `lines: OrderLineView[]` | such a field is `@virtual`, so its operation is written by hand |
 | a write fenced by the row's `_version` | a generated update is the last write's |
 | an upsert by `PUT` | a `PUT` is refused; write the operation by hand |
 | one declaration that serves a whole table | each operation and each view is declared |
 | the Rust server's handlers | a Rust API implements these operations by hand |
-| the Go server's handlers over a projection, and over a view that holds a list, a map, a JSON value or an embedded object | a Go API implements those operations by hand; the TypeScript server serves them |
+| the Go server's handlers over a projection, over a view that holds a list, a map, a JSON value or an embedded object, for a row rule that names text, and for a create that names the state its row starts in | a Go API implements those operations by hand; the TypeScript server serves them |
 
 ## A table's behavior operations
 
@@ -1324,7 +1506,8 @@ name the set `<Table>Actions` to put them under the table's name. The
 OpenAPI document, the permission catalog and the tool documents list the
 operations as any other, and the document
 marks the fields a behavior owns `readOnly`, in the table's own component
-and in a `@source` view's that projects one.
+and in a `@source` view's that projects one, but for the body of a create
+that names [the state its row starts in](#the-state-a-row-starts-in).
 
 The class's decorators guard every route it serves, as a method's guard
 its route: `@auth`, `@requirePermission([...])` and `@publicRoute`, which

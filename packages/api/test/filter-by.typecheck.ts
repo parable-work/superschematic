@@ -1,6 +1,6 @@
 // Type test, checked by `bun run typecheck` (tsconfig.test.json) and never
 // run: FilterBy names the item type's own fields and is optional, and
-// @tableOperation takes no argument (D106).
+// @tableOperation takes no argument, or its row rule (D106, D108).
 import { HttpMethod, paginated, rest, tableOperation } from "@superschematic/api";
 import type { FilterBy } from "@superschematic/api";
 
@@ -28,9 +28,22 @@ export class Issues {
   }
 
   @rest(HttpMethod.GET, "issues/{id}")
-  // @ts-expect-error @tableOperation takes no argument
+  // @ts-expect-error @tableOperation takes its row rule, not a kind
   @tableOperation("read")
   getIssue(id: UUID): IssueView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.PATCH, "issues/{id}")
+  @tableOperation({ by: ["assigneeId"], overridePermission: "issues.admin" })
+  updateIssue(id: UUID): IssueView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.DELETE, "issues/{id}")
+  // @ts-expect-error a row rule names its members in by
+  @tableOperation({ overridePermission: "issues.admin" })
+  deleteIssue(id: UUID): IssueView {
     throw new Error("schema declaration only");
   }
 }

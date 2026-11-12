@@ -339,6 +339,7 @@ export interface NoteFilter {
   id?: UuidFilter<T.IdentityUUID>;
   body?: StringFilter<string>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   _version?: NumberFilter<number>;
   /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
   allOf?: readonly NoteFilter[];
@@ -387,7 +388,7 @@ export const noteTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "\"ledgerNote\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "body", column: "\"bodyText\"", field: "body", qualified: "\"ledgerNote\".\"bodyText\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"ledgerNote\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "\"updatedBy\"", field: "updatedBy", qualified: "\"ledgerNote\".\"updatedBy\"", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "\"updatedBy\"", field: "updatedBy", qualified: "\"ledgerNote\".\"updatedBy\"", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "\"ledgerNote\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {

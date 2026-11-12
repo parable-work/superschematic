@@ -53,6 +53,7 @@ export type {
   RegistrationConfig,
   ServiceCallersConfig,
   ServiceHandleRef,
+  TableOperationRule,
   TimeoutConfig,
   UserAdministrationConfig,
   UserSessionsConfig,

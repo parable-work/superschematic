@@ -57,7 +57,7 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	for column, want := range map[string]FilterKind{
 		"id": FilterUUID, "account_id": FilterUUID, "amount_cents": FilterInt, "booked_on": FilterDate, "kind": FilterString,
 		"memo": FilterString, "tags": FilterNone, "metadata": FilterJSON, "reviewed_at": FilterDateTime, "created_at": FilterDateTime,
-		"created_by": FilterNone, "deleted_at": FilterNone,
+		"created_by": FilterUUID, "deleted_at": FilterNone,
 	} {
 		if kinds[column] != want {
 			t.Errorf("Entry.%s filters as %q, want %q", column, kinds[column], want)

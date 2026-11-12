@@ -56,8 +56,13 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `GET` | `/api/issues/{issueId}/comments` | `comments.listComments` (table: Comment, list) (paged) | issues.read |
 | `POST` | `/api/issues/{issueId}/comments` | `comments.createComment` (table: Comment, create) | issues.write |
 | `DELETE` | `/api/issues/{issueId}/comments/{id}` | `comments.deleteComment` (table: Comment, delete) | issues.write |
+| `POST` | `/api/issues/{issueId}/notes` | `notes.createNote` (table: Note, create) | authenticated |
 | `GET` | `/api/members` | `members.listMembers` (table: Member, list) (paged) | authenticated |
 | `POST` | `/api/members` | `members.createMember` (table: Member, create) | members.write |
+| `GET` | `/api/notes` | `notes.listNotes` (table: Note, list) (filtered) (paged) | authenticated |
+| `DELETE` | `/api/notes/{id}` | `notes.deleteNote` (table: Note, delete) | authenticated |
+| `GET` | `/api/notes/{id}` | `notes.getNote` (table: Note, read) | authenticated |
+| `PATCH` | `/api/notes/{id}` | `notes.updateNote` (table: Note, update) | authenticated |
 | `GET` | `/api/public/issues/{id}` | `issues.getIssueForGuest` (table: Issue, read) | public |
 | `GET` | `/api/teams` | `teams.listTeams` (table: Team, list) (paged) | authenticated |
 | `POST` | `/api/teams` | `teams.createTeam` (table: Team, create) | teams.write |

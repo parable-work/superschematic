@@ -154,6 +154,14 @@ describe('a read', () => {
     expect(calls).toEqual([['findOne', { teamId: { eq: 't2' }, id: { eq: 'i1' } }]]);
   });
 
+  test('a principal whose subject is no id acts as no one, and its behaviors still run as it', async () => {
+    const { orm, state } = fake('issue', issueColumns, { findOne: () => row });
+    const service = { principal: { subject: 'billing-worker', permissions: ['issues.read'] }, serviceCaller: null } as unknown as RequestContext;
+    expect(await tableRead(orm, read, service, request({ id: 'i1' }))).toEqual(view);
+    expect(state.actors).toEqual([null]);
+    expect(state.callers).toEqual([{ subject: 'billing-worker', permissions: ['issues.read'] }]);
+  });
+
   test('a public route’s caller is no one', async () => {
     const { orm, state } = fake('issue', issueColumns, { findOne: () => row });
     await tableRead(orm, read, { principal: null, serviceCaller: null } as unknown as RequestContext, request({ id: 'i1' }));
@@ -418,6 +426,176 @@ describe('a delete', () => {
     const { orm, calls } = fake('issue', issueColumns, { findOne: () => null });
     expect((await problemOf(tableDelete(orm, remove, ctx, request({ id: 'i1', teamId: 't2' })))).status).toBe(404);
     expect(calls.map(call => call[0])).toEqual(['findOne']);
+  });
+});
+
+describe('a row rule', () => {
+  // A note is its author's and whoever it is shared with: userId and
+  // sharedWith hold UUIDs, owner holds text, createdBy is the audit field.
+  const noteColumns = [
+    { name: 'id', column: 'id', required: true, uuid: true, filter: ['eq', 'in'] },
+    { name: 'userId', column: 'user_id', required: true, uuid: true, relation: 'User', filter: ['eq', 'in'] },
+    { name: 'sharedWith', column: 'shared_with', uuid: true, filter: ['eq', 'in', 'isNull'] },
+    { name: 'owner', column: '"owner"', filter: ['eq', 'in', 'ilike'] },
+    { name: 'text', column: '"text"', required: true },
+    { name: 'createdBy', column: 'created_by', uuid: true, audit: 'createdBy', filter: ['eq', 'in'] },
+  ];
+  const noteView = ['id', 'userId', 'text'] as const;
+  const mine = { by: ['userId', 'sharedWith', 'createdBy'], overridePermission: 'notes.admin' } as const;
+  const readNote: TableOperation = { kind: 'read', type: 'Note', repository: 'note', key: 'id', view: noteView, ...mine };
+  const listNotes: TableOperation = { kind: 'list', type: 'Note', repository: 'note', view: noteView, ...mine };
+  const createNote: TableOperation = { kind: 'create', type: 'Note', repository: 'note', view: noteView, body: ['text'], ...mine };
+  const updateNote: TableOperation = { kind: 'update', type: 'Note', repository: 'note', key: 'id', view: noteView, body: ['text'], ...mine };
+  const removeNote: TableOperation = { kind: 'delete', type: 'Note', repository: 'note', key: 'id', view: noteView, ...mine };
+  const caller = (subject: string, permissions: string[] = ['notes.write']) => ({ principal: { subject, permissions }, serviceCaller: null }) as unknown as RequestContext;
+  const sam = '5wbwf6yUxVBcr48AMbz9cb';
+  const note = { id: 'n1', userId: sam, sharedWith: null, owner: 'sam', text: 'Mine', createdBy: sam };
+  const reach = { anyOf: [{ userId: { eq: sam } }, { sharedWith: { eq: sam } }, { createdBy: { eq: sam } }] };
+
+  test('a read, an update and a delete reach the rows that name the caller, and any other is 404', async () => {
+    for (const [run, operation] of [
+      [tableRead, readNote],
+      [tableUpdate, updateNote],
+      [tableDelete, removeNote],
+    ] as const) {
+      const { orm, calls } = fake('note', noteColumns, { findOne: () => null });
+      expect(await problemOf(run(orm, operation, caller(sam), request({ id: 'n1' }, { text: 'Theirs' })))).toEqual({ status: 404, code: 'not_found', detail: 'Note not found' });
+      // The rule holds beside the key, and nothing is written.
+      expect(calls).toEqual([['findOne', { id: { eq: 'n1' }, allOf: [reach] }]]);
+    }
+    const { orm } = fake('note', noteColumns, { findOne: () => note });
+    expect(await tableRead(orm, readNote, caller(sam), request({ id: 'n1' }))).toEqual({ id: 'n1', userId: sam, text: 'Mine' });
+  });
+
+  test('a list keeps to them, beside the parents and whatever the filter says', async () => {
+    const under: TableOperation = { ...listNotes, parents: ['teamId'] };
+    const { orm, calls } = fake('note', noteColumns, { findPage: () => ({ rows: [note], next: null }) });
+    await tableList(orm, under, caller(sam), request({ teamId: 't1' }), { limit: 5 }, { userId: { eq: 'someone-else' } });
+    expect(calls[0]![1]).toEqual({ userId: { eq: 'someone-else' }, allOf: [{ teamId: { eq: 't1' } }, reach] });
+  });
+
+  test('the holder of the override permission reaches every row, by a grant that covers it', async () => {
+    for (const granted of ['notes.admin', 'notes']) {
+      const { orm, calls } = fake('note', noteColumns, { findOne: () => note, findPage: () => ({ rows: [note], next: null }) });
+      await tableRead(orm, readNote, caller(sam, [granted]), request({ id: 'n1' }));
+      await tableList(orm, listNotes, caller(sam, [granted]), request(), { limit: 5 });
+      expect(calls).toEqual([
+        ['findOne', { id: { eq: 'n1' } }],
+        ['findPage', {}, { limit: 5 }],
+      ]);
+    }
+    // A rule without one holds for every caller, and so does one whose permission the caller's do not cover.
+    const strict: TableOperation = { ...readNote, overridePermission: undefined };
+    const { orm, calls } = fake('note', noteColumns, { findOne: () => note });
+    await tableRead(orm, strict, caller(sam, ['notes']), request({ id: 'n1' }));
+    await tableRead(orm, readNote, caller(sam, ['notes.administer', 'note']), request({ id: 'n1' }));
+    const held = ['findOne', { id: { eq: 'n1' }, allOf: [reach] }];
+    expect(calls).toEqual([held, held]);
+  });
+
+  test('a subject that is no id is compared with text alone, and one no member can hold reaches nothing', async () => {
+    const mixed: TableOperation = { ...listNotes, by: ['userId', 'owner'] };
+    const { orm, calls } = fake('note', noteColumns, { findPage: () => ({ rows: [], next: null }) });
+    await tableList(orm, mixed, caller('svc:billing-export'), request(), { limit: 5 });
+    expect(calls[0]![1]).toEqual({ allOf: [{ anyOf: [{ owner: { eq: 'svc:billing-export' } }] }] });
+
+    // Only members that hold ids: no row can name the caller, and the repository is not asked.
+    for (const who of [caller('svc:billing-export'), { principal: null, serviceCaller: null } as unknown as RequestContext]) {
+      const none = fake('note', noteColumns);
+      expect(await tableList(none.orm, listNotes, who, request(), { limit: 5 })).toEqual({ items: [], next: null });
+      expect(await problemOf(tableRead(none.orm, readNote, who, request({ id: 'n1' })))).toEqual({ status: 404, code: 'not_found', detail: 'Note not found' });
+      expect(none.calls).toEqual([]);
+    }
+  });
+
+  test('a member the repository keeps no filter for is the generator’s error, for every caller, before anything is read', async () => {
+    // A filter drops a member it does not know, so a rule that named one would reach every row.
+    const stale: TableOperation = { ...readNote, by: ['userId', 'text'] };
+    for (const who of [caller(sam), caller(sam, ['notes.admin']), { principal: null, serviceCaller: null } as unknown as RequestContext]) {
+      const { orm, calls } = fake('note', noteColumns, { findOne: () => note, findPage: () => ({ rows: [note], next: null }) });
+      const want = 'table operation: the row rule of Note names text, which its repository keeps no equality filter for; rebuild the database’s types'.replace('’', "'");
+      await expect(tableRead(orm, stale, who, request({ id: 'n1' }))).rejects.toThrow(want);
+      await expect(tableList(orm, { ...listNotes, by: ['text'] }, who, request(), { limit: 5 })).rejects.toThrow(want);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  test('a create names the caller in each member but createdBy, which the repository stamps', async () => {
+    const { orm, calls } = fake('note', noteColumns, { createOne: () => note });
+    const shared: TableOperation = { ...createNote, by: ['userId', 'owner', 'createdBy'] };
+    expect(await tableCreate(orm, shared, caller(sam), request({}, { text: 'Mine', userId: 'someone-else' }))).toEqual({ id: 'n1', userId: sam, text: 'Mine' });
+    expect(calls).toEqual([['createOne', { text: 'Mine', userId: sam, owner: sam }]]);
+  });
+
+  test('a create whose caller is no one is 401, and one whose caller has no id for a member that holds one is 403', async () => {
+    const anonymous = fake('note', noteColumns);
+    expect(await problemOf(tableCreate(anonymous.orm, createNote, { principal: null, serviceCaller: null } as unknown as RequestContext, request({}, { text: 'x' })))).toMatchObject({
+      status: 401,
+      code: 'unauthorized',
+    });
+    const service = fake('note', noteColumns);
+    expect(await problemOf(tableCreate(service.orm, createNote, caller('svc:billing-export'), request({}, { text: 'x' })))).toMatchObject({
+      status: 403,
+      detail: 'Note: its userId names who it is for by id, and the caller has none',
+    });
+    expect([...anonymous.calls, ...service.calls]).toEqual([]);
+  });
+});
+
+describe('a create that names the state its row starts in', () => {
+  const taskColumns = [
+    { name: 'id', column: 'id', required: true, key: true },
+    { name: 'title', column: 'title', required: true },
+    { name: 'status', column: 'status', required: true },
+  ];
+  const createTask: TableOperation = { kind: 'create', type: 'Task', repository: 'task', view: ['id', 'title', 'status'], body: ['title', 'status'], starts: ['status'] };
+  const backlog = { id: 't1', title: 'Write it', status: 'backlog' };
+
+  /** The fake repository of Task with its Workflow's operations, whose transition answers what move gives and records its calls among the repository's. */
+  function tasks(move: (key: unknown, params: unknown) => unknown, found: unknown = { ...backlog, status: 'started' }) {
+    const { orm, calls, state } = fake('task', taskColumns, { createOne: () => backlog, findOne: () => found });
+    const transaction = orm.transaction.bind(orm);
+    orm.transaction = (fn => transaction(tx => fn({ task: { ...(tx.task as object), status: { transition: async (key: unknown, params: unknown) => (calls.push(['status.transition', key, params]), move(key, params)) } } }))) as typeof orm.transaction;
+    return { orm, calls, state };
+  }
+
+  test('creates the row without the state, moves it by the Workflow’s transition, and answers the row as the move left it', async () => {
+    const { orm, calls, state } = tasks(() => ({ from: 'backlog', to: 'started' }));
+    expect(await tableCreate(orm, createTask, ctx, request({}, { title: 'Write it', status: 'started' }))).toEqual({ id: 't1', title: 'Write it', status: 'started' });
+    expect(calls).toEqual([
+      ['createOne', { title: 'Write it' }],
+      ['status.transition', 't1', { to: 'started' }],
+      ['findOne', { id: { eq: 't1' } }],
+    ]);
+    // One transaction holds the create and the move.
+    expect(state.transactions).toBe(1);
+  });
+
+  test('a body that names no state, null, or the state the row is created in makes no move', async () => {
+    for (const body of [{ title: 'Write it' }, { title: 'Write it', status: null }, { title: 'Write it', status: 'backlog' }]) {
+      const { orm, calls } = tasks(() => {
+        throw new Error('no move was asked for');
+      });
+      expect(await tableCreate(orm, createTask, ctx, request({}, body))).toEqual(backlog);
+      expect(calls).toEqual([['createOne', { title: 'Write it' }]]);
+    }
+  });
+
+  test('a move the Workflow refuses is its refusal, and the create is rolled back with it', async () => {
+    const refusal = Object.assign(new Error('Task t1 cannot move from backlog to done'), { name: 'RulesRefusal', status: 409, code: 'no_transition', details: { from: 'backlog', to: 'done' } });
+    const { orm, state } = tasks(() => {
+      throw refusal;
+    });
+    await expect(tableCreate(orm, createTask, ctx, request({}, { title: 'Write it', status: 'done' }))).rejects.toBeDefined();
+    // The transaction threw, so the row it created is not kept.
+    expect(state.failed).toBeDefined();
+  });
+
+  test('a repository with no such Workflow is the generator’s error', async () => {
+    const { orm } = fake('task', taskColumns, { createOne: () => backlog });
+    await expect(tableCreate(orm, createTask, ctx, request({}, { title: 'Write it', status: 'started' }))).rejects.toThrow(
+      "table operation: a create of Task starts its row in status, and its repository has no status.transition; rebuild the database's types"
+    );
   });
 });
 

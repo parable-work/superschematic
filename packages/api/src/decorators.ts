@@ -219,6 +219,24 @@ export function paginated(_cfg?: PaginatedConfig): MethodDecorator {
 }
 
 /**
+ * A table operation's row rule (D108): which rows of the table a caller
+ * the route admits reaches.
+ */
+export type TableOperationRule = {
+  /**
+   * The row's members that name who may reach it, each as a view names
+   * it: an own field that holds a subject (`string`, `Identity.UUID` or
+   * `Identity.UserID`), a to-one relation's key (`assigneeId`) or
+   * `createdBy`. The caller reaches a row one of them holds its subject
+   * in. A create sets each but `createdBy` to the caller, and its body may
+   * not carry one.
+   */
+  readonly by: readonly string[];
+  /** The permission whose holder reaches every row, as an operation without `by` does. */
+  readonly overridePermission?: string;
+};
+
+/**
  * The build writes the operation's handler (D106): the method's views are
  * `@source` views of one table of the API's database, and the generated
  * server reads or writes that table through the database's repositories,
@@ -227,9 +245,14 @@ export function paginated(_cfg?: PaginatedConfig): MethodDecorator {
  * row, a GET whose result is a list pages the rows (it needs @paginated),
  * a POST with one body argument creates a row, a PATCH with the key and
  * one body argument updates one, and a DELETE with the key deletes one.
- * Nothing is served that a view does not list, and the route's guards are
- * the only rule over which rows a caller reaches. Take the decorator off
- * and the operation is one you implement, with the same route and types.
+ * Nothing is served that a view does not list. A caller the route's guards
+ * admit reaches every row, unless the decorator names a row rule (D108):
+ * `by` lists the row's members that name who may reach it, and the
+ * operation then reads, lists, updates or deletes only the rows one of
+ * them names the caller in, a row it does not being the 404 of one that
+ * is not there, and a create sets each of them but `createdBy` to the
+ * caller. Take the decorator off and the operation is one you implement,
+ * with the same route and types.
  *
  * ```ts
  * @rest(HttpMethod.PATCH, "issues/{id}")
@@ -238,9 +261,17 @@ export function paginated(_cfg?: PaginatedConfig): MethodDecorator {
  * updateIssue(id: Identity.UUID, input: UpdateIssueInput): IssueView {
  *   throw new Error("schema declaration only");
  * }
+ *
+ * // The caller's own notifications: the rows whose user is the caller.
+ * @rest(HttpMethod.GET, "me/notifications")
+ * @paginated()
+ * @tableOperation({ by: ["userId"] })
+ * listMyNotifications(): NotificationView[] {
+ *   throw new Error("schema declaration only");
+ * }
  * ```
  */
-export function tableOperation(): MethodDecorator {
+export function tableOperation(_rule?: TableOperationRule): MethodDecorator {
   return noopMethodDecorator;
 }
 

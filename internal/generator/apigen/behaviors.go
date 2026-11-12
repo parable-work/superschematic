@@ -144,14 +144,21 @@ func (e EndpointInfo) BehaviorResultGoType() string {
 
 // catalogPermissions are the permissions the permission catalog lists
 // under the endpoint: those its route requires, then those the config of
-// its behavior names, which the core checks (D103), each once.
+// its behavior names, which the core checks (D103), then the one that
+// lifts its table operation's row rule (D108), each once.
 func (e EndpointInfo) catalogPermissions() []string {
-	bo := e.BehaviorOperation()
-	if bo == nil || len(bo.Permissions) == 0 {
+	var more []string
+	if bo := e.BehaviorOperation(); bo != nil {
+		more = append(more, bo.Permissions...)
+	}
+	if to := e.TableOperation(); to != nil && to.OverridePermission != "" {
+		more = append(more, to.OverridePermission)
+	}
+	if len(more) == 0 {
 		return e.RequiredPerms
 	}
 	permissions := slices.Clone(e.RequiredPerms)
-	for _, p := range bo.Permissions {
+	for _, p := range more {
 		if !slices.Contains(permissions, p) {
 			permissions = append(permissions, p)
 		}

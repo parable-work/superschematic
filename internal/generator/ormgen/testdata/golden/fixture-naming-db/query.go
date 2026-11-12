@@ -1581,6 +1581,7 @@ type NoteFilter struct {
 	Id        *UUIDFilter
 	Body      *StringFilter
 	UpdatedAt *DateTimeFilter
+	UpdatedBy *UUIDFilter
 	Version   *Int64Filter
 	// AllOf keeps the rows every one of its filters finds, beside the
 	// filter's other conditions (D99): each filter's conditions are ANDed
@@ -1754,6 +1755,29 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `"ledgerNote"."updatedAt" IS NULL`)
 			} else {
 				conditions = append(conditions, `"ledgerNote"."updatedAt" IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"ledgerNote"."updatedBy" = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`"ledgerNote"."updatedBy" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `"ledgerNote"."updatedBy" IS NULL`)
+			} else {
+				conditions = append(conditions, `"ledgerNote"."updatedBy" IS NOT NULL`)
 			}
 		}
 	}

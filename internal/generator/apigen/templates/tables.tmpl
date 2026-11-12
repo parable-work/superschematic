@@ -43,7 +43,7 @@ import (
 	runtimeresponse "{{ $.Naming.HTTPRuntimeGoModule }}/response"
 	"{{ $.Naming.HTTPRuntimeGoModule }}/serviceauth"
 {{- end }}
-{{- if or .TablesRequireCaller (and .Tables.Rules (not .HasBehaviorEndpoints)) }}
+{{- if or .TablesRequireCaller .Tables.UsesRowRules (and .Tables.Rules (not .HasBehaviorEndpoints)) }}
 	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
 {{- end }}
 {{- if .Tables.Rules }}
@@ -311,6 +311,43 @@ func respondTableError(w gohttp.ResponseWriter, r *gohttp.Request, err error) {
 // no caller is answered 401, as a route's permission check answers one.
 func requireTableCaller(handler gohttp.HandlerFunc) gohttp.HandlerFunc {
 	return runtimesession.RequireAuth(handler).ServeHTTP
+}
+{{- end }}
+{{- if .Tables.UsesRowRules }}
+
+// tableCallerID is the request's caller as a row names them (D108): the
+// id their subject reads as, and false for a request with no caller and
+// for a caller whose subject is no id, which no row's member holds.
+func tableCallerID(ctx context.Context) ({{ .Deps.DatabaseTypesAlias }}.IdentityUUID, bool) {
+	subject := runtimesession.GetPrincipalID(ctx)
+	if subject == "" {
+		var none {{ .Deps.DatabaseTypesAlias }}.IdentityUUID
+		return none, false
+	}
+	id, err := orm.ParseUserID(subject)
+	return id, err == nil
+}
+{{- end }}
+{{- if .Tables.UsesRowLift }}
+
+// tableLifted reports whether the request's caller holds override, the
+// permission whose holder a table operation's row rule does not hold
+// back (D108), by a grant that covers it.
+func tableLifted(ctx context.Context, override string) bool {
+	return runtimesession.HasPrincipalID(ctx) && runtimesession.AnyRoleCovers(runtimesession.GetRoles(ctx), override)
+}
+{{- end }}
+{{- if .Tables.UsesRowCreate }}
+
+// tableUnnamedCaller is the refusal of a create whose row rule names the
+// caller in the new row by id (D108), for a request with none: 401
+// unauthorized without a caller, 403 forbidden for one whose subject is no
+// id.
+func tableUnnamedCaller(ctx context.Context, table string) error {
+	if !runtimesession.HasPrincipalID(ctx) {
+		return UnauthorizedError(errors.New(table + ": its row rule names the caller, and the request has none")).WithCode("unauthorized")
+	}
+	return ForbiddenError(errors.New(table + ": its row rule names the caller by id, and the caller has none")).WithCode("forbidden")
 }
 {{- end }}
 {{- if .Tables.UsesMembers }}

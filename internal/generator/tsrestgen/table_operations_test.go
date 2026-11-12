@@ -118,6 +118,7 @@ func TestGenerateTableOperations(t *testing.T) {
 	issueView := []string{"id", "teamId", "title", "body", "status", "priority", "estimate", "dueOn", "assigneeId", "createdAt", "createdBy", "updatedAt"}
 	commentView := []string{"id", "issueId", "body", "createdAt"}
 	teamView := []string{"id", "key", "name"}
+	noteView := []string{"id", "issueId", "owner", "sharedWith", "text", "createdAt", "createdBy"}
 	want := map[string]*TableRoute{
 		"listTeams":        {Operation: "Teams.listTeams", Kind: "list", Type: "Team", Repository: "team", View: teamView},
 		"getTeam":          {Operation: "Teams.getTeam", Kind: "read", Type: "Team", Repository: "team", Key: "id", View: teamView},
@@ -131,9 +132,16 @@ func TestGenerateTableOperations(t *testing.T) {
 		"createIssue":      {Operation: "Issues.createIssue", Kind: "create", Type: "Issue", Repository: "issue", Parents: []string{"teamId"}, View: issueView, Body: []string{"title", "body", "priority", "estimate", "dueOn", "assigneeId"}},
 		"updateIssue":      {Operation: "Issues.updateIssue", Kind: "update", Type: "Issue", Repository: "issue", Key: "id", View: issueView, Body: []string{"title", "body", "status", "priority", "estimate", "dueOn", "assigneeId"}},
 		"deleteIssue":      {Operation: "Issues.deleteIssue", Kind: "delete", Type: "Issue", Repository: "issue", Key: "id", View: issueView},
-		"listComments":     {Operation: "Comments.listComments", Kind: "list", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView},
-		"createComment":    {Operation: "Comments.createComment", Kind: "create", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView, Body: []string{"body"}},
-		"deleteComment":    {Operation: "Comments.deleteComment", Kind: "delete", Type: "Comment", Repository: "comment", Key: "id", Parents: []string{"issueId"}, View: commentView},
+		// A row rule is the router's to hold (D108): its members, and the
+		// permission that lifts it.
+		"listNotes":     {Operation: "Notes.listNotes", Kind: "list", Type: "Note", Repository: "note", View: noteView, By: []string{"owner", "sharedWith"}, Override: "notes.admin"},
+		"getNote":       {Operation: "Notes.getNote", Kind: "read", Type: "Note", Repository: "note", Key: "id", View: noteView, By: []string{"owner", "sharedWith"}, Override: "notes.admin"},
+		"createNote":    {Operation: "Notes.createNote", Kind: "create", Type: "Note", Repository: "note", Parents: []string{"issueId"}, View: noteView, Body: []string{"text", "sharedWith"}, By: []string{"owner"}},
+		"updateNote":    {Operation: "Notes.updateNote", Kind: "update", Type: "Note", Repository: "note", Key: "id", View: noteView, Body: []string{"text", "sharedWith"}, By: []string{"owner"}},
+		"deleteNote":    {Operation: "Notes.deleteNote", Kind: "delete", Type: "Note", Repository: "note", Key: "id", View: noteView, By: []string{"createdBy"}, Override: "notes.admin"},
+		"listComments":  {Operation: "Comments.listComments", Kind: "list", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView},
+		"createComment": {Operation: "Comments.createComment", Kind: "create", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView, Body: []string{"body"}},
+		"deleteComment": {Operation: "Comments.deleteComment", Kind: "delete", Type: "Comment", Repository: "comment", Key: "id", Parents: []string{"issueId"}, View: commentView},
 	}
 	byName := endpointsByName(output)
 	if len(byName) != len(want) {
@@ -403,6 +411,7 @@ var tableCases = []string{
 	"a list's contains matches % and _ as themselves",
 	"a list's filters, search, sort and cursor hold together",
 	"the routes' guards hold: no caller, no permission, a public route",
+	"a row rule keeps each caller to the rows that name them, and its override permission lifts it",
 	"an operation written by hand reaches the implementation",
 }
 
@@ -465,5 +474,36 @@ func TestGeneratedTableOperationsEndToEnd(t *testing.T) {
 	}
 	if testing.Verbose() {
 		t.Logf("table_operations_runtime.test.ts:\n%s", out)
+	}
+}
+
+// TestTableRouteLiteralHoldsItsRuleAndItsStarts: the router's table writes
+// a row rule's members and its override permission (D108), and the body
+// members that name the state a row starts in (D109), only when the
+// operation has them.
+func TestTableRouteLiteralHoldsItsRuleAndItsStarts(t *testing.T) {
+	plain := &TableRoute{Kind: "create", Type: "Task", Repository: "task", View: []string{"id", "status"}, Body: []string{"title", "status"}}
+	ruled := *plain
+	ruled.Starts, ruled.By, ruled.Override = []string{"status"}, []string{"ownerId", "createdBy"}, "tasks.admin"
+	for _, tc := range []struct {
+		name  string
+		route *TableRoute
+		want  []string
+		not   []string
+	}{
+		{"a plain create", plain, []string{"kind: 'create'", "body: ['title', 'status']"}, []string{"starts:", "by:", "overridePermission:"}},
+		{"a create with a rule and a start", &ruled, []string{"starts: ['status']", "by: ['ownerId', 'createdBy']", "overridePermission: 'tasks.admin'"}, nil},
+	} {
+		literal := tc.route.Literal()
+		for _, want := range tc.want {
+			if !strings.Contains(literal, want) {
+				t.Errorf("%s: the literal lacks %s:\n%s", tc.name, want, literal)
+			}
+		}
+		for _, not := range tc.not {
+			if strings.Contains(literal, not) {
+				t.Errorf("%s: the literal holds %s:\n%s", tc.name, not, literal)
+			}
+		}
 	}
 }

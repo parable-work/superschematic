@@ -48,10 +48,14 @@ import {
   parseCreateIssueInputJson,
   parseCreateMemberInputFromJSON,
   parseCreateMemberInputJson,
+  parseCreateNoteInputFromJSON,
+  parseCreateNoteInputJson,
   parseCreateTeamInputFromJSON,
   parseCreateTeamInputJson,
   parseUpdateIssueInputFromJSON,
   parseUpdateIssueInputJson,
+  parseUpdateNoteInputFromJSON,
+  parseUpdateNoteInputJson,
 } from '@schemas/fixture-tracker-api-types/validators';
 import type { FixtureTrackerDbOrm } from '@schemas/fixture-tracker-db-types/orm';
 import type { Implementations } from './interfaces';
@@ -64,8 +68,13 @@ export type OperationName =
   | 'listComments'
   | 'createComment'
   | 'deleteComment'
+  | 'createNote'
   | 'listMembers'
   | 'createMember'
+  | 'listNotes'
+  | 'deleteNote'
+  | 'getNote'
+  | 'updateNote'
   | 'getIssueForGuest'
   | 'listTeams'
   | 'createTeam'
@@ -145,6 +154,18 @@ export const operationSpecs = {
     auth: { public: false, required: true, permissions: ['issues.write'] },
     manual: false,
   },
+  createNote: {
+    name: 'createNote',
+    namespace: 'notes',
+    method: 'POST',
+    path: '/api/issues/{issueId}/notes',
+    pathParams: [{ name: 'issueId', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseCreateNoteInputFromJSON(parseCreateNoteInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
   listMembers: {
     name: 'listMembers',
     namespace: 'members',
@@ -167,6 +188,58 @@ export const operationSpecs = {
     bodyParams: [],
     input: { parse: (value: unknown) => parseCreateMemberInputFromJSON(parseCreateMemberInputJson(value)), required: true },
     auth: { public: false, required: true, permissions: ['members.write'] },
+    manual: false,
+  },
+  listNotes: {
+    name: 'listNotes',
+    namespace: 'notes',
+    method: 'GET',
+    path: '/api/notes',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    filter: {
+      fields: [
+        { name: 'issueId', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[issueId]', kind: 'uuid', required: false } },
+        { name: 'owner', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[owner]', kind: 'uuid', required: false } },
+      ],
+    },
+    page: { defaultLimit: 20, maxLimit: 100, sort: { param: 'sort', fields: ['createdAt'], default: 'createdAt' } },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  deleteNote: {
+    name: 'deleteNote',
+    namespace: 'notes',
+    method: 'DELETE',
+    path: '/api/notes/{id}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  getNote: {
+    name: 'getNote',
+    namespace: 'notes',
+    method: 'GET',
+    path: '/api/notes/{id}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  updateNote: {
+    name: 'updateNote',
+    namespace: 'notes',
+    method: 'PATCH',
+    path: '/api/notes/{id}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseUpdateNoteInputFromJSON(parseUpdateNoteInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
     manual: false,
   },
   getIssueForGuest: {
@@ -243,6 +316,7 @@ export const operationSpecs = {
         { name: 'dueOn', kind: 'date', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[dueOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } },
         { name: 'assigneeId', kind: 'uuid', operators: ['eq', 'in', 'isNull'], value: { name: 'filter[assigneeId]', kind: 'uuid', required: false } },
         { name: 'createdAt', kind: 'datetime', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[createdAt]', kind: 'datetime', required: false } },
+        { name: 'createdBy', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[createdBy]', kind: 'uuid', required: false } },
       ],
     },
     page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['createdAt', 'priority', 'title'], default: '-createdAt' } },
@@ -278,8 +352,13 @@ export const tableOperations = {
   listComments: { kind: 'list', type: 'Comment', repository: 'comment', parents: ['issueId'], view: ['id', 'issueId', 'body', 'createdAt'] },
   createComment: { kind: 'create', type: 'Comment', repository: 'comment', parents: ['issueId'], view: ['id', 'issueId', 'body', 'createdAt'], body: ['body'] },
   deleteComment: { kind: 'delete', type: 'Comment', repository: 'comment', key: 'id', parents: ['issueId'], view: ['id', 'issueId', 'body', 'createdAt'] },
+  createNote: { kind: 'create', type: 'Note', repository: 'note', parents: ['issueId'], view: ['id', 'issueId', 'owner', 'sharedWith', 'text', 'createdAt', 'createdBy'], body: ['text', 'sharedWith'], by: ['owner'] },
   listMembers: { kind: 'list', type: 'Member', repository: 'member', view: ['id', 'name'] },
   createMember: { kind: 'create', type: 'Member', repository: 'member', view: ['id', 'name'], body: ['name'] },
+  listNotes: { kind: 'list', type: 'Note', repository: 'note', view: ['id', 'issueId', 'owner', 'sharedWith', 'text', 'createdAt', 'createdBy'], by: ['owner', 'sharedWith'], overridePermission: 'notes.admin' },
+  deleteNote: { kind: 'delete', type: 'Note', repository: 'note', key: 'id', view: ['id', 'issueId', 'owner', 'sharedWith', 'text', 'createdAt', 'createdBy'], by: ['createdBy'], overridePermission: 'notes.admin' },
+  getNote: { kind: 'read', type: 'Note', repository: 'note', key: 'id', view: ['id', 'issueId', 'owner', 'sharedWith', 'text', 'createdAt', 'createdBy'], by: ['owner', 'sharedWith'], overridePermission: 'notes.admin' },
+  updateNote: { kind: 'update', type: 'Note', repository: 'note', key: 'id', view: ['id', 'issueId', 'owner', 'sharedWith', 'text', 'createdAt', 'createdBy'], body: ['text', 'sharedWith'], by: ['owner'] },
   getIssueForGuest: { kind: 'read', type: 'Issue', repository: 'issue', key: 'id', view: ['id', 'title', 'status'] },
   listTeams: { kind: 'list', type: 'Team', repository: 'team', view: ['id', 'key', 'name'] },
   createTeam: { kind: 'create', type: 'Team', repository: 'team', view: ['id', 'key', 'name'], body: ['key', 'name'] },
@@ -401,6 +480,20 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       timeoutSeconds: options.timeouts?.deleteComment,
     }
   );
+  // A create of Note (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.createNote,
+    (ctx, request) => tableCreate(options.orm, tableOperations.createNote, ctx, request),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.createNote,
+      rateLimitPerMinute: options.rateLimits?.createNote,
+      timeoutSeconds: options.timeouts?.createNote,
+    }
+  );
   // A list of Member (D106): the runtime's handler runs it through the
   // repositories in one transaction, as the request's caller, and answers
   // the row's view.
@@ -430,6 +523,69 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: options.bodyLimits?.createMember,
       rateLimitPerMinute: options.rateLimits?.createMember,
       timeoutSeconds: options.timeouts?.createMember,
+    }
+  );
+  // A list of Note (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.listNotes,
+    (ctx, request) => {
+      // The request's filters (D106), read before its page.
+      const filter = readFilter(ctx.query, operationSpecs.listNotes.filter);
+      const page = readPage(ctx.query, operationSpecs.listNotes.page);
+      // The page names the sort it was read in (D60, amended): readPage
+      // unbinds the cursor, and bindPage binds the next.
+      return tableList(options.orm, tableOperations.listNotes, ctx, request, page, filter).then(outcome => bindPage(outcome, page));
+    },
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.listNotes,
+      rateLimitPerMinute: options.rateLimits?.listNotes,
+      timeoutSeconds: options.timeouts?.listNotes,
+    }
+  );
+  // A delete of Note (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.deleteNote,
+    (ctx, request) => tableDelete(options.orm, tableOperations.deleteNote, ctx, request),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.deleteNote,
+      rateLimitPerMinute: options.rateLimits?.deleteNote,
+      timeoutSeconds: options.timeouts?.deleteNote,
+    }
+  );
+  // A read of Note (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.getNote,
+    (ctx, request) => tableRead(options.orm, tableOperations.getNote, ctx, request),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.getNote,
+      rateLimitPerMinute: options.rateLimits?.getNote,
+      timeoutSeconds: options.timeouts?.getNote,
+    }
+  );
+  // An update of Note (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.updateNote,
+    (ctx, request) => tableUpdate(options.orm, tableOperations.updateNote, ctx, request),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.updateNote,
+      rateLimitPerMinute: options.rateLimits?.updateNote,
+      timeoutSeconds: options.timeouts?.updateNote,
     }
   );
   // A read of Issue (D106): the runtime's handler runs it through the

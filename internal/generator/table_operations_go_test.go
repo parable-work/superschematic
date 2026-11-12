@@ -40,6 +40,7 @@ var tableOperationCases = []string{
 	"a comment is created under its issue and deleted for good",
 	"a route requires its caller and its permission",
 	"a write that records its caller and has none is unauthorized",
+	"a row rule keeps each caller to the rows that name them",
 	"the operation the project writes reaches its implementation",
 }
 
@@ -54,8 +55,8 @@ var tableOperationCases = []string{
 // covers every kind, the path's parents, the soft delete, the audit
 // stamps, the defaults, an update's absent, null and empty body, the
 // refusals (404, 409, the 400 at a member, 401, 403), a list's page, sort,
-// search and filters of every kind, and the one operation the project
-// writes. The test skips without the database and in -short mode.
+// search and filters of every kind, a row rule and its override
+// permission (D108), and the one operation the project writes. The test skips without the database and in -short mode.
 func TestTableOperationsGoServerServesItsTables(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the generated Go server's table operations in -short mode")
@@ -433,6 +434,7 @@ func refusedAt(t *testing.T, what string, got reply, member, validator, message 
 const (
 	alice   = "11111111-1111-4111-8111-111111111111"
 	bob     = "22222222-2222-4222-8222-222222222222"
+	carol   = "33333333-3333-4333-8333-333333333333"
 	missing = "99999999-9999-4999-8999-999999999999"
 	every   = ":teams.write,members.write,issues.read,issues.write"
 )
@@ -739,6 +741,10 @@ func TestTableOperations(t *testing.T) {
 			{"assigneeId in", "filter[assigneeId][in]=" + linID + "," + maxID, []string{"Crash on save", "Slow_query in list"}},
 			{"assigneeId is null", "filter[assigneeId][isNull]=true", []string{"Fix typo", "Slowxquery at 50%"}},
 			{"assigneeId is not null", "filter[assigneeId][isNull]=false", []string{"Crash on save", "Slow_query in list"}},
+			// Who created a row, an audit field (D110).
+			{"createdBy", "filter[createdBy]=" + alice + "&filter[assigneeId]=" + linID, []string{"Crash on save"}},
+			{"createdBy of another", "filter[createdBy]=" + bob + "&filter[assigneeId]=" + linID, nil},
+			{"createdBy in", "filter[createdBy][in]=" + bob + "," + alice + "&filter[assigneeId]=" + linID, []string{"Crash on save"}},
 			// A time.
 			{"createdAt", "filter[createdAt]=" + at("Fix typo"), []string{"Fix typo"}},
 			{"createdAt range", "filter[createdAt][gt]=" + at("Crash on save") + "&filter[createdAt][lte]=" + at("Slow_query in list"), []string{"Fix typo", "Slow_query in list"}},
@@ -940,6 +946,81 @@ func TestTableOperations(t *testing.T) {
 		if got := service.post("/members", map[string]any{"name": "Robot"}).data(t); got["name"] != "Robot" {
 			t.Errorf("a member created by a caller that is no user: %v", got)
 		}
+	})
+
+	t.Run("a row rule keeps each caller to the rows that name them", func(t *testing.T) {
+		// Notes are their owner's (D108): no route of theirs names a
+		// permission, so the rule is all that holds a caller back.
+		kim, lee, sam, admin := as(alice), as(bob), as(carol), as(carol+":notes.admin")
+		notes := crashPath + "/notes"
+		mine := kim.post(notes, map[string]any{"text": "Kim only"}).data(t)
+		if uuid(t, mine["owner"]) != alice || uuid(t, mine["createdBy"]) != alice || mine["sharedWith"] != nil {
+			t.Fatalf("a note = %v, want the caller as its owner", mine)
+		}
+		shared := kim.post(notes, map[string]any{"text": "Kim, for Lee", "sharedWith": bob}).data(t)
+		theirs := lee.post(notes, map[string]any{"text": "Lee only"}).data(t)
+		if got := column(t, "note", "owner", shared["id"]); got != alice {
+			t.Errorf("the shared note's owner is %s, want %s", got, alice)
+		}
+		path := func(note map[string]any) string { return "/notes/" + fmt.Sprint(note["id"]) }
+		texts := func(c client, query string) []string { return all(t, c, "/notes", query, "text") }
+		for _, tc := range []struct {
+			what  string
+			got   []string
+			want  []string
+		}{
+			{"the owner's", texts(kim, ""), []string{"Kim only", "Kim, for Lee"}},
+			{"the one they are shared with", texts(lee, ""), []string{"Kim, for Lee", "Lee only"}},
+			{"a caller no note names", texts(sam, ""), []string{}},
+			{"beside the request's filter", texts(lee, "filter[owner]="+alice), []string{"Kim, for Lee"}},
+			{"a filter that names another's rows", texts(sam, "filter[owner]="+alice), []string{}},
+			{"the holder of the override permission", texts(admin, ""), []string{"Kim only", "Kim, for Lee", "Lee only"}},
+			{"by a grant that covers it", texts(as(carol+":notes"), ""), []string{"Kim only", "Kim, for Lee", "Lee only"}},
+			{"a caller that is no user", texts(as("billing-worker"), ""), []string{}},
+		} {
+			if !slices.Equal(tc.got, tc.want) {
+				t.Errorf("the notes of %s: %v, want %v", tc.what, tc.got, tc.want)
+			}
+		}
+
+		// A row that names another caller is the 404 of one that is not there.
+		if got := lee.get(path(shared)).data(t); got["text"] != "Kim, for Lee" {
+			t.Errorf("a note shared with the caller: %v", got)
+		}
+		if got := admin.get(path(mine)).data(t); got["text"] != "Kim only" {
+			t.Errorf("a note, as the holder of the override permission: %v", got)
+		}
+		refused(t, "another's note", lee.get(path(mine)), 404, "not_found", "Note not found")
+		refused(t, "a note, as a caller none names", sam.get(path(mine)), 404, "not_found", "Note not found")
+		refused(t, "a note, as a caller that is no user", as("billing-worker").get(path(shared)), 404, "not_found", "Note not found")
+		refused(t, "a note no row holds", kim.get("/notes/"+missing), 404, "not_found", "Note not found")
+
+		// An update is the owner's alone, and names no override.
+		refused(t, "a shared note updated by the one it is shared with", lee.patch(path(shared), map[string]any{"text": "Lee was here"}), 404, "not_found", "Note not found")
+		refused(t, "a note updated by an admin", admin.patch(path(mine), map[string]any{"text": "Sam was here"}), 404, "not_found", "Note not found")
+		if got := kim.patch(path(shared), map[string]any{"text": "Kim, still for Lee"}).data(t); got["text"] != "Kim, still for Lee" || uuid(t, got["owner"]) != alice {
+			t.Errorf("a note updated by its owner: %v", got)
+		}
+		if got := column(t, "note", "text", shared["id"]); got != "Kim, still for Lee" {
+			t.Errorf("the shared note reads %q after the refused updates", got)
+		}
+
+		// A delete is its writer's, by createdBy, or an admin's.
+		refused(t, "another's note deleted", kim.delete(path(theirs)), 404, "not_found", "Note not found")
+		if got := lee.delete(path(theirs)).data(t); got["text"] != "Lee only" {
+			t.Errorf("a note deleted by its writer: %v", got)
+		}
+		if got := admin.delete(path(mine)).data(t); got["text"] != "Kim only" {
+			t.Errorf("a note deleted by an admin: %v", got)
+		}
+		if got := texts(admin, ""); !slices.Equal(got, []string{"Kim, still for Lee"}) {
+			t.Errorf("the notes left: %v", got)
+		}
+
+		// A caller with no id cannot be named in a new row, and the routes ask for a caller.
+		refused(t, "a note created by a caller that is no user", as("billing-worker").post(notes, map[string]any{"text": "x"}), 403, "forbidden", "Access denied")
+		refused(t, "the notes with no caller", nobody.get("/notes"), 401, "", "Authentication required")
+		refused(t, "a note created with no caller", nobody.post(notes, map[string]any{"text": "x"}), 401, "", "Authentication required")
 	})
 
 	t.Run("the operation the project writes reaches its implementation", func(t *testing.T) {

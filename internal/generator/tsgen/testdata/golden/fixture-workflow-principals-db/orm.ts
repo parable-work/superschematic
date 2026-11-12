@@ -90,6 +90,7 @@ export interface QuestionFilter {
   id?: UuidFilter<T.IdentityUUID>;
   prompt?: StringFilter<string>;
   askedOf?: UuidFilter<T.IdentityUUID>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   status?: StringFilter<'open' | 'answered' | 'withdrawn' | 'closed'>;
   statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   review?: StringFilter<'pending' | 'reviewed'>;
@@ -173,7 +174,7 @@ export const questionTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "question.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "prompt", column: "prompt", field: "prompt", qualified: "question.prompt", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "askedOf", column: "asked_of", field: "askedOf", qualified: "question.asked_of", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "question.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "question.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "question.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "question.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "review", column: "review", field: "review", qualified: "question.review", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },

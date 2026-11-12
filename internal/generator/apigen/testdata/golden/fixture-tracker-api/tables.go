@@ -79,6 +79,21 @@ var rowsOfMember = tableRows{
 	Related: map[string]string{},
 }
 
+// rowsOfNote is Note as the refusals of its writes name it.
+var rowsOfNote = tableRows{
+	Type: "Note",
+	Members: map[string]string{
+		"id":          "id",
+		"issue_id":    "issueId",
+		"owner":       "owner",
+		"shared_with": "sharedWith",
+		"text":        "text",
+	},
+	Related: map[string]string{
+		"issue_id": "Issue",
+	},
+}
+
 // rowsOfTeam is Team as the refusals of its writes name it.
 var rowsOfTeam = tableRows{
 	Type: "Team",
@@ -253,6 +268,37 @@ func requireTableCaller(handler gohttp.HandlerFunc) gohttp.HandlerFunc {
 	return runtimesession.RequireAuth(handler).ServeHTTP
 }
 
+// tableCallerID is the request's caller as a row names them (D108): the
+// id their subject reads as, and false for a request with no caller and
+// for a caller whose subject is no id, which no row's member holds.
+func tableCallerID(ctx context.Context) (fixturetrackerdb.IdentityUUID, bool) {
+	subject := runtimesession.GetPrincipalID(ctx)
+	if subject == "" {
+		var none fixturetrackerdb.IdentityUUID
+		return none, false
+	}
+	id, err := orm.ParseUserID(subject)
+	return id, err == nil
+}
+
+// tableLifted reports whether the request's caller holds override, the
+// permission whose holder a table operation's row rule does not hold
+// back (D108), by a grant that covers it.
+func tableLifted(ctx context.Context, override string) bool {
+	return runtimesession.HasPrincipalID(ctx) && runtimesession.AnyRoleCovers(runtimesession.GetRoles(ctx), override)
+}
+
+// tableUnnamedCaller is the refusal of a create whose row rule names the
+// caller in the new row by id (D108), for a request with none: 401
+// unauthorized without a caller, 403 forbidden for one whose subject is no
+// id.
+func tableUnnamedCaller(ctx context.Context, table string) error {
+	if !runtimesession.HasPrincipalID(ctx) {
+		return UnauthorizedError(errors.New(table + ": its row rule names the caller, and the request has none")).WithCode("unauthorized")
+	}
+	return ForbiddenError(errors.New(table + ": its row rule names the caller by id, and the caller has none")).WithCode("forbidden")
+}
+
 // tableMembers are the members of a request's body as its own JSON holds
 // them (D106): the decoded input reads a member left out and a null alike,
 // and a zero as either, where a create leaves both to the column's
@@ -341,6 +387,17 @@ func tableContains(text *string) *string {
 	return &escaped
 }
 
+// NotesListNotesFilter is what a request of Notes.listNotes filters by
+// (FilterBy, D106): a member per field, nil for a field the request does
+// not filter by, each operator the request sent set on it. Every member set
+// holds at once.
+type NotesListNotesFilter struct {
+	// IssueId filters by issueId: eq, in.
+	IssueId *filterparse.Equals[types.IdentityUUID]
+	// Owner filters by owner: eq, in.
+	Owner *filterparse.Equals[types.IdentityUUID]
+}
+
 // IssuesListIssuesFilter is what a request of Issues.listIssues filters by
 // (FilterBy, D106): a member per field, nil for a field the request does
 // not filter by, each operator the request sent set on it. Every member set
@@ -360,6 +417,8 @@ type IssuesListIssuesFilter struct {
 	AssigneeId *filterparse.Equals[types.IdentityUUID]
 	// CreatedAt filters by createdAt: eq, in, gt, gte, lt, lte.
 	CreatedAt *filterparse.Ordered[types.TemporalDateTime]
+	// CreatedBy filters by createdBy: eq, in.
+	CreatedBy *filterparse.Equals[types.IdentityUUID]
 }
 
 // asCommentView is row, a row of Comment, as CommentView shows it: each field the
@@ -422,6 +481,24 @@ func asMemberView(row *fixturetrackerdb.Member) types.MemberView {
 		view.Id = *row.Id
 	}
 	view.Name = row.Name
+	return view
+}
+
+// asNoteView is row, a row of Note, as NoteView shows it: each field the
+// row's member of its name, a relation's key the row it points at.
+func asNoteView(row *fixturetrackerdb.Note) types.NoteView {
+	var view types.NoteView
+	if row.Id != nil {
+		view.Id = *row.Id
+	}
+	if row.Issue.Id != nil {
+		view.IssueId = *row.Issue.Id
+	}
+	view.Owner = row.Owner
+	view.SharedWith = row.SharedWith
+	view.Text = row.Text
+	view.CreatedAt = row.CreatedAt
+	view.CreatedBy = row.CreatedBy
 	return view
 }
 
@@ -671,6 +748,41 @@ func tableCommentsDeleteComment(ctx context.Context, db orm.DatabaseInterface, I
 	return result, nil
 }
 
+// tableNotesCreateNote serves POST /api/issues/{issueId}/notes from Note (D106):
+// a new row of the members the body sets under the path's parents, each
+// member left out or null left to its column's default, as its view.
+func tableNotesCreateNote(ctx context.Context, db orm.DatabaseInterface, IssueId types.IdentityUUID, input *types.CreateNoteInput, raw json.RawMessage) (*types.NoteView, error) {
+	var result *types.NoteView
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetNoteRepository()
+		row := &fixturetrackerdb.Note{}
+		{
+			value := IssueId
+			row.Issue.Id = &value
+		}
+		row.Text = input.Text
+		if input.SharedWith != nil {
+			row.SharedWith = input.SharedWith
+		}
+		caller, named := tableCallerID(ctx)
+		if !named {
+			return tableUnnamedCaller(ctx, "Note")
+		}
+		row.Owner = caller
+		created, err := repo.CreateOne(ctx, row)
+		if err != nil {
+			return err
+		}
+		view := asNoteView(created)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableWriteError(err, rowsOfNote, "issue_id")
+	}
+	return result, nil
+}
+
 // tableMembersListMembers serves GET /api/members from Member (D106):
 // a page of its live rows, as the request filters,
 // searches and sorts them, each as its view.
@@ -727,6 +839,185 @@ func tableMembersCreateMember(ctx context.Context, db orm.DatabaseInterface, inp
 	})
 	if err != nil {
 		return nil, tableWriteError(err, rowsOfMember)
+	}
+	return result, nil
+}
+
+// tableNotesListNotes serves GET /api/notes from Note (D106):
+// a page of its live rows, as the request filters,
+// searches and sorts them, each as its view.
+func tableNotesListNotes(ctx context.Context, db orm.DatabaseInterface, filters NotesListNotesFilter, page paging.Request) (paging.Page[types.NoteView], error) {
+	var result paging.Page[types.NoteView]
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		where := &orm.NoteFilter{}
+		if filter := filters.IssueId; filter != nil {
+			where.IssueID = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
+		}
+		if filter := filters.Owner; filter != nil {
+			where.Owner = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
+		}
+		if !tableLifted(ctx, "notes.admin") {
+			caller, named := tableCallerID(ctx)
+			if !named {
+				result.Items = []types.NoteView{}
+				return nil
+			}
+			where.AllOf = append(where.AllOf, orm.NoteFilter{AnyOf: []orm.NoteFilter{{Owner: &orm.UUIDFilter{Eq: &caller}}, {SharedWith: &orm.UUIDFilter{Eq: &caller}}}})
+		}
+		options := &orm.NotePageOptions{Fields: orm.NoteFields{}.All(), Limit: page.Limit, Sort: orm.NoteSort{Field: orm.NoteSortField(page.Sort.Field), Desc: page.Sort.Desc}}
+		if page.Cursor != "" {
+			options.After = &orm.NotePageKey{}
+			if err := paging.DecodeCursor(page.Cursor, options.After); err != nil {
+				return err
+			}
+		}
+		rows, err := tx.GetNoteRepository().FindPage(ctx, where, options)
+		if err != nil {
+			return err
+		}
+		result.Items = make([]types.NoteView, len(rows.Rows))
+		for i, row := range rows.Rows {
+			result.Items[i] = asNoteView(row)
+		}
+		if rows.Next != nil {
+			next, err := paging.EncodeCursor(rows.Next)
+			if err != nil {
+				return err
+			}
+			result.Next = &next
+		}
+		return nil
+	})
+	if err != nil {
+		return paging.Page[types.NoteView]{}, tableReadError(err, rowsOfNote)
+	}
+	return result, nil
+}
+
+// tableNotesDeleteNote serves DELETE /api/notes/{id} from Note (D106):
+// the live row whose key is the path's deleted, as its view was.
+func tableNotesDeleteNote(ctx context.Context, db orm.DatabaseInterface, Id types.IdentityUUID) (*types.NoteView, error) {
+	var result *types.NoteView
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetNoteRepository()
+		where := &orm.NoteFilter{Id: &orm.UUIDFilter{Eq: &Id}}
+		if !tableLifted(ctx, "notes.admin") {
+			caller, named := tableCallerID(ctx)
+			if !named {
+				return orm.ErrNotFound
+			}
+			where.AllOf = append(where.AllOf, orm.NoteFilter{AnyOf: []orm.NoteFilter{{CreatedBy: &orm.UUIDFilter{Eq: &caller}}}})
+		}
+		row, err := repo.FindOne(ctx, where, nil)
+		if err != nil {
+			return err
+		}
+		if err := repo.DeleteOne(ctx, *row.Id); err != nil {
+			return err
+		}
+		view := asNoteView(row)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableDeleteError(err, rowsOfNote)
+	}
+	return result, nil
+}
+
+// tableNotesGetNote serves GET /api/notes/{id} from Note (D106):
+// the live row whose key is the path's, as its view.
+func tableNotesGetNote(ctx context.Context, db orm.DatabaseInterface, Id types.IdentityUUID) (*types.NoteView, error) {
+	var result *types.NoteView
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetNoteRepository()
+		where := &orm.NoteFilter{Id: &orm.UUIDFilter{Eq: &Id}}
+		if !tableLifted(ctx, "notes.admin") {
+			caller, named := tableCallerID(ctx)
+			if !named {
+				return orm.ErrNotFound
+			}
+			where.AllOf = append(where.AllOf, orm.NoteFilter{AnyOf: []orm.NoteFilter{{Owner: &orm.UUIDFilter{Eq: &caller}}, {SharedWith: &orm.UUIDFilter{Eq: &caller}}}})
+		}
+		row, err := repo.FindOne(ctx, where, nil)
+		if err != nil {
+			return err
+		}
+		view := asNoteView(row)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableReadError(err, rowsOfNote)
+	}
+	return result, nil
+}
+
+// tableNotesUpdateNote serves PATCH /api/notes/{id} from Note (D106):
+// the members the body's own JSON holds set on the live row whose key is
+// the path's, a null clearing a column that may be null and a body of no
+// member writing nothing, as the row's view.
+func tableNotesUpdateNote(ctx context.Context, db orm.DatabaseInterface, Id types.IdentityUUID, input *types.UpdateNoteInput, raw json.RawMessage) (*types.NoteView, error) {
+	members, err := tableMembersOf(raw)
+	if err != nil {
+		return nil, err
+	}
+	var result *types.NoteView
+	err = runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetNoteRepository()
+		where := &orm.NoteFilter{Id: &orm.UUIDFilter{Eq: &Id}}
+		{
+			caller, named := tableCallerID(ctx)
+			if !named {
+				return orm.ErrNotFound
+			}
+			where.AllOf = append(where.AllOf, orm.NoteFilter{AnyOf: []orm.NoteFilter{{Owner: &orm.UUIDFilter{Eq: &caller}}}})
+		}
+		row, err := repo.FindOne(ctx, where, nil)
+		if err != nil {
+			return err
+		}
+		refusal := types.NewValidationErrors()
+		for _, name := range []string{"text"} {
+			if members.null(name) {
+				refusal.AddFieldError(name, "required", "required field")
+			}
+		}
+		if members.set("text") && input.Text == "" {
+			refusal.AddFieldError("text", "minLength", "must be at least 1 characters")
+		}
+		if refusal.HasErrors() {
+			return &tableRefusal{errors: refusal}
+		}
+		update := &orm.NoteUpdate{}
+		changed := false
+		if members.set("text") {
+			value := input.Text
+			update.Text = &value
+			changed = true
+		}
+		switch {
+		case members.null("sharedWith"):
+			update.SharedWithSetNull = true
+			changed = true
+		case members.set("sharedWith"):
+			if input.SharedWith != nil {
+				value := *input.SharedWith
+				update.SharedWith = &value
+			}
+			changed = true
+		}
+		if changed {
+			if row, err = repo.UpdateOne(ctx, *row.Id, update); err != nil {
+				return err
+			}
+		}
+		view := asNoteView(row)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableWriteError(err, rowsOfNote)
 	}
 	return result, nil
 }
@@ -860,6 +1151,9 @@ func tableIssuesListIssues(ctx context.Context, db orm.DatabaseInterface, TeamId
 		}
 		if filter := filters.CreatedAt; filter != nil {
 			where.CreatedAt = &orm.DateTimeFilter{Eq: tableTime(filter.Eq), In: tableTimes(filter.In), Gt: tableTime(filter.Gt), Gte: tableTime(filter.Gte), Lt: tableTime(filter.Lt), Lte: tableTime(filter.Lte)}
+		}
+		if filter := filters.CreatedBy; filter != nil {
+			where.CreatedBy = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
 		}
 		options := &orm.IssuePageOptions{Fields: orm.IssueFields{}.All(), Limit: page.Limit, Sort: orm.IssueSort{Field: orm.IssueSortField(page.Sort.Field), Desc: page.Sort.Desc}}
 		if page.Cursor != "" {

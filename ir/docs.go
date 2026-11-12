@@ -408,7 +408,10 @@ func (s *Schema) validateDocs() []error {
 			if op.Display != nil {
 				errs = append(errs, fmt.Errorf("%s.%s carries a field display; only a field takes @display", set.Name, op.Name))
 			}
-			if op.MCP != nil && !op.MCP.Hidden && op.Docs == nil {
+			// A @tableOperation is given its docs from its declaration
+			// once the loader has filled it (D111), so its @mcp may stand
+			// without them.
+			if op.MCP != nil && !op.MCP.Hidden && op.Docs == nil && op.TableOperation == nil {
 				errs = append(errs, fmt.Errorf("%s.%s is a visible @mcp tool and must also declare @docs", set.Name, op.Name))
 			}
 			if op.Icon != "" {

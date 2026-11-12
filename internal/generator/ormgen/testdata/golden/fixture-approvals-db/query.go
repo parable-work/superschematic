@@ -701,6 +701,7 @@ type NoteFilter struct {
 	Author          *UUIDFilter
 	Pinned          *BoolFilter
 	Views           *FloatFilter
+	CreatedBy       *UUIDFilter
 	Status          *StringFilter
 	StatusEnteredAt *DateTimeFilter
 	Version         *Int64Filter
@@ -1006,6 +1007,29 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `note.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `note.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.Status != nil {
 		if f.Status.Eq != nil {
 			paramNum++
@@ -1182,6 +1206,7 @@ type TaskFilter struct {
 	Proof           *StringFilter
 	Urgent          *BoolFilter
 	Attempts        *FloatFilter
+	CreatedBy       *UUIDFilter
 	Status          *StringFilter
 	StatusEnteredAt *DateTimeFilter
 	Version         *Int64Filter
@@ -1534,6 +1559,29 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `task.attempts IS NULL`)
 			} else {
 				conditions = append(conditions, `task.attempts IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`task.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `task.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `task.created_by IS NOT NULL`)
 			}
 		}
 	}

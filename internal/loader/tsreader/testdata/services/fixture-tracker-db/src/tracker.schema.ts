@@ -77,3 +77,21 @@ export abstract class Comment {
 
   createdAt: Temporal.DateTime;
 }
+
+// A person's own note on an issue. The row names who it is for, and one
+// other person it is shared with; the API's row rule reads both.
+export abstract class Note {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  issue: Relation<Issue, { onDelete: "CASCADE" }>;
+
+  owner: Identity.UUID;
+
+  sharedWith: Nullable<Identity.UUID>;
+
+  text: Validate<string, { minLength: 1 }>;
+
+  createdAt: Temporal.DateTime;
+  createdBy: Identity.UUID;
+}
