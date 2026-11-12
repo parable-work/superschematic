@@ -284,22 +284,6 @@ pub fn refusal_of(operation: &TableOperation, table: &Table, err: Error) -> ApiE
                             );
                         }
                     }
-                    // SQLite names no column of a foreign key: the path's
-                    // parent is the one a create or an update cannot have
-                    // checked itself.
-                    if let [parent] = operation.parents.as_slice() {
-                        if columns.is_empty()
-                            && operation.body.iter().all(|member| {
-                                table.column(member).is_none_or(|c| c.relation.is_none())
-                            })
-                        {
-                            let related = table
-                                .column(parent)
-                                .and_then(|c| c.relation.as_deref())
-                                .unwrap_or("row");
-                            return ApiError::not_found(format!("{related} not found"));
-                        }
-                    }
                     ApiError::conflict(message)
                 }
                 ConstraintKind::NotNull => match held.as_deref() {
@@ -503,6 +487,63 @@ impl<C: Client> Routes<'_, C> {
         refusal_of(self.operation, self.runner.table, err)
     }
 
+    /// A write's error as the route answers it. A foreign key SQLite
+    /// refused names no column, where Postgres's names its own, so the
+    /// reference that names no row is found by reading each one the write
+    /// set: a parent of the path is the 404, and a member of the body the
+    /// 400 at that member, as `refusal_of` answers a named one.
+    async fn refused_write(&self, err: Error, written: &Values) -> ApiError {
+        let unnamed = matches!(
+            &err,
+            Error::Constraint(constraint)
+                if constraint.kind == ConstraintKind::ForeignKey && constraint.columns.is_empty()
+        );
+        if unnamed {
+            let operation = self.operation;
+            let members = operation.parents.iter().chain(&operation.body);
+            for member in members {
+                let Some(column) = self.runner.table.column(member) else {
+                    continue;
+                };
+                let (Some(related), Some(value)) = (
+                    column.relation.as_deref(),
+                    written.get(member).filter(|value| !value.is_null()),
+                ) else {
+                    continue;
+                };
+                if self.holds(related, value).await != Some(false) {
+                    continue;
+                }
+                return if operation.parents.contains(member) {
+                    ApiError::not_found(format!("{related} not found"))
+                } else {
+                    member_refusal(member, "reference", &format!("names no {related}"))
+                };
+            }
+        }
+        self.refused(err)
+    }
+
+    /// Whether a row of the table type `related` holds the key `value`,
+    /// deleted or not, as a foreign key reads it; none when it cannot be
+    /// read.
+    async fn holds(&self, related: &str, value: &Value) -> Option<bool> {
+        let plan = &self.runner.plan;
+        let table = plan.definition.table(related).ok()?;
+        let target = Runner {
+            plan: super::plan::Plan::new(plan.definition, table, plan.session).ok()?,
+            table,
+            client: self.runner.client,
+        };
+        let options = super::FindOptions {
+            include_deleted: true,
+            ..Default::default()
+        };
+        let filter = condition(&table.key, "eq", value.clone());
+        let found = target.find_one(Some(&filter), &options).await.ok()?;
+        Some(found.is_some())
+    }
+
     fn not_found(&self) -> ApiError {
         ApiError::not_found(format!("{} not found", self.operation.table))
     }
@@ -653,11 +694,10 @@ impl<C: Client> Routes<'_, C> {
             }
             input.insert(member.clone(), Value::from(subject));
         }
-        let created = self
-            .runner
-            .create_one(&input)
-            .await
-            .map_err(|err| self.refused(err))?;
+        let created = match self.runner.create_one(&input).await {
+            Ok(created) => created,
+            Err(err) => return Err(self.refused_write(err, &input).await),
+        };
         Ok(view_of(operation, &created))
     }
 
@@ -686,11 +726,14 @@ impl<C: Client> Routes<'_, C> {
             return Ok(view_of(operation, &row));
         }
         let key = row.get(&table.key).cloned().unwrap_or(Value::Null);
-        let updated = self
+        let updated = match self
             .runner
             .update_one(&key, &update, &WriteOptions::default())
             .await
-            .map_err(|err| self.refused(err))?;
+        {
+            Ok(updated) => updated,
+            Err(err) => return Err(self.refused_write(err, &update).await),
+        };
         Ok(view_of(operation, &updated))
     }
 

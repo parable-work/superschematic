@@ -80,30 +80,41 @@ type tableOperation struct {
 	OverridePermission string   `json:"overridePermission,omitempty"`
 }
 
+// UnservedTable is a table operation the Rust server writes no handler for
+// yet (D106, D116), and why: it stays a method of its namespace's trait,
+// to be written by hand, and the build warns of it.
+type UnservedTable struct {
+	Operation string
+	Reason    string
+}
+
 // tableInfo is the table operation endpoint serves, or nil for any other
-// operation. The loader fills an operation's TableOperation and refuses
-// what no handler serves; IR that did not go through it is refused here,
-// naming the operation, since a handler written from half of it would
-// serve something else. What the Rust handlers do not serve yet is refused
-// too: a view member that is @decrypted or @virtual, and a create that
-// names the state its row starts in (D109).
-func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInfo) (*TableInfo, error) {
+// operation, and for one the Rust server writes no handler for yet, with
+// why: an operation over a projection, a create that names the state its
+// row starts in (D109), and a view with a @decrypted member. The loader
+// fills an operation's TableOperation and refuses what no handler serves;
+// IR that did not go through it is refused here, naming the operation,
+// since a handler written from half of it would serve something else.
+func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInfo) (*TableInfo, string, error) {
 	op := endpoint.TableOperation()
 	if op == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 	owner := info.Namespace + "." + info.Name
-	refuse := func(format string, args ...any) (*TableInfo, error) {
-		return nil, fmt.Errorf("rustrestgen: %s is a @tableOperation (D106) %s", owner, fmt.Sprintf(format, args...))
+	refuse := func(format string, args ...any) (*TableInfo, string, error) {
+		return nil, "", fmt.Errorf("rustrestgen: %s is a @tableOperation (D106) %s", owner, fmt.Sprintf(format, args...))
+	}
+	unserved := func(format string, args ...any) (*TableInfo, string, error) {
+		return nil, fmt.Sprintf(format, args...), nil
 	}
 	if !slices.Contains(ir.TableOperationKinds, op.Kind) || op.Type == "" || op.Database == "" {
 		return refuse("whose kind, table and database are not all set (kind %q, type %q, database %q); the loader fills an operation's tableOperation and checks it, so load the schema before generating", op.Kind, op.Type, op.Database)
 	}
 	if op.Projection {
-		return refuse("over the projection %s, which the Rust repositories do not read yet (D116)", op.Type)
+		return unserved("it reads the projection %s, and the Rust repositories read tables so far", op.Type)
 	}
 	if len(op.Starts) > 0 {
-		return refuse("whose create names the state its row starts in (%s), which the Rust server does not serve yet (D109)", strings.Join(op.Starts, ", "))
+		return unserved("its create names the state the row starts in (%s), and the Rust server makes no Workflow's transition in a create so far (D109)", strings.Join(op.Starts, ", "))
 	}
 	table := &TableInfo{Operation: owner, Kind: op.Kind, Database: op.Database, Type: op.Type}
 	data := tableOperation{Kind: op.Kind, Type: op.Type, Key: op.Key, By: op.By, OverridePermission: op.OverridePermission}
@@ -148,7 +159,7 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 			return refuse("whose result %s has a @virtual field, %s, which no implementation fills", view.Name, field.Name)
 		}
 		if field.Decrypted {
-			return refuse("whose result %s has a @decrypted field, %s, which the Rust server does not open yet (D116)", view.Name, field.Name)
+			return unserved("its view %s holds %s, a @decrypted field, and the Rust server opens none in a view so far", view.Name, field.Name)
 		}
 		data.View = append(data.View, field.Name)
 	}
@@ -203,10 +214,10 @@ func tableInfo(schema *ir.Schema, endpoint apigen.EndpointInfo, info EndpointInf
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(data); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	table.Literal = rustutil.RawString(strings.TrimSuffix(buf.String(), "\n"))
-	return table, nil
+	return table, "", nil
 }
 
 // HasTableOperations reports whether the router serves an operation
@@ -315,4 +326,28 @@ func (o *APIOutput) checkTableDeps() error {
 // Args structs.
 func (o *APIOutput) TablesInterfacesUse() string {
 	return rustutil.UseLine("crate::interfaces", o.TableArgs())
+}
+
+// checkSQLiteDeps refuses what a Rust server on a SQLite file does not run
+// yet (D116), each by name: its Deps.db is the file, where the identity
+// store, the behaviors' adapter, a worker's queue and the engine are built
+// over a Postgres pool.
+func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
+	if !deps.SQLite || deps.Database == "" {
+		return nil
+	}
+	refuse := func(what string) error {
+		return fmt.Errorf("rustrestgen: %s is a Rust API on %s, whose DB service lists sqlite first, and %s on Postgres alone so far (D116); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", o.SchemaName, deps.Database, what, deps.Database)
+	}
+	switch {
+	case o.Identity != nil:
+		return refuse("the Rust server builds its identity store")
+	case o.HasBehaviors():
+		return refuse("the Rust server runs behaviors")
+	case len(o.Workers) > 0:
+		return refuse("a Rust worker claims its queue")
+	case len(o.Derivers) > 0 || deps.Engine != nil:
+		return refuse("the Rust server opens an engine")
+	}
+	return nil
 }

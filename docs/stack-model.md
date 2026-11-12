@@ -3443,8 +3443,9 @@ export abstract class FulfilOrders {}
   sqlite-first database claims on the environment's SQLite file
   (`local.worker-sqlite`), beside the server that enqueues, each process
   with a connection of its own that waits five seconds for the other's
-  write lock. A Go or Rust worker there is refused with its server, since
-  their `Deps` reach Postgres alone (D64); their clients are proven by the
+  write lock. A Go worker there is refused with its server, since its
+  `Deps` reach Postgres alone (D64), and a Rust worker by its build, which
+  claims on Postgres alone so far (D116); their clients are proven by the
   parity test. D1 claims nothing: it is reached through a Worker's binding
   alone, and Workers runs no claim loop.
 - **Workers.** `@worker` comes from `@superschematic/api` and goes on a
@@ -6405,8 +6406,17 @@ Resolution refuses (`unrealizable`), on each sql edge:
 - a TypeScript server, job or worker whose database resolves to another
   dialect than its DB service's first, since its `Deps.db` would be the
   wrong client;
-- a Go or Rust one whose database resolves to `sqlite`, since the Go ORM
-  and the Rust pool reach Postgres alone.
+- a Rust one whose database resolves to another dialect than its DB
+  service's first, as a TypeScript one's: its `Deps.db` is a pool for
+  `postgres` and the HTTP runtime's SQLite file for `sqlite` (D116);
+- a Go one whose database resolves to `sqlite`, since the Go ORM reaches
+  Postgres alone.
+
+A Rust server on a SQLite file serves its table operations from the Rust
+repositories on SQLite. The build refuses, by name, what it does not run
+there yet: the identity store, behaviors, a worker's queue and an engine,
+each of which the Rust runtime builds over a Postgres pool so far, and a
+Rust job, worker or app.
 
 acme-shop's `shop-db` lists `postgres` first, so nothing of it changes;
 its `shop-wishlist-db` lists `sqlite` first, for `wishlist-stack`'s

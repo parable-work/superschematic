@@ -1,0 +1,21 @@
+# fixture-tracker-api in Rust on the local target: its default server
+# serves the operations marked @tableOperation from the tables of
+# fixture-tracker-db (D106, D116), which its router runs through the
+# database's Rust repositories: over a pool when the DB service lists
+# postgres first, and over the environment's SQLite file when it lists
+# sqlite first.
+kind: Stack
+types:
+  Tracker:
+    name: Tracker
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-tracker-api, kind: API }
+      expose:
+        - service: { name: fixture-tracker-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

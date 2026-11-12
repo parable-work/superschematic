@@ -41,6 +41,12 @@ type DepsInfo struct {
 	// or its one DB-kind dependency. Empty when the API has neither.
 	Database string
 
+	// SQLite is whether Database's DB service lists the sqlite dialect
+	// first (D116): Deps.db is then the HTTP runtime's SQLite file, in the
+	// pool's place, and the repositories the crate serves its table
+	// operations from are SQLite's.
+	SQLite bool
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 
@@ -462,7 +468,7 @@ func (o *APIOutput) DependencyFeatures(name string) string {
 	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || !o.HasTableOperations() {
 		return ""
 	}
-	return `, features = ["postgres"]`
+	return `, features = ["` + o.DatabaseDialect() + `"]`
 }
 
 // SetDeps sets what Deps holds, so the crate writes src/deps.rs, refusing
@@ -498,6 +504,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
 	}
 	if err := o.checkBehaviorDeps(&deps); err != nil {
+		return err
+	}
+	if err := o.checkSQLiteDeps(&deps); err != nil {
 		return err
 	}
 	o.Deps = &deps
@@ -578,7 +587,10 @@ func (o *APIOutput) DepsUses() []string {
 	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
 		runtime = append(runtime, "memorystore::MemoryStore")
 	}
-	if o.Deps != nil && o.Deps.Database != "" {
+	switch {
+	case o.Deps != nil && o.Deps.Database != "" && o.Deps.SQLite:
+		runtime = append(runtime, "orm::sqlite::Database")
+	case o.Deps != nil && o.Deps.Database != "":
 		runtime = append(runtime, "postgres::Pool")
 	}
 	if o.ChecksEndUsers() {
@@ -624,9 +636,28 @@ func (o *APIOutput) NewSignature() string {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
 	if o.HasBehaviorOperations() || o.HasTableOperations() {
-		params = append(params, "db: Pool")
+		params = append(params, "db: "+o.DatabaseType())
 	}
 	return rustFn("    ", "pub fn new", params, "Self")
+}
+
+// DatabaseType is the type of Deps.db: a pool of the API's database, or,
+// for a database whose DB service lists sqlite first, its SQLite file
+// (D116).
+func (o *APIOutput) DatabaseType() string {
+	if o.Deps != nil && o.Deps.SQLite {
+		return "Arc<Database>"
+	}
+	return "Pool"
+}
+
+// DatabaseDialect is the dialect of the API's database, postgres unless
+// its DB service lists sqlite first.
+func (o *APIOutput) DatabaseDialect() string {
+	if o.Deps != nil && o.Deps.SQLite {
+		return "sqlite"
+	}
+	return "postgres"
 }
 
 // NotImplemented is the body of endpoint's method in the implementation's
@@ -677,7 +708,10 @@ func (o *APIOutput) RuntimeFeatures() []string {
 	}
 	// Deps.db's pool is the one the behavior operations run on (D103), so
 	// a crate with them has a database.
-	if o.Deps.Database != "" {
+	switch {
+	case o.Deps.Database != "" && o.Deps.SQLite:
+		features = append(features, "sqlite")
+	case o.Deps.Database != "":
 		features = append(features, "postgres")
 		if o.Identity != nil {
 			features = append(features, "identity-postgres")

@@ -53,6 +53,27 @@ impl std::fmt::Debug for Database {
     }
 }
 
+/// Opens the file a stack's database field names, as a server's entrypoint
+/// does (D57, D116): a URL of the form `sqlite:<path>`, which the local
+/// and the embedded targets derive for a database on a SQLite file.
+pub fn connect(database: &crate::stackconfig::Database) -> Result<Arc<Database>, Error> {
+    let crate::stackconfig::Database::Url(url) = database else {
+        return Err(Error::Definition(
+            "the database is a Cloud SQL instance, and the API's database is a SQLite file: its DB service lists sqlite first".to_owned(),
+        ));
+    };
+    let path = url
+        .strip_prefix("sqlite://")
+        .or_else(|| url.strip_prefix("sqlite:"))
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            Error::Definition(
+                "the database's URL is no sqlite:<path>, and the API's database is a SQLite file: its DB service lists sqlite first".to_owned(),
+            )
+        })?;
+    Database::open(path).map(Arc::new)
+}
+
 /// A connection, whoever panicked holding it: a transaction a panic
 /// unwound was rolled back as its guard dropped.
 fn held(connection: &Mutex<Connection>) -> MutexGuard<'_, Connection> {

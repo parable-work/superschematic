@@ -190,6 +190,14 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .Files }}
+
+    // One open file per database on SQLite (D116), shared by every API on
+    // it: a write waits its turn on the file's one writing connection.
+{{- range .Files }}
+{{ rustLetCall .Var "open_file" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
 {{- range .Engines }}
 
     // The engine of {{ .Service }}, an engine database (D58), opened on the

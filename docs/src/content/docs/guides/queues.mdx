@@ -716,8 +716,9 @@ which the platform sets.
 
 The claims run on Postgres, or on SQLite where `stack dev` places the
 queue's database on the environment's SQLite file and the worker is in
-TypeScript; a Go or Rust worker there does not resolve, since its `Deps`
-reach Postgres alone. An environment that places the queue's database on
+TypeScript; a Go worker there does not resolve, since its `Deps` reach
+Postgres alone, and a Rust worker does not build, since it claims on
+Postgres alone so far (D116). An environment that places the queue's database on
 a platform of another dialect, or on D1, does not resolve either. On
 Cloudflare the database is a Postgres reached through Hyperdrive
 ([On Cloudflare](#on-cloudflare)).

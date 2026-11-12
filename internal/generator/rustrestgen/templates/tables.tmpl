@@ -23,6 +23,16 @@ use crate::runtime::page::Page;
 {{- end }}
 use crate::runtime::{ApiError, Principal};
 
+{{- if eq .DatabaseDialect "sqlite" }}
+/// What the router serves the table operations from: the repositories of
+/// {{ .TableDatabase }} in the SQLite file `Deps.db` holds.
+pub type Tables = crate::runtime::orm::sqlite::Tables;
+
+/// The tables of {{ .TableDatabase }}, in the file `db` holds.
+pub fn tables(db: std::sync::Arc<crate::runtime::orm::sqlite::Database>) -> Tables {
+    Tables::new(db, database_types::orm::sqlite_definition)
+}
+{{- else }}
 /// What the router serves the table operations from: the repositories of
 /// {{ .TableDatabase }} over the pool `Deps.db` holds.
 pub type Tables = crate::runtime::orm::postgres::Tables;
@@ -31,6 +41,7 @@ pub type Tables = crate::runtime::orm::postgres::Tables;
 pub fn tables(db: crate::runtime::postgres::Pool) -> Tables {
     Tables::new(db, database_types::orm::postgres_definition)
 }
+{{- end }}
 
 /// An operation's definition, read once.
 fn operation(

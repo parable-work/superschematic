@@ -233,7 +233,12 @@ type RustServer struct {
 
 	APIs      []*RustAPI
 	Databases []*RustDatabase
-	Clients   []*RustClient
+
+	// Files are the databases on a SQLite file (D116), each the Deps.db of
+	// an API whose DB service lists sqlite first: the entrypoint opens the
+	// file its field names, in a pool's place.
+	Files   []*RustDatabase
+	Clients []*RustClient
 
 	// Loopback is the server's loopback key, nil without one: a server
 	// has one when it calls an API it serves itself whose operations have a
@@ -594,6 +599,10 @@ type RustDatabase struct {
 	Field string
 	From  string
 
+	// SQLite is a database on a SQLite file (D116), which the entrypoint
+	// opens in a pool's place.
+	SQLite bool
+
 	// Store is the variable of the identity store over the pool when an
 	// API on the database authenticates with the identity runtime (D50),
 	// empty otherwise; StoreAPI is the alias of the API crate whose
@@ -896,7 +905,15 @@ func PlanRust(in RustInput) (*RustServer, error) {
 					From:    api.Config + "." + envgen.RustFieldName(key),
 				}
 				databases[db] = d
-				s.Databases = append(s.Databases, d)
+				switch {
+				case o.Deps.SQLite && (background || s.App != nil):
+					return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Rust server opens a SQLite file, and a job, a worker and an app do not yet (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
+				case o.Deps.SQLite:
+					d.SQLite = true
+					s.Files = append(s.Files, d)
+				default:
+					s.Databases = append(s.Databases, d)
+				}
 			}
 			api.Database = d
 		}
@@ -1169,6 +1186,9 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 	features := map[string]bool{"logging": true, "otel": true}
 	if len(s.Databases) > 0 {
 		features["postgres"] = true
+	}
+	if len(s.Files) > 0 {
+		features["sqlite"] = true
 	}
 	if len(s.Clients) > 0 {
 		// A callee's credential may be a Google ID token, which the
@@ -1593,6 +1613,9 @@ func (s *RustServer) RuntimeUses() []string {
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	uses = append(uses, s.memoryStoreUses(runtime)...)
+	if len(s.Files) > 0 {
+		uses = append(uses, "use "+runtime+"::orm::sqlite::{self, Database as SqliteFile};")
+	}
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
@@ -1714,7 +1737,7 @@ func (s *RustServer) stackconfigUses() []string {
 	if len(s.Clients) > 0 {
 		items = append(items, "Service")
 	}
-	if len(s.Databases) > 0 {
+	if len(s.Databases) > 0 || len(s.Files) > 0 {
 		items = append(items, "Database")
 	}
 	return items

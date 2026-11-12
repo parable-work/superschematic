@@ -1428,13 +1428,16 @@ does, and a create reads a zero or an empty optional member as unset. An
 update reads the request's own JSON, so `"estimate": 0` writes 0 and
 `"estimate": null` clears it.
 
-A Rust server writes no handler yet. It keeps each method in the
-namespace's trait and its scaffold, to be written by hand, and the build
-warns once per API, naming every such operation, so a project that
-builds the API in two languages still builds:
+A Rust server writes the handlers too (D116), from the repositories the
+database's Rust types carry: over its pool, or over the environment's
+SQLite file when the DB service lists `sqlite` first. It writes none yet
+for an operation over a projection, for a create that names the state its
+row starts in, and for a view with a `@decrypted` member. Each of those
+stays a method of the namespace's trait and its scaffold, and the build
+warns of it, with why:
 
 ```
-warning: tracker-api: the Rust server writes no handler for a @tableOperation yet (D106): Issues.listIssues, Issues.getIssue, Issues.createIssue, Issues.updateIssue, Issues.deleteIssue stay methods of the implementation's interface, to be written by hand, with the same route and types
+warning: tracker-api: the Rust server writes no handler for Orders.createOrder, a @tableOperation (D106): its create names the state the row starts in (status), and the Rust server makes no Workflow's transition in a create so far (D109); it stays a method of the implementation's interface, to be written by hand, with the same route and types
 ```
 
 A TypeScript server answers a `Temporal.DateTime` to the millisecond,

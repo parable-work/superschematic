@@ -1117,6 +1117,7 @@ jobs:
           cargo test --features sqlite
           cargo clippy --all-targets --features postgres,sqlite,logging -- -D warnings
           cargo test --features postgres,sqlite,logging
+          cargo clippy --all-targets --features sqlite,logging,otel -- -D warnings
 
       # The runner an embedded environment's binary carries (D116). Its
       # parity tests with the Go runner's binary run under `make rust`,

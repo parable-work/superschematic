@@ -28,7 +28,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-pub use super::sqlite_file::{Database, DatabaseOptions};
+pub use super::sqlite_file::{connect, Database, DatabaseOptions};
 
 // The SQLite client the repositories run on, for a types crate's `orm`
 // module and its callers to name without a version of their own.

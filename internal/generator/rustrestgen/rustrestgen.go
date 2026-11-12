@@ -423,6 +423,11 @@ type APIOutput struct {
 	// TypesCrateIdent is TypesCrate as a Rust path segment; lib.rs
 	// re-exports the crate as `types`.
 	TypesCrateIdent string
+	// UnservedTables are the operations marked @tableOperation the crate
+	// writes no handler for yet (D106, D116), each with why: it stays a
+	// method of its namespace's trait.
+	UnservedTables []UnservedTable
+
 	// ScalarParse is how the router reads a filter's dates and decimals by
 	// the scalar core (D106): nil unless a filter has a field of either
 	// kind. The crate then depends on the scalar crate, as one with the
@@ -810,8 +815,12 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		// A table operation's handler serves it from the table's
 		// repository (D106): its namespace has no method for it either.
 		if info.Behavior == nil {
-			if info.Table, err = tableInfo(schema, endpoint, info); err != nil {
+			var unserved string
+			if info.Table, unserved, err = tableInfo(schema, endpoint, info); err != nil {
 				return nil, err
+			}
+			if unserved != "" {
+				output.UnservedTables = append(output.UnservedTables, UnservedTable{Operation: info.Namespace + "." + info.Name, Reason: unserved})
 			}
 		}
 		if !info.RouterServed() {
