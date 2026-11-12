@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "audit_log",
+      "kind": "table",
+      "sql": "CREATE TABLE audit_log (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  order_id TEXT,\n  what TEXT\n)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": 1
+        },
+        {
+          "name": "order_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "what",
+          "type": "TEXT"
+        }
+      ]
+    },
+    {
+      "name": "customer",
+      "kind": "table",
+      "sql": "CREATE TABLE customer (\n  name TEXT NOT NULL,\n  id TEXT NOT NULL PRIMARY KEY,\n  email VARCHAR(255) NOT NULL UNIQUE,\n  active INTEGER NOT NULL DEFAULT TRUE,\n  nickname TEXT\n)",
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "primaryKey": 1
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR(255)",
+          "notNull": true
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "TRUE"
+        },
+        {
+          "name": "nickname",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_customer_1",
+          "unique": true,
+          "origin": "pk",
+          "keys": [
+            {
+              "column": "id",
+              "collation": "BINARY"
+            }
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_customer_2",
+          "unique": true,
+          "origin": "u",
+          "keys": [
+            {
+              "column": "email",
+              "collation": "BINARY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "order",
+      "kind": "table",
+      "sql": "CREATE TABLE \"order\" (\n  id TEXT NOT NULL PRIMARY KEY,\n  customer_id TEXT NOT NULL,\n  total REAL NOT NULL,\n  state TEXT NOT NULL DEFAULT 'open' CHECK (state in ('open','shipped')),\n  tags TEXT NOT NULL DEFAULT '[]',\n  placed_at TEXT NOT NULL\n)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "primaryKey": 1
+        },
+        {
+          "name": "customer_id",
+          "type": "TEXT",
+          "notNull": true
+        },
+        {
+          "name": "total",
+          "type": "REAL",
+          "notNull": true
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'open'"
+        },
+        {
+          "name": "tags",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'"
+        },
+        {
+          "name": "placed_at",
+          "type": "TEXT",
+          "notNull": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "order_by_total",
+          "origin": "c",
+          "sql": "CREATE INDEX order_by_total ON \"order\" (total)",
+          "keys": [
+            {
+              "column": "total",
+              "collation": "BINARY"
+            }
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_order_1",
+          "unique": true,
+          "origin": "pk",
+          "keys": [
+            {
+              "column": "id",
+              "collation": "BINARY"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "name": "order_totals",
+      "sql": "CREATE VIEW order_totals AS\n  SELECT customer_id, sum(total) AS total FROM \"order\" GROUP BY customer_id"
+    }
+  ],
+  "triggers": [
+    {
+      "name": "order_audit",
+      "table": "order",
+      "sql": "CREATE TRIGGER order_audit AFTER UPDATE ON \"order\"\nBEGIN\n  INSERT INTO audit_log (order_id, what) VALUES (NEW.id, 'updated');\nEND"
+    }
+  ]
+}

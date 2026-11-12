@@ -25,6 +25,7 @@ const (
 	opSetDefault       op = "setDefault"
 	opAlterColumnType  op = "alterColumnType"
 	opRegenerateColumn op = "regenerateColumn"
+	opDropUnmodeled    op = "dropUnmodeled"
 	opCreateIndex      op = "createIndex"
 	opReplaceIndex     op = "replaceIndex"
 	opAddUnique        op = "addUnique"
@@ -82,6 +83,7 @@ var rank = map[op]int{
 	opDropCheck:        9,
 	opAlterColumnType:  10,
 	opRegenerateColumn: 10,
+	opDropUnmodeled:    10,
 	opCreateIndex:      11,
 	opReplaceIndex:     11,
 	opAddUnique:        12,
@@ -204,6 +206,10 @@ type change struct {
 	// backfill on a table the previous model has (D88): the step runs the
 	// trigger's Backfill after creating it.
 	backfill bool
+
+	// unmodeled is what a table read from a database holds that the model
+	// has no form of, which the change drops by rebuilding the table (D116).
+	unmodeled []string
 
 	// role is a @seedRoles role the change inserts or updates, oldRole the
 	// previous model's (D88).

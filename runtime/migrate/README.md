@@ -269,7 +269,9 @@ Records a model as applied without running anything, for a database built
 from `create.sql` or changed by hand. The model's `service` and `dialect`
 key the row, and its dialect must be the database URL's. It refuses while a
 plan is in progress, and prints the hash it replaces.
-`superschematic migrate plan --print-model` prints the model to adopt.
+`superschematic migrate plan --print-model` prints the model to adopt:
+the schema's, or, with `--from-database`, the one a SQLite file built by
+hand holds (Inspect, below).
 
 Exit codes: 0 done, 1 refused or failed, 2 usage.
 
@@ -457,6 +459,47 @@ its position and hint, and is no failure of the run.
 `testdata/describe/` holds a document and a result both sides' tests
 read and write.
 
+## Inspect
+
+```
+superschematic-migrate inspect [--database-url URL]
+```
+
+Prints what the catalog of a SQLite file holds, for `superschematic
+migrate plan --from-database` (D116): the compiler reads a file built by
+hand through it and turns the result into the model a plan starts from
+and `adopt` records. The runner opens the file with `mode=ro` and
+`PRAGMA query_only`, so it creates no file, no state table and no row,
+and it refuses a file that does not exist. A URL that names no SQLite
+file is a usage error. The runner judges nothing: it leaves out SQLite's
+own tables (`sqlite_%`) and its own (`superschematic_%`) and reports the
+rest as SQLite gives it.
+
+It prints one JSON object, each list in name order:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `version` | integer | `1`. |
+| `tables` | array | The tables of `PRAGMA table_list`. |
+| `views` | array | `{ name, sql }`: each view and the statement `sqlite_schema` keeps. |
+| `triggers` | array | `{ name, table, sql }`: each trigger, the table or view it is on, and its statement. |
+
+A table:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | The table. |
+| `kind` | string | `table`, `virtual`, or `shadow` for a table a virtual table keeps its content in. Only a `table` has columns, indexes and foreign keys here: a virtual table's come from its module, which the runner may not hold. |
+| `sql` | string | The `CREATE` statement `sqlite_schema` keeps. |
+| `withoutRowid`, `strict` | boolean | The table's options; absent when false. |
+| `columns` | array | The rows of `PRAGMA table_xinfo`, in order: `name`, `type` as declared, `notNull`, `default` (the expression without the parentheses an expression is written in; absent for none), `primaryKey` (the column's 1-based place in the key) and `hidden` (2 for a `VIRTUAL` generated column, 3 for a `STORED` one). |
+| `indexes` | array | The rows of `PRAGMA index_list`: `name`, `unique`, `origin` (`c` for `CREATE INDEX`, `u` for a `UNIQUE` of the table's definition, `pk` for its primary key), `partial`, `sql` (absent for an index SQLite made for a constraint) and `keys`, the key rows of `PRAGMA index_xinfo`: `column` (absent for an expression and for the rowid), `expression`, `descending` and `collation`. |
+| `foreignKeys` | array | The keys of `PRAGMA foreign_key_list`: `table`, `columns`, `refColumns` (absent when the key names none and so references the table's primary key), `onUpdate`, `onDelete` and `match`. |
+
+`testdata/inspect/` holds files built by hand, each as the statements
+that build it (`<name>.sql`) and its inspection (`<name>.json`), which
+both sides' tests read.
+
 ## Layout
 
 | Path | What it holds |
@@ -472,6 +515,7 @@ read and write.
 | `go/testdata/` | Hand-written plans per dialect, and the canonical JSON vectors |
 | `testdata/plans/<case>/` | The plans the compiler writes for the runner, `NN-<name>.plan.json` |
 | `testdata/describe/` | A describe document and its result, which the runner's and the compiler's tests both read and write |
+| `testdata/inspect/` | SQLite files built by hand, as their statements, and their inspections, which the runner's and the compiler's tests both read |
 
 Nothing in the module needs cgo, so the binary builds with
 `CGO_ENABLED=0` for any platform Go targets.

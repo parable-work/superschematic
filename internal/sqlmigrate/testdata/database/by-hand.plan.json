@@ -1,0 +1,196 @@
+{
+  "dialect": "sqlite",
+  "expanded": "6a250664df5882af3fe8a39bda19d5077d190c3419d4f78250f9dd969b5d8f7a",
+  "from": "a66f98909216d07e76854baa09e3303764b138ea8523a2e015dab4c44f6ada6c",
+  "hash": "279d56ffe31a9f4fa2ba8112600d43401a9372ab17754a5f6d217afe369920af",
+  "service": "byhand-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:trigger/order/order_audit",
+          "reason": "Dropping trigger order_audit of order removes it for good: the model has no form of it, so no plan creates it again.",
+          "subject": "trigger/order/order_audit"
+        },
+        {
+          "class": "compat",
+          "id": "compat:trigger/order/order_audit",
+          "reason": "Servers built from the previous version may rely on trigger order_audit of order, which this step drops before they are gone.",
+          "subject": "trigger/order/order_audit"
+        }
+      ],
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER \"order_audit\""
+      ],
+      "subject": "trigger/order/order_audit",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:view/order_totals",
+          "reason": "Dropping view order_totals removes it for good: the model has no form of it, so no plan creates it again.",
+          "subject": "view/order_totals"
+        },
+        {
+          "class": "compat",
+          "id": "compat:view/order_totals",
+          "reason": "Servers built from the previous version may read view order_totals, which this step drops before they are gone.",
+          "subject": "view/order_totals"
+        }
+      ],
+      "index": 2,
+      "op": "dropView",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW \"order_totals\""
+      ],
+      "subject": "view/order_totals",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer holds the database's write lock for time that grows with the table.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot change the default of id and drop what the table's definition holds and the model has no form of (UNIQUE (email) in the table's definition), so the step rebuilds customer: it copies the rows into a new table, drops the old one and renames the new one.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 3,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"email\" TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"active\" INTEGER DEFAULT 1 NOT NULL,\n  \"nickname\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"email\", \"name\", \"active\", \"nickname\")\nSELECT \"id\", \"email\", \"name\", \"active\", \"nickname\"\nFROM \"customer\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order holds the database's write lock for time that grows with the table.",
+          "subject": "table/order"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot change the default of id, so the step rebuilds order: it copies the rows into a new table, drops the old one and renames the new one.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 4,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" REAL NOT NULL,\n  \"note\" TEXT,\n  \"state\" TEXT DEFAULT 'open' NOT NULL CHECK (\"state\" IN ('open', 'shipped')),\n  \"tags\" TEXT DEFAULT '[]' NOT NULL,\n  \"placed_at\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"customer_id\", \"total\", \"state\", \"tags\", \"placed_at\")\nSELECT \"id\", \"customer_id\", \"total\", \"state\", \"tags\", \"placed_at\"\nFROM \"order\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "CREATE INDEX \"idx_order_placed_at\" ON \"order\" (\"placed_at\")",
+        "CREATE INDEX \"order_by_total\" ON \"order\" (\"total\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order holds the database's write lock for time that grows with the table.",
+          "subject": "table/order"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/constraint/fk_order_customer_id",
+          "reason": "Validating fk_order_customer_id fails when a row of order has a customer_id that customer(id) does not hold.",
+          "subject": "table/order/constraint/fk_order_customer_id"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot add foreign key fk_order_customer_id, so the step rebuilds order: it copies the rows into a new table, drops the old one and renames the new one.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 5,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" REAL NOT NULL,\n  \"note\" TEXT,\n  \"state\" TEXT DEFAULT 'open' NOT NULL CHECK (\"state\" IN ('open', 'shipped')),\n  \"tags\" TEXT DEFAULT '[]' NOT NULL,\n  \"placed_at\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"customer_id\", \"total\", \"note\", \"state\", \"tags\", \"placed_at\")\nSELECT \"id\", \"customer_id\", \"total\", \"note\", \"state\", \"tags\", \"placed_at\"\nFROM \"order\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "CREATE INDEX \"idx_order_placed_at\" ON \"order\" (\"placed_at\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/customer/column/nickname",
+          "reason": "Dropping customer.nickname deletes its values.",
+          "subject": "table/customer/column/nickname"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer/column/nickname",
+          "reason": "SQLite rewrites customer to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/customer/column/nickname"
+        }
+      ],
+      "index": 6,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"customer\" DROP COLUMN \"nickname\""
+      ],
+      "subject": "table/customer/column/nickname",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/audit_log",
+          "reason": "Dropping table audit_log deletes its rows.",
+          "subject": "table/audit_log"
+        }
+      ],
+      "index": 7,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"audit_log\""
+      ],
+      "subject": "table/audit_log",
+      "transactional": true
+    }
+  ],
+  "to": "39e5c9b6669a3ca4a484ead973938a3f191e86efa297598e514c9cdc25b8b10e",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,359 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "child",
+      "kind": "table",
+      "sql": "CREATE TABLE child (\n  id TEXT PRIMARY KEY,\n  parent_id BIGINT REFERENCES parent ON UPDATE CASCADE ON DELETE SET NULL,\n  other_id INTEGER REFERENCES missing DEFERRABLE INITIALLY DEFERRED,\n  amount DECIMAL(10,2) DEFAULT 0 CHECK (amount \u003e= 0 AND amount \u003c= 100.5),\n  title TEXT NOT NULL DEFAULT ('untitled') CHECK (length(title) \u003e= 1 AND length(title) \u003c= 80),\n  kind TEXT CHECK (kind IN ('a', 'b''c')),\n  flag BOOLEAN DEFAULT FALSE,\n  made TEXT DEFAULT CURRENT_TIMESTAMP,\n  payload,\n  ratio DOUBLE PRECISION,\n  body TEXT,\n  search_text TEXT GENERATED ALWAYS AS (coalesce(title, '') || ' ' || coalesce(body, '')) STORED,\n  CHECK (amount \u003c ratio),\n  CONSTRAINT kind_or_flag CHECK (kind IS NOT NULL OR flag)\n)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": 1
+        },
+        {
+          "name": "parent_id",
+          "type": "BIGINT"
+        },
+        {
+          "name": "other_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "amount",
+          "type": "DECIMAL(10,2)",
+          "default": "0"
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'untitled'"
+        },
+        {
+          "name": "kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "flag",
+          "type": "BOOLEAN",
+          "default": "FALSE"
+        },
+        {
+          "name": "made",
+          "type": "TEXT",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "payload",
+          "type": ""
+        },
+        {
+          "name": "ratio",
+          "type": "DOUBLE PRECISION"
+        },
+        {
+          "name": "body",
+          "type": "TEXT"
+        },
+        {
+          "name": "search_text",
+          "type": "TEXT",
+          "hidden": 3
+        }
+      ],
+      "indexes": [
+        {
+          "name": "child_body",
+          "origin": "c",
+          "sql": "CREATE INDEX child_body ON child (body)",
+          "keys": [
+            {
+              "column": "body",
+              "collation": "BINARY"
+            }
+          ]
+        },
+        {
+          "name": "child_by_parent",
+          "origin": "c",
+          "sql": "CREATE INDEX child_by_parent ON child (parent_id DESC)",
+          "keys": [
+            {
+              "column": "parent_id",
+              "descending": true,
+              "collation": "BINARY"
+            }
+          ]
+        },
+        {
+          "name": "child_kind_title",
+          "origin": "c",
+          "sql": "CREATE INDEX child_kind_title ON child (kind, lower(title))",
+          "keys": [
+            {
+              "column": "kind",
+              "collation": "BINARY"
+            },
+            {
+              "expression": true,
+              "collation": "BINARY"
+            }
+          ]
+        },
+        {
+          "name": "child_title_lower",
+          "unique": true,
+          "origin": "c",
+          "partial": true,
+          "sql": "CREATE UNIQUE INDEX child_title_lower ON child (lower(title)) WHERE kind = 'a'",
+          "keys": [
+            {
+              "expression": true,
+              "collation": "BINARY"
+            }
+          ]
+        },
+        {
+          "name": "child_title_nocase",
+          "origin": "c",
+          "sql": "CREATE INDEX child_title_nocase ON child (title COLLATE NOCASE)",
+          "keys": [
+            {
+              "column": "title",
+              "collation": "NOCASE"
+            }
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_child_1",
+          "unique": true,
+          "origin": "pk",
+          "keys": [
+            {
+              "column": "id",
+              "collation": "BINARY"
+            }
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "table": "missing",
+          "columns": [
+            "other_id"
+          ],
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "table": "parent",
+          "columns": [
+            "parent_id"
+          ],
+          "onUpdate": "CASCADE",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        }
+      ]
+    },
+    {
+      "name": "child_fts",
+      "kind": "virtual",
+      "sql": "CREATE VIRTUAL TABLE child_fts USING fts5(title, body)"
+    },
+    {
+      "name": "child_fts_config",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'child_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID",
+      "withoutRowid": true
+    },
+    {
+      "name": "child_fts_content",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'child_fts_content'(id INTEGER PRIMARY KEY, c0, c1)"
+    },
+    {
+      "name": "child_fts_data",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'child_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+    },
+    {
+      "name": "child_fts_docsize",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'child_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+    },
+    {
+      "name": "child_fts_idx",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'child_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+      "withoutRowid": true
+    },
+    {
+      "name": "kv",
+      "kind": "table",
+      "sql": "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID",
+      "withoutRowid": true,
+      "columns": [
+        {
+          "name": "k",
+          "type": "TEXT",
+          "notNull": true,
+          "primaryKey": 1
+        },
+        {
+          "name": "v",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_kv_1",
+          "unique": true,
+          "origin": "pk",
+          "keys": [
+            {
+              "column": "k",
+              "collation": "BINARY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parent",
+      "kind": "table",
+      "sql": "CREATE TABLE parent (\n  id INTEGER PRIMARY KEY,\n  code TEXT NOT NULL COLLATE NOCASE,\n  label VARCHAR(40) COLLATE RTRIM,\n  UNIQUE (code, label)\n)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": 1
+        },
+        {
+          "name": "code",
+          "type": "TEXT",
+          "notNull": true
+        },
+        {
+          "name": "label",
+          "type": "VARCHAR(40)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_parent_1",
+          "unique": true,
+          "origin": "u",
+          "keys": [
+            {
+              "column": "code",
+              "collation": "NOCASE"
+            },
+            {
+              "column": "label",
+              "collation": "RTRIM"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "seq",
+      "kind": "table",
+      "sql": "CREATE TABLE seq (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT UNIQUE ON CONFLICT REPLACE)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": 1
+        },
+        {
+          "name": "v",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_seq_1",
+          "unique": true,
+          "origin": "u",
+          "keys": [
+            {
+              "column": "v",
+              "collation": "BINARY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "stray_fts",
+      "kind": "virtual",
+      "sql": "CREATE VIRTUAL TABLE stray_fts USING fts5(body)"
+    },
+    {
+      "name": "stray_fts_config",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'stray_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID",
+      "withoutRowid": true
+    },
+    {
+      "name": "stray_fts_content",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'stray_fts_content'(id INTEGER PRIMARY KEY, c0)"
+    },
+    {
+      "name": "stray_fts_data",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'stray_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+    },
+    {
+      "name": "stray_fts_docsize",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'stray_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+    },
+    {
+      "name": "stray_fts_idx",
+      "kind": "shadow",
+      "sql": "CREATE TABLE 'stray_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+      "withoutRowid": true
+    },
+    {
+      "name": "strict_log",
+      "kind": "table",
+      "sql": "CREATE TABLE strict_log (a INTEGER PRIMARY KEY, b TEXT) STRICT",
+      "strict": true,
+      "columns": [
+        {
+          "name": "a",
+          "type": "INTEGER",
+          "primaryKey": 1
+        },
+        {
+          "name": "b",
+          "type": "TEXT"
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "name": "child_titles",
+      "sql": "CREATE VIEW child_titles AS SELECT id, title FROM child"
+    }
+  ],
+  "triggers": [
+    {
+      "name": "child_fts_insert",
+      "table": "child",
+      "sql": "CREATE TRIGGER child_fts_insert AFTER INSERT ON child\nBEGIN\n  INSERT INTO child_fts (rowid, title, body) VALUES (NEW.rowid, NEW.title, NEW.body);\nEND"
+    },
+    {
+      "name": "trg_child_bump_version",
+      "table": "child",
+      "sql": "CREATE TRIGGER \"trg_child_bump_version\" AFTER UPDATE ON \"child\" FOR EACH ROW WHEN NEW.amount = OLD.amount BEGIN UPDATE \"child\" SET amount = OLD.amount + 1 WHERE rowid = NEW.rowid; END"
+    }
+  ]
+}

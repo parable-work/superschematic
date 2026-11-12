@@ -655,6 +655,8 @@ func sqliteCannot(c *change) string {
 		return "change the check on " + c.check.Column
 	case opDropCheck:
 		return "drop the check on " + c.oldCheck.Column
+	case opDropUnmodeled:
+		return "drop what the table's definition holds and the model has no form of (" + strings.Join(c.unmodeled, "; ") + ")"
 	}
 	return string(c.op) + " " + c.subject
 }
