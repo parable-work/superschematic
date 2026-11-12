@@ -1249,7 +1249,12 @@
         },
         {
           "name": "deleteNote",
-          "comment": "Deletes a note the caller wrote.",
+          "comment": "Deletes a note the caller wrote. It names its own tool and no @docs,\nwhich its declaration gives it (D111).",
+          "mcp": {
+            "handle": "remove_note",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
           "typeRef": {
             "name": "NoteView"
           },

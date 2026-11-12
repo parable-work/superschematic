@@ -424,7 +424,9 @@ func TestTableOperationsDocumentThemselves(t *testing.T) {
 		"createTeam":       {"Create team", "A new team; a key another team holds is a conflict.", "teams.create-team", "", "create_team", "invocationPolicy=auto"},
 		"getIssueForGuest": {"Get issue for guest", "One issue as anyone sees it: another view of the same table behind another guard.", "issues.get-issue-for-guest", "read_only", "get_issue_for_guest", "invocationPolicy=auto"},
 		"updateIssue":      {"Update issue", "Changes the members the body sets.", "issues.update-issue", "", "update_issue", "invocationPolicy=auto"},
-		"deleteNote":       {"Delete note", "Deletes a note the caller wrote.", "notes.delete-note", "", "delete_note", "invocationPolicy=auto"},
+		// A @mcp of its own, and no @docs: the tool is the author's, and
+		// the docs are still given.
+		"deleteNote": {"Delete note", "Deletes a note the caller wrote. It names its own tool and no @docs, which its declaration gives it (D111).", "notes.delete-note", "", "remove_note", "invocationPolicy=auto"},
 		// An operation the project writes says its own.
 		"summarizeTeam": {},
 	} {
