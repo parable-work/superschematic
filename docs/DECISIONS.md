@@ -18197,7 +18197,23 @@ to its route; `mcp_parity.rs` replays the 234 `/mcp` exchanges of the
 engine's corpus. Built, of step 6: the runner, `runtime/migrate/rust`,
 with the start a binary calls, the copy before a contract step and the
 adoption; its tests replay the compiler's SQLite vectors and, beside the
-Go runner's binary, every split of a chain between the two runners.
+Go runner's binary, every split of a chain between the two runners. And
+`migrate plan --from-database`, which reads a SQLite file through the Go
+runner's `inspect` (the compiler links no SQLite driver) and plans from
+the model it reads: `TestReadDatabaseRoundTrip` reads the SQLite DDL of
+twenty-five schemas back to their models, their seeded roles aside, and
+`TestAdoptAndMigrateAFileBuiltByHand` adopts and migrates a file built by
+hand.
+
+Built, of step 3: the generated crate's `Api`, whose `handle` answers a
+request through the routes `build_router` mounts, with a route's rate
+limit, body limit and timeout left to the host
+(`RouterOptions.transport`), and the runtime's `block_on`.
+`the_api_answers_a_request_with_no_transport_and_no_runtime_under_it`, of
+`TestTableOperationsRustServerOnSQLite`, drives it on a thread with no
+async runtime. `handle` runs through the axum router rather than one
+generated function per operation beside it, so the `server` feature is
+not built: the crate links axum, tokio and tower as before.
 
 Not built. Of steps 1 and 2: a repository's write of a table that composes
 behaviors, which is refused until the types crate binds the rules adapter
@@ -18209,9 +18225,10 @@ a create that names its start state (D109) and a view with a `@decrypted`
 member, each of which stays a method with a warning; a JSON column's
 `eq` on SQLite, which compares text; and, for a Rust API on a SQLite file,
 the identity store, behaviors, a worker's queue, an engine, and a Rust
-job, worker and app, each refused by name. Step 3, `Api::handle`, the
-`server` feature and `block_on`. Of step 4: the endpoint mounted on a
-generated router, which waits on `handle`, so `outputs.api.mcp` stays
-refused for a Rust API. Step 5, behavior workers on SQLite and `drain`.
-Of step 6: recorded plans and `stack build --release`. Step 7, the
-`embedded` target.
+job, worker and app, each refused by name. Of step 3: the `server`
+feature, and the build's list of the operations that stream a file,
+which `handle` routes as the router does. Of step 4: the endpoint mounted
+on a generated router, so `outputs.api.mcp` stays refused for a Rust API.
+Step 5, behavior workers on SQLite and `drain`. Of step 6: recorded plans
+and `stack build --release`, and an environment's adoption settings.
+Step 7, the `embedded` target.
