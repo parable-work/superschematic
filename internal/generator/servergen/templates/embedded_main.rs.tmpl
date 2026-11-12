@@ -14,6 +14,13 @@
 //! platform's proxy. On SIGTERM or SIGINT it stops taking requests, lets
 //! those in flight finish and closes the library. It logs one JSON object
 //! per line on stdout.
+{{- if .Workers }}
+//!
+//! It runs each worker's loop beside the server: the library's
+//! `Worker::run` over the worker's drain. Once the server has stopped, the
+//! workers claim no more and let their running drains finish for each
+//! one's grace.
+{{- end }}
 //!
 //! What needs a socket or a clock is this host's, not the library's: the
 //! listener, the limit of a request's body, and draining. A request's
@@ -32,6 +39,9 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use {{ .Runtime }}::logging::{self, tracing};
 use {{ .Runtime }}::telemetry::{self, Defaults};
+{{- if .Workers }}
+use {{ .Runtime }}::Shutdown;
+{{- end }}
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
 use {{ .Lib }} as environment;
@@ -190,12 +200,35 @@ fn address(arguments: &Arguments, port: Option<&str>) -> Result<SocketAddr, Stri
 /// or SIGINT.
 async fn run(address: SocketAddr, data: PathBuf) -> Result<(), Failure> {
     let embedded = Arc::new(Embedded::open(Options { data_dir: data }).await?);
+{{- if .Workers }}
+    // Each worker's loop, beside the server.
+    let shutdown = Shutdown::new();
+    let workers: Vec<_> = (0..embedded.workers().len())
+        .map(|index| {
+            let embedded = Arc::clone(&embedded);
+            let shutdown = shutdown.clone();
+            tokio::spawn(async move { embedded.workers()[index].run(shutdown).await })
+        })
+        .collect();
+{{- end }}
     let served = Arc::clone(&embedded);
     let app = Router::new().fallback(move |request: Request| {
         let embedded = Arc::clone(&served);
         async move { answer(&embedded, request).await }
     });
     let stopped = serve(address, app).await;
+{{- if .Workers }}
+    // The workers claim no more, and their running drains have their
+    // grace.
+    shutdown.cancel();
+    for worker in workers {
+        match worker.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => tracing::error!(error = %err, "worker failed"),
+            Err(err) => tracing::error!(error = %err, "worker failed"),
+        }
+    }
+{{- end }}
     // The server has let go of its routes, so this is the last holder.
     if let Ok(embedded) = Arc::try_unwrap(embedded) {
         embedded.close();

@@ -1048,6 +1048,7 @@ dependencies = [
 name = "notes-notes-api-types"
 version = "0.1.0"
 dependencies = [
+ "notes-notes-db-types",
  "serde",
  "serde_json",
  "superscalar",
@@ -1113,6 +1114,16 @@ dependencies = [
  "serde_json",
  "superschematic-http-runtime",
  "superschematic-migrate",
+ "tokio",
+]
+
+[[package]]
+name = "notes-notes-stack-notes-api-pin-notes-worker"
+version = "0.0.0"
+dependencies = [
+ "notes-notes-api-api",
+ "notes-notes-api-implementation",
+ "superschematic-http-runtime",
  "tokio",
 ]
 

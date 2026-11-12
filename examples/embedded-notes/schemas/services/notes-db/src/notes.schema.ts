@@ -1,6 +1,6 @@
 import { Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate } from "@superschematic/schema";
-import { AutoGenerate, key } from "@superschematic/db";
+import { AutoGenerate, key, queue } from "@superschematic/db";
 
 // A note: a title, what it says, and whether it is pinned.
 export abstract class Note {
@@ -14,4 +14,11 @@ export abstract class Note {
   pinned: Default<boolean, false>;
 
   createdAt: Temporal.DateTime;
+}
+
+// Asked when someone wants a note pinned: the worker PinNotes of notes-api
+// pins it. The binary claims the message on the same file the note is in.
+@queue()
+export abstract class PinRequested {
+  noteId: Identity.UUID;
 }

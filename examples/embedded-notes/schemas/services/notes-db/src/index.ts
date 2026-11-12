@@ -1,2 +1,2 @@
-export { Note } from "./notes.schema";
+export { Note, PinRequested } from "./notes.schema";
 export * from "./service.generated";

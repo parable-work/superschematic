@@ -21,8 +21,8 @@
 //! and any other path from the site's files, which the binary carries, so
 //! the site and the APIs share one origin (D91). [`Embedded::close`] lets
 //! go of every API and every file. A host that has a process of its own
-//! links this library and calls the three; `main.rs` is the host that
-//! serves `handle` on 127.0.0.1.
+//! links this library and calls them; `main.rs` is the host that serves
+//! `handle` on 127.0.0.1.
 //!
 //! An API reads its configuration from the process's environment, as on
 //! any target. The binary carries what the environment binds, and `open`
@@ -150,8 +150,8 @@ fn hold<T>(slot: &RwLock<Option<T>>, api: Option<T>) {
     *slot.write().unwrap_or_else(PoisonError::into_inner) = api;
 }
 
-/// The environment's one process: every API of it, and each database's
-/// open file.
+/// The environment's one process: every API of it, each database's open
+/// file.
 pub struct Embedded {
     apis: Arc<Apis>,
 }

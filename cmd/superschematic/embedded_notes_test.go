@@ -32,16 +32,20 @@ import (
 // migrates from the plan it carries; writes a note and reads it back
 // through notes-api under /api/notes-api; reads the digest notes-digest
 // counts by calling notes-api in the process, whose service clause holds;
-// reads the site's page, which
+// asks for the note to be pinned, which the worker the binary runs beside
+// its server does from the queue the request wrote to; reads the site's
+// page, which
 // the binary carries with its digest as its ETag, the page's config, and
 // the fallback for a path that names no file; stops it with SIGTERM; and
 // starts it again on the same files, which need no plan and hold the
-// note. It listens on every interface only when told to in those words.
+// note. Then it starts it on a file the first release's plan alone made,
+// which the binary takes forward by the second. It listens on every
+// interface only when told to in those words.
 func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the cargo build of examples/embedded-notes in -short mode")
 	}
-	for _, tool := range []string{"cargo", "bun"} {
+	for _, tool := range []string{"cargo", "bun", "go"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skipf("%s not available; skipping the build of examples/embedded-notes", tool)
 		}
@@ -72,21 +76,24 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	if filepath.Base(binary) != "notes-stack-desktop" {
 		t.Errorf("the binary is %s, want notes-stack-desktop", binary)
 	}
-	// The build is no release: it carries the plan the example's release
-	// recorded, and records nothing.
-	recorded, err := os.ReadFile(filepath.Join(stackDir, "plans", "Desktop", "notes-db", "0001.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The build is no release: it carries the plans the example's two
+	// releases recorded, as they are, and records nothing.
 	crate := filepath.Join(schemasRoot, "dist", "embedded", "notes-stack", "Desktop")
-	carried, err := os.ReadFile(filepath.Join(crate, "carried", "plans", "notes-db", "0001.json"))
-	if err != nil || !bytes.Equal(carried, recorded) {
-		t.Errorf("the binary does not carry the recorded plan as it is: %v", err)
+	plans := filepath.Join(stackDir, "plans", "Desktop", "notes-db")
+	for _, plan := range []string{"0001.json", "0002.json"} {
+		recorded, err := os.ReadFile(filepath.Join(plans, plan))
+		if err != nil {
+			t.Fatal(err)
+		}
+		carried, err := os.ReadFile(filepath.Join(crate, "carried", "plans", "notes-db", plan))
+		if err != nil || !bytes.Equal(carried, recorded) {
+			t.Errorf("the binary does not carry the recorded plan %s as it is: %v", plan, err)
+		}
 	}
-	if plans, _ := filepath.Glob(filepath.Join(stackDir, "plans", "Desktop", "notes-db", "*.json")); len(plans) != 1 {
-		t.Errorf("a build that is no release recorded a plan: %v", plans)
+	if recorded, _ := filepath.Glob(filepath.Join(plans, "*.json")); len(recorded) != 2 {
+		t.Errorf("a build that is no release recorded a plan: %v", recorded)
 	}
-	if !strings.Contains(out, "the binary carries 1 plan(s) of notes-db") {
+	if !strings.Contains(out, "the binary carries 2 plan(s) of notes-db") {
 		t.Errorf("stack build does not say what the binary carries:\n%s", out)
 	}
 
@@ -122,6 +129,24 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	if status, _, body := request(t, http.MethodGet, origin+"/api/notes-api/api/notes/"+created.Data.ID, "", nil); status != http.StatusOK || !strings.Contains(string(body), "two litres") {
 		t.Errorf("GET the note = %d %s", status, body)
 	}
+	// A request enqueues a message in its transaction, and the worker
+	// PinNotes, which the binary runs beside the server, handles it: the
+	// request's commit wakes it, and it pins the note.
+	if status, _, body := request(t, http.MethodPost, origin+"/api/notes-api/api/notes/"+created.Data.ID+"/pin-requests", "", nil); status != http.StatusOK {
+		t.Fatalf("POST a pin request = %d %s", status, body)
+	}
+	pinned := false
+	for deadline := time.Now().Add(15 * time.Second); !pinned && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		_, _, body := request(t, http.MethodGet, origin+"/api/notes-api/api/notes/"+created.Data.ID, "", nil)
+		pinned = strings.Contains(string(body), `"pinned":true`)
+	}
+	if !pinned {
+		t.Errorf("the worker did not pin the note the request asked for:\n%s", first.log.String())
+	}
+	if log := first.log.String(); !strings.Contains(log, `"msg":"worker started"`) || !strings.Contains(log, `"worker":"notes-api-pin-notes"`) || !strings.Contains(log, `"msg":"message handled"`) {
+		t.Errorf("the binary's log does not show its worker handling the message:\n%s", log)
+	}
+
 	// notes-digest, an API of another server of the binary, counts the
 	// notes by calling notes-api through its SDK, in the process, with its
 	// server's loopback credential, which notes-api's service clause
@@ -169,6 +194,51 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 		t.Errorf("the notes after a restart = %d %s, want the note the first run wrote", status, body)
 	}
 	second.stop(t)
+	if log := second.log.String(); !strings.Contains(log, `"msg":"worker stopped"`) {
+		t.Errorf("the worker did not stop with the binary:\n%s", log)
+	}
+
+	// A file an earlier release wrote: the first release's plan alone,
+	// applied by the migration runner, as that release's binary applied
+	// it. The binary takes it forward by the second plan, which adds the
+	// queue, and serves it.
+	earlier := filepath.Join(t.TempDir(), "data")
+	file := filepath.Join(earlier, "databases", "notes_db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := buildMigrateRunner(t, repoRoot)
+	apply := exec.Command(runner, "apply", "--plan", filepath.Join(plans, "0001.json"), "--phase", "all", "--database-url", "sqlite:"+file)
+	if output, err := apply.CombinedOutput(); err != nil {
+		t.Fatalf("apply the first release's plan: %v\n%s", err, output)
+	}
+	third := startBinary(t, binary, earlier, port)
+	log := third.wait(t, origin)
+	if strings.Contains(log, "from an empty database") || strings.Count(log, "applying plan") != 1 {
+		t.Errorf("the binary did not take the earlier release's file forward by the second plan alone:\n%s", log)
+	}
+	status, _, body = request(t, http.MethodPost, origin+"/api/notes-api/api/notes", `{"title":"eggs"}`, nil)
+	if err := json.Unmarshal(body, &created); status != http.StatusOK || err != nil {
+		t.Fatalf("POST a note on the migrated file = %d %s (%v)", status, body, err)
+	}
+	if status, _, body := request(t, http.MethodPost, origin+"/api/notes-api/api/notes/"+created.Data.ID+"/pin-requests", "", nil); status != http.StatusOK {
+		t.Errorf("POST a pin request on the migrated file = %d %s", status, body)
+	}
+	third.stop(t)
+}
+
+// buildMigrateRunner builds superschematic-migrate, which holds the SQLite
+// driver the compiler's module leaves out, and returns its path.
+func buildMigrateRunner(t *testing.T, repoRoot string) string {
+	t.Helper()
+	runner := filepath.Join(t.TempDir(), "superschematic-migrate")
+	build := exec.Command("go", "build", "-o", runner, "./cmd/superschematic-migrate")
+	build.Dir = filepath.Join(repoRoot, "runtime", "migrate", "go")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build superschematic-migrate: %v\n%s", err, output)
+	}
+	return runner
 }
 
 // runErr runs the installed binary's command line with args, and returns
@@ -313,15 +383,7 @@ func TestStackDevRunsEmbeddedNotesAsOneProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The migration runner, which holds the SQLite driver the compiler's
-	// module leaves out.
-	runner := filepath.Join(t.TempDir(), "superschematic-migrate")
-	build := exec.Command("go", "build", "-o", runner, "./cmd/superschematic-migrate")
-	build.Dir = filepath.Join(repoRoot, "runtime", "migrate", "go")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build superschematic-migrate: %v\n%s", err, output)
-	}
+	runner := buildMigrateRunner(t, repoRoot)
 	t.Setenv("SUPERSCHEMATIC_MIGRATE", runner)
 	example := filepath.Join(repoRoot, "examples", "embedded-notes")
 	t.Chdir(example)
@@ -374,7 +436,7 @@ func TestStackDevRunsEmbeddedNotesAsOneProcess(t *testing.T) {
 		t.Fatalf("stack dev did not stop:\n%s", log.String())
 	}
 	got := log.String()
-	for _, want := range []string{"migrate notes-db: 1 steps to model", "is one binary", `"plans":0`} {
+	for _, want := range []string{"migrate notes-db: ", " steps to model", "is one binary", `"plans":0`, `"msg":"worker started"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stack dev's output lacks %q:\n%s", want, got)
 		}

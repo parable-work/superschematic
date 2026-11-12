@@ -223,6 +223,34 @@ func TestACallBetweenServersCarriesTheCallersLoopbackKey(t *testing.T) {
 	}
 }
 
+// TestAWorkerRunsInsideTheBinary: a Rust worker of an API of the
+// environment is placed on embedded.worker, inside the binary, and
+// reaches its queue's database through the file (D116).
+func TestAWorkerRunsInsideTheBinary(t *testing.T) {
+	svcs := services()
+	service(svcs, notesDB.Name).Queues = []string{"NoteSaved"}
+	service(svcs, notesAPI.Name).Workers = []ir.Worker{{Name: "IndexNotes", Queue: "NoteSaved"}}
+	env := mustResolve(t, notes(), svcs)
+	var worker *ir.ResolvedDeployable
+	for _, d := range env.Deployables {
+		if d.Kind == ir.DeployableWorker {
+			worker = d
+		}
+	}
+	if worker == nil || worker.Platform != embedded.Worker || !worker.InBinary() || worker.Worker == nil || worker.Worker.Instances != 1 {
+		t.Fatalf("worker = %+v, want one instance on %s inside the binary", worker, embedded.Worker)
+	}
+	var url any
+	for _, b := range worker.Bindings {
+		if value, ok := b.Value.(map[string]any); ok && b.Source == ir.BindingDerived && value["url"] != nil {
+			url = value["url"]
+		}
+	}
+	if url != "sqlite:databases/notes_db.sqlite" {
+		t.Errorf("the worker reaches its queue at %v, want the database's file under the data directory", url)
+	}
+}
+
 // TestResolutionRefusesWhatTheBinaryCannotHold: each thing an embedded
 // environment may not hold is refused by name (D116).
 func TestResolutionRefusesWhatTheBinaryCannotHold(t *testing.T) {

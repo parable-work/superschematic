@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -27,11 +28,14 @@ import (
 // API's EnvConfig, opens each file once for every API on it, builds each
 // API's Deps and calls its `create`, and gives its host `handle`, which
 // sends a request under `/api/<service>` to that API's `handle` and
-// answers any other path from the site, on one origin (D91), and `close`.
+// answers any other path from the site, on one origin (D91), each
+// worker's `drain`, and `close`. A worker is its queues over the file the
+// binary opened (the HTTP runtime's SqliteWorker), drained on connections
+// of the worker's own.
 // A call from one API of the binary to another is the SDK's, over the
 // HTTP runtime's in-process transport, with the loopback credential of
 // the caller's server (docs/stack-model.md, section 9.9). main.rs serves
-// `handle` on 127.0.0.1 at $PORT.
+// `handle` on 127.0.0.1 at $PORT and runs each worker's loop.
 //
 // The stack's build writes Cargo.toml, src/lib.rs and src/main.rs. What a
 // binary carries, its plans and its site's files, is `stack build
@@ -76,6 +80,18 @@ type EmbeddedServerInput struct {
 	APIs []RustAPIInput
 }
 
+// EmbeddedWorkerInput is one worker of the environment that runs: its
+// deployable, the API that declares it, its @worker or @behaviorWorker
+// class, and how many messages it handles at a time and how long it lets
+// its running handlers finish, as the environment resolves them.
+type EmbeddedWorkerInput struct {
+	Name         string
+	API          string
+	Class        string
+	Concurrency  int
+	GraceSeconds int
+}
+
 // EmbeddedDatabaseInput is one DB schema a database of the environment
 // hosts: its service and its file, relative to the binary's data
 // directory.
@@ -118,10 +134,10 @@ type EmbeddedInput struct {
 	Port int
 
 	// Servers are the environment's servers, by name, each with the APIs
-	// it serves, sorted by service. Workers names the environment's
-	// workers that run, which the binary does not hold yet.
+	// it serves, sorted by service. Workers are the environment's workers
+	// that run, by name.
 	Servers []EmbeddedServerInput
-	Workers []string
+	Workers []EmbeddedWorkerInput
 
 	// Databases are the DB schemas the environment's databases host, by
 	// service.
@@ -168,6 +184,9 @@ type EmbeddedCrate struct {
 
 	// Stores are the databases' files, by service.
 	Stores []*EmbeddedStore
+
+	// Workers are the environment's workers, by name.
+	Workers []*EmbeddedWorker
 
 	// Bound are the variables the binary sets when the process's
 	// environment leaves them unset, by name.
@@ -236,6 +255,139 @@ type EmbeddedAPI struct {
 	// Disabled are the memory stores its Deps hold, each off in the
 	// environment (D75).
 	Disabled []RustMemoryStoreUse
+
+	// WorkerDeps and Workers are the variables of the Deps its workers are
+	// built from and of the implementation's Workers, set when a worker of
+	// it calls the implementation: a @worker, or a @behaviorWorker whose
+	// table's behaviors emit events (D104).
+	WorkerDeps string
+	Workers    string
+}
+
+// EmbeddedWorker is a worker of the binary: its deployable, its class and
+// the API that declares it, the file its queues are claimed on, and the
+// variables its queues and the worker are held in.
+type EmbeddedWorker struct {
+	Name  string
+	Class string
+	API   *EmbeddedAPI
+	Store *RustDatabase
+
+	Var    string
+	Queues string
+
+	// Handlers is the variable of the worker's handle on the
+	// implementation's Workers, empty for a behavior worker whose table's
+	// behaviors emit no events, which calls no implementation.
+	Handlers string
+
+	// Func is the function that builds the queues of a @worker, whose
+	// method Method handles each message of Queue: Message is the
+	// message's type and Descriptor the constant that holds the queue's
+	// descriptor, through the API crate. Empty for a behavior worker.
+	Func       string
+	Method     string
+	Queue      string
+	Message    string
+	Descriptor string
+
+	// Behavior is the function of the API crate's behaviors module that
+	// builds a @behaviorWorker's queues (D103), which takes the
+	// implementation's Workers when Emits; QueueNames are those queues, as
+	// the worker's log names them.
+	Behavior   string
+	Emits      bool
+	QueueNames string
+
+	Concurrency  int
+	GraceSeconds int
+}
+
+// QueuesLets are the statements that build the worker's queues: for a
+// worker that calls the implementation, a handle of its own on the
+// implementation's Workers first, which the queues' handlers keep.
+func (w *EmbeddedWorker) QueuesLets() []string {
+	fn := w.Behavior
+	if w.Func != "" {
+		fn = w.Func
+	}
+	if w.Handlers == "" {
+		return []string{rustLetCall(w.Queues, fn, "?")}
+	}
+	return []string{
+		rustLetCall(w.Handlers, "Arc::clone", "", "&"+w.API.Workers),
+		rustLetCall(w.Queues, fn, "?", w.Handlers),
+	}
+}
+
+// WorkerLet is the statement that joins the worker's queues with the file
+// they are claimed on.
+func (w *EmbeddedWorker) WorkerLet() string {
+	return rustLetCall(w.Var, "Worker::new", "", rustString(w.Name), w.Queues, "&"+w.Store.Var, fmt.Sprint(w.Concurrency), fmt.Sprint(w.GraceSeconds))
+}
+
+// Signature is the first line, or lines, of the function that builds a
+// @worker's queues, as rustfmt lays them out.
+func (w *EmbeddedWorker) Signature() string {
+	param := "workers: Arc<dyn " + w.API.Alias + "::Workers>"
+	ret := ") -> Result<SqliteWorker, Failure> {"
+	if line := "fn " + w.Func + "(" + param + ret; len(line) <= rustWidth {
+		return line
+	}
+	return "fn " + w.Func + "(\n    " + param + ",\n" + ret
+}
+
+// DefinitionLet is the statement that parses the queue's descriptor.
+func (w *EmbeddedWorker) DefinitionLet() string {
+	return rustLetChain("definition", "QueueDefinition::parse("+w.Descriptor+")", `map_err(|err| format!("queue `+w.Queue+" of "+w.Store.Service+`: {err}"))?`)
+}
+
+// DepsLet is the statement that builds the API's Deps in the variable
+// name: its configuration, its database's open file, a client per API it
+// calls and each memory store, which is off.
+func (a *EmbeddedAPI) DepsLet(name string) string {
+	const indent = "        "
+	lines := []string{"    let " + name + " = " + a.Alias + "::Deps {"}
+	if a.Config != "" {
+		lines = append(lines, indent+"config: "+a.Config+".clone(),")
+	}
+	if a.Database != nil {
+		lines = append(lines, indent+"db: "+a.Database.Var+".clone(),")
+	}
+	for _, held := range a.Holds {
+		lines = append(lines, indent+held.Field+": "+held.Client.Var+".clone(),")
+	}
+	for _, store := range a.Disabled {
+		lines = append(lines, indent+store.Field+": Arc::clone(&"+store.Store.Var+"),")
+	}
+	return strings.Join(append(lines, indent+"span: logging::api_span("+rustString(a.Service)+"),", "    };"), "\n")
+}
+
+// ServerDepsLet is the statement that builds the Deps the API's
+// implementation is created from.
+func (a *EmbeddedAPI) ServerDepsLet() string { return a.DepsLet(a.Deps) }
+
+// WorkerDepsLet is the statement that builds the Deps the API's workers
+// are created from.
+func (a *EmbeddedAPI) WorkerDepsLet() string { return a.DepsLet(a.WorkerDeps) }
+
+// EmbeddedLet is the expression open returns: the binary's APIs, and its
+// workers when it has any, as rustfmt lays the struct out.
+func (c *EmbeddedCrate) EmbeddedLet() string {
+	if len(c.Workers) == 0 {
+		return "    Ok(Embedded { apis })"
+	}
+	vars := make([]string, len(c.Workers))
+	for i, w := range c.Workers {
+		vars[i] = w.Var
+	}
+	const indent = "        "
+	list := indent + "workers: vec![" + strings.Join(vars, ", ") + "],"
+	// rustfmt keeps an array on one line while it takes sixty columns.
+	if len(strings.Join(vars, ", "))+len("vec![]") > rustChainWidth || len(list) > rustWidth {
+		list = indent + "workers: vec![\n" + indent + "    " + strings.Join(vars, ",\n"+indent+"    ") + ",\n" + indent + "],"
+	}
+	return "    Ok(Embedded {\n" + indent + "apis,\n" + list + "\n    })"
 }
 
 // EmbeddedCall is a client in an API's Deps.
@@ -275,16 +427,13 @@ type EmbeddedStore struct {
 }
 
 // PlanEmbedded plans the crate of an environment's one binary. It refuses
-// by name what the binary does not hold: a worker, a database that is no
-// SQLite file, an engine, a bucket, a memory store that is on, an API over
+// by name what the binary does not hold: a database that is no SQLite
+// file, an engine, a bucket, a memory store that is on, an API over
 // the user model, and two servers that bind one variable to two values.
 func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 	where := fmt.Sprintf("stack %s: environment %s builds as one binary (D116)", in.Stack, in.Environment)
 	if in.Paths.MigrateRust == "" {
 		return nil, fmt.Errorf("%s, whose crate depends on the migration runner's checkout, superschematic-migrate, and the naming file's [paths] migrate_rust is unset", where)
-	}
-	if len(in.Workers) > 0 {
-		return nil, fmt.Errorf("%s, and runs %s %s, which it does not hold yet: the binary runs a worker through its drain, which the embedded crate does not call; turn the worker off in the environment with `enabled: false`", where, plural(len(in.Workers), "worker"), strings.Join(in.Workers, ", "))
 	}
 	if len(in.Servers) == 0 {
 		return nil, fmt.Errorf("%s, and has no server: a binary serves at least one API", where)
@@ -351,7 +500,7 @@ func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 	}
 	// The names the library declares beside the plan's.
 	taken := rustNames{}
-	for _, name := range append(slices.Clone(rustReserved), "apis", "data", "options", "request", "site") {
+	for _, name := range append(slices.Clone(rustReserved), "apis", "data", "options", "request", "site", "workers", "definition", "handle") {
 		taken[name] = true
 	}
 	for _, a := range server.APIs {
@@ -434,6 +583,64 @@ func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 		if api.ServiceAuthenticator != "" {
 			api.CallersVar = taken.take(rustStem(api.Service) + "_callers")
 		}
+	}
+	outputs := map[string]*rustrestgen.APIOutput{}
+	for _, a := range plan.APIs {
+		outputs[a.Output.SchemaName] = a.Output
+	}
+	for _, in := range in.Workers {
+		api, o := wired[in.API], outputs[in.API]
+		if api == nil {
+			return nil, fmt.Errorf("%s, and worker %s is %s of %s, which no server of the environment serves: a binary runs the workers of the APIs it holds", where, in.Name, in.Class, in.API)
+		}
+		named := func(w rustrestgen.WorkerInfo) bool { return w.Name == in.Class }
+		w := &EmbeddedWorker{
+			Name:         in.Name,
+			Class:        in.Class,
+			API:          api,
+			Store:        api.Database,
+			Concurrency:  max(in.Concurrency, 1),
+			GraceSeconds: in.GraceSeconds,
+		}
+		if w.GraceSeconds <= 0 {
+			w.GraceSeconds = ir.DefaultWorkerGraceSeconds
+		}
+		if w.Store == nil || !w.Store.SQLite {
+			return nil, fmt.Errorf("%s, and worker %s of %s claims a queue, and %s is on no SQLite file of the binary", where, in.Name, in.API, in.API)
+		}
+		snake := rustutil.ToSnakeCase(in.Class)
+		switch i, b := slices.IndexFunc(o.Workers, named), slices.IndexFunc(o.BehaviorWorkers, named); {
+		case i >= 0:
+			info := o.Workers[i]
+			if o.Deps.DatabaseTypesCrate == "" {
+				return nil, fmt.Errorf("%s, and worker %s of %s claims queue %s of %s, whose Rust types the API crate does not re-export as %s", where, in.Name, in.API, info.Queue, w.Store.Service, rustrestgen.DatabaseTypesModule)
+			}
+			types := api.Alias + "::" + rustrestgen.DatabaseTypesModule + "::"
+			w.Func = taken.take(snake + "_queues")
+			w.Method, w.Queue = info.Method, info.Queue
+			w.Message, w.Descriptor = types+info.Queue, types+info.QueueConst
+		case b >= 0:
+			info := o.BehaviorWorkers[b]
+			w.Behavior = api.Alias + "::behaviors::" + snake + "_worker"
+			w.Emits = info.Behavior != nil && info.Behavior.Emits()
+			names := make([]string, len(info.BehaviorQueues))
+			for j, q := range info.BehaviorQueues {
+				names[j] = q.Queue
+			}
+			w.QueueNames = strings.Join(names, ", ")
+		default:
+			return nil, fmt.Errorf("%s, and worker %s runs %s of %s, which declares no such worker", where, in.Name, in.Class, in.API)
+		}
+		if w.Func != "" || w.Emits {
+			if api.Workers == "" {
+				api.WorkerDeps = taken.take(rustStem(api.Service) + "_worker_deps")
+				api.Workers = taken.take(rustStem(api.Service) + "_workers")
+			}
+			w.Handlers = taken.take(snake + "_handlers")
+		}
+		w.Queues = taken.take(snake + "_worker_queues")
+		w.Var = taken.take(snake + "_worker")
+		c.Workers = append(c.Workers, w)
 	}
 	files := map[string]string{}
 	for _, d := range in.Databases {
@@ -569,6 +776,18 @@ func (c *EmbeddedCrate) Configured() bool {
 	return slices.ContainsFunc(c.Wired, func(a *EmbeddedAPI) bool { return a.Config != "" })
 }
 
+// QueueWorkers are the binary's @worker workers, each of which has a
+// function that builds its queues.
+func (c *EmbeddedCrate) QueueWorkers() []*EmbeddedWorker {
+	var out []*EmbeddedWorker
+	for _, w := range c.Workers {
+		if w.Func != "" {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 // OpensFiles reports whether an API of the binary is on a database.
 func (c *EmbeddedCrate) OpensFiles() bool { return len(c.Files) > 0 }
 
@@ -601,6 +820,9 @@ func (c *EmbeddedCrate) LibUses() []string {
 	if c.Loopbacks() {
 		stackconfig = append(stackconfig, "SERVICE_AUTHORIZATION_HEADER")
 	}
+	if slices.ContainsFunc(c.Workers, func(w *EmbeddedWorker) bool { return w.Func != "" }) {
+		uses = append(uses, "use "+runtime+"::queue::QueueDefinition;")
+	}
 	switch len(stackconfig) {
 	case 0:
 	case 1:
@@ -608,7 +830,13 @@ func (c *EmbeddedCrate) LibUses() []string {
 	default:
 		uses = append(uses, "use "+runtime+"::stackconfig::{"+strings.Join(stackconfig, ", ")+"};")
 	}
+	if len(c.Workers) > 0 {
+		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "DrainOptions", "Drained", "SqliteWorker", "Wake"}))
+	}
 	var root []string
+	if slices.ContainsFunc(c.Workers, func(w *EmbeddedWorker) bool { return w.Func != "" }) {
+		root = append(root, "block_on")
+	}
 	if c.ServiceAuth() {
 		root = append(root, "JwtServiceAuthenticator")
 	}
@@ -617,6 +845,9 @@ func (c *EmbeddedCrate) LibUses() []string {
 	}
 	if c.ServiceAuth() {
 		root = append(root, "ServiceAuthConfig")
+	}
+	if len(c.Workers) > 0 {
+		root = append(root, "Shutdown")
 	}
 	if len(root) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime, root))
@@ -936,12 +1167,4 @@ func SiteContentType(name string) string {
 		return t
 	}
 	return "application/octet-stream"
-}
-
-// plural is n and noun, in the plural unless n is one.
-func plural(n int, noun string) string {
-	if n == 1 {
-		return "its " + noun
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
 }

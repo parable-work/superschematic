@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -316,4 +318,178 @@ func TestEmbeddedCrateBuilds(t *testing.T) {
 			t.Fatalf("cargo %s in %s: %v\n%s", strings.Join(args, " "), out, err, output)
 		}
 	}
+}
+
+// embeddedWorkerGoldenRoot holds the crates of binaries with a behavior
+// worker in them (D116), a directory per worker.
+const embeddedWorkerGoldenRoot = "testdata/golden/embedded-worker"
+
+// embeddedInput is the crate of a binary that holds the worker's API, its
+// server and the worker, over the database's SQLite file, as the stack's
+// build reads it from an environment that builds as one binary.
+func (w rustBehaviorWorkerOnSQLite) embeddedInput(in servergen.RustInput, out string) servergen.EmbeddedInput {
+	f := w.fixture
+	file := "databases/" + strings.ReplaceAll(f.db, "-", "_") + ".sqlite"
+	paths := in.Paths
+	paths.MigrateRust = filepath.Join(filepath.Dir(paths.HTTPRuntimeRust), "..", "migrate", "rust")
+	return servergen.EmbeddedInput{
+		Stack:       in.Stack,
+		Environment: "Desktop",
+		Dir:         servergen.EmbeddedDir(out, in.Stack, "Desktop"),
+		OutputRoot:  out,
+		Port:        8080,
+		Servers:     []servergen.EmbeddedServerInput{{Name: f.api, APIs: in.APIs}},
+		Workers: []servergen.EmbeddedWorkerInput{{
+			Name: w.server, API: f.api, Class: w.name, Concurrency: 2, GraceSeconds: 5,
+		}},
+		Databases:      []servergen.EmbeddedDatabaseInput{{Service: f.db, File: file}},
+		Bound:          []servergen.EmbeddedVariable{{Name: f.databaseKey + "_URL", Value: "sqlite:" + file, Server: f.api}},
+		Naming:         in.Naming,
+		RepositoryRoot: in.RepositoryRoot,
+		SDKDirs:        in.SDKDirs,
+		Paths:          paths,
+	}
+}
+
+// TestEmbeddedCrateWithABehaviorWorker: the crate of a binary whose
+// environment runs a behavior worker (D116) builds the worker's queues by
+// the function the API crate's behaviors module holds, over the file the
+// binary opened, and gives its host the worker: its drain, for a host with
+// no async runtime, and the loop over it, which main.rs runs beside the
+// server and stops within the worker's grace. TicketTimers needs no
+// implementation; ProblemWakeUps, whose table's Schedules emits events,
+// takes the implementation's Workers, built from Deps of their own. Each
+// file is laid out as rustfmt lays it out, and the crate passes clippy
+// against the API crate, the database's Rust types and the checkout's
+// crates, unless in -short mode or without cargo. Regenerate with:
+//
+//	go test ./internal/generator/servergen -run TestEmbeddedCrateWithABehaviorWorker -update
+func TestEmbeddedCrateWithABehaviorWorker(t *testing.T) {
+	for _, w := range rustBehaviorWorkersOnSQLite {
+		t.Run(w.name, func(t *testing.T) {
+			repoRoot := testpaths.TempDir(t)
+			out := filepath.Join(repoRoot, "schemas", "dist")
+			paths := rustFakePaths(repoRoot)
+			paths.RulesAdapterRust = filepath.Join(repoRoot, "runtime", "engine", "rust", "rules-adapter")
+			paths.RulesBehaviorsRust = filepath.Join(repoRoot, "runtime", "engine", "rust", "rules-behaviors")
+			crate := w.fixture.onSQLite(t, w.fixture.apiCrate(t, out, paths))
+			in := w.embeddedInput(w.fixture.workerInput(t, repoRoot, out, paths, crate, w.name, w.server), out)
+			c, err := servergen.PlanEmbedded(in)
+			if err != nil {
+				t.Fatalf("PlanEmbedded: %v", err)
+			}
+			if err := servergen.WriteEmbedded(c, in.Dir); err != nil {
+				t.Fatal(err)
+			}
+			files := map[string]string{}
+			for _, file := range []string{servergen.RustManifestFile, servergen.RustMainFile, servergen.EmbeddedLibFile} {
+				files[filepath.FromSlash(file)] = filepath.Join(in.Dir, filepath.FromSlash(file))
+			}
+			compareGoldens(t, filepath.Join(embeddedWorkerGoldenRoot, w.server), files)
+			read := func(file string) string {
+				data, err := os.ReadFile(filepath.Join(in.Dir, filepath.FromSlash(file)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(data)
+			}
+			lib, main := read(servergen.EmbeddedLibFile), read(servergen.RustMainFile)
+			stem := strings.ReplaceAll(w.fixture.api, "-", "_")
+			// The function of the API crate's behaviors module that builds
+			// the worker's queues: its class in snake case.
+			var snake strings.Builder
+			for i, r := range w.name {
+				if r >= 'A' && r <= 'Z' {
+					if i > 0 {
+						snake.WriteByte('_')
+					}
+					r += 'a' - 'A'
+				}
+				snake.WriteRune(r)
+			}
+			worker := snake.String() + "_worker"
+			wants := []string{
+				"pub fn workers(&self) -> &[Worker] {",
+				"pub fn drain(",
+				"pub async fn run(&self, shutdown: Shutdown) -> Result<(), Failure> {",
+				"use superschematic_http_runtime::worker::{self, DrainOptions, Drained, SqliteWorker, Wake};",
+				`Worker::new(`,
+				`"` + w.server + `",`,
+			}
+			if w.emits {
+				wants = append(wants,
+					stem+"_impl::create_workers("+stem+"_worker_deps)",
+					"Arc::clone(&"+stem+"_workers);",
+					stem+"_api::behaviors::"+worker+"(",
+				)
+			} else {
+				wants = append(wants, stem+"_api::behaviors::"+worker+"()?;")
+			}
+			for _, want := range wants {
+				if !strings.Contains(lib, want) {
+					t.Errorf("lib.rs does not contain %q:\n%s", want, lib)
+				}
+			}
+			if !w.emits && strings.Contains(lib, "create_workers") {
+				t.Errorf("lib.rs builds the implementation's workers, which a behavior worker of a table that emits no events has none of:\n%s", lib)
+			}
+			for _, want := range []string{"let shutdown = Shutdown::new();", "embedded.workers()[index].run(shutdown).await", "shutdown.cancel();"} {
+				if !strings.Contains(main, want) {
+					t.Errorf("main.rs does not contain %q:\n%s", want, main)
+				}
+			}
+			if rustfmt, err := exec.LookPath("rustfmt"); err == nil {
+				for _, file := range []string{servergen.EmbeddedLibFile, servergen.RustMainFile} {
+					source := filepath.Join(in.Dir, filepath.FromSlash(file))
+					if diff, err := exec.Command(rustfmt, "--edition", "2021", "--check", source).CombinedOutput(); err != nil {
+						t.Errorf("rustfmt lays out %s otherwise: %v\n%s", source, err, diff)
+					}
+				}
+			}
+
+			if testing.Short() {
+				return
+			}
+			cargo, err := exec.LookPath("cargo")
+			if err != nil {
+				t.Log("cargo not available; the crate is not compiled")
+				return
+			}
+			w.checkEmbeddedCompiles(t, cargo)
+		})
+	}
+}
+
+// checkEmbeddedCompiles writes the binary's crate, the API crate it holds
+// and the Rust types both read under a repository of their own with this
+// checkout's runtimes, with the implementation's scaffold, and lints the
+// crate with clippy, warnings denied.
+func (w rustBehaviorWorkerOnSQLite) checkEmbeddedCompiles(t *testing.T, cargo string) {
+	t.Helper()
+	paths := testpaths.Local(t)
+	names := naming.Default()
+	repoRoot := testpaths.TempDir(t)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	crate := w.fixture.onSQLite(t, w.fixture.apiCrate(t, out, paths))
+	w.fixture.writeCrates(t, out, paths, crate)
+	// The scaffold in the implementation's directory, which the plan
+	// reads, and in its mirror, which the crate builds against.
+	apiDir := apiDirOf(out, crate)
+	for _, dir := range []string{filepath.Join(repoRoot, "services", crate.output.SchemaName, "rust"), servergen.MirrorDir(out, crate.output.SchemaName)} {
+		if _, err := rustrestgen.WriteImplementationScaffold(crate.output, dir, apiDir, paths, names); err != nil {
+			t.Fatalf("write the implementation's scaffold: %v", err)
+		}
+	}
+	in := w.embeddedInput(w.fixture.workerInput(t, repoRoot, out, paths, crate, w.name, w.server), out)
+	c, err := servergen.PlanEmbedded(in)
+	if err != nil {
+		t.Fatalf("PlanEmbedded: %v", err)
+	}
+	if err := servergen.WriteEmbedded(c, in.Dir); err != nil {
+		t.Fatal(err)
+	}
+	// The crate is a member of the output root's workspace, which a build
+	// writes; here it is a workspace of its own.
+	appendManifest(t, in.Dir, "\n[workspace]\n\n"+testpaths.RustPatch(paths, names))
+	cargoCommand(t, cargo, in.Dir, rustTargetDir(t), "clippy", "--quiet", "--all-targets", "--", "-D", "warnings")
 }

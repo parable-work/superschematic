@@ -8,9 +8,10 @@ import {
   requireService,
   rest,
   source,
-  tableOperation
+  tableOperation,
+  worker
 } from "@superschematic/api";
-import { Note } from "@notes/notes-db";
+import { Note, PinRequested } from "@notes/notes-db";
 
 // A note as the API shows it.
 @source(Note)
@@ -97,3 +98,26 @@ export class NotesForServices {
     throw new Error("schema declaration only");
   }
 }
+
+// A request to pin a note, as the API answers it: the note it names.
+export abstract class PinRequest {
+  noteId: Identity.UUID;
+}
+
+// What the implementation writes itself: the one operation the tables do
+// not serve.
+export class Pins {
+  // Asks for a note to be pinned. The request is a message on notes-db's
+  // queue PinRequested, written in the request's transaction, which the
+  // worker PinNotes handles.
+  @rest(HttpMethod.POST, "notes/{id}/pin-requests")
+  @publicRoute
+  requestPin(id: Identity.UUID): PinRequest {
+    throw new Error("schema declaration only");
+  }
+}
+
+// Pins each note a PinRequested names. It runs inside the binary, beside
+// the server that enqueues its messages (D116).
+@worker({ queue: PinRequested })
+export abstract class PinNotes {}

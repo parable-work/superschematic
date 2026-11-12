@@ -21,8 +21,20 @@
 //! and any other path from the site's files, which the binary carries, so
 //! the site and the APIs share one origin (D91). [`Embedded::close`] lets
 //! go of every API and every file. A host that has a process of its own
-//! links this library and calls the three; `main.rs` is the host that
-//! serves `handle` on 127.0.0.1.
+//! links this library and calls them; `main.rs` is the host that serves
+//! `handle` on 127.0.0.1.
+{{- if .Workers }}
+//!
+//! [`Embedded::workers`] are the environment's workers, each its queues
+//! over the file the binary opened. [`Worker::drain`] is the worker as a
+//! function a host calls, with a connection of the worker's own
+//! ([`Worker::connect`]), the time and a limit: it claims and runs what is
+//! due and answers how many messages it ran and when the next falls due.
+//! It reads no clock and starts no task, so a host with no async runtime
+//! calls it on a thread of its own and sleeps until that time, or until a
+//! write this process commits to the file wakes it ([`Worker::wake`]).
+//! [`Worker::run`] is the loop over it on tokio, which `main.rs` runs.
+{{- end }}
 //!
 //! An API reads its configuration from the process's environment, as on
 //! any target. The binary carries what the environment binds, and `open`
@@ -55,6 +67,9 @@ mod carried;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
+{{- if .Workers }}
+use std::time::{Duration, SystemTime};
+{{- end }}
 
 use axum::body::Bytes;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, HOST, IF_NONE_MATCH};
@@ -197,11 +212,128 @@ fn hold<T>(slot: &RwLock<Option<T>>, api: Option<T>) {
     *slot.write().unwrap_or_else(PoisonError::into_inner) = api;
 }
 
-/// The environment's one process: every API of it, and each database's
-/// open file.
+/// The environment's one process: every API of it, each database's open
+/// file{{ if .Workers }}, and its workers{{ end }}.
 pub struct Embedded {
     apis: Arc<Apis>,
+{{- if .Workers }}
+    workers: Vec<Worker>,
+{{- end }}
 }
+{{- if .Workers }}
+
+/// A worker of the binary (D116): its queues, over its database's file.
+pub struct Worker {
+    name: &'static str,
+    queues: Arc<SqliteWorker>,
+    file: Arc<SqliteFile>,
+    concurrency: usize,
+    grace: Duration,
+}
+
+impl Worker {
+    /// The worker named `name` over `queues`, claimed on `file`, which
+    /// handles `concurrency` messages at a time under [`Worker::run`] and
+    /// lets its running handlers finish for `grace` seconds.
+    fn new(
+        name: &'static str,
+        queues: SqliteWorker,
+        file: &Arc<SqliteFile>,
+        concurrency: usize,
+        grace: u64,
+    ) -> Self {
+        Self {
+            name,
+            queues: Arc::new(queues),
+            file: Arc::clone(file),
+            concurrency,
+            grace: Duration::from_secs(grace),
+        }
+    }
+
+    /// The worker's deployable in the stack.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// How many messages the worker handles at a time under
+    /// [`Worker::run`], a connection each.
+    pub fn concurrency(&self) -> usize {
+        self.concurrency
+    }
+
+    /// Opens a connection of the worker's own to its database's file, for
+    /// [`Worker::drain`] to run on.
+    ///
+    /// # Errors
+    ///
+    /// The file could not be opened.
+    pub fn connect(&self) -> Result<sqlite::rusqlite::Connection, Failure> {
+        worker::drain::open(self.file.path())
+            .map_err(|err| format!("worker {}: {err}", self.name).into())
+    }
+
+    /// Claims and runs what is due of the worker's queues, up to `limit`
+    /// messages, on `connection`, and answers how many it ran and when the
+    /// next falls due. `now` is the host's time. It reads no clock of its
+    /// own and starts no task: a host with no async runtime calls it on a
+    /// thread of its own, and sleeps until that time or until
+    /// [`Worker::wake`] says this process committed a write.
+    ///
+    /// # Errors
+    ///
+    /// A claim or a read that failed; what ran before it stays run. A
+    /// handler's failure is no error of the drain: its message is failed,
+    /// and retried or marked dead as its queue says.
+    pub fn drain(
+        &self,
+        connection: &mut sqlite::rusqlite::Connection,
+        now: SystemTime,
+        limit: usize,
+    ) -> Result<Drained, Failure> {
+        self.queues
+            .drain(connection, now, limit)
+            .map_err(|err| format!("worker {}: {err}", self.name).into())
+    }
+
+    /// What wakes the worker between its drains: each write this process
+    /// commits to the worker's file. A write another process made is heard
+    /// at the next poll.
+    pub fn wake(&self) -> &Arc<Wake> {
+        self.file.wake()
+    }
+
+    /// The loop over the worker's drain on tokio, which `main.rs` runs: it
+    /// drains on [`Worker::concurrency`] connections of the worker's own
+    /// until `shutdown` is cancelled, then lets the running drains finish
+    /// for the worker's grace.
+    ///
+    /// # Errors
+    ///
+    /// The worker's connections could not be opened.
+    pub async fn run(&self, shutdown: Shutdown) -> Result<(), Failure> {
+        let connections = (0..self.concurrency)
+            .map(|_| self.connect())
+            .collect::<Result<Vec<_>, _>>()?;
+        tracing::info!(
+            worker = self.name,
+            queues = %self.queues.name(),
+            concurrency = self.concurrency,
+            "worker started"
+        );
+        let options = DrainOptions {
+            limit: worker::DEFAULT_DRAIN_LIMIT,
+            grace: self.grace,
+            poll: worker::DEFAULT_IDLE,
+        };
+        let queues = Arc::clone(&self.queues);
+        let wake = Some(Arc::clone(self.file.wake()));
+        worker::run_drain(queues, connections, wake, options, shutdown)
+            .await
+            .map_err(|err| format!("worker {}: {err}", self.name).into())
+    }
+}
+{{- end }}
 
 impl Embedded {
     /// Opens the data directory, migrates each database's file and builds
@@ -237,9 +369,16 @@ impl Embedded {
         }
         site(&request)
     }
+{{- if .Workers }}
+
+    /// The environment's workers, by name.
+    pub fn workers(&self) -> &[Worker] {
+        &self.workers
+    }
+{{- end }}
 
     /// Lets go of every API, and with them their files: a request after
-    /// it is answered 503.
+    /// it is answered 503.{{ if .Workers }} A host stops its workers' loops first.{{ end }}
     pub fn close(self) {
 {{- range .Wired }}
         hold(&self.apis.{{ .Slot }}, None);
@@ -318,21 +457,7 @@ async fn open(options: Options) -> Result<Embedded, Failure> {
 {{- range .Wired }}
 
     // {{ .Service }}: its implementation, built from its Deps.
-    let {{ .Deps }} = {{ .Alias }}::Deps {
-{{- if .Config }}
-        config: {{ .Config }}.clone(),
-{{- end }}
-{{- if .Database }}
-        db: {{ .Database.Var }}.clone(),
-{{- end }}
-{{- range .Holds }}
-        {{ .Field }}: {{ .Client.Var }}.clone(),
-{{- end }}
-{{- range .Disabled }}
-        {{ .Field }}: Arc::clone(&{{ .Store.Var }}),
-{{- end }}
-        span: logging::api_span({{ rustString .Service }}),
-    };
+{{ .ServerDepsLet }}
 {{ rustLet .Handlers (printf "%s::create(%s)" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"implementation of %s: {err}\"))?" .Service) }}
 {{- if .ServiceAuthenticator }}
     // It verifies a calling service's credential against its callers
@@ -358,14 +483,47 @@ async fn open(options: Options) -> Result<Embedded, Failure> {
 {{ .HoldCall }}
 {{- end }}
 
+{{- range .Wired }}
+{{- if .Workers }}
+
+    // {{ .Service }}'s workers, built from Deps of their own, as a worker's
+    // entrypoint builds them.
+{{ .WorkerDepsLet }}
+{{ rustLet .Workers (printf "%s::create_workers(%s)" .ImplAlias .WorkerDeps) ".await" (printf "map_err(|err| format!(\"workers of %s: {err}\"))?" .Service) }}
+{{- end }}
+{{- end }}
+{{- range .Workers }}
+
+    // Worker {{ .Name }}: {{ .Class }} of
+    // {{ .API.Service }}, whose queues are claimed on {{ .Store.Service }}'s file.
+{{- range .QueuesLets }}
+{{ . }}
+{{- end }}
+{{ .WorkerLet }}
+{{- end }}
+
     tracing::info!(
         stack = STACK,
         environment = ENVIRONMENT,
         data = %data.display(),
         "opened"
     );
-    Ok(Embedded { apis })
+{{ .EmbeddedLet }}
 }
+{{- range .QueueWorkers }}
+
+/// The queues of worker {{ .Name }}: {{ .Queue }} of {{ .Store.Service }}, each message
+/// handled by the implementation's method. The drain completes a message
+/// whose method answers `Ok`, and fails one whose method answers an error
+/// or panics, which the queue retries after its backoff or marks dead.
+{{ .Signature }}
+    type Message = {{ .Message }};
+{{ .DefinitionLet }}
+    // The method's future is driven where the drain runs.
+    let handle = move |message: Message| block_on(workers.{{ .Method }}(message));
+    Ok(SqliteWorker::new().queue(definition, handle)?)
+}
+{{- end }}
 
 /// Takes the file of `service` under `data` to the model the plans the
 /// binary carries for it end at, and creates it when it is missing.

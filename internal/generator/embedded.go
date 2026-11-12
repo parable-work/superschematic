@@ -103,8 +103,15 @@ func (r run) embeddedInput(stackName string, env *ir.ResolvedEnvironment) (serve
 		case !d.InBinary():
 			return in, fmt.Errorf("%s, and %s %s runs outside it, on platform %s: an environment that builds a binary holds every server and worker in it", where, d.Kind, d.Name, d.Platform)
 		case d.Kind == ir.DeployableWorker:
+			// A worker the environment turns off runs nothing (D53).
 			if d.Worker != nil && d.Worker.Instances > 0 {
-				in.Workers = append(in.Workers, d.Name)
+				in.Workers = append(in.Workers, servergen.EmbeddedWorkerInput{
+					Name:         d.Name,
+					API:          d.Worker.API,
+					Class:        d.Worker.Name,
+					Concurrency:  d.Worker.Concurrency,
+					GraceSeconds: d.Worker.GraceSeconds,
+				})
 			}
 		case d.Kind == ir.DeployableServer:
 			server := servergen.EmbeddedServerInput{Name: d.Name}
