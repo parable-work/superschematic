@@ -35,6 +35,10 @@ pub mod identity;
 mod jws;
 mod jwt;
 mod loopback;
+// An API's MCP endpoint (D81, D116): the stateless transport over a tool
+// set, a call's confirmation (D93, D98), and a router's tools as requests
+// to their routes.
+pub mod mcp;
 // The memory store an API lists (D75): the interface, a disabled and an
 // in-process store and the typed channels and keys, and with the
 // `memorystore-redis` feature the Redis client.
