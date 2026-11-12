@@ -566,8 +566,10 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 // behaviorfields.Expand), once the behaviors' own checks hold what that
 // relies on (verify.CheckBehaviors), so an index, a uniqueness, a display
 // field, a projection's column and @enqueueOnChange may name one as they
-// name the table's own; when those checks fail, the pass runs over the
-// schema as written and reports them among its findings. The API's
+// name the table's own; when those checks fail, the pass reports them
+// among its findings, over the schema as written but for the fields the
+// sound uses own (behaviorfields.ExpandFields), so a reference to one is
+// not reported beside the check that failed. The API's
 // @behaviorOperations sets are filled from its database the same way
 // (D103, behaviorops.Expand), once their checks pass
 // (verify.CheckBehaviorOperations), and its @behaviorWorker classes are
@@ -597,6 +599,14 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 				return nil, err
 			}
+		}
+	} else if owned := behaviorfields.ExpandFields(schema, reg); len(owned) > 0 {
+		// The checks failed, and the pass below reports why. The fields
+		// the sound uses own still join their tables, so the pass does
+		// not add, to a config the build refuses, a finding for each
+		// index or trigger that names one of them.
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
 		}
 	}
 	// The operations of a table's behaviors join their @behaviorOperations

@@ -132,7 +132,7 @@ type {{ $q.Method }}Page struct {
 }
 {{- end }}
 
-// {{ .Method }} runs the query {{ .Name }}{{ if .Doc }}: {{ .Doc }}{{ else }}.{{ end }}
+{{ .MethodDoc }}
 {{- if .Page }}
 // It reads a page in the order of its key, the page after page.After when
 // it is set.

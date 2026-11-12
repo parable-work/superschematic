@@ -10,15 +10,28 @@ sidebar:
 A field's type is a scalar from superscalar, imported in a schema file as
 `import { Contact, Generic, Identity } from "superscalar"` and written
 `Contact.Email`. Every generated decoder, in Go, TypeScript, Python and
-Rust, parses and checks the value the same way, and a DB column gets the
+Rust, holds the value to the same checks, and a DB column gets the
 SQL type below. Pick the narrowest scalar that fits before reaching for
 `Validate<T, { ... }>`: the scalar's checks come with it everywhere.
 
 Generated code names the scalar without its dot: `ContactEmail` in Go
 and TypeScript, over the base type in the table. The base types are
-Go / TypeScript / Python / Rust. *Normalizes* means the value is
-rewritten on parse (trimmed, lowercased, canonicalized) before it is
-checked and stored.
+Go / TypeScript / Python / Rust.
+
+*Normalizes* means the scalar has a canonical form, which superscalar's
+normalize rewrites a value to (trimmed, lowercased, canonicalized):
+`normalize<Scalar>Strict` in a TypeScript types package and
+`Normalize<Scalar>` in Go. The generated Go, TypeScript and Rust
+decoders do not normalize: each checks a value as it was sent against
+the checks in the table, so a scalar whose pattern is its canonical
+form's takes that form alone, as `Design.Color` takes `#FF5733FF` and
+refuses `#FF5733`. The Python models normalize a value before they
+check it. Normalize a value a person typed before sending it.
+
+`Generic.Text`, `Generic.Float64` and `Generic.Boolean` name a plain
+text, number and yes-or-no field. A TypeScript schema writes them
+`string`, `number` and `boolean`: superscalar's `Generic` namespace has
+no member for them.
 
 ## AgentSkill
 

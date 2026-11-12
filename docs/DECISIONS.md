@@ -17589,3 +17589,66 @@ and unit-tested in TypeScript, built and compiled in Go), a projection's
 read and list in TypeScript, and an `Encrypted<T>` column. Step 4, row
 rules through `by`, is not designed here and not built: an operation
 that reads or writes only the caller's rows is written by hand.
+
+## D107. A build holds a Timers deadline to its Workflow and reports a refused behavior config alone, a join table's name is its own, a claimed message holds a UUID in base62, and `init` names the behaviors' core (D53, D71, D79, D103 amended)
+
+Building an issue tracker on D106, eighteen tables with Workflow,
+Reactions, Timers and Seats behind a TypeScript API, met eight surprises
+that were the compiler's:
+- `init` wrote a naming file whose `[paths]` named no `rules_go` or
+  `rules_typescript` (D71), so the first table to compose a behavior left
+  the output root's workspace with no source for `@superschematic/rules`.
+  The stack's build said so, once per server, where it says why it wrote
+  no Dockerfile.
+- A cycle's deadline, `{ start: { field: "startsAt" }; then: { transition:
+  "active" } }`, checked and built. Every create of a cycle then answered
+  422 `invalid_schema`: `deadlines.begin.then names no from`. The build
+  held a Timers config to the rules that read the IR and left the rest to
+  the core's define check, at the first command (D103).
+- The same table's `@index(["team", "status"])` was reported beside
+  another Timers refusal as `key "status" names no field of Issue`. The
+  fields a behavior owns join their table once the behaviors' checks pass,
+  and the pass that reports a failed check ran over the table without
+  them.
+- A `@query` whose comment ran to two lines broke the Go ORM:
+  `queries.go` held the second line uncommented, and the build failed to
+  format it.
+- `labels: ManyToMany<Label>` on `Issue`, beside an explicit `IssueLabel`
+  table, built a `create.sql` that creates `issue_label` twice.
+- A TypeScript worker compared a message's `assigneeId` with a row's and
+  never matched: a claimed message held a UUID hyphenated, as Postgres
+  returns it, and a repository's row holds it in base62 (D79). The uuid
+  module's own header says every runtime path hands the types base62.
+- The scalar reference lists `Generic.Float64`, and a TypeScript schema
+  that writes it does not compile: superscalar's `Generic` namespace has no
+  member for the three scalars of a plain field.
+- The same page says a scalar that normalizes is rewritten on parse before
+  it is checked, and `Design.Color` refused `#ff8800`: the generated Go,
+  TypeScript and Rust decoders check a value as sent against the scalar's
+  pattern, which is its canonical form's. Only the Python models normalize
+  first.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `init` writes `rules_go`, `rules_typescript`, `rules_adapter_rust` and `rules_behaviors_rust` beside the paths it wrote, each when the checkout holds its directory. A generator reads one only for a database whose tables compose behaviors (D103), so a project with none builds as before. | Leaving them to the build's note, which a project meets at its first behavior, long after `init`, and only for the servers of a stack. |
+| `verify`'s `checkTimersConfig` holds each deadline to the Workflow as the core's `parse_deadline` does, in its words and its order: an `enters` state, a `then`'s transition and `from` states and an `until`'s states are states of the Workflow, a transition leads from each `from` state to the `then`'s, a field start names its `then`'s `from` and takes no `until.leaves`, an `until.leaves` names the state the deadline starts in and an `until.enters` another, and only a field start takes a negative `afterMs`. The cases are the core's own (`its_config_holds_each_start_then_and_until_to_the_type`). A Workflow whose config Workflow refuses is still the core's. | Linking the behaviors' core into the compiler to run its define check at a build: the CLI links superscalar's archive alone (D82), and a second archive would end the build without Rust. A server that runs every table's define check as it starts, which still fails after the build. |
+| When the behaviors' checks fail, the fields the sound uses own still join their tables before the pass that reports them (`behaviorfields.ExpandFields`): no sub-table and no queue, and a table one of whose uses cannot be expanded is left as written. An index, a uniqueness, a projection's column or an `@enqueueOnChange` that names such a field is then reported only when it is wrong itself. | Reporting the behaviors' findings alone, which hides the others a fix would meet next. Dropping findings by their text. |
+| The Go ORM writes a query's doc comment through `docComment`, wrapped, each line a comment. `fixture-queries-db`'s `categoryTotals` has one of two lines. | Collapsing the comment to one line, which no other generated comment does. |
+| `verify`'s `checkSQLNames` refuses a `@manyToMany` list whose join table, `<table>_<target's table>` as sqlgen names it, is a declared table's name or another list's join table, naming both and what to change. | Suffixing the second name, which would name a table after the order its fields were read in. An option that names the join table, for a list neither ORM reads yet. |
+| A claimed message holds a UUID in base62 in TypeScript: `claimOf` and `sqliteMemberValue` hand a `uuid` field through `uuidFromDb`, a list element by element. An enqueue still takes either form and writes it hyphenated. The Go and Rust clients are unchanged: their types hold a UUID, which serializes in base62. | Leaving a handler to convert, as `naming_postgres_test.go`'s script did with `uuidToDb`: a comparison that is silently false is the cost of forgetting. |
+| The scalar reference says what a decoder does: `Normalizes` names the scalar's canonical form and the function that rewrites a value to it; the Go, TypeScript and Rust decoders check a value as sent, and the Python models normalize first; and `Generic.Text`, `Generic.Float64` and `Generic.Boolean` are written `string`, `number` and `boolean` in a TypeScript schema. | Leaving a page that describes neither. |
+| The tables guide says a Seats sub-table holds a subject as its text, a user's id in base62, which equals the id a TypeScript row holds and which SQL cannot cast to a `uuid` column. | A SQL function that reads either form, added to every database with a behavior that keeps subjects. |
+
+Left: decoders that normalize in Go, TypeScript and Rust as the Python
+models do, a change to three generators and the parity vectors, which
+would let `Design.Color` take `#ff8800` and store `#FF8800FF`;
+superscalar's `Generic` namespace gaining the three plain scalars;
+Reactions' and Workflow's own config rules at a build, which are still
+the core's at the first command; and a join table either ORM reads.
+
+Status: built. `TestInitWritesASchemasRoot`; `TestTimersChecks` and
+`TestTimersConfigTheCoreTakes`; `TestARefusedBehaviorConfigReportsOnlyItself`;
+ormgen's and tsgen's goldens of `fixture-queries-db`; `TestJoinTableNames`;
+`queue-sqlite.test.ts`, and on Postgres
+`TestQueueParityOfGoTypeScriptAndRustOnPostgres` and
+`TestNamedTablesAcrossGoAndTypeScriptOnPostgres`.

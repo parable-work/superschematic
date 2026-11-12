@@ -82,6 +82,12 @@ func TestInitWritesASchemasRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.ToSlash(filepath.Join(fromRepo, "runtime/schema/go")), names.Paths.SchemaRuntimeGo)
 	assert.Equal(t, filepath.ToSlash(filepath.Join(fromRepo, "third_party/superscalar/go")), names.Paths.ScalarGo)
+	// The behaviors' core's modules (D103), which a table that composes a
+	// behavior needs in each language, whenever the project adds one.
+	assert.Equal(t, filepath.ToSlash(filepath.Join(fromRepo, "runtime/rules/go")), names.Paths.RulesGo)
+	assert.Equal(t, filepath.ToSlash(filepath.Join(fromRepo, "runtime/rules/typescript")), names.Paths.RulesTypeScript)
+	assert.Equal(t, filepath.ToSlash(filepath.Join(fromRepo, "runtime/engine/rust/rules-adapter")), names.Paths.RulesAdapterRust)
+	assert.Equal(t, filepath.ToSlash(filepath.Join(fromRepo, "runtime/engine/rust/rules-behaviors")), names.Paths.RulesBehaviorsRust)
 	assert.Empty(t, names.Paths.BuildContext, "the checkout does not hold the project")
 
 	assert.Contains(t, out, "Wrote the schemas root ./schemas:\n  superschematic.toml\n  tsconfig.base.json\n  .gitignore\n  services/\n")

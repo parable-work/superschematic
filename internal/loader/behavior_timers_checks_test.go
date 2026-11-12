@@ -166,11 +166,103 @@ func TestTimersChecks(t *testing.T) {
 		{"a field start of no date-time", func(_, ticket map[string]any) {
 			timersConfig(ticket, map[string]any{"deadlines": map[string]any{"remind": map[string]any{"start": map[string]any{"field": "title"}}}})
 		}, `type Ticket: behavior Timers config: deadlines.remind.start.field "title" is not a date-time field of Ticket: a deadline starts from the time a value holds`},
+		// The rest of the core's parse_deadline, in its words (its
+		// its_config_holds_each_start_then_and_until_to_the_type), which a
+		// build once let through to fail every command on the table.
+		{"an enters state the Workflow lacks", oneDeadline(map[string]any{"start": map[string]any{"enters": "gone"}}),
+			`type Ticket: behavior Timers config: deadlines.sla.start.enters "gone" is not a state of the type's Workflow (open, waiting, closed)`},
+		{"a negative afterMs on an entry", oneDeadline(map[string]any{"start": map[string]any{"enters": "open"}, "afterMs": -1}),
+			"type Ticket: behavior Timers config: deadlines.sla.afterMs is negative, which only a field start takes: a deadline that starts at the create or at an entry is not due before it"},
+		{"a then to no state", oneDeadline(map[string]any{"start": map[string]any{"enters": "open"}, "then": map[string]any{"transition": "gone"}}),
+			`type Ticket: behavior Timers config: deadlines.sla.then.transition "gone" is not a state of the type's Workflow (open, waiting, closed)`},
+		{"a then no transition leads to", oneDeadline(map[string]any{"start": map[string]any{"enters": "waiting"}, "then": map[string]any{"transition": "closed"}}),
+			`type Ticket: behavior Timers config: deadlines.sla.then: no transition of the type's Workflow leads from "waiting" to "closed"`},
+		{"a then from no state", oneDeadline(map[string]any{"start": map[string]any{"create": true}, "then": map[string]any{"transition": "closed", "from": []any{"gone"}}}),
+			`type Ticket: behavior Timers config: deadlines.sla.then.from names "gone", which is not a state of the type's Workflow (open, waiting, closed)`},
+		{"a then to the state it starts in", oneDeadline(map[string]any{"start": map[string]any{"enters": "open"}, "then": map[string]any{"transition": "open"}}),
+			`type Ticket: behavior Timers config: deadlines.sla.then moves the status from "open" to itself`},
+		{"a field start whose then names no from", oneDeadline(map[string]any{"start": map[string]any{"field": "visitAt"}, "then": map[string]any{"transition": "closed"}}),
+			"type Ticket: behavior Timers config: deadlines.sla.then names no from: a deadline that starts at a field is in no state of its own, so then.from names the states its move leaves"},
+		{"a field start that leaves a state", oneDeadline(map[string]any{"start": map[string]any{"field": "visitAt"}, "until": map[string]any{"leaves": "open"}}),
+			"type Ticket: behavior Timers config: deadlines.sla.until.leaves: a deadline that starts at a field is in no state of its own to leave; until.enters names the states that cancel it"},
+		{"an until.leaves of another state", oneDeadline(map[string]any{"start": map[string]any{"enters": "waiting"}, "until": map[string]any{"leaves": "open"}}),
+			`type Ticket: behavior Timers config: deadlines.sla.until.leaves "open" is not the state the deadline starts in, "waiting", which until.leaves cancels it on leaving`},
+		{"an until.leaves of a create start", oneDeadline(map[string]any{"start": map[string]any{"create": true}, "until": map[string]any{"leaves": "waiting"}}),
+			`type Ticket: behavior Timers config: deadlines.sla.until.leaves "waiting" is not the state the deadline starts in, "open", which until.leaves cancels it on leaving`},
+		{"an until.enters of the start state", oneDeadline(map[string]any{"start": map[string]any{"create": true}, "until": map[string]any{"enters": []any{"closed", "open"}}}),
+			`type Ticket: behavior Timers config: deadlines.sla.until.enters names "open", the state the deadline starts in, which would cancel it as it starts`},
+		{"an until.enters of no state", oneDeadline(map[string]any{"start": map[string]any{"field": "visitAt"}, "until": map[string]any{"enters": []any{"gone"}}}),
+			`type Ticket: behavior Timers config: deadlines.sla.until.enters "gone" is not a state of the type's Workflow (open, waiting, closed)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadTickets(t, tc.edit)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("LoadService = %v, want an error holding %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestARefusedBehaviorConfigReportsOnlyItself: a table whose Timers config
+// the build refuses, and whose index names the field its Workflow owns, is
+// reported for the config alone. The pass that reports it runs over the
+// fields the sound uses own, so the index is not also said to name no
+// field of the table.
+func TestARefusedBehaviorConfigReportsOnlyItself(t *testing.T) {
+	_, err := loadTickets(t, func(_, ticket map[string]any) {
+		ticket["indexes"] = []any{map[string]any{"keys": []any{"status", "title"}}}
+		timersConfig(ticket, map[string]any{"deadlines": map[string]any{"remind": map[string]any{"start": map[string]any{"field": "when"}}}})
+	})
+	if err == nil {
+		t.Fatal("LoadService loaded a Timers config that starts at no field")
+	}
+	if want := `type Ticket: behavior Timers config: deadlines.remind.start.field "when" is not a field of Ticket`; !strings.Contains(err.Error(), want) {
+		t.Errorf("LoadService = %v, want an error holding %q", err, want)
+	}
+	if strings.Contains(err.Error(), "names no field") {
+		t.Errorf("LoadService = %v, which also refuses the index on the Workflow's field", err)
+	}
+	// The index is still held to the table: a key no field has is refused
+	// beside the config.
+	_, err = loadTickets(t, func(_, ticket map[string]any) {
+		ticket["indexes"] = []any{map[string]any{"keys": []any{"stauts"}}}
+		timersConfig(ticket, map[string]any{"deadlines": map[string]any{"remind": map[string]any{"start": map[string]any{"field": "when"}}}})
+	})
+	if want := `key "stauts" names no field of Ticket`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("LoadService = %v, want an error holding %q", err, want)
+	}
+}
+
+// oneDeadline gives Ticket one deadline, sla, over a Workflow of three
+// states: open, which leads to waiting and to closed, and waiting, which
+// leads back to open.
+func oneDeadline(deadline map[string]any) func(doc, ticket map[string]any) {
+	return func(_, ticket map[string]any) {
+		ticket["behaviors"].([]any)[1].(map[string]any)["config"] = map[string]any{
+			"states": []any{"open", "waiting", "closed"},
+			"transitions": []any{
+				map[string]any{"from": "open", "to": "waiting"},
+				map[string]any{"from": "waiting", "to": "open"},
+				map[string]any{"from": "open", "to": "closed"},
+			},
+		}
+		timersConfig(ticket, map[string]any{"deadlines": map[string]any{"sla": deadline}})
+	}
+}
+
+// TestTimersConfigTheCoreTakes: the deadlines the core's define check
+// takes load, a field start with its then's from and a negative afterMs
+// among them, and so does a Workflow whose config Workflow itself refuses,
+// whose deadlines' states the build leaves to the core.
+func TestTimersConfigTheCoreTakes(t *testing.T) {
+	for name, deadline := range map[string]map[string]any{
+		"a field start with from":     {"start": map[string]any{"field": "visitAt"}, "afterMs": -3600000, "then": map[string]any{"transition": "closed", "from": []any{"open"}}, "until": map[string]any{"enters": []any{"closed"}}},
+		"an entry that leaves itself": {"start": map[string]any{"enters": "open"}, "then": map[string]any{"transition": "waiting"}, "until": map[string]any{"leaves": "open"}},
+		"a create start":              {"start": map[string]any{"create": true}, "afterMs": 1500, "then": map[string]any{"transition": "closed"}, "until": map[string]any{"enters": []any{"waiting"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadTickets(t, oneDeadline(deadline)); err != nil {
+				t.Fatalf("LoadService = %v, want it loaded", err)
 			}
 		})
 	}

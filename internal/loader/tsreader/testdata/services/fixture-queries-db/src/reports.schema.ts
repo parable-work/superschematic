@@ -17,6 +17,8 @@ export abstract class CategoryTotalsRow {
   earned: Finance.SignedMoney;
 }
 
+// What each category spent and earned between two times, a sub-category's
+// under its parent, over the accounts the caller names or over every one.
 @query<CategoryTotalsParams, CategoryTotalsRow>({
   name: "categoryTotals",
   sql: `SELECT COALESCE(p.id, c.id) AS category_id,

@@ -335,7 +335,9 @@ const initIgnoreRules = `# The output root is generated, but for the lockfiles o
 
 // initPathKeys are the [paths] keys init sets, in the order it writes
 // them, with the checkout directory each names: those acme-shop's naming
-// file sets. A key whose directory the checkout lacks is left out.
+// file sets, and the behaviors' core's (D103), which a project needs once
+// a table types a field as a behavior or implements one, long after init
+// ran. A key whose directory the checkout lacks is left out.
 var initPathKeys = []struct{ key, dir string }{
 	{"scalar_go", "third_party/superscalar/go"},
 	{"scalar_typescript", "third_party/superscalar/bindings/typescript"},
@@ -347,6 +349,10 @@ var initPathKeys = []struct{ key, dir string }{
 	{"http_runtime_rust", "runtime/http/rust"},
 	{"http_runtime_typescript", "runtime/http/typescript"},
 	{"versiongraph_go", "runtime/versiongraph/go"},
+	{"rules_go", "runtime/rules/go"},
+	{"rules_typescript", "runtime/rules/typescript"},
+	{"rules_adapter_rust", "runtime/engine/rust/rules-adapter"},
+	{"rules_behaviors_rust", "runtime/engine/rust/rules-behaviors"},
 }
 
 // initNamingFile is the naming file: the two coordinates and the [paths]

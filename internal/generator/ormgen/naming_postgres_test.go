@@ -210,14 +210,14 @@ try {
   check(deleted?.deletedAt instanceof Date, 'a soft delete stamps the renamed deletedAt');
   // The trigger enqueued x1's posting when the line was created, and the
   // upsert's new amount replaced it; the line with no externalId posted
-  // nothing. A claimed message holds a UUID hyphenated.
+  // nothing. A claimed message holds a UUID in base62, as a row does.
   const postings = postgresQueue(pool, linePostedQueue);
   const posted = await call('claimPostings', () => postings.claim(10, 60));
-  check(posted.length === 1 && posted[0]!.message.lineId === uuidToDb(lines[0]!.id) && Number(posted[0]!.message.amountCents) === -1300, 'the trigger enqueued into the renamed queue table');
+  check(posted.length === 1 && posted[0]!.message.lineId === lines[0]!.id && Number(posted[0]!.message.amountCents) === -1300, 'the trigger enqueued into the renamed queue table');
   await call('completePosting', () => postings.complete(posted[0]!.id, posted[0]!.token));
   await call('enqueuePosting', () => orm.transaction(tx => enqueue(tx, linePostedQueue, { lineId: lines[1]!.id, amountCents: cents(500) })));
   const enqueued = await call('claimEnqueued', () => postings.claim(10, 60));
-  check(enqueued.length === 1 && enqueued[0]!.message.lineId === uuidToDb(lines[1]!.id), 'an enqueue writes the renamed columns');
+  check(enqueued.length === 1 && enqueued[0]!.message.lineId === lines[1]!.id, 'an enqueue writes the renamed columns');
   const note = await call('createNote', () => orm.note.createOne({ body: 'first' }));
   await call('updateNote', () => orm.note.updateOne(note.id, { body: 'second' }));
   await call('hardDeleteNote', () => orm.note.deleteOne(note.id));

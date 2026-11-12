@@ -270,7 +270,9 @@ func scanBudgets(rows pgx.Rows) ([]types.BudgetsRow, error) {
 // categoryTotalsQuery is the statement of the query categoryTotals.
 const categoryTotalsQuery = "SELECT COALESCE(p.id, c.id) AS category_id,\n           COALESCE(SUM(li.amount) FILTER (WHERE li.amount < 0), 0)::bigint AS spent,\n           COALESCE(SUM(li.amount) FILTER (WHERE li.amount > 0), 0)::bigint AS earned\n    FROM line_item li\n    LEFT JOIN category c ON c.id = li.category_id\n    LEFT JOIN category p ON p.id = c.parent_id\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND li.transfer_group_id IS NULL\n    GROUP BY 1\n    ORDER BY 1"
 
-// CategoryTotals runs the query categoryTotals.
+// CategoryTotals runs the query categoryTotals: What each category spent and
+// earned between two times, a sub-category's under its parent, over the
+// accounts the caller names or over every one.
 func (q *Queries) CategoryTotals(ctx context.Context, params types.CategoryTotalsParams) ([]types.CategoryTotalsRow, error) {
 	args := make([]any, 0, 3)
 	args = append(args, time.Time(params.Start))

@@ -267,7 +267,10 @@ transaction you began on it.
 `enqueue` is typed by the definition: the message is `OrderPlaced` from
 the database's types. A field writes its column as the Go ORM writes
 it: a JSON field its JSON text, an unset optional field or list nothing,
-and an unset enum its schema default. A `Geo.Location` goes to its
+and an unset enum its schema default. A UUID goes to its column from
+either of its forms, and a claimed message holds it in base62, the form a
+repository's row holds one in, so a handler compares a message's id with
+a row's as they are. A `Geo.Location` goes to its
 `POINT` column as `(lon,lat)` and comes back as `{lat, lon}`. A
 `Temporal.Duration` goes to its `INTERVAL` column as its whole
 microseconds, so `-1h2m` stays negative as a whole and `1500ns` is stored

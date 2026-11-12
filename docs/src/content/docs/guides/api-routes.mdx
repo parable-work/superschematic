@@ -1590,11 +1590,14 @@ state (`{ leaves: "open" }`) or enters one of a list (`{ enters: ["closed"]
 }`). `enters`, `then` and `until` read a `Workflow`
 field: the table's one, or, when it has several, the one `status` names
 (`status: "payment"`). `permission` is the permission a caller needs to
-reset or snooze a deadline; with none, nobody may. The build checks that
-the Workflow and a field start's field are there, and that the field holds
-date-times; the rest of the config (a state the Workflow lacks, a
-transition that does not lead there) is the core's to refuse, at the
-first command on the table.
+reset or snooze a deadline; with none, nobody may. The build holds each
+deadline to the table as the core does, in the core's words: the Workflow
+and a field start's field are there, and the field holds date-times; an
+`enters` state, a `then`'s transition and `from` states and an `until`'s
+states are states of the Workflow, with a transition from each `from`
+state to the `then`'s; a deadline that starts at a field names its
+`then`'s `from` and takes no `until.leaves`, since it is in no state of
+its own; and only a field start takes a negative `afterMs`.
 
 The build adds, beside the table:
 

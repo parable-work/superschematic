@@ -1699,7 +1699,12 @@ The build adds the sub-table `problem_seats_occupants`
 (`ProblemSeatsOccupants`), one row per subject seated, keyed by its
 `number` on the row, the order they were seated in, with `seat`,
 `subject`, `seated_at` and `seated_by`, deleted with the row; it adds no
-column and no queue. Its operations are `seats.takeSeat({ seat, subject?
+column and no queue. `subject` and `seated_by` hold a caller's subject as
+its text, a user's id in base62, the form a TypeScript repository's row
+holds an id in, so code compares the two as they are. SQL has no cast
+from that text to a `uuid` column: a `@query` over the sub-table answers
+the subject as text, and the code that reads it matches it to rows. Its
+operations are `seats.takeSeat({ seat, subject?
 })`, which answers `{ seat, subject, displaced }`, the subjects it
 unseated to make room, longest seated first; `leaveSeat({ seat, subject?
 })`; and the read-only `listSeats({ seat? })`, which answers `{ items: [{

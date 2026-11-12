@@ -166,6 +166,60 @@ func ExpandExternal(types map[string]*ir.TypeDef, reg *registry.Registry) {
 	}
 }
 
+// ExpandFields adds the fields a table's behaviors own to each DB table of
+// schema whose uses allow it, and nothing else of Expand's: no sub-table,
+// no queue. It is for a schema whose behaviors' checks failed, so that the
+// verification pass, which then runs to report them, does not also report
+// each index, uniqueness, projection column or @enqueueOnChange that names
+// a field a sound use owns (status, beside a Timers config the build
+// refuses) as one that names no field. A table one of whose uses cannot be
+// expanded (an unregistered behavior, a field the table already declares,
+// a declared field with no type or with one the registry lacks, as a use
+// anchored on a field takes of a behavior a table implements) is left as
+// it was written. It returns the scalars the added fields name,
+// which the loader hydrates from the registry, and adds each to the
+// schema's scalars, as Expand does.
+func ExpandFields(schema *ir.Schema, reg *registry.Registry) []string {
+	if schema == nil || schema.Kind != ir.SchemaKindDB {
+		return nil
+	}
+	var scalars []string
+	for _, name := range sortedNames(schema.Types) {
+		td := schema.Types[name]
+		if td == nil || td.Role != ir.RoleDBTable || len(td.TableBehaviors()) == 0 {
+			continue
+		}
+		fields, optimistic := td.Fields, td.Optimistic
+		used, err := expandType(td, reg)
+		typed := err == nil && !slices.ContainsFunc(td.Fields[len(fields):], func(added *ir.FieldDef) bool {
+			return added.TypeRef.Name == ""
+		})
+		for _, scalar := range used {
+			if _, known := reg.Scalars().Scalar(scalar); !known {
+				typed = false
+			}
+		}
+		if !typed {
+			td.Fields, td.Optimistic = fields, optimistic
+			continue
+		}
+		for _, scalar := range used {
+			if !slices.Contains(scalars, scalar) {
+				scalars = append(scalars, scalar)
+			}
+		}
+	}
+	for _, scalar := range scalars {
+		if schema.Scalars == nil {
+			schema.Scalars = map[string]*ir.ScalarDef{}
+		}
+		if schema.Scalars[scalar] == nil {
+			schema.Scalars[scalar] = &ir.ScalarDef{Name: scalar}
+		}
+	}
+	return scalars
+}
+
 // expandType adds td's owned fields and returns the scalars they name.
 func expandType(td *ir.TypeDef, reg *registry.Registry) ([]string, error) {
 	var scalars []string
