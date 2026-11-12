@@ -473,7 +473,7 @@ type {{ $typeName }}HistoryOptions struct {
 // {{ .TypeName }}Filter provides filtering for {{ .TypeName }} queries
 type {{ .TypeName }}Filter struct {
 	{{- range .Fields }}
-	{{- if or (not .IsAuditField) .IsAuditTimestamp }}
+	{{- if or (not .IsAuditField) .IsAuditTimestamp .IsAuditUser }}
 	{{- if .IsArray }}
 	{{ toGoName .Name }} *ArrayStringFilter
 	{{- else if .IsVector }}

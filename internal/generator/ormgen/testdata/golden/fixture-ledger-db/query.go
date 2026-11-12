@@ -714,7 +714,9 @@ type AccountFilter struct {
 	OpenedOn       *DateFilter
 	MailingAddress *StringFilter
 	CreatedAt      *DateTimeFilter
+	CreatedBy      *UUIDFilter
 	UpdatedAt      *DateTimeFilter
+	UpdatedBy      *UUIDFilter
 	// ReferencedByEntryAccount filters on the presence or absence of a
 	// Entry whose account points at this row.
 	ReferencedByEntryAccount *ReferencedByFilter
@@ -1011,6 +1013,29 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`account.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`account.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `account.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `account.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.UpdatedAt != nil {
 		if f.UpdatedAt.Eq != nil {
 			paramNum++
@@ -1059,6 +1084,29 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `account.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `account.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`account.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`account.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `account.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `account.updated_by IS NOT NULL`)
 			}
 		}
 	}
@@ -1140,7 +1188,9 @@ type EntryFilter struct {
 	Metadata    *StringFilter
 	ReviewedAt  *DateTimeFilter
 	CreatedAt   *DateTimeFilter
+	CreatedBy   *UUIDFilter
 	UpdatedAt   *DateTimeFilter
+	UpdatedBy   *UUIDFilter
 	// AccountID allows filtering by foreign key
 	AccountID *UUIDFilter
 	// TransferID allows filtering by foreign key
@@ -1658,6 +1708,29 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `entry.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `entry.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.UpdatedAt != nil {
 		if f.UpdatedAt.Eq != nil {
 			paramNum++
@@ -1706,6 +1779,29 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `entry.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `entry.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `entry.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `entry.updated_by IS NOT NULL`)
 			}
 		}
 	}

@@ -959,8 +959,9 @@ implementation's interface and its scaffold leave the method out. Take the
 decorator off and the operation is one you implement, with the same route,
 types, SDK method and tool. A set may hold both kinds, so one operation
 that needs code of yours does not cost the others theirs. The decorator
-takes no argument; the JSON and YAML forms write `tableOperation: {}` on
-the operation.
+takes no argument, or one, its [row rule](#row-rules); the JSON and YAML
+forms write `tableOperation: {}` on the operation, with the rule's `by`
+and `overridePermission` inside it.
 
 ### The table and the kind
 
@@ -1161,10 +1162,10 @@ A route's guards are the method's, as on any operation: `@auth`,
 `@requirePermission`, `@publicRoute`, `@requireService`, `@allowService`,
 `@rateLimit`, `@bodyLimit` and `@timeout`
 ([Auth and permissions](/superschematic/guides/auth-and-permissions/)).
-They are the only rule over which rows a caller reaches: a caller the
-route admits reaches every live row the path holds. `@requireOwnership`
-fails the load on a `@tableOperation`, since no implementation of yours
-runs to check what the caller owns, and so does
+A caller the route admits reaches every live row the path holds, unless
+the operation names a [row rule](#row-rules). `@requireOwnership` fails
+the load on a `@tableOperation`, since no implementation of yours runs to
+check what the caller owns: a row rule says it instead. So does
 `@manualRouteRegistration`, which hands the route to a handler of yours.
 
 Different callers get different views through different operations. A
@@ -1191,6 +1192,90 @@ getIssueForGuest(id: Identity.UUID): IssueGuestView {
 Several views of one table do not confuse a relation's key: it refers to
 the one of them an operation lists
 ([What a value refers to](/superschematic/reference/references-and-search/#what-a-value-refers-to)).
+
+### Row rules
+
+A permission says who may call a route. A row rule says which rows that
+caller reaches. `@tableOperation({ by: [...] })` lists the row's members
+that name who the row is for, and the operation then reaches only the
+rows one of them holds the caller in:
+
+```ts
+export class Notes extends Authenticated {
+  // The caller's notes, their own and the ones shared with them.
+  @rest(HttpMethod.GET, "notes")
+  @paginated({ defaultSort: "createdAt" })
+  @tableOperation({ by: ["owner", "sharedWith"], overridePermission: "notes.admin" })
+  listNotes(sort: SortBy<NoteView, ["createdAt"]>, filter: FilterBy<NoteView, ["issueId", "owner"]>): NoteView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // A new note on the issue the path names, the caller's own.
+  @rest(HttpMethod.POST, "issues/{issueId}/notes")
+  @tableOperation({ by: ["owner"] })
+  createNote(issueId: Identity.UUID, input: CreateNoteInput): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes a note of the caller's own.
+  @rest(HttpMethod.PATCH, "notes/{id}")
+  @tableOperation({ by: ["owner"] })
+  updateNote(id: Identity.UUID, input: UpdateNoteInput): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // Deletes a note the caller wrote, or any note for an admin.
+  @rest(HttpMethod.DELETE, "notes/{id}")
+  @tableOperation({ by: ["createdBy"], overridePermission: "notes.admin" })
+  deleteNote(id: Identity.UUID): NoteView {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+| Kind | With a rule |
+| --- | --- |
+| read, update, delete | the live row under the path's key and parents that also names the caller; a row that names someone else is the 404 of a row that is not there, and nothing is written |
+| list | the rows that name the caller, beside the path's parents and whatever the request's filter says: `filter[owner]=<someone else>` finds only what the rule already reaches |
+| create | each member the rule names is set to the caller, and the body's view may not hold one; `createdBy` is the repository's stamp as on any create |
+
+A member of `by` is named as a view names it: a field of the table that
+holds an id (`Identity.UUID`, `Identity.UserID`), a to-one relation's
+key (`assigneeId`), text, or `createdBy`. The caller is the request's
+principal, by its subject: a user's id. A row is reached when any one
+member holds it, so `["owner", "sharedWith"]` is "mine or shared with
+me". An operation carries its own rule, so a table's read may reach the
+rows shared with the caller while its update reaches only the owner's.
+
+`overridePermission` names one permission whose holder the rule does not
+hold back: they reach every row, as an operation without a rule does. A
+grant covers it as it covers a route's permission (`notes` covers
+`notes.admin`), and the permission catalog lists it under the operation.
+Without it the rule holds for every caller.
+
+The loader holds the rule to the table. It fails the load for a rule on a
+route that admits a request with no caller (`@publicRoute`, or no guard
+at all), for a member the table does not have, for one that holds no
+subject (a number, a time, `updatedBy`, a secret, a field a behavior
+owns), for a rule over a projection, for an `overridePermission` with no
+`by`, and for a create whose rule names the table's key or a relation its
+path sets.
+
+What a rule does not say yet:
+
+- A caller named through another table: "the rows of a team I am a
+  member of". Give the row the member itself, or write the operation by
+  hand.
+- A behavior's seat (`Seats`): the same.
+- A caller that is a service, or any principal whose subject is no id.
+  It is named by no member that holds an id, so it lists nothing, reads
+  a 404 and cannot create; give it the override permission.
+- On a Go server, a member that holds text. The Go handlers compare the
+  caller with an id; the operation stays one you implement, with a
+  warning. The TypeScript server serves it.
+
+A row rule is the generated handler's. An operation you write by hand,
+an ORM call in a worker and SQL of your own reach every row, as before.
 
 ### The servers
 
@@ -1249,13 +1334,13 @@ Each of these has something that stands in until it is:
 
 | Not built | Until then |
 | --- | --- |
-| a row rule: an operation that reads or writes only the rows a field or a seat names the caller in | the route's guards are the only rule; an operation that needs one is written by hand |
+| a row rule that names the caller through another table (a team's members) or a behavior's seat | a [row rule](#row-rules) names members of the row itself; an operation that needs more is written by hand |
 | a view of a relation's rows nested in a result, `lines: OrderLineView[]` | such a field is `@virtual`, so its operation is written by hand |
 | a write fenced by the row's `_version` | a generated update is the last write's |
 | an upsert by `PUT` | a `PUT` is refused; write the operation by hand |
 | one declaration that serves a whole table | each operation and each view is declared |
 | the Rust server's handlers | a Rust API implements these operations by hand |
-| the Go server's handlers over a projection, and over a view that holds a list, a map, a JSON value or an embedded object | a Go API implements those operations by hand; the TypeScript server serves them |
+| the Go server's handlers over a projection, over a view that holds a list, a map, a JSON value or an embedded object, and for a row rule that names text | a Go API implements those operations by hand; the TypeScript server serves them |
 
 ## A table's behavior operations
 

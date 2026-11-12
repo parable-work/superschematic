@@ -66,6 +66,12 @@ func TestTableOperationsAreFilledFromTheirDeclarations(t *testing.T) {
 		"listComments":     {Kind: "list", Database: db, Type: "Comment", Parents: issue},
 		"createComment":    {Kind: "create", Database: db, Type: "Comment", Parents: issue, Input: "input"},
 		"deleteComment":    {Kind: "delete", Database: db, Type: "Comment", Key: "id", Parents: issue},
+		// A row rule is kept as the decorator says it (D108).
+		"listNotes":  {Kind: "list", Database: db, Type: "Note", By: []string{"owner", "sharedWith"}, OverridePermission: "notes.admin"},
+		"getNote":    {Kind: "read", Database: db, Type: "Note", Key: "id", By: []string{"owner", "sharedWith"}, OverridePermission: "notes.admin"},
+		"createNote": {Kind: "create", Database: db, Type: "Note", Parents: issue, Input: "input", By: []string{"owner"}},
+		"updateNote": {Kind: "update", Database: db, Type: "Note", Key: "id", Input: "input", By: []string{"owner"}},
+		"deleteNote": {Kind: "delete", Database: db, Type: "Note", Key: "id", By: []string{"createdBy"}, OverridePermission: "notes.admin"},
 	}
 	seen := 0
 	for _, set := range api.OperationSets {
@@ -143,7 +149,7 @@ func TestTableOperationsAreHeldToTheirTable(t *testing.T) {
 		want []string
 	}{
 		{"@requireOwnership", func(_ *ir.Schema, op func(string) *ir.FieldDef) { op("getIssue").RequireOwnership = true },
-			[]string{"Issues.getIssue: @requireOwnership asks the implementation to check what the caller owns, and a @tableOperation has none: write the operation by hand, or guard the route another way"}},
+			[]string{"Issues.getIssue: @requireOwnership asks the implementation to check what the caller owns, and a @tableOperation has none: name the row's members that hold who it is for in @tableOperation({ by: [...] }) (D108), or write the operation by hand"}},
 		{"@manualRouteRegistration", func(_ *ir.Schema, op func(string) *ir.FieldDef) { op("getIssue").ManualRouteRegistration = true },
 			[]string{"Issues.getIssue: @manualRouteRegistration hands the route to a handler of yours, and @tableOperation to one the build writes: an operation takes one of them"}},
 		{"a plain result", func(_ *ir.Schema, op func(string) *ir.FieldDef) { op("getTeam").TypeRef.Name = "TeamSummary" },
@@ -243,6 +249,43 @@ func TestTableOperationsAreHeldToTheirTable(t *testing.T) {
 		{"two bodies", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
 			op("createTeam").Arguments = append(op("createTeam").Arguments, &ir.ArgumentDef{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
 		}, []string{"Teams.createTeam: a create takes one body argument, a @source view of Team, beside its path's parameters, and this takes input, note"}},
+		// The row rule (D108).
+		{"a row rule on a route with no caller", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getIssueForGuest").TableOperation.By = []string{"createdBy"}
+		}, []string{"Issues.getIssueForGuest: its row rule reaches the rows that name the caller, and the route admits a request with none; guard it with @auth or @requirePermission, or put it in an Authenticated set (D108)"}},
+		{"an override permission with no rule", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getIssue").TableOperation.OverridePermission = "issues.admin"
+		}, []string{`Issues.getIssue: its @tableOperation names overridePermission "issues.admin", which lifts a row rule, and names no by; list the row's members that name who may reach it`}},
+		{"a rule that names no member", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getNote").TableOperation.By = []string{"user"}
+		}, []string{"Notes.getNote: by names user, which is no member of Note; a row rule names a member that holds a subject (id, issueId, owner, sharedWith, text, createdBy)"}},
+		{"a rule that names a member twice", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getNote").TableOperation.By = []string{"owner", "owner"}
+		}, []string{"Notes.getNote: by names owner twice"}},
+		{"a rule that names a time", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getNote").TableOperation.By = []string{"createdAt"}
+		}, []string{"Notes.getNote: by names createdAt, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (id, issueId, owner, sharedWith, text, createdBy)"}},
+		{"a rule that names who last wrote the row", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getIssue").TableOperation.By = []string{"updatedBy"}
+		}, []string{"Issues.getIssue: by names updatedBy, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (id, teamId, title, body, status, assigneeId, createdBy)"}},
+		{"a rule that names a number", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getIssue").TableOperation.By = []string{"priority"}
+		}, []string{"Issues.getIssue: by names priority, which holds no subject a row rule compares the caller with: text, a UUID, a to-one relation's key or createdBy, none of them secret or a behavior's (id, teamId, title, body, status, assigneeId, createdBy)"}},
+		{"a create whose rule names the key", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("createNote").TableOperation.By = []string{"id"}
+		}, []string{
+			"Notes.createNote: by names id, the key of Note, and a create's row rule sets each member it names to the caller: a create names no key",
+			"Notes.createNote: its body CreateNoteInput leaves out owner, which Note requires and gives no default: no request could create a row; add it to the view, or name it in the path",
+		}},
+		{"a create whose rule names its path's relation", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("createNote").TableOperation.By = []string{"owner", "issueId"}
+		}, []string{"Notes.createNote: by names issueId, which the path's {issueId} sets, and a create's row rule sets each member it names to the caller: one of them sets it"}},
+		{"a create whose body sets a member of its rule", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("createNote").TableOperation.By = []string{"owner", "sharedWith"}
+		}, []string{"Notes.createNote: its body CreateNoteInput sets sharedWith, the member its row rule sets to the caller; leave the field out of the view"}},
+		{"a create with a rule of createdBy alone sets nothing", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("createIssue").TableOperation.By = []string{"createdBy"}
+		}, nil},
 		{"members written otherwise", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
 			op("getTeam").TableOperation = &ir.TableOperation{Kind: "list", Database: "fixture-tracker-db", Type: "Team"}
 		},

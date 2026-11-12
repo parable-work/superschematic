@@ -106,6 +106,7 @@ export interface NoteFilter {
   author?: UuidFilter<T.IdentityUUID>;
   pinned?: BoolFilter;
   views?: NumberFilter<number>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   status?: StringFilter<'draft' | 'published'>;
   statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   _version?: NumberFilter<number>;
@@ -176,7 +177,7 @@ export const noteTable: TableDefinition = {
     { name: "author", column: "author", field: "author", qualified: "note.author", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "pinned", column: "pinned", field: "pinned", qualified: "note.pinned", boolean: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "views", column: "views", field: "views", qualified: "note.views", required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "note.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "note.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "note.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "status", column: "status", field: "status", qualified: "note.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "note.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
@@ -278,6 +279,7 @@ export interface TaskFilter {
   proof?: StringFilter<string> & NullFilter;
   urgent?: BoolFilter;
   attempts?: NumberFilter<number>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   status?: StringFilter<'planned' | 'working' | 'proving' | 'done' | 'cancelled'>;
   statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   _version?: NumberFilter<number>;
@@ -391,7 +393,7 @@ export const taskTable: TableDefinition = {
     { name: "proof", column: "proof", field: "proof", qualified: "task.proof", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "urgent", column: "urgent", field: "urgent", qualified: "task.urgent", boolean: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "attempts", column: "attempts", field: "attempts", qualified: "task.attempts", required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "task.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "task.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "task.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "task.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "task._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },

@@ -118,6 +118,7 @@ func TestGenerateTableOperations(t *testing.T) {
 	issueView := []string{"id", "teamId", "title", "body", "status", "priority", "estimate", "dueOn", "assigneeId", "createdAt", "createdBy", "updatedAt"}
 	commentView := []string{"id", "issueId", "body", "createdAt"}
 	teamView := []string{"id", "key", "name"}
+	noteView := []string{"id", "issueId", "owner", "sharedWith", "text", "createdAt", "createdBy"}
 	want := map[string]*TableRoute{
 		"listTeams":        {Operation: "Teams.listTeams", Kind: "list", Type: "Team", Repository: "team", View: teamView},
 		"getTeam":          {Operation: "Teams.getTeam", Kind: "read", Type: "Team", Repository: "team", Key: "id", View: teamView},
@@ -131,6 +132,13 @@ func TestGenerateTableOperations(t *testing.T) {
 		"createIssue":      {Operation: "Issues.createIssue", Kind: "create", Type: "Issue", Repository: "issue", Parents: []string{"teamId"}, View: issueView, Body: []string{"title", "body", "priority", "estimate", "dueOn", "assigneeId"}},
 		"updateIssue":      {Operation: "Issues.updateIssue", Kind: "update", Type: "Issue", Repository: "issue", Key: "id", View: issueView, Body: []string{"title", "body", "status", "priority", "estimate", "dueOn", "assigneeId"}},
 		"deleteIssue":      {Operation: "Issues.deleteIssue", Kind: "delete", Type: "Issue", Repository: "issue", Key: "id", View: issueView},
+		// A row rule is the router's to hold (D108): its members, and the
+		// permission that lifts it.
+		"listNotes":        {Operation: "Notes.listNotes", Kind: "list", Type: "Note", Repository: "note", View: noteView, By: []string{"owner", "sharedWith"}, Override: "notes.admin"},
+		"getNote":          {Operation: "Notes.getNote", Kind: "read", Type: "Note", Repository: "note", Key: "id", View: noteView, By: []string{"owner", "sharedWith"}, Override: "notes.admin"},
+		"createNote":       {Operation: "Notes.createNote", Kind: "create", Type: "Note", Repository: "note", Parents: []string{"issueId"}, View: noteView, Body: []string{"text", "sharedWith"}, By: []string{"owner"}},
+		"updateNote":       {Operation: "Notes.updateNote", Kind: "update", Type: "Note", Repository: "note", Key: "id", View: noteView, Body: []string{"text", "sharedWith"}, By: []string{"owner"}},
+		"deleteNote":       {Operation: "Notes.deleteNote", Kind: "delete", Type: "Note", Repository: "note", Key: "id", View: noteView, By: []string{"createdBy"}, Override: "notes.admin"},
 		"listComments":     {Operation: "Comments.listComments", Kind: "list", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView},
 		"createComment":    {Operation: "Comments.createComment", Kind: "create", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView, Body: []string{"body"}},
 		"deleteComment":    {Operation: "Comments.deleteComment", Kind: "delete", Type: "Comment", Repository: "comment", Key: "id", Parents: []string{"issueId"}, View: commentView},
@@ -403,6 +411,7 @@ var tableCases = []string{
 	"a list's contains matches % and _ as themselves",
 	"a list's filters, search, sort and cursor hold together",
 	"the routes' guards hold: no caller, no permission, a public route",
+	"a row rule keeps each caller to the rows that name them, and its override permission lifts it",
 	"an operation written by hand reaches the implementation",
 }
 

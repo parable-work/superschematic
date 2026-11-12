@@ -192,6 +192,12 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("issues.write"),
 			},
 		},
+		// A new note on the issue the path names, the caller's own.
+		{
+			Method:  "POST",
+			Path:    "/issues/{issueId}/notes",
+			Handler: requireTableCaller(createNotesCreateNoteHandler(cfg.DB)),
+		},
 		// The members, a page at a time.
 		{
 			Method:  "GET",
@@ -206,6 +212,32 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("members.write"),
 			},
+		},
+		// The caller's notes, their own and the ones shared with them. A holder
+		// of notes.admin lists everyone's.
+		{
+			Method:  "GET",
+			Path:    "/notes",
+			Handler: requireTableCaller(createNotesListNotesHandler(cfg.DB)),
+		},
+		// Deletes a note the caller wrote.
+		{
+			Method:  "DELETE",
+			Path:    "/notes/{id}",
+			Handler: requireTableCaller(createNotesDeleteNoteHandler(cfg.DB)),
+		},
+		// One note, its owner's or one shared with the caller.
+		{
+			Method:  "GET",
+			Path:    "/notes/{id}",
+			Handler: requireTableCaller(createNotesGetNoteHandler(cfg.DB)),
+		},
+		// Changes a note of the caller's own: one shared with them is not theirs
+		// to change.
+		{
+			Method:  "PATCH",
+			Path:    "/notes/{id}",
+			Handler: requireTableCaller(createNotesUpdateNoteHandler(cfg.DB)),
 		},
 		// The teams, a page at a time.
 		{
@@ -597,6 +629,72 @@ func createCommentsDeleteCommentHandler(db orm.DatabaseInterface) gohttp.Handler
 	}
 }
 
+// createNotesCreateNoteHandler creates a handler for POST /api/issues/{issueId}/notes
+//
+// A new note on the issue the path names, the caller's own.
+//
+// It serves the create of Note, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createNotesCreateNoteHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IssueIdStr, err := runtimerouting.PathParam(r, "issueId")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "issueId must be percent-encoded UTF-8")
+			return
+		}
+		if IssueIdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "issueId is required")
+			return
+		}
+		IssueId, err := types.ParseIdentityUUID(IssueIdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "issueId must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.CreateNoteInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableNotesCreateNote(r.Context(), db, IssueId, &input, rawInput)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
 // createMembersListMembersHandler creates a handler for GET /api/members
 //
 // The members, a page at a time.
@@ -676,6 +774,232 @@ func createMembersCreateMemberHandler(db orm.DatabaseInterface) gohttp.HandlerFu
 
 		// Serve the operation from its table, as the request's caller (D106)
 		result, err := tableMembersCreateMember(r.Context(), db, &input, rawInput)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createNotesListNotesHandler creates a handler for GET /api/notes
+//
+// The caller's notes, their own and the ones shared with them. A holder
+// of notes.admin lists everyone's.
+//
+// It serves the list of Note, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createNotesListNotesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	// A filter's values (D106): each field's value as an item of a query
+	// list of its type, its error recorded at filter[field].
+	filterIssueIdArg := bodyargs.NewArg("filter[issueId]", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	filterOwnerArg := bodyargs.NewArg("filter[owner]", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Read the request's filters (FilterBy, D106): the bracket form,
+		// filter[field]=value and filter[field][op]=value, its own reader,
+		// whose refusal is the 400 every server answers at filter[field].
+		// Each value is then decoded as an item of a query list of its
+		// field's type.
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "issueId", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "owner", Operators: []filterparse.Operator{"eq", "in"}}}})
+		if !ok {
+			return
+		}
+		filterErrors := types.NewValidationErrors()
+		filters := NotesListNotesFilter{
+			IssueId: filterparse.DecodeEquals[types.IdentityUUID](filterErrors, filterRequest, "issueId", filterIssueIdArg),
+			Owner:   filterparse.DecodeEquals[types.IdentityUUID](filterErrors, filterRequest, "owner", filterOwnerArg),
+		}
+		if filterErrors.HasErrors() {
+			RespondValidationErrors(w, r, filterErrors)
+			return
+		}
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		// It also reads sort, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"createdAt"}, Default: paging.Sort{Field: "createdAt"}}})
+		if !ok {
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableNotesListNotes(r.Context(), db, filters, page)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
+			return
+		}
+
+		// Respond with result
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createNotesDeleteNoteHandler creates a handler for DELETE /api/notes/{id}
+//
+// Deletes a note the caller wrote.
+//
+// It serves the delete of Note, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createNotesDeleteNoteHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableNotesDeleteNote(r.Context(), db, Id)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createNotesGetNoteHandler creates a handler for GET /api/notes/{id}
+//
+// One note, its owner's or one shared with the caller.
+//
+// It serves the read of Note, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createNotesGetNoteHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableNotesGetNote(r.Context(), db, Id)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createNotesUpdateNoteHandler creates a handler for PATCH /api/notes/{id}
+//
+// Changes a note of the caller's own: one shared with them is not theirs
+// to change.
+//
+// It serves the update of Note, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createNotesUpdateNoteHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.UpdateNoteInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableNotesUpdateNote(r.Context(), db, Id, &input, rawInput)
 		if err != nil {
 			respondTableError(w, r, err)
 			return

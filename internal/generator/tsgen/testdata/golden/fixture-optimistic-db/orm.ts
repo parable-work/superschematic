@@ -65,7 +65,9 @@ export interface ShelfFilter {
   id?: UuidFilter<T.IdentityUUID>;
   label?: StringFilter<string>;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   _version?: NumberFilter<number>;
   /** The rows a Stock row's shelf points at, or none does. */
   referencedByStockShelf?: ReferencedByFilter;
@@ -117,9 +119,9 @@ export const shelfTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "shelf.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "label", column: "label", field: "label", qualified: "shelf.label", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "shelf.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "shelf.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "shelf.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "shelf.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "shelf.updated_by", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "shelf.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "shelf.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "shelf.deleted_by", uuid: true, audit: "deletedBy" },
     { name: "_version", column: "_version", field: "_version", qualified: "shelf._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },

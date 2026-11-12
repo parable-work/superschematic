@@ -15,8 +15,9 @@ implementation has summarizeTeam alone. The cases are D106's parity
 cases, which the Go server runs too: each kind; a row under its parents;
 the table's defaults and audit stamps; an update's absent, null and empty
 bodies; a unique key and a foreign key refused; a soft and a hard delete;
-a list's pages, sorts, search and filters; the routes' guards; and the
-hand-written operation beside them.
+a list's pages, sorts, search and filters; the routes' guards; the
+hand-written operation beside them; and a row rule (D108), which keeps
+each caller to the rows that name them.
 */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -598,6 +599,64 @@ describe('the table operations of fixture-tracker-api', () => {
     expect((await call('GET', `/api/public/issues/${issues[0].id}`)).status).toBe(200);
   });
 
+  test('a row rule keeps each caller to the rows that name them, and its override permission lifts it', async () => {
+    const issue = issues[0].id;
+    // A create names the caller as the owner, whatever the body says of it.
+    const kims = await ok('POST', `/api/issues/${issue}/notes`, { text: 'Kim only' }, KIM);
+    expect(kims).toEqual({ id: expect.any(String), issueId: issue, owner: KIM_ID, sharedWith: null, text: 'Kim only', createdAt: expect.any(String), createdBy: KIM_ID });
+    // The body's view holds no owner, so a request that names one is refused.
+    expect(await refused('POST', `/api/issues/${issue}/notes`, { as: KIM, body: { text: 'For Sam', owner: SAM_ID } })).toMatchObject({
+      status: 400,
+      errors: { owner: [{ validator: 'unknown', message: 'unknown field' }] },
+    });
+    const shared = await ok('POST', `/api/issues/${issue}/notes`, { text: 'Kim, for Lee', sharedWith: LEE_ID }, KIM);
+    expect(shared).toMatchObject({ owner: KIM_ID, sharedWith: LEE_ID });
+    const lees = await ok('POST', `/api/issues/${issue}/notes`, { text: 'Lee only' }, LEE);
+    expect((await orm.note.getOne(shared.id)).owner).toBe(KIM_ID);
+
+    // A list holds the caller's own rows and the ones shared with them,
+    // beside whatever its filter says.
+    const texts = async (as: string, query = '') => (await walk(`/api/notes${query}`, as)).items.map(note => note.text);
+    expect(await texts(KIM)).toEqual(['Kim only', 'Kim, for Lee']);
+    expect(await texts(LEE)).toEqual(['Kim, for Lee', 'Lee only']);
+    expect(await texts(SAM)).toEqual([]);
+    expect(await texts(LEE, `?filter[owner]=${KIM_ID}`)).toEqual(['Kim, for Lee']);
+    expect(await texts(SAM, `?filter[owner]=${KIM_ID}`)).toEqual([]);
+
+    // A read of a row that names another is the 404 of one that is not there.
+    const notFound = { status: 404, code: 'not_found', title: 'Not Found', detail: 'Note not found' };
+    expect(await ok('GET', `/api/notes/${shared.id}`, undefined, LEE)).toEqual(shared);
+    expect(await refused('GET', `/api/notes/${kims.id}`, { as: LEE })).toMatchObject(notFound);
+    expect(await refused('GET', `/api/notes/${kims.id}`, { as: SAM })).toMatchObject(notFound);
+    expect(await refused('GET', `/api/notes/${uuid(0xdead)}`, { as: KIM })).toMatchObject(notFound);
+
+    // An update is the owner's alone: a note shared with Lee is not Lee's to change.
+    expect(await refused('PATCH', `/api/notes/${shared.id}`, { as: LEE, body: { text: 'Lee was here' } })).toMatchObject(notFound);
+    expect(await ok('PATCH', `/api/notes/${shared.id}`, { text: 'Kim, still for Lee' }, KIM)).toMatchObject({ text: 'Kim, still for Lee', owner: KIM_ID });
+    expect((await orm.note.getOne(shared.id)).text).toBe('Kim, still for Lee');
+
+    // The holder of the override permission reaches every row, by a grant that covers it.
+    for (const admin of [`${SAM_ID}:notes.admin`, `${SAM_ID}:notes`]) {
+      expect(await texts(admin)).toEqual(['Kim only', 'Kim, still for Lee', 'Lee only']);
+      expect(await ok('GET', `/api/notes/${kims.id}`, undefined, admin)).toEqual(kims);
+    }
+    // The update names no override, so it holds for an admin too.
+    expect(await refused('PATCH', `/api/notes/${kims.id}`, { as: `${SAM_ID}:notes.admin`, body: { text: 'Sam was here' } })).toMatchObject(notFound);
+
+    // A delete is its writer's, by createdBy, or an admin's.
+    expect(await refused('DELETE', `/api/notes/${lees.id}`, { as: KIM })).toMatchObject(notFound);
+    expect(await ok('DELETE', `/api/notes/${lees.id}`, undefined, LEE)).toEqual(lees);
+    expect(await ok('DELETE', `/api/notes/${kims.id}`, undefined, `${SAM_ID}:notes.admin`)).toEqual(kims);
+    expect(await texts(`${SAM_ID}:notes.admin`)).toEqual(['Kim, still for Lee']);
+
+    // A caller whose subject is no id is named by no row, and cannot be named in a new one.
+    expect(await texts('billing-worker')).toEqual([]);
+    expect(await refused('GET', `/api/notes/${shared.id}`, { as: 'billing-worker' })).toMatchObject(notFound);
+    expect(await refused('POST', `/api/issues/${issue}/notes`, { as: 'billing-worker', body: { text: 'x' } })).toMatchObject({ status: 403 });
+    // And the routes ask for a caller.
+    expect(await refused('GET', '/api/notes', {})).toMatchObject({ status: 401 });
+  });
+
   test('an operation written by hand reaches the implementation', async () => {
     const before = summarized.length;
     expect(await ok('GET', `/api/teams/${core.id}/summary`, undefined, LEE)).toEqual({
@@ -611,17 +670,22 @@ describe('the table operations of fixture-tracker-api', () => {
         'createComment',
         'createIssue',
         'createMember',
+        'createNote',
         'createTeam',
         'deleteComment',
         'deleteIssue',
+        'deleteNote',
         'getIssue',
         'getIssueForGuest',
+        'getNote',
         'getTeam',
         'listComments',
         'listIssues',
         'listMembers',
+        'listNotes',
         'listTeams',
         'updateIssue',
+        'updateNote',
       ].sort()
     );
   });

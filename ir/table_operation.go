@@ -13,8 +13,9 @@ package ir
 // The method stays an ordinary declaration: its route, its guards, its
 // arguments and its result are the ones it writes, and the OpenAPI
 // document, the SDKs, the permission catalog and the tool documents read
-// it as any operation. The reader records the decorator as an empty
-// FieldDef.TableOperation. The loader holds the method's views to one
+// it as any operation. The reader records the decorator as
+// FieldDef.TableOperation, empty but for the row rule its argument writes
+// (By, OverridePermission, D108). The loader holds the method's views to one
 // table of the API's database, decides what the operation does from its
 // HTTP method and shape, and fills the rest. A server whose generator
 // writes table handlers routes the operation to one and leaves the method
@@ -45,10 +46,10 @@ var TableOperationKinds = []string{
 	TableOperationRead, TableOperationList, TableOperationCreate, TableOperationUpdate, TableOperationDelete,
 }
 
-// TableOperation is @tableOperation on an operation (D106). The decorator
-// takes no argument, so every member is the loader's: a data form writes
-// the empty object, and one that writes a member the loader would fill
-// otherwise is refused.
+// TableOperation is @tableOperation on an operation (D106). The decorator's
+// argument writes the row rule, By and OverridePermission (D108); every
+// other member is the loader's: a data form leaves them out, and one that
+// writes a member the loader would fill otherwise is refused.
 type TableOperation struct {
 	// Kind is what the handler does, one of [TableOperationKinds].
 	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
@@ -80,6 +81,18 @@ type TableOperation struct {
 	// Input is the body argument of a create and an update, by its name;
 	// its type is a @source view of the table.
 	Input string `json:"input,omitempty" yaml:"input,omitempty"`
+
+	// By is the row rule (D108): the members of the row that name who may
+	// reach it, each as a view names it, an own field that holds a subject
+	// (userId, owner), a to-one relation's key (assigneeId) or createdBy.
+	// A read, a list, an update and a delete reach only the rows one of
+	// them names the caller in, and a create sets each but createdBy to
+	// the caller. Empty reaches every row the route admits.
+	By []string `json:"by,omitempty" yaml:"by,omitempty"`
+
+	// OverridePermission is the permission whose holder By does not hold
+	// back: they reach every row, as an operation without By does.
+	OverridePermission string `json:"overridePermission,omitempty" yaml:"overridePermission,omitempty"`
 }
 
 // TableOperationParent is one path parameter that holds a table

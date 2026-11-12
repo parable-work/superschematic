@@ -877,6 +877,7 @@ type LineItemFilter struct {
 	Tags               *ArrayStringFilter
 	CreatedAt          *DateTimeFilter
 	UpdatedAt          *DateTimeFilter
+	UpdatedBy          *UUIDFilter
 	// AccountID allows filtering by foreign key
 	AccountID *UUIDFilter
 	// Account keeps the rows whose account is among the BankAccount rows
@@ -1395,6 +1396,29 @@ func (f *LineItemFilter) conditions(args *[]interface{}, paramOffset int) []stri
 				conditions = append(conditions, `line_item.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `line_item.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_item.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`line_item.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `line_item.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `line_item.updated_by IS NOT NULL`)
 			}
 		}
 	}

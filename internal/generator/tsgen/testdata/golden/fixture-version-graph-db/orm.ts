@@ -496,6 +496,7 @@ export interface RecipeFilter {
   id?: UuidFilter<T.IdentityUUID>;
   title?: StringFilter<string>;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   /** The rows a Cover row's recipe points at, or none does. */
   referencedByCoverRecipe?: ReferencedByFilter;
   /** The rows a Ingredient row's recipe points at, or none does. */
@@ -570,7 +571,7 @@ export const recipeTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "recipe.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "title", column: "title", field: "title", qualified: "recipe.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"title\", \"created_at\", \"created_by\"",
@@ -681,6 +682,7 @@ export interface RecipeCommitFilter {
   contentHash?: StringFilter<string>;
   sequence?: NumberFilter<T.GenericInt64> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   /** The rows a RecipeCommit row's parentCommit points at, or none does. */
   referencedByRecipeCommitParentCommit?: ReferencedByFilter;
   /** The rows a RecipePatch row's commit points at, or none does. */
@@ -761,7 +763,7 @@ export const recipeCommitTable: TableDefinition = {
     { name: "contentHash", column: "content_hash", field: "contentHash", qualified: "recipe_commit.content_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "sequence", column: "\"sequence\"", field: "sequence", qualified: "recipe_commit.\"sequence\"", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_commit.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_commit.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_commit.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\"",
@@ -1014,7 +1016,9 @@ export interface RecipeRefFilter {
   name?: StringFilter<string>;
   sealedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   _version?: NumberFilter<number>;
   /** The rows a Cover row's ref points at, or none does. */
   referencedByCoverRef?: ReferencedByFilter;
@@ -1104,9 +1108,9 @@ export const recipeRefTable: TableDefinition = {
     { name: "name", column: "\"name\"", field: "name", qualified: "recipe_ref.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "sealedAt", column: "sealed_at", field: "sealedAt", qualified: "recipe_ref.sealed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_ref.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_ref.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_ref.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_ref.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "recipe_ref.updated_by", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "recipe_ref.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "recipe_ref.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "recipe_ref.deleted_by", uuid: true, audit: "deletedBy" },
     { name: "_version", column: "_version", field: "_version", qualified: "recipe_ref._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
@@ -1212,7 +1216,9 @@ export interface RecipeReleaseFilter {
   rootId?: UuidFilter<T.IdentityUUID>;
   commitId?: UuidFilter<T.IdentityUUID>;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   _version?: NumberFilter<number>;
   /** The rows whose root is among the Recipe rows the filter finds (D90). */
   root?: RecipeFilter;
@@ -1268,9 +1274,9 @@ export const recipeReleaseTable: TableDefinition = {
     { name: "rootId", column: "root_id", field: "root", qualified: "recipe_release.root_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
     { name: "commitId", column: "commit_id", field: "commit", qualified: "recipe_release.commit_id", uuid: true, required: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_release.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_release.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_release.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_release.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "recipe_release.updated_by", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "recipe_release.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "recipe_release._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
@@ -1506,7 +1512,9 @@ export interface StepFilter {
   timings?: JsonFilter<T.GenericJSON>;
   scratch?: StringFilter<string> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   entityKey?: UuidFilter<T.IdentityUUID>;
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
@@ -1568,9 +1576,9 @@ export const stepTable: TableDefinition = {
     { name: "timings", column: "timings", field: "timings", qualified: "step.timings", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "scratch", column: "scratch", field: "scratch", qualified: "step.scratch", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "step.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "step.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "step.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "step.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "step.updated_by", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "step.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "step.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "step.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
     { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "step.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },

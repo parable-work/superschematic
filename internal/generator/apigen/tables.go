@@ -166,6 +166,12 @@ type TablesInfo struct {
 	UsesContains bool
 	UsesTexts    bool
 	UsesMembers  bool
+	// UsesRowRules: an operation holds a row rule (D108), so tables.go
+	// reads the request's caller; UsesRowLift, one names the permission
+	// that lifts it; UsesRowCreate, a create sets a member to the caller.
+	UsesRowRules  bool
+	UsesRowLift   bool
+	UsesRowCreate bool
 }
 
 // TableRows is what the refusals of a table's writes name (D106): the
@@ -527,6 +533,19 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 		"return err",
 		"}",
 	}
+	// A row rule (D108) holds beside the key and the parents: a row that
+	// names another caller is the 404 of one that is not there.
+	reach, err := b.reach(owner, result, to, []string{"return orm.ErrNotFound"})
+	if err != nil {
+		return nil, err
+	}
+	if len(reach) > 0 {
+		find = append(append([]string{"where := " + where}, reach...),
+			"row, err := repo.FindOne(ctx, where, nil)",
+			"if err != nil {",
+			"return err",
+			"}")
+	}
 	rowKey, err := b.rowKey(owner, result)
 	if err != nil {
 		return nil, err
@@ -570,7 +589,7 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 		b.info.UsesJSON = true
 		h.Body = append(h.Body, "repo := "+repo)
 		if to.Kind == ir.TableOperationCreate {
-			if err := b.create(owner, h, body, parents, endpoint, asView); err != nil {
+			if err := b.create(owner, h, body, parents, endpoint, asView, to); err != nil {
 				return nil, err
 			}
 		} else {
@@ -585,6 +604,49 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 		h.Params += ", " + param
 	}
 	return h, nil
+}
+
+// reach are the statements that hold where, a filter of the operation's
+// table, to the rows its row rule reaches for the request's caller (D108):
+// the rows one of the rule's members holds the caller's id in, unless the
+// caller holds the rule's override permission. none are the statements
+// that answer a caller no row can name, one with no id. No statements for
+// an operation without a rule. A member that holds text is not served
+// yet: the Go handlers compare the caller with a UUID alone.
+func (b *tableBuilder) reach(owner string, result *tableView, to *ir.TableOperation, none []string) ([]string, error) {
+	if len(to.By) == 0 {
+		if to.OverridePermission != "" {
+			return nil, fmt.Errorf("apigen: operation %s: its @tableOperation names the override permission %s and no row rule; the loader refuses it (D108)", owner, to.OverridePermission)
+		}
+		return nil, nil
+	}
+	filter := "orm." + to.Type + "Filter"
+	var named []string
+	for _, name := range to.By {
+		column := result.column(name)
+		if column == nil {
+			return nil, fmt.Errorf("apigen: operation %s: its row rule names %s, which is no member of %s; the loader holds a @tableOperation's rule to its table (D108)", owner, name, to.Type)
+		}
+		if column.Filter != sqlutil.FilterUUID {
+			return nil, unserved("its row rule names %s, which holds text, and the Go server compares the caller with a member that holds a UUID alone so far (D108)", name)
+		}
+		member := codegen.ToPascalCase(column.Field)
+		if column.Relation != "" {
+			member += "ID"
+		}
+		named = append(named, "{"+member+": &orm.UUIDFilter{Eq: &caller}}")
+	}
+	b.info.UsesRowRules = true
+	open := "{"
+	if to.OverridePermission != "" {
+		b.info.UsesRowLift = true
+		open = "if !tableLifted(ctx, " + strconv.Quote(to.OverridePermission) + ") {"
+	}
+	lines := []string{open, "caller, named := tableCallerID(ctx)", "if !named {"}
+	lines = append(lines, none...)
+	return append(lines, "}",
+		"where.AllOf = append(where.AllOf, "+filter+"{AnyOf: []"+filter+"{"+strings.Join(named, ", ")+"}})",
+		"}"), nil
 }
 
 // owner names the endpoint's operation as the loader does, Set.operation,
@@ -737,6 +799,26 @@ func (b *tableBuilder) rowMemberOf(owner string, view *tableView, field *ir.Fiel
 		out.relation = row + "." + name
 	}
 	return out, nil
+}
+
+// uuidScalar is the scalar a principal's id reads as (orm.ParseUserID).
+const uuidScalar = "Identity.UUID"
+
+// rowScalar names the scalar a row holds in column: the column's own, or,
+// for a to-one relation's key, the key's of the row it points at, a UUID
+// for one the generator adds.
+func rowScalar(tables map[string]*sqlutil.TableModel, column *sqlutil.ColumnModel) string {
+	def := column.Def
+	if column.Relation != "" {
+		def = nil
+		if target := tables[column.Relation]; target != nil && target.KeyColumn() != nil {
+			def = target.KeyColumn().Def
+		}
+	}
+	if def == nil {
+		return uuidScalar
+	}
+	return def.TypeRef.Name
 }
 
 // assign are the statements that set dst from src, each a Go expression
@@ -906,6 +988,14 @@ func (b *tableBuilder) list(owner string, endpoint EndpointInfo, h *TableHandler
 			body = append(body, lines...)
 		}
 	}
+
+	// A row rule (D108) holds beside the parents and whatever the filter
+	// says: a caller no row can name lists none.
+	reach, err := b.reach(owner, result, to, []string{"result.Items = []types." + endpoint.OutputType + "{}", "return nil"})
+	if err != nil {
+		return err
+	}
+	body = append(body, reach...)
 
 	*params = append(*params, "page paging.Request")
 	options := "Fields: orm." + typeName + "Fields{}.All(), Limit: page.Limit"
@@ -1152,7 +1242,7 @@ func (b *tableBuilder) defaultOf(table *sqlutil.TableModel, c *sqlutil.ColumnMod
 // create models the body of a create: a row of the path's parents, the
 // members the body sets and the defaults of the columns it leaves unsaid,
 // through the repository's CreateOne.
-func (b *tableBuilder) create(owner string, h *TableHandler, body *tableView, parents map[string]*sqlutil.ColumnModel, endpoint EndpointInfo, asView string) error {
+func (b *tableBuilder) create(owner string, h *TableHandler, body *tableView, parents map[string]*sqlutil.ColumnModel, endpoint EndpointInfo, asView string, operation *ir.TableOperation) error {
 	members, err := b.bodyMembers(owner, body)
 	if err != nil {
 		return err
@@ -1243,6 +1333,43 @@ func (b *tableBuilder) create(owner string, h *TableHandler, body *tableView, pa
 			lines = append(append([]string{"if " + condition + " {"}, lines...), "}")
 		}
 		h.Body = append(h.Body, lines...)
+	}
+	// The row rule's members name the caller in the new row (D108):
+	// createdBy as the repository stamps it, each other one set here,
+	// after the body's, which the loader holds from setting one.
+	var callers []string
+	for _, name := range operation.By {
+		column := body.column(name)
+		if column == nil {
+			return fmt.Errorf("apigen: operation %s: its row rule names %s, which is no member of %s; the loader holds a @tableOperation's rule to its table (D108)", owner, name, typeName)
+		}
+		if column.Audit != "" {
+			continue
+		}
+		if _, set := byMember[name]; set {
+			return fmt.Errorf("apigen: operation %s: its body %s sets %s, the member its row rule sets to the caller; the loader refuses it on a @tableOperation (D108)", owner, body.def.Name, name)
+		}
+		if column.Filter != sqlutil.FilterUUID {
+			return unserved("its row rule names %s, which holds text, and the Go server names the caller by a UUID alone so far (D108)", name)
+		}
+		if held := rowScalar(b.tables, column); held != uuidScalar {
+			return unserved("its row rule names %s, which holds %s, and a create of the Go server sets the caller as %s alone so far (D108)", name, held, uuidScalar)
+		}
+		target, before, err := to(&ir.FieldDef{Name: name}, column)
+		if err != nil {
+			return err
+		}
+		callers = append(callers, before...)
+		callers = append(callers, assign(target.expr, target.held, "caller", goMember{}, "")...)
+	}
+	if len(callers) > 0 {
+		b.info.UsesRowRules, b.info.UsesRowCreate = true, true
+		h.Body = append(h.Body,
+			"caller, named := tableCallerID(ctx)",
+			"if !named {",
+			"return tableUnnamedCaller(ctx, "+strconv.Quote(typeName)+")",
+			"}")
+		h.Body = append(h.Body, callers...)
 	}
 	refusals := b.refusals(nil, members, false)
 	if len(refusals) > 0 || slices.ContainsFunc(h.Body, func(line string) bool { return strings.Contains(line, "members.set(") }) {

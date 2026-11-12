@@ -73,7 +73,9 @@ export interface AccountFilter {
   code?: StringFilter<string>;
   openedOn?: DateFilter<T.TemporalDate> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   /** The rows a Entry row's account points at, or none does. */
   referencedByEntryAccount?: ReferencedByFilter;
   /** The rows a Entry row's transfer points at, or none does. */
@@ -132,9 +134,9 @@ export const accountTable: TableDefinition = {
     { name: "openedOn", column: "opened_on", field: "openedOn", qualified: "account.opened_on", date: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "mailingAddress", column: "mailing_address", field: "mailingAddress", qualified: "account.mailing_address", json: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "account.updated_by", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "account.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
@@ -250,7 +252,9 @@ export interface EntryFilter {
   metadata?: JsonFilter<T.GenericJSON> & NullFilter;
   reviewedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
+  updatedBy?: UuidFilter<T.IdentityUUID>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
   /** The rows whose account is among the Account rows the filter finds (D90). */
@@ -315,9 +319,9 @@ export const entryTable: TableDefinition = {
     { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "in", "isNull"] },
     { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy" },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "entry.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "entry.updated_by", uuid: true, required: true, audit: "updatedBy" },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "entry.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "entry.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "entry.deleted_by", uuid: true, audit: "deletedBy" },
   ],

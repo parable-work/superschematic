@@ -40,6 +40,10 @@ does. You never write, edit or duplicate:
   rows through `@source` views: mark the method `@tableOperation()` and
   the TypeScript and Go servers serve it from the repositories, in one
   transaction and as the caller.
+- The check that a row is the caller's: `@tableOperation({ by:
+  ["ownerId"] })` keeps a read, a list, an update and a delete to the
+  rows one of the named members holds the caller in, and sets them on a
+  create.
 - Routing, argument decoding, 400s, auth and permission checks, rate,
   body and time limits, pagination plumbing, a list's filter parsing,
   webhook signature checks.
@@ -160,10 +164,13 @@ path for when the store is unavailable.
   a path parameter named for a relation's key (`teams/{teamId}/issues`)
   holds the row to its parent, a body view lists only the columns a
   caller may set, and an update's members are all `Nullable`. Write the
-  operation by hand, with the same route and types, when it needs a
-  `@virtual` field, an ownership check, a rule over which rows the caller
-  sees, or a Rust server. `superschematic catalog decorators` has its
-  rules.
+  `@tableOperation({ by: ["ownerId"], overridePermission: "notes.admin"
+  })` holds it to the rows a member names the caller in, a row of
+  someone else's a 404, and sets those members on a create; a rule needs
+  a route that requires a caller. Write the operation by hand, with the
+  same route and types, when it needs a `@virtual` field, a rule that
+  names the caller through another table, or a Rust server.
+  `superschematic catalog decorators` has its rules.
 - **A list's page, sort, search and filters are declared.** `@paginated`
   on a `GET` that returns a list, with a `SortBy<Item, [...]>`, a
   `SearchQuery` and a `FilterBy<Item, [...]>` argument. Don't add a

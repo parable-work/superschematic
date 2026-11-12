@@ -33,11 +33,15 @@ import (
 //   - a list is @paginated, sorts by columns the repositories sort by, and
 //     searches a table with search fields;
 //   - no guard asks an implementation to run: @requireOwnership and
-//     @manualRouteRegistration fail the load.
+//     @manualRouteRegistration fail the load;
+//   - a row rule (D108) names members of the row that hold a subject, on a
+//     route that requires a caller, and a create's body carries none of
+//     the members the rule sets to the caller.
 //
 // It writes TableOperation's Kind, Database, Type, Projection, Key,
-// Parents and Input. A data form that wrote one of them otherwise is
-// refused, since what an operation does is its declaration's to say.
+// Parents and Input, and keeps the row rule the decorator wrote, By and
+// OverridePermission. A data form that wrote one of the first otherwise
+// is refused, since what an operation does is its declaration's to say.
 func checkTableOperations(schema *ir.Schema, in Input, r *Result) {
 	type marked struct {
 		set *ir.OperationSet
@@ -208,7 +212,7 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 
 	switch {
 	case op.RequireOwnership:
-		r.errorf("", "%s: @requireOwnership asks the implementation to check what the caller owns, and a @tableOperation has none: write the operation by hand, or guard the route another way", owner)
+		r.errorf("", "%s: @requireOwnership asks the implementation to check what the caller owns, and a @tableOperation has none: name the row's members that hold who it is for in @tableOperation({ by: [...] }) (D108), or write the operation by hand", owner)
 	case op.ManualRouteRegistration:
 		r.errorf("", "%s: @manualRouteRegistration hands the route to a handler of yours, and @tableOperation to one the build writes: an operation takes one of them", owner)
 	case op.Webhook:
@@ -359,6 +363,7 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 	}
 
 	checkResultView(owner, result, r)
+	callerSets := checkRowRule(owner, kind, op, result, key, parentOf, r)
 
 	var input *tableView
 	inputName := ""
@@ -390,7 +395,7 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 			break
 		}
 		input, inputName = view, arg.Name
-		checkBodyView(owner, kind, input, parentOf, r)
+		checkBodyView(owner, kind, input, parentOf, callerSets, r)
 	default:
 		for _, arg := range body {
 			if method == "GET" {
@@ -408,6 +413,7 @@ func checkTableOperation(schema *ir.Schema, db *tableDatabase, set *ir.Operation
 	filled := &ir.TableOperation{
 		Kind: kind, Database: db.name, Type: result.source.Name, Projection: result.projection,
 		Parents: parents, Input: inputName,
+		By: op.TableOperation.By, OverridePermission: op.TableOperation.OverridePermission,
 	}
 	if keyArg != nil {
 		filled.Key = key
@@ -448,12 +454,94 @@ func checkResultView(owner string, result *tableView, r *Result) {
 	}
 }
 
+// subjectMember reports whether a row rule may name the column (D108): it
+// holds one subject the repositories filter by, a UUID, a to-one
+// relation's key or text, and is the row's own to say: createdBy alone
+// among the audit fields, no field a behavior owns, no secret.
+func subjectMember(source *ir.TypeDef, c *sqlutil.ColumnModel) bool {
+	_, anchors := source.FieldBehavior(c.Field)
+	return (c.Filter == sqlutil.FilterUUID || c.Filter == sqlutil.FilterString) &&
+		(c.Audit == "" || c.Audit == sqlutil.AuditCreatedBy) &&
+		!c.Secret && !c.Encrypted && !c.Internal && !anchors && (c.Def == nil || !c.Def.Owned())
+}
+
+// checkRowRule holds a table operation's row rule to its table (D108): by
+// names members of the row that hold a subject, as a view names them (an
+// own field, a to-one relation's key, createdBy, the key itself), on a
+// route that requires a caller, since the rule compares the row with
+// who is calling. A read, a list, an update and a delete then reach only
+// the rows one member names the caller in. A create sets each member but
+// createdBy, which the repository stamps, to the caller: it returns those,
+// which the body may not carry, and refuses the key, which the table
+// generates, and a relation the path sets.
+func checkRowRule(owner, kind string, op *ir.FieldDef, result *tableView, key string, parents map[string]bool, r *Result) map[string]bool {
+	rule := op.TableOperation
+	if rule == nil || len(rule.By) == 0 {
+		if rule != nil && rule.OverridePermission != "" {
+			r.errorf("", "%s: its @tableOperation names overridePermission %q, which lifts a row rule, and names no by; list the row's members that name who may reach it", owner, rule.OverridePermission)
+		}
+		return nil
+	}
+	if !op.HasUserClause() {
+		r.errorf("", "%s: its row rule reaches the rows that name the caller, and the route admits a request with none; guard it with @auth or @requirePermission, or put it in an Authenticated set (D108)", owner)
+	}
+	if result.projection {
+		r.errorf("", "%s: its row rule is over %s, a projection, and a rule is held to a table's own columns so far (D108); write the operation by hand", owner, result.source.Name)
+		return nil
+	}
+	var known []string
+	for i := range result.model.Columns {
+		if c := &result.model.Columns[i]; subjectMember(result.source, c) {
+			known = append(known, viewMember(c))
+		}
+	}
+	listed := "it has none"
+	if len(known) > 0 {
+		listed = strings.Join(known, ", ")
+	}
+	sets := map[string]bool{}
+	seen := map[string]bool{}
+	for _, name := range rule.By {
+		c := result.column(name)
+		again := seen[name]
+		seen[name] = true
+		switch {
+		case again:
+			r.errorf("", "%s: by names %s twice", owner, name)
+		case c == nil:
+			r.errorf("", "%s: by names %s, which is no member of %s; a row rule names a member that holds a subject (%s)", owner, name, result.source.Name, listed)
+		case c.Audit != "" && c.Audit != sqlutil.AuditCreatedBy:
+			r.errorf("", "%s: by names %s, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (%s)", owner, name, listed)
+		case !subjectMember(result.source, c):
+			r.errorf("", "%s: by names %s, which holds no subject a row rule compares the caller with: text, a UUID, a to-one relation's key or createdBy, none of them secret or a behavior's (%s)", owner, name, listed)
+		case kind != ir.TableOperationCreate || c.Audit == sqlutil.AuditCreatedBy:
+		case name == key:
+			r.errorf("", "%s: by names %s, the key of %s, and a create's row rule sets each member it names to the caller: a create names no key", owner, name, result.source.Name)
+		case parents[name]:
+			r.errorf("", "%s: by names %s, which the path's {%s} sets, and a create's row rule sets each member it names to the caller: one of them sets it", owner, name, name)
+		default:
+			sets[name] = true
+		}
+	}
+	return sets
+}
+
+// viewMember is the name a view holds a column under: its field, or a
+// to-one relation's key.
+func viewMember(c *sqlutil.ColumnModel) string {
+	if c.Relation != "" {
+		return c.Field + "Id"
+	}
+	return c.Field
+}
+
 // checkBodyView holds a create's or an update's body to the columns a
 // caller may set (D106). A create also sets every column the table
 // requires and gives no value itself; an update's members are all
-// optional. parents are the path parameters that set a relation, which
-// the body may not set too.
-func checkBodyView(owner, kind string, body *tableView, parents map[string]bool, r *Result) {
+// optional. parents are the path parameters that set a relation, and
+// callerSets the members a create's row rule sets to the caller (D108):
+// the body may set neither.
+func checkBodyView(owner, kind string, body *tableView, parents, callerSets map[string]bool, r *Result) {
 	set := map[string]bool{}
 	for _, f := range body.view.Fields {
 		if f.Virtual {
@@ -481,6 +569,8 @@ func checkBodyView(owner, kind string, body *tableView, parents map[string]bool,
 			why = "a field a behavior owns, which only its operations change"
 		case parents[f.Name]:
 			why = "the relation the path's {" + f.Name + "} sets"
+		case callerSets[f.Name]:
+			why = "the member its row rule sets to the caller"
 		}
 		if why != "" {
 			r.errorf("", "%s: its body %s sets %s, %s; leave the field out of the view", owner, body.view.Name, f.Name, why)
@@ -500,7 +590,7 @@ func checkBodyView(owner, kind string, body *tableView, parents map[string]bool,
 			member += "Id"
 		}
 		_, anchors := body.source.FieldBehavior(c.Field)
-		if set[member] || parents[member] || c.Internal || c.Audit != "" || anchors || (c.Def != nil && c.Def.Owned()) {
+		if set[member] || parents[member] || callerSets[member] || c.Internal || c.Audit != "" || anchors || (c.Def != nil && c.Def.Owned()) {
 			continue
 		}
 		if !c.Required || c.AutoGenerated || c.Default != nil || c.DefaultsToNow() || (c.Key && (c.Def == nil || c.Class.UUIDLike)) {

@@ -225,6 +225,11 @@ type TableRoute struct {
 	Body []string
 	// Search is a list's SearchQuery argument, by its query parameter.
 	Search string
+	// By is the row rule (D108): the row's members that name who may
+	// reach it, and Override the permission whose holder reaches every
+	// row.
+	By       []string
+	Override string
 }
 
 // Handler is the runtime's handler of the operation's kind: tableRead,
@@ -266,6 +271,12 @@ func (r *TableRoute) Literal() string {
 	}
 	if r.Search != "" {
 		fields = append(fields, "search: "+tsString(r.Search))
+	}
+	if len(r.By) > 0 {
+		fields = append(fields, "by: "+tsStringList(r.By))
+		if r.Override != "" {
+			fields = append(fields, "overridePermission: "+tsString(r.Override))
+		}
 	}
 	return "{ " + strings.Join(fields, ", ") + " }"
 }
@@ -1393,6 +1404,14 @@ func (b *builder) tableEndpoint(ep apigen.EndpointInfo, op *ir.TableOperation) (
 		Type:       op.Type,
 		Repository: lowerFirst(op.Type),
 		Key:        op.Key,
+		By:         op.By,
+		Override:   op.OverridePermission,
+	}
+	if op.OverridePermission != "" && len(op.By) == 0 {
+		return refuse("whose overridePermission lifts a row rule it does not have")
+	}
+	if len(op.By) > 0 && op.Projection {
+		return refuse("whose row rule is over a projection")
 	}
 	if !identifierPattern.MatchString(route.Repository) {
 		return endpoint, fmt.Errorf("tsrestgen: %s is a %s of %s, and the repository's member %q is no identifier the router can name it by", owner, op.Kind, op.Type, route.Repository)

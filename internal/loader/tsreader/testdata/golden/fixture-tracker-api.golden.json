@@ -210,6 +210,38 @@
         }
       ]
     },
+    "CreateNoteInput": {
+      "name": "CreateNoteInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller sets to write a note: the issue is the path's, and the\nrow rule makes the caller its owner.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Note",
+        "omittedFromSource": [
+          "id",
+          "issue",
+          "owner",
+          "createdAt",
+          "createdBy"
+        ]
+      },
+      "fields": [
+        {
+          "name": "text",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1
+        },
+        {
+          "name": "sharedWith",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        }
+      ]
+    },
     "CreateTeamInput": {
       "name": "CreateTeamInput",
       "owner": "src/tracker.schema.ts",
@@ -409,6 +441,68 @@
         }
       ]
     },
+    "NoteView": {
+      "name": "NoteView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "A person's note on an issue.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Note",
+        "omittedFromSource": [
+          "issue"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "issueId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "owner",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "sharedWith",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "text",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        }
+      ]
+    },
     "TeamSummary": {
       "name": "TeamSummary",
       "owner": "src/tracker.schema.ts",
@@ -527,6 +621,37 @@
         },
         {
           "name": "assigneeId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        }
+      ]
+    },
+    "UpdateNoteInput": {
+      "name": "UpdateNoteInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a note's owner may change.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Note",
+        "omittedFromSource": [
+          "id",
+          "issue",
+          "owner",
+          "createdAt",
+          "createdBy"
+        ]
+      },
+      "fields": [
+        {
+          "name": "text",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1
+        },
+        {
+          "name": "sharedWith",
           "typeRef": {
             "name": "Identity.UUID"
           }
@@ -974,6 +1099,176 @@
           "tableOperation": {},
           "httpMethod": "DELETE",
           "restPath": "issues/{issueId}/comments/{id}"
+        }
+      ]
+    },
+    {
+      "name": "Notes",
+      "comment": "Notes are their owner's (D108): each operation's row rule names the\nrow's members that hold who may reach it, and a row that names another\nperson is not found.",
+      "operations": [
+        {
+          "name": "listNotes",
+          "comment": "The caller's notes, their own and the ones shared with them. A holder\nof notes.admin lists everyone's.",
+          "typeRef": {
+            "name": "NoteView",
+            "isArray": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "sort",
+              "typeRef": {
+                "name": "string"
+              },
+              "isQuery": true,
+              "sort": [
+                "createdAt"
+              ]
+            }
+          ],
+          "auth": true,
+          "filter": {
+            "argument": "filter",
+            "fields": [
+              {
+                "name": "issueId"
+              },
+              {
+                "name": "owner"
+              }
+            ]
+          },
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100,
+            "defaultSort": "createdAt"
+          },
+          "tableOperation": {
+            "by": [
+              "owner",
+              "sharedWith"
+            ],
+            "overridePermission": "notes.admin"
+          },
+          "httpMethod": "GET",
+          "restPath": "notes"
+        },
+        {
+          "name": "getNote",
+          "comment": "One note, its owner's or one shared with the caller.",
+          "typeRef": {
+            "name": "NoteView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "owner",
+              "sharedWith"
+            ],
+            "overridePermission": "notes.admin"
+          },
+          "httpMethod": "GET",
+          "restPath": "notes/{id}"
+        },
+        {
+          "name": "createNote",
+          "comment": "A new note on the issue the path names, the caller's own.",
+          "typeRef": {
+            "name": "NoteView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "issueId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateNoteInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "owner"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "issues/{issueId}/notes"
+        },
+        {
+          "name": "updateNote",
+          "comment": "Changes a note of the caller's own: one shared with them is not theirs\nto change.",
+          "typeRef": {
+            "name": "NoteView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "UpdateNoteInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "owner"
+            ]
+          },
+          "httpMethod": "PATCH",
+          "restPath": "notes/{id}"
+        },
+        {
+          "name": "deleteNote",
+          "comment": "Deletes a note the caller wrote.",
+          "typeRef": {
+            "name": "NoteView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "createdBy"
+            ],
+            "overridePermission": "notes.admin"
+          },
+          "httpMethod": "DELETE",
+          "restPath": "notes/{id}"
         }
       ]
     }

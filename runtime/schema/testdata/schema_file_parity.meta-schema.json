@@ -6524,6 +6524,13 @@
     "TableOperation": {
       "additionalProperties": false,
       "properties": {
+        "by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "database": {
           "default": "",
           "type": "string"
@@ -6537,6 +6544,10 @@
           "type": "string"
         },
         "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "overridePermission": {
           "default": "",
           "type": "string"
         },

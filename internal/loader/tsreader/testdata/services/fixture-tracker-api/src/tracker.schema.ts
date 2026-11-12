@@ -13,7 +13,7 @@ import {
   source,
   tableOperation
 } from "@superschematic/api";
-import { Comment, Issue, IssueStatus, Member, Team } from "@schemas/fixture-tracker-db";
+import { Comment, Issue, IssueStatus, Member, Note, Team } from "@schemas/fixture-tracker-db";
 
 // A team as the API shows it.
 @source(Team)
@@ -107,6 +107,33 @@ export abstract class CommentView {
 @source(Comment)
 export abstract class CreateCommentInput {
   body: Validate<string, { minLength: 1 }>;
+}
+
+// A person's note on an issue.
+@source(Note)
+export abstract class NoteView {
+  id: Identity.UUID;
+  issueId: Identity.UUID;
+  owner: Identity.UUID;
+  sharedWith: Nullable<Identity.UUID>;
+  text: string;
+  createdAt: Temporal.DateTime;
+  createdBy: Identity.UUID;
+}
+
+// What a caller sets to write a note: the issue is the path's, and the
+// row rule makes the caller its owner.
+@source(Note)
+export abstract class CreateNoteInput {
+  text: Validate<string, { minLength: 1 }>;
+  sharedWith: Nullable<Identity.UUID>;
+}
+
+// What a note's owner may change.
+@source(Note)
+export abstract class UpdateNoteInput {
+  text: Nullable<Validate<string, { minLength: 1 }>>;
+  sharedWith: Nullable<Identity.UUID>;
 }
 
 // How many issues a team has open: no view of a table, so the operation
@@ -248,6 +275,49 @@ export class Comments extends Authenticated {
   @requirePermission(["issues.write"])
   @tableOperation()
   deleteComment(issueId: Identity.UUID, id: Identity.UUID): CommentView {
+    throw new Error("schema declaration only");
+  }
+}
+
+// Notes are their owner's (D108): each operation's row rule names the
+// row's members that hold who may reach it, and a row that names another
+// person is not found.
+export class Notes extends Authenticated {
+  // The caller's notes, their own and the ones shared with them. A holder
+  // of notes.admin lists everyone's.
+  @rest(HttpMethod.GET, "notes")
+  @paginated({ defaultSort: "createdAt" })
+  @tableOperation({ by: ["owner", "sharedWith"], overridePermission: "notes.admin" })
+  listNotes(sort: SortBy<NoteView, ["createdAt"]>, filter: FilterBy<NoteView, ["issueId", "owner"]>): NoteView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // One note, its owner's or one shared with the caller.
+  @rest(HttpMethod.GET, "notes/{id}")
+  @tableOperation({ by: ["owner", "sharedWith"], overridePermission: "notes.admin" })
+  getNote(id: Identity.UUID): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // A new note on the issue the path names, the caller's own.
+  @rest(HttpMethod.POST, "issues/{issueId}/notes")
+  @tableOperation({ by: ["owner"] })
+  createNote(issueId: Identity.UUID, input: CreateNoteInput): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes a note of the caller's own: one shared with them is not theirs
+  // to change.
+  @rest(HttpMethod.PATCH, "notes/{id}")
+  @tableOperation({ by: ["owner"] })
+  updateNote(id: Identity.UUID, input: UpdateNoteInput): NoteView {
+    throw new Error("schema declaration only");
+  }
+
+  // Deletes a note the caller wrote.
+  @rest(HttpMethod.DELETE, "notes/{id}")
+  @tableOperation({ by: ["createdBy"], overridePermission: "notes.admin" })
+  deleteNote(id: Identity.UUID): NoteView {
     throw new Error("schema declaration only");
   }
 }

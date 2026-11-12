@@ -17652,3 +17652,48 @@ ormgen's and tsgen's goldens of `fixture-queries-db`; `TestJoinTableNames`;
 `queue-sqlite.test.ts`, and on Postgres
 `TestQueueParityOfGoTypeScriptAndRustOnPostgres` and
 `TestNamedTablesAcrossGoAndTypeScriptOnPostgres`.
+
+## D108. A `@tableOperation` names the row's members that hold who may reach it, and reaches only those rows (D106 amended)
+
+D106 left a generated operation with one rule over its rows: the route's
+guards. A caller the route admits reaches every live row the path holds.
+The tracker's inbox showed what that costs. `GET /notifications` behind
+`inbox.read` lists everyone's notifications to anyone who holds the
+permission, and any holder of `issues.write` edits any comment. A private
+row was a hand-written operation: the tracker's own inbox is two, a list
+that adds `userId: { eq: caller }` to the request's filter and an update
+that does the same, twenty-five lines that say one thing, "the rows whose
+user is the caller". D106 named this its step 4 and did not design it.
+
+The rule is a fact about the table as the operation reads it, so the
+operation says it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@tableOperation` takes one optional argument, the row rule: `{ by: [...], overridePermission? }`. `by` lists members of the row, named as a view names them: a field of the table that holds an id or text, a to-one relation's key (`assigneeId`), or `createdBy`. `ir.TableOperation` keeps both as written (`by`, `overridePermission`). | A decorator of its own, `@rowRule`, which would let a rule sit on an operation no handler of the build's serves and so check nothing. A rule on the table, in the DB schema: the database does not know the API's callers, and one table's read and update often differ, as a shared note's do. Postgres row-level security, which SQLite and D1 do not have, and which would need each request's caller set on the database's session. |
+| A read, an update and a delete find the live row under the path's key and parents that one member of `by` also holds the caller in. A row that names someone else is the 404 `not_found` of a row that is not there, and nothing is written. A list keeps the same rows beside the path's parents and the request's filter, in an `allOf` of its own, so no filter widens it. | A 403 for a row that exists and names another, which tells a caller which keys are taken. Checking the row after it is read, which a list cannot do without reading past its page. |
+| The caller is the request's principal, by its subject. A member that holds an id is compared with a subject that reads as one, in either of its forms, and a member that holds text with the subject as it is. A request with no caller, and a caller whose subject no member can hold, reach no row: an empty page, and a 404. | Reading a service caller's name as a subject. A service that needs every row holds the override permission, or the operation is written by hand. |
+| A create sets each member of `by` but `createdBy` to the caller, and its body's view may not hold one: the member is the rule's. `createdBy` stays the repository's stamp. A create whose caller is no one is a 401, and one whose caller has no id for a member that holds one a 403. The loader refuses a create whose rule names the table's key or a relation its path sets. | Leaving the member to the body and refusing a value that is not the caller's, a second way to say one thing. Skipping the rule on a create, which would let a caller write a row they then cannot read. |
+| `overridePermission` names one permission whose holder the rule does not hold back, matched as a route's permission is (`notes` covers `notes.admin`). The permission catalog lists it under the operation. Without it the rule holds for every caller. | A list of permissions, or a role: one permission is what a route's own guard names, and a role is a set of them. An implicit override for an admin, which no schema would show. |
+| The loader holds the rule to the table (`verify.checkRowRule`): the route requires a caller (`@auth`, `@requirePermission`, an `Authenticated` set); each member is one of the table's, holds a subject, and is no secret, no field a behavior owns and no audit field but `createdBy`; no member is named twice; and the table is no projection. `@requireOwnership` on a `@tableOperation` still fails the load, and its message now names the rule. | Leaving a member's kind to the generators, which would surface a mistake at a build or a request. |
+| `createdBy` and `updatedBy` keep a filter in both ORMs, as `createdAt` and `updatedAt` do: `sqlutil.tableOf` gives every column but `deletedAt`, `deletedBy` and an encrypted one its filter, and the Go ORM's filter struct declares them. A rule by `createdBy` is a filter the repository already had the column for. | A filter only the generated handlers reach, which the Go ORM's typed filter has no place for. |
+| The TypeScript handlers build the rule from the router's table (`by`, `overridePermission` on each `TableOperation`) and the repository's own columns. A member the repository keeps no equality filter for throws before anything is read, for every caller: a repository drops a filter's member it does not know, and a rule that dropped one would reach every row. | Trusting the loader's check alone, when the router and the types package are built apart and one may be stale. |
+| The Go handlers write the rule into `tables.go`, typed: `where.AllOf = append(where.AllOf, orm.NoteFilter{AnyOf: ...})` under `if !tableLifted(ctx, "notes.admin")`, and `row.Owner = caller` on a create. A member that holds text, and a create whose member holds an id of another scalar than `Identity.UUID`, stay operations the project implements, with the build's warning (D106's last rule). | Refusing such a rule at the load, which would fail a TypeScript API for what only the Go server lacks. |
+| A TypeScript table operation acts as no one for a principal whose subject is no id, as the Go server's `WithCaller` does: a read is served, and a write that stamps its caller is a 401. Before, `orm.as` threw and the route answered 500. | Leaving the two servers to differ on a caller a custom authenticator establishes. |
+
+Left: a caller named through another table (a team's members), which
+needs the repositories' path filters (D90) in a rule and a way to say
+which relation holds the caller; a behavior's seat as a member, which
+needs a filter over the Seats sub-table, whose subject is text (D107);
+the Go handlers for a member that holds text; a rule over a projection;
+and the Rust server, which serves no table operation yet (D106).
+
+Status: built. `TestTableOperationsAreFilledFromTheirDeclarations` and
+`TestTableOperationsAreHeldToTheirTable`; `table-routes.test.ts`;
+`fixture-tracker-api`'s `Notes`, in tsrestgen's, apigen's and servergen's
+goldens; and on Postgres, over HTTP, one scenario on both servers,
+`TestGeneratedTableOperationsEndToEnd` and
+`TestTableOperationsGoServerServesItsTables`: a create names the caller,
+a list, a read, an update and a delete keep to the caller's rows, the
+override permission and a grant that covers it reach every row, and a
+caller with no id reaches none.

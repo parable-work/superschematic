@@ -621,7 +621,9 @@ type ShelfFilter struct {
 	Id        *UUIDFilter
 	Label     *StringFilter
 	CreatedAt *DateTimeFilter
+	CreatedBy *UUIDFilter
 	UpdatedAt *DateTimeFilter
+	UpdatedBy *UUIDFilter
 	Version   *Int64Filter
 	// ReferencedByStockShelf filters on the presence or absence of a
 	// Stock whose shelf points at this row.
@@ -804,6 +806,29 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			}
 		}
 	}
+	if f.CreatedBy != nil {
+		if f.CreatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`shelf.created_by = $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Eq.ToUUID())
+		}
+		if len(f.CreatedBy.In) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.In))
+			for i, id := range f.CreatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedBy.IsNull != nil {
+			if *f.CreatedBy.IsNull {
+				conditions = append(conditions, `shelf.created_by IS NULL`)
+			} else {
+				conditions = append(conditions, `shelf.created_by IS NOT NULL`)
+			}
+		}
+	}
 	if f.UpdatedAt != nil {
 		if f.UpdatedAt.Eq != nil {
 			paramNum++
@@ -852,6 +877,29 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `shelf.updated_at IS NULL`)
 			} else {
 				conditions = append(conditions, `shelf.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedBy != nil {
+		if f.UpdatedBy.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`shelf.updated_by = $%d`, paramNum))
+			*args = append(*args, f.UpdatedBy.Eq.ToUUID())
+		}
+		if len(f.UpdatedBy.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedBy.In))
+			for i, id := range f.UpdatedBy.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf.updated_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.UpdatedBy.IsNull != nil {
+			if *f.UpdatedBy.IsNull {
+				conditions = append(conditions, `shelf.updated_by IS NULL`)
+			} else {
+				conditions = append(conditions, `shelf.updated_by IS NOT NULL`)
 			}
 		}
 	}

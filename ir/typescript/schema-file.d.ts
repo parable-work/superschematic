@@ -736,10 +736,12 @@ export interface StackDecl {
 }
 
 export interface TableOperation {
+  by?: string[];
   database?: string;
   input?: string;
   key?: string;
   kind?: string;
+  overridePermission?: string;
   parents?: TableOperationParent[];
   projection?: boolean;
   type?: string;
