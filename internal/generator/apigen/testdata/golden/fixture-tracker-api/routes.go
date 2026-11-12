@@ -1249,6 +1249,7 @@ func createIssuesListIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc 
 	filterDueOnArg := bodyargs.NewArg("filter[dueOn]", bodyargs.String, bodyargs.MaxLength(40))
 	filterAssigneeIdArg := bodyargs.NewArg("filter[assigneeId]", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
 	filterCreatedAtArg := bodyargs.NewArg("filter[createdAt]", bodyargs.String)
+	filterCreatedByArg := bodyargs.NewArg("filter[createdBy]", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		TeamIdStr, err := runtimerouting.PathParam(r, "teamId")
@@ -1278,7 +1279,7 @@ func createIssuesListIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc 
 		// whose refusal is the 400 every server answers at filter[field].
 		// Each value is then decoded as an item of a query list of its
 		// field's type.
-		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "priority", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "title", Operators: []filterparse.Operator{"eq", "in", "contains"}}, {Name: "estimate", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "dueOn", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "assigneeId", Operators: []filterparse.Operator{"eq", "in", "isNull"}}, {Name: "createdAt", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}}})
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "priority", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "title", Operators: []filterparse.Operator{"eq", "in", "contains"}}, {Name: "estimate", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "dueOn", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "assigneeId", Operators: []filterparse.Operator{"eq", "in", "isNull"}}, {Name: "createdAt", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "createdBy", Operators: []filterparse.Operator{"eq", "in"}}}})
 		if !ok {
 			return
 		}
@@ -1291,6 +1292,7 @@ func createIssuesListIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc 
 			DueOn:      filterparse.DecodeOrdered[types.TemporalDate](filterErrors, filterRequest, "dueOn", filterDueOnArg),
 			AssigneeId: filterparse.DecodeEquals[types.IdentityUUID](filterErrors, filterRequest, "assigneeId", filterAssigneeIdArg),
 			CreatedAt:  filterparse.DecodeOrdered[types.TemporalDateTime](filterErrors, filterRequest, "createdAt", filterCreatedAtArg),
+			CreatedBy:  filterparse.DecodeEquals[types.IdentityUUID](filterErrors, filterRequest, "createdBy", filterCreatedByArg),
 		}
 		if filterErrors.HasErrors() {
 			RespondValidationErrors(w, r, filterErrors)

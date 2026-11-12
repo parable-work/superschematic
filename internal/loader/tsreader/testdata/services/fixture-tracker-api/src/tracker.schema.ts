@@ -204,7 +204,7 @@ export class Issues extends Authenticated {
     teamId: Identity.UUID,
     q: SearchQuery<Validate<string, { maxLength: 100 }>>,
     sort: SortBy<IssueView, ["createdAt", "priority", "title"]>,
-    filter: FilterBy<IssueView, ["status", "priority", "title", "estimate", "dueOn", "assigneeId", "createdAt"]>
+    filter: FilterBy<IssueView, ["status", "priority", "title", "estimate", "dueOn", "assigneeId", "createdAt", "createdBy"]>
   ): IssueView[] {
     throw new Error("schema declaration only");
   }

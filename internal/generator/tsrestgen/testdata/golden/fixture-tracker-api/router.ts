@@ -316,6 +316,7 @@ export const operationSpecs = {
         { name: 'dueOn', kind: 'date', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[dueOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } },
         { name: 'assigneeId', kind: 'uuid', operators: ['eq', 'in', 'isNull'], value: { name: 'filter[assigneeId]', kind: 'uuid', required: false } },
         { name: 'createdAt', kind: 'datetime', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[createdAt]', kind: 'datetime', required: false } },
+        { name: 'createdBy', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[createdBy]', kind: 'uuid', required: false } },
       ],
     },
     page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['createdAt', 'priority', 'title'], default: '-createdAt' } },

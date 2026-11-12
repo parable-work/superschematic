@@ -2,6 +2,7 @@ package verify
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -23,6 +24,9 @@ func filterSchema(fields []string, edit func(op *ir.FieldDef, item *ir.TypeDef))
 			&ir.FieldDef{Name: "customer", TypeRef: ir.TypeRef{Name: "CustomerView"}, Required: true},
 			&ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}, Required: true},
 			&ir.FieldDef{Name: "createdBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+			&ir.FieldDef{Name: "updatedBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}},
+			&ir.FieldDef{Name: "deletedBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}},
+			&ir.FieldDef{Name: "deletedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}},
 			&ir.FieldDef{Name: "createdAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true},
 			&ir.FieldDef{Name: "total", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true, Virtual: true},
 			&ir.FieldDef{Name: "card", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Decrypted: true},
@@ -78,11 +82,28 @@ func TestFilterFillsEachFieldsKindAndOperators(t *testing.T) {
 		t.Fatalf("filter fields differ")
 	}
 
-	// A hand-written list filters by a field its implementation fills, and
-	// by who created a row; a list over a table's view cannot (below).
+	// A hand-written list filters by a field its implementation fills; a
+	// list over a table's view cannot (below).
 	schema = filterSchema([]string{"total", "createdBy"}, nil)
 	if errs := filterFindings(schema, Input{}); len(errs) != 0 {
 		t.Fatalf("an item that is no @source view: errors %q", errs)
+	}
+
+	// A list over a table's view filters by who created a row and who
+	// last wrote it, as by any id (D110): eq and in, and isNull on the one
+	// that may be null.
+	schema = filterSchema([]string{"createdBy", "updatedBy", "createdAt"}, func(_ *ir.FieldDef, item *ir.TypeDef) {
+		item.Source = &ir.SourceRef{Target: "shop-db.Order"}
+	})
+	if errs := filterFindings(schema, Input{}); len(errs) != 0 {
+		t.Fatalf("a view filtered by its audit fields: errors %q", errs)
+	}
+	audit := map[string]string{}
+	for _, field := range schema.OperationSets[0].Operations[0].Filter.Fields {
+		audit[field.Name] = field.Kind + " " + strings.Join(field.Operators, ",")
+	}
+	if want := map[string]string{"createdBy": "uuid eq,in", "updatedBy": "uuid eq,in,isNull", "createdAt": "datetime eq,in,gt,gte,lt,lte"}; !reflect.DeepEqual(audit, want) {
+		t.Errorf("the audit fields filter as %v, want %v", audit, want)
 	}
 }
 
@@ -119,8 +140,10 @@ func TestFiltersAreHeldToTheirListAndItem(t *testing.T) {
 		{"a duration", []string{"wait"}, nil, []string{"Orders.listOrders: filter argument filter names OrderView.wait, which holds Temporal.Duration; a filter compares one text, number, time or boolean"}},
 		{"a virtual field of a view", []string{"total"}, sourced,
 			[]string{"Orders.listOrders: filter argument filter names OrderView.total, which is @virtual: no column of shop-db.Order holds it, so the table cannot filter by it"}},
-		{"an audit field of a view", []string{"createdBy"}, sourced,
-			[]string{"Orders.listOrders: filter argument filter names OrderView.createdBy, an audit field the repositories keep no filter for"}},
+		{"who deleted a row", []string{"deletedBy"}, sourced,
+			[]string{"Orders.listOrders: filter argument filter names OrderView.deletedBy, which says a row is deleted, and a list holds no deleted row to compare it on"}},
+		{"when a row was deleted", []string{"deletedAt"}, sourced,
+			[]string{"Orders.listOrders: filter argument filter names OrderView.deletedAt, which says a row is deleted, and a list holds no deleted row to compare it on"}},
 		{"another kind written", []string{"status"}, func(op *ir.FieldDef, _ *ir.TypeDef) { op.Filter.Fields[0].Kind = "string" },
 			[]string{"Orders.listOrders: filter argument filter gives status the kind string, and OrderView.status is enum; leave the kind out, the loader fills it"}},
 		{"other operators written", []string{"status"}, func(op *ir.FieldDef, _ *ir.TypeDef) { op.Filter.Fields[0].Operators = []string{"eq", "contains"} },

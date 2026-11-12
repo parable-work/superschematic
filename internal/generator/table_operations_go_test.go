@@ -741,6 +741,10 @@ func TestTableOperations(t *testing.T) {
 			{"assigneeId in", "filter[assigneeId][in]=" + linID + "," + maxID, []string{"Crash on save", "Slow_query in list"}},
 			{"assigneeId is null", "filter[assigneeId][isNull]=true", []string{"Fix typo", "Slowxquery at 50%"}},
 			{"assigneeId is not null", "filter[assigneeId][isNull]=false", []string{"Crash on save", "Slow_query in list"}},
+			// Who created a row, an audit field (D110).
+			{"createdBy", "filter[createdBy]=" + alice + "&filter[assigneeId]=" + linID, []string{"Crash on save"}},
+			{"createdBy of another", "filter[createdBy]=" + bob + "&filter[assigneeId]=" + linID, nil},
+			{"createdBy in", "filter[createdBy][in]=" + bob + "," + alice + "&filter[assigneeId]=" + linID, []string{"Crash on save"}},
 			// A time.
 			{"createdAt", "filter[createdAt]=" + at("Fix typo"), []string{"Fix typo"}},
 			{"createdAt range", "filter[createdAt][gt]=" + at("Crash on save") + "&filter[createdAt][lte]=" + at("Slow_query in list"), []string{"Fix typo", "Slow_query in list"}},

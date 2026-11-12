@@ -341,8 +341,12 @@ filter can compare. The loader refuses:
 - a list or a map, a `Secret`, a `@decrypted` field, whose column holds
   ciphertext, JSON, an object type, a union and a duration;
 - on an item that is a `@source` view, a `@virtual` field, which no column
-  of the table holds, and an audit field other than `createdAt` and
-  `updatedAt`.
+  of the table holds, and `deletedAt` and `deletedBy`, which no row a
+  list holds has a value in.
+
+The other audit fields filter as any field of their type: `createdBy` and
+`updatedBy` as an id (`filter[createdBy]=<id>` is "what I filed"), and
+`createdAt` and `updatedAt` as a time.
 
 So a list filters by nothing its view does not show, and narrowing a list
 cannot probe a column no view returns. The refusal names the operation,

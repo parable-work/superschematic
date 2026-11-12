@@ -109,6 +109,8 @@ func TestTableOperationsAreFilledFromTheirDeclarations(t *testing.T) {
 		"dueOn":      "date eq,in,gt,gte,lt,lte,isNull",
 		"assigneeId": "uuid eq,in,isNull",
 		"createdAt":  "datetime eq,in,gt,gte,lt,lte",
+		// Who created a row filters as any id does (D110).
+		"createdBy": "uuid eq,in",
 	}
 	if !reflect.DeepEqual(kinds, wantKinds) {
 		t.Errorf("listIssues filter kinds = %v, want %v", kinds, wantKinds)

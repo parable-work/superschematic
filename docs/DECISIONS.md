@@ -17737,3 +17737,30 @@ and through the behaviors' core, `TestGeneratedStartStateCreateEndToEnd`:
 a create that names `paid` answers a paid order at its second version, a
 state the initial one does not lead to is the 409 `vetoed` and keeps no
 row, and so does a state the Workflow does not have.
+
+## D110. A list over a view filters by who created a row and who last wrote it (D106 amended)
+
+"What I filed" is a list every tracker has, and D106's `FilterBy` refused
+it: a field of a `@source` view that is an audit field other than
+`createdAt` and `updatedAt` had no filter, because the repositories kept
+none for it. D108 gave `createdBy` and `updatedBy` their filters in both
+ORMs, for a row rule to read. The refusal outlived its reason.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `FilterBy` over a `@source` view takes `createdBy` and `updatedBy`, as an id (`eq`, `in`, and `isNull` where the column may be null), beside `createdAt` and `updatedAt`. The generated handlers of both servers read them as any id's filter. | A "mine" flag on a list, which D108's row rule is when the list should hold nothing else, and which a filter is when it should. |
+| `deletedAt` and `deletedBy` are still refused, and the message says why: they say a row is deleted, and a list holds no deleted row to compare them on. | Filters that could only ever match nothing. |
+
+Left, of what the tracker could not say of its lists: a sort by a column
+that may be null, which needs a keyset that orders nulls and compares
+them, in the statements both ORMs share; a filter that negates (`ne`,
+`notIn`) or joins its members with "or", which is an operator in both
+ORMs' filters, the three servers' filter readers, the OpenAPI
+parameters, the four SDKs and the tool schemas; and a filter through a
+relation without a projection.
+
+Status: built. `TestFilterFillsEachFieldsKindAndOperators` and
+`TestFiltersAreHeldToTheirListAndItem`; `fixture-tracker-api`'s
+`listIssues`; and on Postgres, on both servers,
+`TestGeneratedTableOperationsEndToEnd` and
+`TestTableOperationsGoServerServesItsTables`.
