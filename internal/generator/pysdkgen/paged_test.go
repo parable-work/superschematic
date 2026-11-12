@@ -162,9 +162,10 @@ func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 // sort and before cursor and limit, typed as <Operation>Filter: a member
 // per field, in FilterBy's order, holding a value of the type a query
 // parameter of the field's type has, or the field's operators, which
-// follow its kind, is_null on a field that may be null alone. The
-// namespace imports a field's enum, and the SDK carries the filter's
-// writer; an operation without a filter is unchanged.
+// follow its kind, ne and not_in beside eq and in on every one (D112) and
+// is_null on a field that may be null alone. The namespace imports a
+// field's enum, and the SDK carries the filter's writer; an operation
+// without a filter is unchanged.
 func TestFilteredMethodTakesATypedFilter(t *testing.T) {
 	_, apiOutput := loadPagedAPI(t)
 	sdkOutput := generatePagedSDK(t, apiOutput)
@@ -197,18 +198,19 @@ func TestFilteredMethodTakesATypedFilter(t *testing.T) {
 		t.Fatalf("list_parts filter parameter = %+v", filter)
 	}
 
-	ordered := "eq in gt gte lt lte"
+	equals := "eq ne in not_in"
+	ordered := equals + " gt gte lt lte"
 	want := []struct{ name, pyName, pyType, operatorsType, operators string }{
-		{"id", "id", "str", "ListPartsFilterId", "eq in"},
-		{"name", "name", "str", "ListPartsFilterName", "eq in contains"},
-		{"kind", "kind", "PartKind", "ListPartsFilterKind", "eq in"},
+		{"id", "id", "str", "ListPartsFilterId", equals},
+		{"name", "name", "str", "ListPartsFilterName", equals + " contains"},
+		{"kind", "kind", "PartKind", "ListPartsFilterKind", equals},
 		{"quantity", "quantity", "int", "ListPartsFilterQuantity", ordered},
 		{"weight", "weight", "float", "ListPartsFilterWeight", ordered},
 		{"price", "price", "str", "ListPartsFilterPrice", ordered},
-		{"discontinued", "discontinued", "bool", "ListPartsFilterDiscontinued", "eq in"},
+		{"discontinued", "discontinued", "bool", "ListPartsFilterDiscontinued", equals},
 		{"madeAt", "made_at", "str", "ListPartsFilterMadeAt", ordered},
 		{"retiredOn", "retired_on", "str", "ListPartsFilterRetiredOn", ordered + " is_null"},
-		{"supplierId", "supplier_id", "str", "ListPartsFilterSupplierId", "eq in is_null"},
+		{"supplierId", "supplier_id", "str", "ListPartsFilterSupplierId", equals + " is_null"},
 	}
 	if len(parts.FilterFields) != len(want) {
 		t.Fatalf("list_parts filter fields = %+v", parts.FilterFields)
@@ -219,7 +221,7 @@ func TestFilteredMethodTakesATypedFilter(t *testing.T) {
 			keys = append(keys, operator.Key)
 			operand := field.PyType
 			switch operator.Key {
-			case "in":
+			case "in", "not_in":
 				operand = "list[" + field.PyType + "]"
 			case "contains":
 				operand = "str"
@@ -235,7 +237,7 @@ func TestFilteredMethodTakesATypedFilter(t *testing.T) {
 			t.Errorf("filter field %d = %v, want %+v", i, got, w)
 		}
 	}
-	if got := parts.FilterFields[9].OperatorKeys(); got != `("eq", "in", "is_null")` {
+	if got := parts.FilterFields[9].OperatorKeys(); got != `("eq", "ne", "in", "not_in", "is_null")` {
 		t.Errorf("OperatorKeys = %s", got)
 	}
 	if got := (FilterField{Operators: []FilterOperator{{Key: "eq"}}}).OperatorKeys(); got != `("eq",)` {
@@ -272,8 +274,9 @@ func TestWriteSDKGoldenPaged(t *testing.T) {
 // iteration reaches it, a repeated cursor ending it, a sort sent with every
 // page the iterator asks for (D60, amended), and a cursor or limit the
 // route would refuse failing before any request. A typed filter (D106) is
-// written in the bracket form, each kind and operator, beside a sort and
-// with every page the iterator asks for; what the route would refuse fails
+// written in the bracket form, each kind and operator, ne and not_in
+// among them (D112), beside a sort and with every page the iterator asks
+// for; what the route would refuse fails
 // before any request; and the SDK's writer sends the pairs of
 // filter_parity.json's queries. The probe needs pydantic and skips without
 // it.
@@ -603,16 +606,17 @@ assert len(requests) == asked, requests[asked:]
 
 # A typed filter (D106) is written in the bracket form: a value is an
 # equality, filter[field]=value, and an operator filter[field][op]=value,
-# an in's values joined by commas and is_null as isNull; a field of each
-# kind, by the wire's name for it, and every operator.
+# an in's and a not_in's values joined by commas, not_in as notIn and
+# is_null as isNull; a field of each kind, by the wire's name for it, and
+# every operator.
 PartKind = types_package.PartKind
 PART_IDS = [part["id"] for part in PARTS]
 SUPPLIER = PARTS[1]["supplierId"]
 every_kind = {
     "id": {"in": PART_IDS[:2]},
-    "name": {"eq": "Part 1", "in": ["Part 1", "Part 2"], "contains": "art 1"},
+    "name": {"eq": "Part 1", "ne": "Part 7", "in": ["Part 1", "Part 2"], "not_in": ["Part 8", "Part 9"], "contains": "art 1"},
     "kind": PartKind("bolt"),
-    "quantity": {"eq": 2, "in": [1, 2, 3], "gt": 0, "gte": 1, "lt": 9, "lte": 8},
+    "quantity": {"eq": 2, "ne": 7, "in": [1, 2, 3], "not_in": [5, 6], "gt": 0, "gte": 1, "lt": 9, "lte": 8},
     "weight": {"gte": 0.5, "lt": 2.5},
     "price": {"gt": "0.25", "lte": "2.25"},
     "discontinued": False,
@@ -623,11 +627,15 @@ every_kind = {
 EVERY_KIND_QUERY = {
     "filter[id][in]": [",".join(PART_IDS[:2])],
     "filter[name]": ["Part 1"],
+    "filter[name][ne]": ["Part 7"],
     "filter[name][in]": ["Part 1,Part 2"],
+    "filter[name][notIn]": ["Part 8,Part 9"],
     "filter[name][contains]": ["art 1"],
     "filter[kind]": ["bolt"],
     "filter[quantity]": ["2"],
+    "filter[quantity][ne]": ["7"],
     "filter[quantity][in]": ["1,2,3"],
+    "filter[quantity][notIn]": ["5,6"],
     "filter[quantity][gt]": ["0"],
     "filter[quantity][gte]": ["1"],
     "filter[quantity][lt]": ["9"],
@@ -648,16 +656,17 @@ assert requests[-1] == ("/api/parts", EVERY_KIND_QUERY), requests[-1]
 assert [type(part) for part in parts.items] == [types_package.PartView] * 2, parts.items
 assert [part.name for part in parts.items] == ["Part 0", "Part 1"], parts.items
 
-# The remaining forms: an enum and a bool in an in and under eq, and an
-# is_null on the other nullable field. A member or an operator that is
-# None, and an in of no value, is left out, and no filter sends none.
+# The remaining forms: an enum and a bool in an in and a not_in and under
+# eq and ne, and an is_null on the other nullable field. A member or an
+# operator that is None, and an in or a not_in of no value, is left out,
+# and no filter sends none.
 catalog.list_parts(
     filter={
-        "kind": {"eq": PartKind("nut"), "in": [PartKind("bolt"), PartKind("washer")]},
-        "discontinued": {"eq": True, "in": [True, False]},
+        "kind": {"eq": PartKind("nut"), "ne": PartKind("bolt"), "in": [PartKind("bolt"), PartKind("washer")], "not_in": [PartKind("nut")]},
+        "discontinued": {"eq": True, "ne": False, "in": [True, False], "not_in": [False]},
         "retired_on": {"eq": "2026-06-30", "is_null": False},
-        "supplier_id": {"in": [SUPPLIER], "is_null": None},
-        "id": {"in": []},
+        "supplier_id": {"in": [SUPPLIER], "not_in": [PARTS[2]["supplierId"]], "ne": None, "is_null": None},
+        "id": {"in": [], "not_in": []},
         "name": None,
     },
 )
@@ -665,14 +674,22 @@ assert requests[-1] == (
     "/api/parts",
     {
         "filter[kind]": ["nut"],
+        "filter[kind][ne]": ["bolt"],
         "filter[kind][in]": ["bolt,washer"],
+        "filter[kind][notIn]": ["nut"],
         "filter[discontinued]": ["true"],
+        "filter[discontinued][ne]": ["false"],
         "filter[discontinued][in]": ["true,false"],
+        "filter[discontinued][notIn]": ["false"],
         "filter[retiredOn]": ["2026-06-30"],
         "filter[retiredOn][isNull]": ["false"],
         "filter[supplierId][in]": [SUPPLIER],
+        "filter[supplierId][notIn]": [PARTS[2]["supplierId"]],
     },
 ), requests[-1]
+# A ne's value is kept whole, as an eq's is, a comma and spaces included.
+catalog.list_parts(filter={"name": {"eq": " a, b ", "ne": " c, d "}})
+assert requests[-1] == ("/api/parts", {"filter[name]": [" a, b "], "filter[name][ne]": [" c, d "]}), requests[-1]
 for none in ({}, None):
     catalog.list_parts(filter=none)
     assert requests[-1] == ("/api/parts", {}), requests[-1]
@@ -703,6 +720,20 @@ refused_before_the_request(
     lambda: catalog.list_parts(filter={"name": {"in": ["a,b", " c", "", None, "d"]}}),
     {"filter[name][in][0]": "pattern", "filter[name][in][1]": "pattern", "filter[name][in][2]": "required", "filter[name][in][3]": "required"},
 )
+# A not_in is held to what an in is, at its own member.
+refused_before_the_request(lambda: catalog.list_parts(filter={"quantity": {"not_in": list(range(101))}}), {"filter[quantity][not_in]": "listMax"})
+refused_before_the_request(lambda: catalog.list_parts(filter={"quantity": {"not_in": 3}}), {"filter[quantity][not_in]": "type"})
+refused_before_the_request(lambda: catalog.list_parts(filter={"name": {"not_in": "Part 1"}}), {"filter[name][not_in]": "type"})
+refused_before_the_request(
+    lambda: catalog.list_parts(filter={"name": {"not_in": ["a,b", " c", "", None, "d"]}}),
+    {
+        "filter[name][not_in][0]": "pattern",
+        "filter[name][not_in][1]": "pattern",
+        "filter[name][not_in][2]": "required",
+        "filter[name][not_in][3]": "required",
+    },
+)
+refused_before_the_request(lambda: catalog.list_parts(filter={"name": {"notIn": ["Part 1"]}}), {"filter[name]": "invalid"})
 refused_before_the_request(lambda: catalog.list_parts(filter={"name": {"contains": ""}}), {"filter[name][contains]": "minLength"})
 refused_before_the_request(lambda: catalog.list_parts(filter={"name": {"contains": 3}}), {"filter[name][contains]": "type"})
 refused_before_the_request(lambda: catalog.list_parts(filter={"retired_on": {"is_null": "true"}}), {"filter[retired_on][is_null]": "type"})
@@ -713,11 +744,18 @@ catalog.list_parts(filter={"kind": {"in": ["nut", PartKind("washer")]}})
 assert requests[-1] == ("/api/parts", {"filter[kind][in]": ["nut,washer"]}), requests[-1]
 refused_before_the_request(
     lambda: catalog.list_parts(
-        filter={"quantity": {"gte": "1", "in": [1, "2"]}, "weight": "heavy", "discontinued": 1, "kind": "screw"},
+        filter={
+            "quantity": {"gte": "1", "in": [1, "2"], "ne": "3", "not_in": ["4", 5]},
+            "weight": "heavy",
+            "discontinued": 1,
+            "kind": "screw",
+        },
     ),
     {
-        "filter[quantity][gte]": "type",
+        "filter[quantity][ne]": "type",
         "filter[quantity][in][1]": "type",
+        "filter[quantity][not_in][0]": "type",
+        "filter[quantity][gte]": "type",
         "filter[weight]": "type",
         "filter[discontinued]": "type",
         "filter[kind]": "enum",
@@ -727,8 +765,9 @@ refused_before_the_request(lambda: next(catalog.list_parts_all(filter={"sku": "x
 
 # The SDK's writer is held to the vectors every runtime's reader is
 # (D106): given a vector's filters, it sends exactly the vector's pairs, in
-# their order. A field's filters are its member's operators, isNull as
-# is_null, and a field with an equality alone the value itself.
+# their order. A field's filters are its member's operators, notIn as
+# not_in and isNull as is_null, and a field with an equality alone the
+# value itself.
 FilterField = client_module.FilterField
 filter_query_params = client_module.filter_query_params
 with open(filter_vectors_path) as filter_vectors_file:
@@ -741,6 +780,8 @@ for vector in filter_vectors["queries"]:
         member = typed.setdefault(one["field"], {})
         if one["operator"] == "in":
             member["in"] = one["values"]
+        elif one["operator"] == "notIn":
+            member["not_in"] = one["values"]
         elif one["operator"] == "isNull":
             member["is_null"] = one["values"] == ["true"]
         else:
@@ -750,7 +791,7 @@ for vector in filter_vectors["queries"]:
     typed = {name: member["eq"] if list(member) == ["eq"] else member for name, member in typed.items()}
     pairs = [list(pair) for pair in filter_query_params(typed, "filter", fields).items()]
     assert pairs == vector["pairs"], f"{vector['name']}: {pairs}"
-assert written == {"eq", "in", "gt", "gte", "lt", "lte", "contains", "isNull"}, written
+assert written == {"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "contains", "isNull"}, written
 
 # More parameters than a request may hold are refused, as the route's
 # reader refuses them.

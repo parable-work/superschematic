@@ -15,8 +15,12 @@ import (
 
 // UUIDFilter provides filtering operations for UUID fields
 type UUIDFilter struct {
-	Eq     *types.IdentityUUID
-	In     []types.IdentityUUID
+	Eq *types.IdentityUUID
+	In []types.IdentityUUID
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne     *types.IdentityUUID
+	NotIn  []types.IdentityUUID
 	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
@@ -32,7 +36,11 @@ type StringFilter struct {
 	// An empty or nil slice adds no condition, so a caller narrowing a result
 	// set must treat "no allowed values" as its own case rather than passing
 	// the empty slice and getting every row back.
-	In    []string
+	In []string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *string
+	NotIn []string
 	ILike *string // Case-insensitive LIKE
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
@@ -40,7 +48,11 @@ type StringFilter struct {
 
 // Int64Filter provides filtering operations for integer fields
 type Int64Filter struct {
-	Eq      *int64
+	Eq *int64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *int64
+	NotIn   []int64
 	Gt      *int64
 	Gte     *int64
 	Lt      *int64
@@ -61,7 +73,11 @@ type Int64Range struct {
 
 // FloatFilter provides filtering operations for float fields
 type FloatFilter struct {
-	Eq      *float64
+	Eq *float64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *float64
+	NotIn   []float64
 	Gt      *float64
 	Gte     *float64
 	Lt      *float64
@@ -83,6 +99,10 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *bool
+	NotIn []bool
 	// In matches any value in the set; an empty or nil slice adds no
 	// condition (D89).
 	In []bool
@@ -92,7 +112,11 @@ type BoolFilter struct {
 
 // DateTimeFilter provides filtering operations for DateTime fields
 type DateTimeFilter struct {
-	Eq      *time.Time
+	Eq *time.Time
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *time.Time
+	NotIn   []time.Time
 	Gt      *time.Time
 	Gte     *time.Time
 	Lt      *time.Time
@@ -112,7 +136,11 @@ type DateTimeRange struct {
 
 // DateFilter provides filtering operations for Date fields
 type DateFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -136,7 +164,10 @@ type DateRange struct {
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
 type DurationFilter struct {
-	Eq      *time.Duration
+	Eq *time.Duration
+	// Ne keeps the rows Eq leaves out (D112), a row whose column is NULL
+	// among them.
+	Ne      *time.Duration
 	Gt      *time.Duration
 	Gte     *time.Duration
 	Lt      *time.Duration
@@ -477,6 +508,11 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`problem.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`problem.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -485,6 +521,15 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`problem.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(problem.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -500,6 +545,11 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`problem.title = $%d`, paramNum))
 			*args = append(*args, *f.Title.Eq)
 		}
+		if f.Title.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`problem.title IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Title.Ne)
+		}
 		if len(f.Title.In) > 0 {
 			placeholders := make([]string, len(f.Title.In))
 			for i, value := range f.Title.In {
@@ -508,6 +558,15 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`problem.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Title.NotIn) > 0 {
+			placeholders := make([]string, len(f.Title.NotIn))
+			for i, value := range f.Title.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(problem.title IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Title.ILike != nil {
 			paramNum++
@@ -528,6 +587,11 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`problem.status = $%d`, paramNum))
 			*args = append(*args, *f.Status.Eq)
 		}
+		if f.Status.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`problem.status IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Status.Ne)
+		}
 		if len(f.Status.In) > 0 {
 			placeholders := make([]string, len(f.Status.In))
 			for i, value := range f.Status.In {
@@ -536,6 +600,15 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`problem.status IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Status.NotIn) > 0 {
+			placeholders := make([]string, len(f.Status.NotIn))
+			for i, value := range f.Status.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(problem.status IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Status.ILike != nil {
 			paramNum++
@@ -555,6 +628,11 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`problem.status_entered_at = $%d`, paramNum))
 			*args = append(*args, *f.StatusEnteredAt.Eq)
+		}
+		if f.StatusEnteredAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`problem.status_entered_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Ne)
 		}
 		if f.StatusEnteredAt.Gt != nil {
 			paramNum++
@@ -593,6 +671,15 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`problem.status_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.StatusEnteredAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.StatusEnteredAt.NotIn))
+			for i, value := range f.StatusEnteredAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(problem.status_entered_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.StatusEnteredAt.IsNull != nil {
 			if *f.StatusEnteredAt.IsNull {
 				conditions = append(conditions, `problem.status_entered_at IS NULL`)
@@ -606,6 +693,11 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`problem._version = $%d`, paramNum))
 			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`problem._version IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Version.Ne)
 		}
 		if f.Version.Gt != nil {
 			paramNum++
@@ -643,6 +735,15 @@ func (f *ProblemFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`problem._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Version.NotIn) > 0 {
+			placeholders := make([]string, len(f.Version.NotIn))
+			for i, value := range f.Version.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(problem._version IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Version.IsNull != nil {
 			if *f.Version.IsNull {

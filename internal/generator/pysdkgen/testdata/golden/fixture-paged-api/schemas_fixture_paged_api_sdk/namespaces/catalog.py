@@ -45,56 +45,58 @@ if TYPE_CHECKING:
 
 
 # The operators of each field of ListPartsFilter (D106), all optional:
-# eq and the comparisons take a value of the field, in a list of them,
-# contains text, and is_null, for a field that may be null, a bool.
+# eq, ne and the comparisons take a value of the field, in and not_in a
+# list of them, contains text, and is_null, for a field that may be null,
+# a bool. ne and not_in keep the items eq and in leave out, an item whose
+# field is null among them (D112).
 ListPartsFilterId = TypedDict(
     "ListPartsFilterId",
-    {"eq": "str", "in": "list[str]"},
+    {"eq": "str", "ne": "str", "in": "list[str]", "not_in": "list[str]"},
     total=False,
 )
 ListPartsFilterName = TypedDict(
     "ListPartsFilterName",
-    {"eq": "str", "in": "list[str]", "contains": "str"},
+    {"eq": "str", "ne": "str", "in": "list[str]", "not_in": "list[str]", "contains": "str"},
     total=False,
 )
 ListPartsFilterKind = TypedDict(
     "ListPartsFilterKind",
-    {"eq": "PartKind", "in": "list[PartKind]"},
+    {"eq": "PartKind", "ne": "PartKind", "in": "list[PartKind]", "not_in": "list[PartKind]"},
     total=False,
 )
 ListPartsFilterQuantity = TypedDict(
     "ListPartsFilterQuantity",
-    {"eq": "int", "in": "list[int]", "gt": "int", "gte": "int", "lt": "int", "lte": "int"},
+    {"eq": "int", "ne": "int", "in": "list[int]", "not_in": "list[int]", "gt": "int", "gte": "int", "lt": "int", "lte": "int"},
     total=False,
 )
 ListPartsFilterWeight = TypedDict(
     "ListPartsFilterWeight",
-    {"eq": "float", "in": "list[float]", "gt": "float", "gte": "float", "lt": "float", "lte": "float"},
+    {"eq": "float", "ne": "float", "in": "list[float]", "not_in": "list[float]", "gt": "float", "gte": "float", "lt": "float", "lte": "float"},
     total=False,
 )
 ListPartsFilterPrice = TypedDict(
     "ListPartsFilterPrice",
-    {"eq": "str", "in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str"},
+    {"eq": "str", "ne": "str", "in": "list[str]", "not_in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str"},
     total=False,
 )
 ListPartsFilterDiscontinued = TypedDict(
     "ListPartsFilterDiscontinued",
-    {"eq": "bool", "in": "list[bool]"},
+    {"eq": "bool", "ne": "bool", "in": "list[bool]", "not_in": "list[bool]"},
     total=False,
 )
 ListPartsFilterMadeAt = TypedDict(
     "ListPartsFilterMadeAt",
-    {"eq": "str", "in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str"},
+    {"eq": "str", "ne": "str", "in": "list[str]", "not_in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str"},
     total=False,
 )
 ListPartsFilterRetiredOn = TypedDict(
     "ListPartsFilterRetiredOn",
-    {"eq": "str", "in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str", "is_null": "bool"},
+    {"eq": "str", "ne": "str", "in": "list[str]", "not_in": "list[str]", "gt": "str", "gte": "str", "lt": "str", "lte": "str", "is_null": "bool"},
     total=False,
 )
 ListPartsFilterSupplierId = TypedDict(
     "ListPartsFilterSupplierId",
-    {"eq": "str", "in": "list[str]", "is_null": "bool"},
+    {"eq": "str", "ne": "str", "in": "list[str]", "not_in": "list[str]", "is_null": "bool"},
     total=False,
 )
 
@@ -119,16 +121,16 @@ class ListPartsFilter(TypedDict, total=False):
 # The fields of ListPartsFilter: each member, the item's field as the
 # wire names it, the type of its values, and its operators.
 _LIST_PARTS_FILTER_FIELDS = (
-    FilterField("id", "id", "str", ("eq", "in")),
-    FilterField("name", "name", "str", ("eq", "in", "contains")),
-    FilterField("kind", "kind", "PartKind", ("eq", "in")),
-    FilterField("quantity", "quantity", "int", ("eq", "in", "gt", "gte", "lt", "lte")),
-    FilterField("weight", "weight", "float", ("eq", "in", "gt", "gte", "lt", "lte")),
-    FilterField("price", "price", "str", ("eq", "in", "gt", "gte", "lt", "lte")),
-    FilterField("discontinued", "discontinued", "bool", ("eq", "in")),
-    FilterField("made_at", "madeAt", "str", ("eq", "in", "gt", "gte", "lt", "lte")),
-    FilterField("retired_on", "retiredOn", "str", ("eq", "in", "gt", "gte", "lt", "lte", "is_null")),
-    FilterField("supplier_id", "supplierId", "str", ("eq", "in", "is_null")),
+    FilterField("id", "id", "str", ("eq", "ne", "in", "not_in")),
+    FilterField("name", "name", "str", ("eq", "ne", "in", "not_in", "contains")),
+    FilterField("kind", "kind", "PartKind", ("eq", "ne", "in", "not_in")),
+    FilterField("quantity", "quantity", "int", ("eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte")),
+    FilterField("weight", "weight", "float", ("eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte")),
+    FilterField("price", "price", "str", ("eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte")),
+    FilterField("discontinued", "discontinued", "bool", ("eq", "ne", "in", "not_in")),
+    FilterField("made_at", "madeAt", "str", ("eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte")),
+    FilterField("retired_on", "retiredOn", "str", ("eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte", "is_null")),
+    FilterField("supplier_id", "supplierId", "str", ("eq", "ne", "in", "not_in", "is_null")),
 )
 
 

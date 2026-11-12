@@ -567,9 +567,45 @@ describe('the table operations of fixture-tracker-api', () => {
     expect(await kept(`filter[createdAt][gte]=${at}&filter[createdAt][lt]=${after}`)).toEqual(['100% done']);
     expect(await kept('filter[createdAt][lt]=2000-01-01T00:00:00Z')).toEqual([]);
 
+    // ne and notIn keep the items eq and in leave out (D112), an item
+    // whose field is null among them: an issue with no estimate, no due
+    // date or no assignee is "not 3", "not due on that day" and "not
+    // Ada's".
+    expect(await kept('filter[status][ne]=open')).toEqual(['100 percent', '100% done']);
+    expect(await kept('filter[status][notIn]=done,started')).toEqual(where(issue => issue.status === 'open'));
+    expect(await kept('filter[priority][ne]=5')).toEqual(where(issue => issue.priority !== 5));
+    expect(await kept('filter[priority][notIn]=1,9,4')).toEqual(['Crash on save', 'Slow search', 'snake_case names']);
+    expect(await kept('filter[title][ne]=Slow+search')).toEqual(where(issue => issue.title !== 'Slow search'));
+    expect(await kept('filter[title][notIn]=Slow+search,snakeXcase')).toEqual(where(issue => !['Slow search', 'snakeXcase'].includes(issue.title)));
+    expect(await kept('filter[estimate][ne]=3')).toEqual(['100 percent', '100% done', 'Slow search', 'snakeXcase', 'snake_case names']);
+    expect(await kept('filter[estimate][notIn]=3,8')).toEqual(['100% done', 'Slow search', 'snakeXcase', 'snake_case names']);
+    expect(await kept('filter[estimate][ne]=3&filter[estimate][isNull]=false')).toEqual(['100 percent', '100% done', 'snakeXcase']);
+    expect(await kept('filter[dueOn][ne]=2026-03-01')).toEqual(['100 percent', '100% done', 'Slow search', 'snake_case names']);
+    expect(await kept('filter[dueOn][notIn]=2026-03-01,2026-01-15')).toEqual(['100 percent', 'Slow search', 'snake_case names']);
+    expect(await kept(`filter[assigneeId][ne]=${ada.id}`)).toEqual(['100% done', 'Slow search', 'snakeXcase', 'snake_case names']);
+    expect(await kept(`filter[assigneeId][notIn]=${ada.id},${bob.id}`)).toEqual(['Slow search', 'snake_case names']);
+    expect(await kept(`filter[createdBy][ne]=${KIM_ID}`)).toEqual(where(() => true));
+    expect(await kept(`filter[createdBy][notIn]=${KIM_ID},${SAM_ID}`)).toEqual([]);
+    expect(await kept('filter[createdAt][notIn]=2000-01-01T00:00:00Z')).toEqual(where(() => true));
+    // Each pair divides the list in two: no issue in both, none in neither.
+    for (const [eq, ne] of [
+      ['filter[estimate]=3', 'filter[estimate][ne]=3'],
+      ['filter[dueOn][in]=2026-03-01,2026-06-30', 'filter[dueOn][notIn]=2026-03-01,2026-06-30'],
+      [`filter[assigneeId]=${bob.id}`, `filter[assigneeId][ne]=${bob.id}`],
+      ['filter[status][in]=open', 'filter[status][notIn]=open'],
+    ] as const) {
+      expect([...(await kept(eq)), ...(await kept(ne))].sort()).toEqual(where(() => true));
+    }
+    // They hold beside the other members, a search and a sort.
+    expect(titles((await walk(`/api/teams/${core.id}/issues?sort=-priority&limit=1&filter[status][ne]=done&filter[assigneeId][notIn]=${ada.id}&q=sn`)).items)).toEqual(['snake_case names', 'snakeXcase']);
+
     // A field, an operator and a value the filter does not take are the route's 400 at filter[field].
     for (const [query, parameter] of [
       ['filter[body]=x', 'filter[body]'],
+      ['filter[status][ne]=closed', 'filter[status]'],
+      ['filter[priority][notIn]=1,high', 'filter[priority]'],
+      ['filter[priority][notIn]=', 'filter[priority]'],
+      ['filter[status][neq]=open', 'filter[status]'],
       ['filter[status][gt]=open', 'filter[status]'],
       ['filter[status]=closed', 'filter[status]'],
       ['filter[priority]=high', 'filter[priority]'],

@@ -392,9 +392,9 @@ func tableContains(text *string) *string {
 // not filter by, each operator the request sent set on it. Every member set
 // holds at once.
 type NotesListNotesFilter struct {
-	// IssueId filters by issueId: eq, in.
+	// IssueId filters by issueId: eq, ne, in, notIn.
 	IssueId *filterparse.Equals[types.IdentityUUID]
-	// Owner filters by owner: eq, in.
+	// Owner filters by owner: eq, ne, in, notIn.
 	Owner *filterparse.Equals[types.IdentityUUID]
 }
 
@@ -403,21 +403,21 @@ type NotesListNotesFilter struct {
 // not filter by, each operator the request sent set on it. Every member set
 // holds at once.
 type IssuesListIssuesFilter struct {
-	// Status filters by status: eq, in.
+	// Status filters by status: eq, ne, in, notIn.
 	Status *filterparse.Equals[types.IssueStatus]
-	// Priority filters by priority: eq, in, gt, gte, lt, lte.
+	// Priority filters by priority: eq, ne, in, notIn, gt, gte, lt, lte.
 	Priority *filterparse.Ordered[int64]
-	// Title filters by title: eq, in, contains.
+	// Title filters by title: eq, ne, in, notIn, contains.
 	Title *filterparse.Text[string]
-	// Estimate filters by estimate: eq, in, gt, gte, lt, lte, isNull.
+	// Estimate filters by estimate: eq, ne, in, notIn, gt, gte, lt, lte, isNull.
 	Estimate *filterparse.Ordered[float64]
-	// DueOn filters by dueOn: eq, in, gt, gte, lt, lte, isNull.
+	// DueOn filters by dueOn: eq, ne, in, notIn, gt, gte, lt, lte, isNull.
 	DueOn *filterparse.Ordered[types.TemporalDate]
-	// AssigneeId filters by assigneeId: eq, in, isNull.
+	// AssigneeId filters by assigneeId: eq, ne, in, notIn, isNull.
 	AssigneeId *filterparse.Equals[types.IdentityUUID]
-	// CreatedAt filters by createdAt: eq, in, gt, gte, lt, lte.
+	// CreatedAt filters by createdAt: eq, ne, in, notIn, gt, gte, lt, lte.
 	CreatedAt *filterparse.Ordered[types.TemporalDateTime]
-	// CreatedBy filters by createdBy: eq, in.
+	// CreatedBy filters by createdBy: eq, ne, in, notIn.
 	CreatedBy *filterparse.Equals[types.IdentityUUID]
 }
 
@@ -851,10 +851,10 @@ func tableNotesListNotes(ctx context.Context, db orm.DatabaseInterface, filters 
 	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
 		where := &orm.NoteFilter{}
 		if filter := filters.IssueId; filter != nil {
-			where.IssueID = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
+			where.IssueID = &orm.UUIDFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn}
 		}
 		if filter := filters.Owner; filter != nil {
-			where.Owner = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
+			where.Owner = &orm.UUIDFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn}
 		}
 		if !tableLifted(ctx, "notes.admin") {
 			caller, named := tableCallerID(ctx)
@@ -1132,28 +1132,28 @@ func tableIssuesListIssues(ctx context.Context, db orm.DatabaseInterface, TeamId
 		where := &orm.IssueFilter{TeamID: &orm.UUIDFilter{Eq: &TeamId}}
 		where.SearchText = tableText(Q)
 		if filter := filters.Status; filter != nil {
-			where.Status = &orm.StringFilter{Eq: tableText(filter.Eq), In: tableTexts(filter.In)}
+			where.Status = &orm.StringFilter{Eq: tableText(filter.Eq), Ne: tableText(filter.Ne), In: tableTexts(filter.In), NotIn: tableTexts(filter.NotIn)}
 		}
 		if filter := filters.Priority; filter != nil {
-			where.Priority = &orm.Int64Filter{Eq: filter.Eq, In: filter.In, Gt: filter.Gt, Gte: filter.Gte, Lt: filter.Lt, Lte: filter.Lte}
+			where.Priority = &orm.Int64Filter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn, Gt: filter.Gt, Gte: filter.Gte, Lt: filter.Lt, Lte: filter.Lte}
 		}
 		if filter := filters.Title; filter != nil {
-			where.Title = &orm.StringFilter{Eq: tableText(filter.Eq), In: tableTexts(filter.In), ILike: tableContains(filter.Contains)}
+			where.Title = &orm.StringFilter{Eq: tableText(filter.Eq), Ne: tableText(filter.Ne), In: tableTexts(filter.In), NotIn: tableTexts(filter.NotIn), ILike: tableContains(filter.Contains)}
 		}
 		if filter := filters.Estimate; filter != nil {
-			where.Estimate = &orm.FloatFilter{Eq: filter.Eq, In: filter.In, Gt: filter.Gt, Gte: filter.Gte, Lt: filter.Lt, Lte: filter.Lte, IsNull: filter.IsNull}
+			where.Estimate = &orm.FloatFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn, Gt: filter.Gt, Gte: filter.Gte, Lt: filter.Lt, Lte: filter.Lte, IsNull: filter.IsNull}
 		}
 		if filter := filters.DueOn; filter != nil {
-			where.DueOn = &orm.DateFilter{Eq: tableText(filter.Eq), In: tableTexts(filter.In), Gt: tableText(filter.Gt), Gte: tableText(filter.Gte), Lt: tableText(filter.Lt), Lte: tableText(filter.Lte), IsNull: filter.IsNull}
+			where.DueOn = &orm.DateFilter{Eq: tableText(filter.Eq), Ne: tableText(filter.Ne), In: tableTexts(filter.In), NotIn: tableTexts(filter.NotIn), Gt: tableText(filter.Gt), Gte: tableText(filter.Gte), Lt: tableText(filter.Lt), Lte: tableText(filter.Lte), IsNull: filter.IsNull}
 		}
 		if filter := filters.AssigneeId; filter != nil {
-			where.AssigneeID = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In, IsNull: filter.IsNull}
+			where.AssigneeID = &orm.UUIDFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn, IsNull: filter.IsNull}
 		}
 		if filter := filters.CreatedAt; filter != nil {
-			where.CreatedAt = &orm.DateTimeFilter{Eq: tableTime(filter.Eq), In: tableTimes(filter.In), Gt: tableTime(filter.Gt), Gte: tableTime(filter.Gte), Lt: tableTime(filter.Lt), Lte: tableTime(filter.Lte)}
+			where.CreatedAt = &orm.DateTimeFilter{Eq: tableTime(filter.Eq), Ne: tableTime(filter.Ne), In: tableTimes(filter.In), NotIn: tableTimes(filter.NotIn), Gt: tableTime(filter.Gt), Gte: tableTime(filter.Gte), Lt: tableTime(filter.Lt), Lte: tableTime(filter.Lte)}
 		}
 		if filter := filters.CreatedBy; filter != nil {
-			where.CreatedBy = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
+			where.CreatedBy = &orm.UUIDFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn}
 		}
 		options := &orm.IssuePageOptions{Fields: orm.IssueFields{}.All(), Limit: page.Limit, Sort: orm.IssueSort{Field: orm.IssueSortField(page.Sort.Field), Desc: page.Sort.Desc}}
 		if page.Cursor != "" {

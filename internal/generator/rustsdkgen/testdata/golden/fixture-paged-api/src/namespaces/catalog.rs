@@ -190,8 +190,8 @@ impl CatalogNamespace {
     /// yields every item, page after page.
     ///
     /// `query.filter` keeps the items its members find (D106): each
-    /// member is a field's operators (`eq`, `one_of`, and the ones its type
-    /// adds), and all of them hold at once. A cursor carries no filter:
+    /// member is a field's operators (`eq`, `ne`, `one_of`, `not_in`, and the
+    /// ones its type adds), and all of them hold at once. A cursor carries no filter:
     /// the next page is asked with the same one, as `list_parts_all` does.
     ///
     /// - `options.timeout_ms`: optional per-request timeout override.

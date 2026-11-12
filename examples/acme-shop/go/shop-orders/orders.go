@@ -174,19 +174,26 @@ func (o *Orders) ListOrders(ctx context.Context, filter api.OrderListOrdersFilte
 }
 
 // statusFilter is the repository's filter of an order's status for the
-// request's: filter[status]=placed is its Eq, and filter[status][in] its
-// In, both when the request sent both. The repository holds a status as
-// its text.
+// request's, member for member: filter[status]=placed is its Eq,
+// filter[status][ne] its Ne, filter[status][in] its In and
+// filter[status][notIn] its NotIn, each when the request sent it. The
+// repository holds a status as its text.
 func statusFilter(by *filterparse.Equals[types.OrderStatus]) *orm.StringFilter {
-	out := &orm.StringFilter{}
-	if by.Eq != nil {
-		eq := string(*by.Eq)
-		out.Eq = &eq
+	text := func(status *types.OrderStatus) *string {
+		if status == nil {
+			return nil
+		}
+		value := string(*status)
+		return &value
 	}
-	for _, status := range by.In {
-		out.In = append(out.In, string(status))
+	texts := func(statuses []types.OrderStatus) []string {
+		var values []string
+		for _, status := range statuses {
+			values = append(values, string(status))
+		}
+		return values
 	}
-	return out
+	return &orm.StringFilter{Eq: text(by.Eq), Ne: text(by.Ne), In: texts(by.In), NotIn: texts(by.NotIn)}
 }
 
 // CancelOrder cancels the caller's order, or any order for staff, while

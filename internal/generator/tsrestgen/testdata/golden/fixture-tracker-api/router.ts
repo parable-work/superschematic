@@ -200,8 +200,8 @@ export const operationSpecs = {
     bodyParams: [],
     filter: {
       fields: [
-        { name: 'issueId', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[issueId]', kind: 'uuid', required: false } },
-        { name: 'owner', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[owner]', kind: 'uuid', required: false } },
+        { name: 'issueId', kind: 'uuid', operators: ['eq', 'ne', 'in', 'notIn'], value: { name: 'filter[issueId]', kind: 'uuid', required: false } },
+        { name: 'owner', kind: 'uuid', operators: ['eq', 'ne', 'in', 'notIn'], value: { name: 'filter[owner]', kind: 'uuid', required: false } },
       ],
     },
     page: { defaultLimit: 20, maxLimit: 100, sort: { param: 'sort', fields: ['createdAt'], default: 'createdAt' } },
@@ -309,14 +309,14 @@ export const operationSpecs = {
     bodyParams: [],
     filter: {
       fields: [
-        { name: 'status', kind: 'enum', operators: ['eq', 'in'], value: { name: 'filter[status]', kind: 'enum', required: false, enumValues: ['open', 'started', 'done'] } },
-        { name: 'priority', kind: 'int', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[priority]', kind: 'integer', required: false, scalar: { name: 'Generic.Int64', min: -9007199254740991, max: 9007199254740991 } } },
-        { name: 'title', kind: 'string', operators: ['eq', 'in', 'contains'], value: { name: 'filter[title]', kind: 'string', required: false } },
-        { name: 'estimate', kind: 'float', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[estimate]', kind: 'number', required: false } },
-        { name: 'dueOn', kind: 'date', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[dueOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } },
-        { name: 'assigneeId', kind: 'uuid', operators: ['eq', 'in', 'isNull'], value: { name: 'filter[assigneeId]', kind: 'uuid', required: false } },
-        { name: 'createdAt', kind: 'datetime', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[createdAt]', kind: 'datetime', required: false } },
-        { name: 'createdBy', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[createdBy]', kind: 'uuid', required: false } },
+        { name: 'status', kind: 'enum', operators: ['eq', 'ne', 'in', 'notIn'], value: { name: 'filter[status]', kind: 'enum', required: false, enumValues: ['open', 'started', 'done'] } },
+        { name: 'priority', kind: 'int', operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[priority]', kind: 'integer', required: false, scalar: { name: 'Generic.Int64', min: -9007199254740991, max: 9007199254740991 } } },
+        { name: 'title', kind: 'string', operators: ['eq', 'ne', 'in', 'notIn', 'contains'], value: { name: 'filter[title]', kind: 'string', required: false } },
+        { name: 'estimate', kind: 'float', operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[estimate]', kind: 'number', required: false } },
+        { name: 'dueOn', kind: 'date', operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[dueOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } },
+        { name: 'assigneeId', kind: 'uuid', operators: ['eq', 'ne', 'in', 'notIn', 'isNull'], value: { name: 'filter[assigneeId]', kind: 'uuid', required: false } },
+        { name: 'createdAt', kind: 'datetime', operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte'], value: { name: 'filter[createdAt]', kind: 'datetime', required: false } },
+        { name: 'createdBy', kind: 'uuid', operators: ['eq', 'ne', 'in', 'notIn'], value: { name: 'filter[createdBy]', kind: 'uuid', required: false } },
       ],
     },
     page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['createdAt', 'priority', 'title', 'dueOn', 'estimate'], default: '-createdAt' } },

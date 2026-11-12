@@ -357,6 +357,7 @@ func TestPagesChangeNoOtherSDKFile(t *testing.T) {
 // the request's filters find (D106), read with a reader of its own, and
 // Catalog.findParts is added, a list with a filter alone under another
 // name: the typed filter is seen on the wire for each kind and operator,
+// ne and notIn among them (D112), which keep a part whose field is null,
 // beside a sort and with every page, through invokeTool, and as
 // runtime/http/testdata/filter_parity.json's queries write it. tsc holds
 // filterUsage, a caller of the filtered methods, to the filters' types.
@@ -410,15 +411,15 @@ import { PartKind } from '@schemas/fixture-paged-api-types';
 export async function filterUsage(sdk: FixturePagedApiSDK): Promise<string[]> {
   const filter: CatalogListPartsFilter = {
     id: '00000000-0000-4000-8000-000000000001',
-    name: { contains: 'x', in: ['axle', 'bracket'] },
-    kind: { in: [PartKind.Bolt, PartKind.Nut] },
-    quantity: { gte: 1, lt: 9 },
+    name: { contains: 'x', in: ['axle', 'bracket'], ne: 'clamp' },
+    kind: { in: [PartKind.Bolt, PartKind.Nut], notIn: [PartKind.Washer] },
+    quantity: { gte: 1, lt: 9, ne: 7, notIn: [5, 6] },
     weight: 2.5,
-    price: { gte: '1.00' },
+    price: { gte: '1.00', notIn: ['9.99'] },
     discontinued: false,
     madeAt: { gt: '2026-01-01T00:00:00Z' },
     retiredOn: { isNull: true },
-    supplierId: { isNull: false },
+    supplierId: { isNull: false, ne: '7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f' },
   };
   const page = await sdk.catalog.listParts({ filter, sort: 'name', limit: 2 });
   const names = page.items.map((part) => part.name);
@@ -442,6 +443,14 @@ export async function filterUsage(sdk: FixturePagedApiSDK): Promise<string[]> {
   await sdk.catalog.listParts({ filter: { quantity: '1' } });
   // @ts-expect-error an in takes a list
   await sdk.catalog.listPartsAll({ filter: { id: { in: '00000000-0000-4000-8000-000000000001' } } });
+  // @ts-expect-error a notIn takes a list
+  await sdk.catalog.listParts({ filter: { kind: { notIn: PartKind.Bolt } } });
+  // @ts-expect-error a notIn's values are the field's
+  await sdk.catalog.listParts({ filter: { discontinued: { notIn: ['true'] } } });
+  // @ts-expect-error a ne takes one value
+  await sdk.catalog.listParts({ filter: { quantity: { ne: [1, 2] } } });
+  // @ts-expect-error a ne's value is the field's
+  await sdk.catalog.findParts({ where: { kind: { ne: 'bolt' } } });
   // @ts-expect-error the tool's filter is the method's
   await invokeTool(sdk, 'catalog.findParts', { where: { quantity: { contains: '1' } } });
   return names;

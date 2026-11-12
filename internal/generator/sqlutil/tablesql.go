@@ -206,8 +206,10 @@ type Clauses struct {
 	// Eq, Gt, Gte, Lt, Lte and ILike compare the column %s with the
 	// parameter $%d; In with the placeholders %s; IsNull and IsNotNull
 	// test it; Search matches one word of a search text, its pattern the
-	// parameter, on the search column %s.
-	Eq, Gt, Gte, Lt, Lte, ILike, In, IsNull, IsNotNull, Search string
+	// parameter, on the search column %s. Ne and NoneOf are a filter's ne
+	// and notIn (D112): the rows Eq and In leave out, a row whose column
+	// is NULL among them, which <> and NOT IN would drop.
+	Eq, Ne, Gt, Gte, Lt, Lte, ILike, In, NoneOf, IsNull, IsNotNull, Search string
 	// Exists and NotExists wrap a probe %s of the rows that point at a row.
 	Exists, NotExists string
 	// Set and SetNull assign the column %s in an update, Set the parameter
@@ -241,12 +243,14 @@ type Clauses struct {
 func PostgresClauses() Clauses {
 	return Clauses{
 		Eq:          "%s = $%d",
+		Ne:          "%s IS DISTINCT FROM $%d",
 		Gt:          "%s > $%d",
 		Gte:         "%s >= $%d",
 		Lt:          "%s < $%d",
 		Lte:         "%s <= $%d",
 		ILike:       "%s ILIKE $%d",
 		In:          "%s IN (%s)",
+		NoneOf:      "(%s IN (%s)) IS NOT TRUE",
 		IsNull:      "%s IS NULL",
 		IsNotNull:   "%s IS NOT NULL",
 		Search:      `%s ILIKE $%d ESCAPE '\'`,
@@ -281,8 +285,8 @@ const DefaultLimit = 100
 // them, for the generators that carry them and the tests that compare them.
 func (c Clauses) AllClauses() []NamedStatement {
 	return []NamedStatement{
-		{"eq", c.Eq}, {"gt", c.Gt}, {"gte", c.Gte}, {"lt", c.Lt}, {"lte", c.Lte}, {"ilike", c.ILike},
-		{"in", c.In}, {"isNull", c.IsNull}, {"isNotNull", c.IsNotNull}, {"search", c.Search},
+		{"eq", c.Eq}, {"ne", c.Ne}, {"gt", c.Gt}, {"gte", c.Gte}, {"lt", c.Lt}, {"lte", c.Lte}, {"ilike", c.ILike},
+		{"in", c.In}, {"noneOf", c.NoneOf}, {"isNull", c.IsNull}, {"isNotNull", c.IsNotNull}, {"search", c.Search},
 		{"exists", c.Exists}, {"notExists", c.NotExists},
 		{"set", c.Set}, {"setNull", c.SetNull}, {"pageKey", c.PageKey},
 		{"placeholder", c.Placeholder}, {"default", c.Default}, {"or", c.Or}, {"group", c.Group},

@@ -56,25 +56,25 @@ export interface GetItemArgs {
  * operators the request sent. An item is kept when it matches them all.
  */
 export interface ListPartsFilter {
-  /** By id: eq, in. */
+  /** By id: eq, ne, in, notIn. */
   readonly id?: EqualsFilter<IdentityUUID>;
-  /** By name: eq, in, contains. */
+  /** By name: eq, ne, in, notIn, contains. */
   readonly name?: TextFilter<string>;
-  /** By kind: eq, in. */
+  /** By kind: eq, ne, in, notIn. */
   readonly kind?: EqualsFilter<PartKind>;
-  /** By quantity: eq, in, gt, gte, lt, lte. */
+  /** By quantity: eq, ne, in, notIn, gt, gte, lt, lte. */
   readonly quantity?: OrderedFilter<number>;
-  /** By weight: eq, in, gt, gte, lt, lte. */
+  /** By weight: eq, ne, in, notIn, gt, gte, lt, lte. */
   readonly weight?: OrderedFilter<number>;
-  /** By price: eq, in, gt, gte, lt, lte. */
+  /** By price: eq, ne, in, notIn, gt, gte, lt, lte. */
   readonly price?: OrderedFilter<GenericDecimal>;
-  /** By discontinued: eq, in. */
+  /** By discontinued: eq, ne, in, notIn. */
   readonly discontinued?: EqualsFilter<boolean>;
-  /** By madeAt: eq, in, gt, gte, lt, lte. */
+  /** By madeAt: eq, ne, in, notIn, gt, gte, lt, lte. */
   readonly madeAt?: OrderedFilter<Date>;
-  /** By retiredOn: eq, in, gt, gte, lt, lte, isNull. */
+  /** By retiredOn: eq, ne, in, notIn, gt, gte, lt, lte, isNull. */
   readonly retiredOn?: OrderedFilter<TemporalDate>;
-  /** By supplierId: eq, in, isNull. */
+  /** By supplierId: eq, ne, in, notIn, isNull. */
   readonly supplierId?: EqualsFilter<IdentityUUID>;
 }
 

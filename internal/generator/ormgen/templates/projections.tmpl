@@ -464,9 +464,9 @@ func (r *{{ .Name }}) read(ctx context.Context, query string, args []interface{}
 
 {{- define "projectionCondition" }}
 {{- if eq .Op "in" }}
-		if len({{ .Field }}.In) > 0 {
-			placeholders := make([]string, len({{ .Field }}.In))
-			for i, {{ .Loop }} := range {{ .Field }}.In {
+		if len({{ .Field }}.{{ .Member }}) > 0 {
+			placeholders := make([]string, len({{ .Field }}.{{ .Member }}))
+			for i, {{ .Loop }} := range {{ .Field }}.{{ .Member }} {
 				paramNum++
 				placeholders[i] = fmt.Sprintf("$%d", paramNum)
 				*args = append(*args, {{ .Value }})

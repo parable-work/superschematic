@@ -91,7 +91,7 @@ func (f argForm) OwnAction() bool { return f.Acts() && !f.InputActs() }
 // members' checkboxes, written as `in`; a field of text is a text box,
 // written as `contains`; and any other is its type's control, a boolean's
 // a select of Yes and No, written as equality. The form has no control for
-// a range or for isNull.
+// a range, for ne and notIn (D112) or for isNull.
 type filterControl struct {
 	// The control, as an argument's of the field's type is: Name is the
 	// form's member (filter_status) and JSONName where its errors are

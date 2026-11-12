@@ -13,7 +13,9 @@ import "slices"
 // item and fills its kind, its type and its operators, so a generator
 // never classifies a field itself. On the wire a filter is the bracket
 // form, filter[field]=value for equality and filter[field][op]=value for
-// an operator, whatever the argument is called; members are ANDed.
+// an operator, whatever the argument is called; members are ANDed. ne and
+// notIn negate eq and in (D112): each keeps the items the other leaves
+// out, an item whose field is null among them.
 
 // FilterParam is the query parameter every filter travels under:
 // filter[field] and filter[field][op].
@@ -51,7 +53,9 @@ var FilterKinds = []string{
 // The operators of a filter, as the wire names them.
 const (
 	FilterOpEq       = "eq"
+	FilterOpNe       = "ne"
 	FilterOpIn       = "in"
+	FilterOpNotIn    = "notIn"
 	FilterOpGt       = "gt"
 	FilterOpGte      = "gte"
 	FilterOpLt       = "lt"
@@ -63,22 +67,28 @@ const (
 // FilterOperatorOrder is every operator, in the order a field lists its
 // own and a reader answers them.
 var FilterOperatorOrder = []string{
-	FilterOpEq, FilterOpIn, FilterOpGt, FilterOpGte, FilterOpLt, FilterOpLte, FilterOpContains, FilterOpIsNull,
+	FilterOpEq, FilterOpNe, FilterOpIn, FilterOpNotIn, FilterOpGt, FilterOpGte, FilterOpLt, FilterOpLte, FilterOpContains, FilterOpIsNull,
 }
 
-// FilterOperators are the operators of a field of kind (D106): eq and in
-// on every kind; gt, gte, lt and lte on a number, a date and a time;
-// contains on text; and isNull on a field that may be null. Nil for a kind
-// that is none of [FilterKinds].
+// FilterListOperator reports whether an operator takes a list of values,
+// separated by commas on the wire: in and notIn.
+func FilterListOperator(op string) bool {
+	return op == FilterOpIn || op == FilterOpNotIn
+}
+
+// FilterOperators are the operators of a field of kind (D106): eq and in,
+// and ne and notIn, which negate them (D112), on every kind; gt, gte, lt
+// and lte on a number, a date and a time; contains on text; and isNull on
+// a field that may be null. Nil for a kind that is none of [FilterKinds].
 func FilterOperators(kind string, nullable bool) []string {
 	var ops []string
 	switch kind {
 	case FilterKindUUID, FilterKindEnum, FilterKindBool:
-		ops = []string{FilterOpEq, FilterOpIn}
+		ops = []string{FilterOpEq, FilterOpNe, FilterOpIn, FilterOpNotIn}
 	case FilterKindString:
-		ops = []string{FilterOpEq, FilterOpIn, FilterOpContains}
+		ops = []string{FilterOpEq, FilterOpNe, FilterOpIn, FilterOpNotIn, FilterOpContains}
 	case FilterKindInt, FilterKindFloat, FilterKindDecimal, FilterKindDateTime, FilterKindDate:
-		ops = []string{FilterOpEq, FilterOpIn, FilterOpGt, FilterOpGte, FilterOpLt, FilterOpLte}
+		ops = []string{FilterOpEq, FilterOpNe, FilterOpIn, FilterOpNotIn, FilterOpGt, FilterOpGte, FilterOpLt, FilterOpLte}
 	default:
 		return nil
 	}

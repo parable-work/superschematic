@@ -238,12 +238,16 @@ export interface TableStatements {
 /** The parts of statements written around a column, sqlutil.Clauses: format strings whose first %s is the column. */
 export interface Clauses {
   readonly eq: string;
+  /** A filter's ne (D112): the rows eq leaves out, a row whose column is NULL among them. Absent in types written before it. */
+  readonly ne?: string;
   readonly gt: string;
   readonly gte: string;
   readonly lt: string;
   readonly lte: string;
   readonly ilike: string;
   readonly in: string;
+  /** A filter's notIn (D112): the rows in leaves out, a row whose column is NULL among them. Absent in types written before it. */
+  readonly noneOf?: string;
   readonly isNull: string;
   readonly isNotNull: string;
   readonly search: string;
@@ -468,6 +472,13 @@ export class TooManyRowsError extends Error {
   }
 }
 
+/** The clause of a filter's ne or notIn (D112), which types written before it do not carry. */
+function negationClause(clauses: Clauses, clause: 'ne' | 'noneOf', table: string, column: string): string {
+  const text = clauses[clause];
+  if (!text) throw new Error(`orm: ${table}.${column}: these types hold no clause for ${clause === 'ne' ? 'ne' : 'notIn'}: build them again`);
+  return text;
+}
+
 /** findPage's error for an after key that holds no key, or whose row no longer exists in an order by another column. */
 export class PageKeyError extends Error {
   constructor(message = 'the page key names no row of its sort') {
@@ -478,17 +489,23 @@ export class PageKeyError extends Error {
 
 /**
  * The filters of a column, by its kind, as the Go ORM's (D79): each set
- * member is one condition, all of them ANDed. in with no values adds none;
- * between is [min, max], both included; isNull, on a column that may be
- * null, true for IS NULL and false for IS NOT NULL.
+ * member is one condition, all of them ANDed. in with no values adds none,
+ * and neither does notIn; ne and notIn keep the rows eq and in leave out
+ * (D112), a row whose column is NULL among them; between is [min, max],
+ * both included; isNull, on a column that may be null, true for IS NULL
+ * and false for IS NOT NULL.
  */
 export interface UuidFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface StringFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
   /** Contains the text, in any case: ILIKE %text%. */
   readonly ilike?: string;
 }
@@ -500,38 +517,47 @@ export interface StringFilter<T = string> {
  */
 export interface JsonFilter<T = unknown> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface NumberFilter<T = number> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
   readonly lte?: T;
   readonly between?: readonly [T, T];
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface DateTimeFilter<T = Date> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
   readonly lte?: T;
   readonly between?: readonly [T, T];
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface DateFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
   readonly lte?: T;
   readonly between?: readonly [T, T];
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 /** A duration's filter, its values a duration's text; Postgres compares intervals with a day as 24 hours and a month as 30 days. */
 export interface DurationFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
@@ -540,7 +566,9 @@ export interface DurationFilter<T = string> {
 }
 export interface BoolFilter {
   readonly eq?: boolean;
+  readonly ne?: boolean;
   readonly in?: readonly boolean[];
+  readonly notIn?: readonly boolean[];
 }
 /** A location's filter, which tests presence alone: Postgres has no equality for a POINT. */
 export type PointFilter = Record<never, never>;
@@ -1433,18 +1461,24 @@ class TableRepository {
             conditions.push(fill(c[op as 'eq' | 'gt' | 'gte' | 'lt' | 'lte'], q, ++n));
             args.push(this.encode(value, column, op));
             break;
+          case 'ne':
+            conditions.push(fill(negationClause(c, 'ne', this.def.name, column.name), q, ++n));
+            args.push(this.encode(value, column, op));
+            break;
           case 'ilike':
             conditions.push(fill(c.ilike, q, ++n));
             args.push(`%${String(value)}%`);
             break;
-          case 'in': {
+          case 'in':
+          case 'notIn': {
             const values = value as readonly unknown[];
             if (values.length === 0) break;
+            const clause = op === 'in' ? c.in : negationClause(c, 'noneOf', this.def.name, column.name);
             const placeholders = values.map(v => {
               args.push(this.encode(v, column, op));
               return fill(c.placeholder, ++n);
             });
-            conditions.push(fill(c.in, q, placeholders.join(', ')));
+            conditions.push(fill(clause, q, placeholders.join(', ')));
             break;
           }
           case 'between': {

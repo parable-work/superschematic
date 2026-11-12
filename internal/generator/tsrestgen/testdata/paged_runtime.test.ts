@@ -243,16 +243,16 @@ describe('a filtered list', () => {
     expect(byField.kind).toEqual({
       name: 'kind',
       kind: 'enum',
-      operators: ['eq', 'in'],
+      operators: ['eq', 'ne', 'in', 'notIn'],
       value: { name: 'filter[kind]', kind: 'enum', required: false, enumValues: ['bolt', 'nut', 'washer'] },
     });
-    expect(byField.name.operators).toEqual(['eq', 'in', 'contains']);
-    expect(byField.quantity.operators).toEqual(['eq', 'in', 'gt', 'gte', 'lt', 'lte']);
-    expect(byField.retiredOn.operators).toEqual(['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull']);
+    expect(byField.name.operators).toEqual(['eq', 'ne', 'in', 'notIn', 'contains']);
+    expect(byField.quantity.operators).toEqual(['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte']);
+    expect(byField.retiredOn.operators).toEqual(['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'isNull']);
     expect(byField.supplierId).toEqual({
       name: 'supplierId',
       kind: 'uuid',
-      operators: ['eq', 'in', 'isNull'],
+      operators: ['eq', 'ne', 'in', 'notIn', 'isNull'],
       value: { name: 'filter[supplierId]', kind: 'uuid', required: false },
     });
     expect(byField.madeAt.value).toEqual({ name: 'filter[madeAt]', kind: 'datetime', required: false });
@@ -322,6 +322,41 @@ describe('a filtered list', () => {
       filter: { id: { in: [parts[0].id, parts[5].id] } },
     });
     expect((await kept('filter[discontinued][in]=true,false')).parts).toEqual(wire(parts));
+  });
+
+  test('ne and notIn keep the items eq and in leave out, an item whose field is null among them', async () => {
+    expect(await kept('filter[kind][ne]=nut')).toEqual({
+      parts: named('Anchor bolt', 'Eye bolt', 'Flat washer'),
+      filter: { kind: { ne: 'nut' } },
+    });
+    expect(await kept('filter[quantity][notIn]=0,+3+,,12')).toEqual({
+      parts: named('Cap nut', 'Flat washer', 'Hex nut'),
+      filter: { quantity: { notIn: [0, 3, 12] } },
+    });
+    expect((await kept('filter[name][ne]=Hex+nut')).parts).toEqual(named('Anchor bolt', 'Cap nut', 'Eye bolt', 'Flat washer', 'Wing nut'));
+    expect(await kept('filter[price][ne]=0.250')).toEqual({
+      parts: named('Anchor bolt', 'Eye bolt', 'Flat washer', 'Hex nut', 'Wing nut'),
+      filter: { price: { ne: '0.25' } },
+    });
+    expect((await kept('filter[discontinued][ne]=true')).parts).toEqual(named('Anchor bolt', 'Cap nut', 'Flat washer', 'Wing nut'));
+    const made = await kept('filter[madeAt][ne]=2026-01-10T08:00:00Z');
+    expect(made.parts).toEqual(named('Cap nut', 'Eye bolt', 'Hex nut', 'Wing nut'));
+    expect(made.filter.madeAt.ne).toBeInstanceOf(Date);
+    // A part with no retirement date is not retired on that day, and one
+    // with no supplier is none of these suppliers'.
+    expect(await kept('filter[retiredOn][ne]=2026-03-01')).toEqual({
+      parts: named('Anchor bolt', 'Cap nut', 'Flat washer', 'Hex nut', 'Wing nut'),
+      filter: { retiredOn: { ne: '2026-03-01' } },
+    });
+    expect((await kept(`filter[supplierId][notIn]=${suppliers[0]}`)).parts).toEqual(named('Eye bolt', 'Flat washer', 'Hex nut', 'Wing nut'));
+    expect((await kept(`filter[supplierId][notIn]=${suppliers[0]},${suppliers[1]}`)).parts).toEqual(named('Eye bolt', 'Wing nut'));
+    // isNull says otherwise when the caller wants only the parts that have one.
+    expect(await kept(`filter[supplierId][ne]=${suppliers[0]}&filter[supplierId][isNull]=false`)).toEqual({
+      parts: named('Flat washer', 'Hex nut'),
+      filter: { supplierId: { ne: suppliers[0], isNull: false } },
+    });
+    // They hold beside eq and in, as any member does.
+    expect((await kept('filter[kind][in]=bolt,nut&filter[kind][ne]=nut&filter[quantity][notIn]=12')).parts).toEqual(named('Eye bolt'));
   });
 
   test('a range on a number, a decimal, a timestamp and a date', async () => {
@@ -429,16 +464,16 @@ describe('a refused filter', () => {
   });
 
   test('an operator the field does not take', async () => {
-    expectProblem(await refused('/api/parts?filter[kind][gt]=nut'), refusal('filter[kind]', 'takes no operator gt; expected one of eq, in'));
+    expectProblem(await refused('/api/parts?filter[kind][gt]=nut'), refusal('filter[kind]', 'takes no operator gt; expected one of eq, ne, in, notIn'));
     expectProblem(
       await refused('/api/parts?filter[quantity][contains]=4'),
-      refusal('filter[quantity]', 'takes no operator contains; expected one of eq, in, gt, gte, lt, lte')
+      refusal('filter[quantity]', 'takes no operator contains; expected one of eq, ne, in, notIn, gt, gte, lt, lte')
     );
     expectProblem(
       await refused('/api/parts?filter[name][isNull]=true'),
-      refusal('filter[name]', 'takes no operator isNull; expected one of eq, in, contains')
+      refusal('filter[name]', 'takes no operator isNull; expected one of eq, ne, in, notIn, contains')
     );
-    expectProblem(await refused('/api/parts?filter[kind][neq]=nut'), refusal('filter[kind]', 'takes no operator neq; expected one of eq, in'));
+    expectProblem(await refused('/api/parts?filter[kind][neq]=nut'), refusal('filter[kind]', 'takes no operator neq; expected one of eq, ne, in, notIn'));
   });
 
   test('a key that is no filter, an operator sent twice, and an operator’s own value', async () => {
@@ -447,6 +482,7 @@ describe('a refused filter', () => {
     expectProblem(await refused('/api/parts?filter[kind][in][0]=nut'), refusal('filter[kind][in][0]', malformed));
     expectProblem(await refused('/api/parts?filter[kind]=nut&filter[kind][eq]=bolt'), refusal('filter[kind]', 'holds eq more than once'));
     expectProblem(await refused('/api/parts?filter[kind][in]=,'), refusal('filter[kind]', 'in names no value'));
+    expectProblem(await refused('/api/parts?filter[kind][notIn]=,'), refusal('filter[kind]', 'notIn names no value'));
     expectProblem(await refused('/api/parts?filter[name][contains]='), refusal('filter[name]', 'contains needs text'));
     expectProblem(await refused('/api/parts?filter[retiredOn][isNull]=1'), refusal('filter[retiredOn]', 'isNull expects true or false'));
     const many = Array.from({ length: 51 }, (_, i) => `filter[name]=n${i}`).join('&');

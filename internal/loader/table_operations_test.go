@@ -102,15 +102,15 @@ func TestTableOperationsAreFilledFromTheirDeclarations(t *testing.T) {
 		kinds[field.Name] = field.Kind + " " + strings.Join(field.Operators, ",")
 	}
 	wantKinds := map[string]string{
-		"status":     "enum eq,in",
-		"priority":   "int eq,in,gt,gte,lt,lte",
-		"title":      "string eq,in,contains",
-		"estimate":   "float eq,in,gt,gte,lt,lte,isNull",
-		"dueOn":      "date eq,in,gt,gte,lt,lte,isNull",
-		"assigneeId": "uuid eq,in,isNull",
-		"createdAt":  "datetime eq,in,gt,gte,lt,lte",
+		"status":     "enum eq,ne,in,notIn",
+		"priority":   "int eq,ne,in,notIn,gt,gte,lt,lte",
+		"title":      "string eq,ne,in,notIn,contains",
+		"estimate":   "float eq,ne,in,notIn,gt,gte,lt,lte,isNull",
+		"dueOn":      "date eq,ne,in,notIn,gt,gte,lt,lte,isNull",
+		"assigneeId": "uuid eq,ne,in,notIn,isNull",
+		"createdAt":  "datetime eq,ne,in,notIn,gt,gte,lt,lte",
 		// Who created a row filters as any id does (D110).
-		"createdBy": "uuid eq,in",
+		"createdBy": "uuid eq,ne,in,notIn",
 	}
 	if !reflect.DeepEqual(kinds, wantKinds) {
 		t.Errorf("listIssues filter kinds = %v, want %v", kinds, wantKinds)

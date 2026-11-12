@@ -106,10 +106,10 @@ export const apiCredentialTable: TableDefinition = {
   table: "api_credential",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "api_credential.id", uuid: true, key: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "service", column: "service", field: "service", qualified: "api_credential.service", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "api_credential.id", uuid: true, key: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "service", column: "service", field: "service", qualified: "api_credential.service", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "secret", column: "secret", field: "secret", qualified: "api_credential.secret", required: true, encrypted: true },
-    { name: "rotatedAt", column: "rotated_at", field: "rotatedAt", qualified: "api_credential.rotated_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "rotatedAt", column: "rotated_at", field: "rotatedAt", qualified: "api_credential.rotated_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"service\", \"secret\", \"rotated_at\"",
@@ -237,13 +237,13 @@ export const plaidItemTable: TableDefinition = {
   table: "plaid_item",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "plaid_item.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "itemId", column: "item_id", field: "itemId", qualified: "plaid_item.item_id", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "institution", column: "institution", field: "institution", qualified: "plaid_item.institution", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "plaid_item.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "itemId", column: "item_id", field: "itemId", qualified: "plaid_item.item_id", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "institution", column: "institution", field: "institution", qualified: "plaid_item.institution", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "accessToken", column: "access_token", field: "accessToken", qualified: "plaid_item.access_token", required: true, encrypted: true },
     { name: "webhookSecret", column: "webhook_secret", field: "webhookSecret", qualified: "plaid_item.webhook_secret", encrypted: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "plaid_item.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "plaid_item.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "plaid_item.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "plaid_item.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "plaid_item.deleted_at", timestamp: true, audit: "deletedAt" },
   ],
   statements: {
@@ -306,12 +306,14 @@ export type FixtureVaultDbTx = OrmTx<FixtureVaultDbRepositories>;
 export const fixtureVaultDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

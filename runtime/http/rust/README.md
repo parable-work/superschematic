@@ -40,13 +40,16 @@ This crate provides:
 - `filter`: the filters of a list operation (`FilterBy`, D106), the twin
   of Go's `filterparse` and TypeScript's `filter.ts`. An operation's spec
   is `FilterSpec::new(&[FieldSpec::new("stateId", &[Operator::Eq,
-  Operator::In])])`, and `FilterSpec::query` reads the bracket form,
+  Operator::Ne, Operator::In, Operator::NotIn])])`, and
+  `FilterSpec::query` reads the bracket form,
   `filter[field]=value` and `filter[field][op]=value`, into `Filter`s in
   the spec's field order, with the 400 every runtime answers at
   `filter[field]`. An implementation takes a field's filter typed,
   `filter::Equals<T>`, `filter::Ordered<T>` or `filter::Text<T>` by its
-  operators (`eq`, `in_`, `gt`, `gte`, `lt`, `lte`, `contains`,
-  `is_null`), which `filter::decode_equals`, `decode_ordered` and
+  operators (`eq`, `ne`, `in_`, `not_in`, `gt`, `gte`, `lt`, `lte`,
+  `contains`, `is_null`; `ne` and `not_in` keep the items `eq` and `in_`
+  leave out, an item whose field is null among them, D112), which
+  `filter::decode_equals`, `decode_ordered` and
   `decode_text` read from the request's filters, each value as
   `ParamSpec::query_item` reads an item of a query list of the field's
   type, refused at `filter[field]`; each type's `check` holds a filter an

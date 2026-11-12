@@ -8,7 +8,9 @@
 //! implementation takes them typed, a member per field ([`Equals`],
 //! [`Ordered`], [`Text`]), which the router decodes each value into as an
 //! item of a query list of the field's type ([`decode_equals`],
-//! [`decode_ordered`], [`decode_text`]). Members are ANDed. An in-process
+//! [`decode_ordered`], [`decode_text`]). Members are ANDed. `ne` and
+//! `notIn` negate `eq` and `in` (D112): each keeps the items the other
+//! leaves out, an item whose field is null among them. An in-process
 //! caller builds the typed filter itself, and `Args::check` holds it to the
 //! route's rules ([`Equals::check`]).
 //!
@@ -31,17 +33,22 @@ pub const PARAM: &str = "filter";
 /// The most filter parameters a request may hold.
 pub const MAX_FILTERS: usize = 50;
 
-/// The most values an `in` may list.
+/// The most values an `in` or a `notIn` may list.
 pub const MAX_IN_VALUES: usize = 100;
 
 /// The comparison a filter makes. It writes and reads as the wire names
-/// it: `eq`, `in`, `gt`, `gte`, `lt`, `lte`, `contains`, `isNull`.
+/// it: `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte`, `contains`,
+/// `isNull`. `ne` and `notIn` negate `eq` and `in` (D112).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Operator {
     #[serde(rename = "eq")]
     Eq,
+    #[serde(rename = "ne")]
+    Ne,
     #[serde(rename = "in")]
     In,
+    #[serde(rename = "notIn")]
+    NotIn,
     #[serde(rename = "gt")]
     Gt,
     #[serde(rename = "gte")]
@@ -59,9 +66,11 @@ pub enum Operator {
 impl Operator {
     /// Every operator, in the order a field lists its own and
     /// [`FilterSpec::query`] answers them.
-    pub const ALL: [Operator; 8] = [
+    pub const ALL: [Operator; 10] = [
         Operator::Eq,
+        Operator::Ne,
         Operator::In,
+        Operator::NotIn,
         Operator::Gt,
         Operator::Gte,
         Operator::Lt,
@@ -74,7 +83,9 @@ impl Operator {
     pub const fn as_str(self) -> &'static str {
         match self {
             Operator::Eq => "eq",
+            Operator::Ne => "ne",
             Operator::In => "in",
+            Operator::NotIn => "notIn",
             Operator::Gt => "gt",
             Operator::Gte => "gte",
             Operator::Lt => "lt",
@@ -89,6 +100,12 @@ impl Operator {
         Self::ALL
             .into_iter()
             .find(|operator| operator.as_str() == text)
+    }
+
+    /// Whether the operator takes a list of values, separated by commas
+    /// on the wire: `in` and `notIn`.
+    pub const fn takes_list(self) -> bool {
+        matches!(self, Operator::In | Operator::NotIn)
     }
 }
 
@@ -141,7 +158,7 @@ impl FieldSpec {
 /// An operation's `FilterBy` as its `Args` carry it in an associated
 /// const: the fields a caller may filter by,
 /// `FilterSpec::new(&[FieldSpec::new("stateId", &[Operator::Eq,
-/// Operator::In])])`.
+/// Operator::Ne, Operator::In, Operator::NotIn])])`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FilterSpec {
     fields: &'static [FieldSpec],
@@ -181,8 +198,8 @@ impl FilterSpec {
     ///   take, and a field's operator sent twice (`filter[f]` and
     ///   `filter[f][eq]` are one), each at `filter[field]`;
     /// - a value the operator does not take, at `filter[field]`:
-    ///   `isNull`'s is `true` or `false`, `in`'s is 1 to [`MAX_IN_VALUES`]
-    ///   values, and `contains` needs text.
+    ///   `isNull`'s is `true` or `false`, `in`'s and `notIn`'s is 1 to
+    ///   [`MAX_IN_VALUES`] values, and `contains` needs text.
     ///
     /// A value's own type is the route's to check, as it decodes it
     /// ([`decode_equals`]).
@@ -234,7 +251,7 @@ impl FilterSpec {
                 Operator::IsNull if value != "true" && value != "false" => {
                     return Err(refuse(&at(name), "isNull expects true or false", None));
                 }
-                Operator::In => in_values(name, value)?,
+                Operator::In | Operator::NotIn => list_values(name, operator, value)?,
                 Operator::Contains if value.is_empty() => {
                     return Err(refuse(&at(name), "contains needs text", None));
                 }
@@ -254,9 +271,9 @@ impl FilterSpec {
 }
 
 /// One filter a request holds: the field, the operator and its values as
-/// the query sent them. Every operator but `in` holds one value; `in`
-/// holds its list, split at commas, each value trimmed. `isNull`'s value
-/// is `true` or `false`.
+/// the query sent them. Every operator but `in` and `notIn` holds one
+/// value; those two hold their list, split at commas, each value trimmed.
+/// `isNull`'s value is `true` or `false`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Filter {
     pub field: String,
@@ -275,9 +292,10 @@ fn more_than_once(field: &str, operator: Operator) -> ApiError {
     refuse(&at(field), &reason, None)
 }
 
-/// The values of an `in`: its text split at commas, each value trimmed and
-/// an empty one dropped, 1 to [`MAX_IN_VALUES`] of them.
-fn in_values(field: &str, text: &str) -> Result<Vec<String>, ApiError> {
+/// The values of an `in` or a `notIn`: its text split at commas, each
+/// value trimmed and an empty one dropped, 1 to [`MAX_IN_VALUES`] of them.
+/// A refusal names the operator.
+fn list_values(field: &str, operator: Operator, text: &str) -> Result<Vec<String>, ApiError> {
     let values: Vec<String> = text
         .split(',')
         .map(str::trim)
@@ -285,16 +303,17 @@ fn in_values(field: &str, text: &str) -> Result<Vec<String>, ApiError> {
         .map(str::to_owned)
         .collect();
     if values.is_empty() {
-        return Err(refuse(&at(field), "in names no value", None));
+        let reason = format!("{operator} names no value");
+        return Err(refuse(&at(field), &reason, None));
     }
-    check_in_length(field, values.len())?;
+    check_list_length(field, operator, values.len())?;
     Ok(values)
 }
 
-/// An `in` holds at most [`MAX_IN_VALUES`] values.
-fn check_in_length(field: &str, length: usize) -> Result<(), ApiError> {
+/// An `in` and a `notIn` hold at most [`MAX_IN_VALUES`] values.
+fn check_list_length(field: &str, operator: Operator, length: usize) -> Result<(), ApiError> {
     if length > MAX_IN_VALUES {
-        let reason = format!("in must hold at most {MAX_IN_VALUES} values");
+        let reason = format!("{operator} must hold at most {MAX_IN_VALUES} values");
         return Err(refuse(&at(field), &reason, Some("max")));
     }
     Ok(())
@@ -324,18 +343,21 @@ fn bracket_key(key: &str) -> Option<(&str, Option<&str>)> {
 
 // A field's filter as an implementation takes it (D106): a member per
 // operator, each `None`, or empty, when the request holds none. Which type
-// a field's is follows its operators: Equals for eq and in alone (a UUID,
-// an enum, a boolean), Ordered for a number, a date and a time, which add
-// gt, gte, lt and lte, and Text for text, which adds contains. `is_null`
-// is set only on a field that may be null: true keeps the rows whose field
-// is null, false the others. The `in` operator's member is `in_`, `in`
-// being a keyword.
+// a field's is follows its operators: Equals for eq, ne, in and notIn
+// alone (a UUID, an enum, a boolean), Ordered for a number, a date and a
+// time, which add gt, gte, lt and lte, and Text for text, which adds
+// contains. `ne` and `not_in` keep the rows `eq` and `in_` leave out
+// (D112), a row whose field is null among them. `is_null` is set only on a
+// field that may be null: true keeps the rows whose field is null, false
+// the others. The `in` operator's member is `in_`, `in` being a keyword.
 
 /// The filter of a field compared for equality alone.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Equals<T> {
     pub eq: Option<T>,
+    pub ne: Option<T>,
     pub in_: Vec<T>,
+    pub not_in: Vec<T>,
     pub is_null: Option<bool>,
 }
 
@@ -344,7 +366,9 @@ pub struct Equals<T> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ordered<T> {
     pub eq: Option<T>,
+    pub ne: Option<T>,
     pub in_: Vec<T>,
+    pub not_in: Vec<T>,
     pub gt: Option<T>,
     pub gte: Option<T>,
     pub lt: Option<T>,
@@ -357,7 +381,9 @@ pub struct Ordered<T> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Text<T> {
     pub eq: Option<T>,
+    pub ne: Option<T>,
     pub in_: Vec<T>,
+    pub not_in: Vec<T>,
     pub contains: Option<String>,
     pub is_null: Option<bool>,
 }
@@ -369,7 +395,9 @@ impl<T> Default for Equals<T> {
     fn default() -> Self {
         Self {
             eq: None,
+            ne: None,
             in_: Vec::new(),
+            not_in: Vec::new(),
             is_null: None,
         }
     }
@@ -379,7 +407,9 @@ impl<T> Default for Ordered<T> {
     fn default() -> Self {
         Self {
             eq: None,
+            ne: None,
             in_: Vec::new(),
+            not_in: Vec::new(),
             gt: None,
             gte: None,
             lt: None,
@@ -393,7 +423,9 @@ impl<T> Default for Text<T> {
     fn default() -> Self {
         Self {
             eq: None,
+            ne: None,
             in_: Vec::new(),
+            not_in: Vec::new(),
             contains: None,
             is_null: None,
         }
@@ -404,7 +436,9 @@ impl<T> Default for Text<T> {
 /// to its type.
 struct Decoded<T> {
     eq: Option<T>,
+    ne: Option<T>,
     in_: Vec<T>,
+    not_in: Vec<T>,
     gt: Option<T>,
     gte: Option<T>,
     lt: Option<T>,
@@ -424,13 +458,18 @@ fn decode_field<T: DeserializeOwned>(
 ) -> Result<Option<Decoded<T>>, ApiError> {
     let mut out = Decoded {
         eq: None,
+        ne: None,
         in_: Vec::new(),
+        not_in: Vec::new(),
         gt: None,
         gte: None,
         lt: None,
         lte: None,
         contains: None,
         is_null: None,
+    };
+    let list = |texts: &[String]| -> Result<Vec<T>, ApiError> {
+        texts.iter().map(|text| value.query_item(text)).collect()
     };
     let mut any = false;
     for filter in filters.iter().filter(|filter| filter.field == field) {
@@ -440,13 +479,9 @@ fn decode_field<T: DeserializeOwned>(
         any = true;
         match filter.operator {
             Operator::Eq => out.eq = Some(value.query_item(first)?),
-            Operator::In => {
-                out.in_ = filter
-                    .values
-                    .iter()
-                    .map(|text| value.query_item(text))
-                    .collect::<Result<_, _>>()?;
-            }
+            Operator::Ne => out.ne = Some(value.query_item(first)?),
+            Operator::In => out.in_ = list(&filter.values)?,
+            Operator::NotIn => out.not_in = list(&filter.values)?,
             Operator::Gt => out.gt = Some(value.query_item(first)?),
             Operator::Gte => out.gte = Some(value.query_item(first)?),
             Operator::Lt => out.lt = Some(value.query_item(first)?),
@@ -469,7 +504,9 @@ pub fn decode_equals<T: DeserializeOwned>(
 ) -> Result<Option<Equals<T>>, ApiError> {
     Ok(decode_field(filters, field, value)?.map(|d| Equals {
         eq: d.eq,
+        ne: d.ne,
         in_: d.in_,
+        not_in: d.not_in,
         is_null: d.is_null,
     }))
 }
@@ -483,7 +520,9 @@ pub fn decode_ordered<T: DeserializeOwned>(
 ) -> Result<Option<Ordered<T>>, ApiError> {
     Ok(decode_field(filters, field, value)?.map(|d| Ordered {
         eq: d.eq,
+        ne: d.ne,
         in_: d.in_,
+        not_in: d.not_in,
         gt: d.gt,
         gte: d.gte,
         lt: d.lt,
@@ -501,7 +540,9 @@ pub fn decode_text<T: DeserializeOwned>(
 ) -> Result<Option<Text<T>>, ApiError> {
     Ok(decode_field(filters, field, value)?.map(|d| Text {
         eq: d.eq,
+        ne: d.ne,
         in_: d.in_,
+        not_in: d.not_in,
         contains: d.contains,
         is_null: d.is_null,
     }))
@@ -511,7 +552,7 @@ pub fn decode_text<T: DeserializeOwned>(
 /// operator with its values of the field's type, then `contains` and
 /// `is_null`.
 struct Members<'a, T> {
-    values: [(Operator, &'a [T]); 6],
+    values: [(Operator, &'a [T]); 8],
     contains: Option<&'a str>,
     is_null: Option<bool>,
 }
@@ -519,10 +560,10 @@ struct Members<'a, T> {
 /// Holds a filter an in-process caller built to the route's rules: the
 /// router would refuse a request that says the same, with the same 400 at
 /// `filter[field]`. An operator the field does not take, `is_null` on a
-/// field that is never null among them; an `in` past [`MAX_IN_VALUES`]
-/// values; a `contains` of no text; then each value, checked as the
-/// router checks one of the field's type. A field the spec does not name
-/// is the generator's error, a 500.
+/// field that is never null among them; an `in` or a `notIn` past
+/// [`MAX_IN_VALUES`] values; a `contains` of no text; then each value,
+/// checked as the router checks one of the field's type. A field the spec
+/// does not name is the generator's error, a 500.
 fn check_members<T: Serialize>(
     spec: &FilterSpec,
     field: &str,
@@ -550,8 +591,8 @@ fn check_members<T: Serialize>(
         return Err(field_spec.refuse_operator(operator.as_str()));
     }
     for (operator, values) in &members.values {
-        if *operator == Operator::In {
-            check_in_length(field, values.len())?;
+        if operator.takes_list() {
+            check_list_length(field, *operator, values.len())?;
         }
     }
     if members.contains == Some("") {
@@ -572,13 +613,15 @@ impl<T: Serialize> Equals<T> {
     /// parameter. The router would refuse a request that says the same,
     /// with the same 400 at `filter[field]`: an operator the field does
     /// not take, `is_null` on a field that is never null among them, an
-    /// `in_` past [`MAX_IN_VALUES`] values, then a value its type refuses.
-    /// An empty `in_` is none.
+    /// `in_` or a `not_in` past [`MAX_IN_VALUES`] values, then a value its
+    /// type refuses. An empty `in_` or `not_in` is none.
     pub fn check(&self, spec: &FilterSpec, field: &str, value: &ParamSpec) -> Result<(), ApiError> {
         let members = Members {
             values: [
                 (Operator::Eq, self.eq.as_slice()),
+                (Operator::Ne, self.ne.as_slice()),
                 (Operator::In, &self.in_),
+                (Operator::NotIn, &self.not_in),
                 (Operator::Gt, &[]),
                 (Operator::Gte, &[]),
                 (Operator::Lt, &[]),
@@ -598,7 +641,9 @@ impl<T: Serialize> Ordered<T> {
         let members = Members {
             values: [
                 (Operator::Eq, self.eq.as_slice()),
+                (Operator::Ne, self.ne.as_slice()),
                 (Operator::In, &self.in_),
+                (Operator::NotIn, &self.not_in),
                 (Operator::Gt, self.gt.as_slice()),
                 (Operator::Gte, self.gte.as_slice()),
                 (Operator::Lt, self.lt.as_slice()),
@@ -619,7 +664,9 @@ impl<T: Serialize> Text<T> {
         let members = Members {
             values: [
                 (Operator::Eq, self.eq.as_slice()),
+                (Operator::Ne, self.ne.as_slice()),
                 (Operator::In, &self.in_),
+                (Operator::NotIn, &self.not_in),
                 (Operator::Gt, &[]),
                 (Operator::Gte, &[]),
                 (Operator::Lt, &[]),
@@ -641,20 +688,43 @@ mod tests {
     use crate::ParamKind;
 
     const SPEC: FilterSpec = FilterSpec::new(&[
-        FieldSpec::new("kind", &[Operator::Eq, Operator::In]),
+        FieldSpec::new(
+            "kind",
+            &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn],
+        ),
         FieldSpec::new(
             "quantity",
             &[
                 Operator::Eq,
+                Operator::Ne,
                 Operator::In,
+                Operator::NotIn,
                 Operator::Gt,
                 Operator::Gte,
                 Operator::Lt,
                 Operator::Lte,
             ],
         ),
-        FieldSpec::new("name", &[Operator::Eq, Operator::In, Operator::Contains]),
-        FieldSpec::new("retired", &[Operator::Eq, Operator::In, Operator::IsNull]),
+        FieldSpec::new(
+            "name",
+            &[
+                Operator::Eq,
+                Operator::Ne,
+                Operator::In,
+                Operator::NotIn,
+                Operator::Contains,
+            ],
+        ),
+        FieldSpec::new(
+            "retired",
+            &[
+                Operator::Eq,
+                Operator::Ne,
+                Operator::In,
+                Operator::NotIn,
+                Operator::IsNull,
+            ],
+        ),
         FieldSpec::new("weight", &Operator::ALL),
         FieldSpec::new("retiredOn", &Operator::ALL),
         FieldSpec::new("price", &Operator::ALL),
@@ -734,8 +804,107 @@ mod tests {
             );
             assert_eq!(operator.to_string(), operator.as_str());
         }
+        let names: Vec<&str> = Operator::ALL.iter().map(|op| op.as_str()).collect();
+        assert_eq!(
+            names,
+            ["eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "contains", "isNull"]
+        );
+        // The order of ALL is the order the reader answers them in.
+        assert!(Operator::ALL.is_sorted());
         assert_eq!(Operator::parse("neq"), None);
+        assert_eq!(Operator::parse("notin"), None);
         assert_eq!(Operator::parse("isnull"), None);
+        let lists = Operator::ALL.into_iter().filter(|op| op.takes_list());
+        assert_eq!(lists.collect::<Vec<_>>(), [Operator::In, Operator::NotIn]);
+    }
+
+    #[test]
+    fn ne_and_not_in_read_as_eq_and_in_do() {
+        // ne is one value, kept whole: a comma and its spaces are the
+        // value's, and an empty one is a value. notIn is a list, split at
+        // commas, each value trimmed and a blank one dropped. A field's
+        // filters come in the operators' order.
+        let filters = read(&[
+            ("filter[name][notIn]", " M4 ,, M5,"),
+            ("filter[quantity][notIn]", "7"),
+            ("filter[name][ne]", " a, b "),
+            ("filter[kind][ne]", ""),
+            ("filter[name][in]", "x,y"),
+            ("filter[name]", "z"),
+        ]);
+        let filter = |field: &str, operator, values: &[&str]| Filter {
+            field: field.to_owned(),
+            operator,
+            values: values.iter().map(|value| (*value).to_owned()).collect(),
+        };
+        assert_eq!(
+            filters,
+            [
+                filter("kind", Operator::Ne, &[""]),
+                filter("quantity", Operator::NotIn, &["7"]),
+                filter("name", Operator::Eq, &["z"]),
+                filter("name", Operator::Ne, &[" a, b "]),
+                filter("name", Operator::In, &["x", "y"]),
+                filter("name", Operator::NotIn, &["M4", "M5"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_not_in_holds_one_to_a_hundred_values() {
+        let query = |value: &str| {
+            let pairs = vec![("filter[kind][notIn]".to_owned(), value.to_owned())];
+            SPEC.query(&QueryValues::new(pairs))
+        };
+        for blank in ["", " , ,"] {
+            assert_eq!(
+                refusal(query(blank)),
+                (
+                    "Invalid query parameter filter[kind]: notIn names no value".to_owned(),
+                    json!({
+                        "location": "query",
+                        "parameter": "filter[kind]",
+                        "reason": "notIn names no value",
+                    }),
+                ),
+                "{blank:?}"
+            );
+        }
+        let most = vec!["bolt"; MAX_IN_VALUES].join(",");
+        assert_eq!(query(&most).unwrap()[0].values.len(), MAX_IN_VALUES);
+        let reason = "notIn must hold at most 100 values";
+        assert_eq!(
+            refusal(query(&format!("{most},nut"))),
+            (
+                format!("Invalid query parameter filter[kind]: {reason}"),
+                json!({
+                    "location": "query",
+                    "parameter": "filter[kind]",
+                    "reason": reason,
+                    "errors": [{"validator": "max", "message": reason}],
+                }),
+            )
+        );
+
+        // ne and notIn are a field's own: one sent twice is refused, and
+        // so is one the field does not take.
+        let twice = [("filter[kind][ne]", "bolt"), ("filter[kind][ne]", "nut")];
+        let pairs = twice.map(|(key, value)| (key.to_owned(), value.to_owned()));
+        let (detail, _) = refusal(SPEC.query(&QueryValues::new(pairs.to_vec())));
+        assert_eq!(
+            detail,
+            "Invalid query parameter filter[kind]: holds ne more than once"
+        );
+        const EQUALITY: FilterSpec =
+            FilterSpec::new(&[FieldSpec::new("kind", &[Operator::Eq, Operator::In])]);
+        for (key, operator) in [("filter[kind][ne]", "ne"), ("filter[kind][notIn]", "notIn")] {
+            let pairs = vec![(key.to_owned(), "bolt".to_owned())];
+            let (detail, _) = refusal(EQUALITY.query(&QueryValues::new(pairs)));
+            assert_eq!(
+                detail,
+                format!("Invalid query parameter filter[kind]: takes no operator {operator}; expected one of eq, in")
+            );
+        }
     }
 
     #[test]
@@ -763,19 +932,26 @@ mod tests {
         let filters = read(&[
             ("filter[quantity][lte]", "9"),
             ("filter[kind][in]", "bolt, nut"),
+            ("filter[kind][ne]", "nut"),
             ("filter[quantity][gt]", "1"),
             ("filter[name][contains]", "M4 "),
             ("filter[quantity][in]", "2,3"),
+            ("filter[quantity][notIn]", "5, 6"),
             ("filter[retired][isNull]", "false"),
             ("filter[quantity][gte]", "2"),
             ("filter[name][eq]", ""),
+            ("filter[name][ne]", "a, b"),
+            ("filter[name][notIn]", "M5,M6"),
             ("filter[quantity]", "4"),
+            ("filter[quantity][ne]", "8"),
             ("filter[retired]", "T"),
+            ("filter[retired][notIn]", "F"),
             ("filter[quantity][lt]", "10"),
         ]);
         assert_eq!(
             decode_equals::<String>(&filters, "kind", &KIND).unwrap(),
             Some(Equals {
+                ne: Some("nut".to_owned()),
                 in_: vec!["bolt".to_owned(), "nut".to_owned()],
                 ..Default::default()
             })
@@ -784,7 +960,9 @@ mod tests {
             decode_ordered::<i64>(&filters, "quantity", &QUANTITY).unwrap(),
             Some(Ordered {
                 eq: Some(4),
+                ne: Some(8),
                 in_: vec![2, 3],
+                not_in: vec![5, 6],
                 gt: Some(1),
                 gte: Some(2),
                 lt: Some(10),
@@ -793,10 +971,13 @@ mod tests {
             })
         );
         // contains is the text as sent, and an empty eq a value of text.
+        // A ne is one value, its comma and all.
         assert_eq!(
             decode_text::<String>(&filters, "name", &NAME).unwrap(),
             Some(Text {
                 eq: Some(String::new()),
+                ne: Some("a, b".to_owned()),
+                not_in: vec!["M5".to_owned(), "M6".to_owned()],
                 contains: Some("M4 ".to_owned()),
                 ..Default::default()
             })
@@ -806,15 +987,35 @@ mod tests {
             decode_equals::<bool>(&filters, "retired", &RETIRED).unwrap(),
             Some(Equals {
                 eq: Some(true),
+                ne: None,
                 in_: Vec::new(),
+                not_in: vec![false],
                 is_null: Some(false),
+            })
+        );
+
+        // A filter of ne or notIn alone is a filter.
+        let filters = read(&[("filter[kind][notIn]", "nut")]);
+        assert_eq!(
+            decode_equals::<String>(&filters, "kind", &KIND).unwrap(),
+            Some(Equals {
+                not_in: vec!["nut".to_owned()],
+                ..Default::default()
+            })
+        );
+        let filters = read(&[("filter[quantity][ne]", "3")]);
+        assert_eq!(
+            decode_ordered::<i64>(&filters, "quantity", &QUANTITY).unwrap(),
+            Some(Ordered {
+                ne: Some(3),
+                ..Default::default()
             })
         );
     }
 
     #[test]
     fn a_value_its_type_refuses_is_refused_at_the_filter() {
-        let cases: [(Pairs<'_>, &str, Value); 6] = [
+        let cases: [(Pairs<'_>, &str, Value); 9] = [
             (
                 &[("filter[quantity]", "many")],
                 "Invalid query parameter filter[quantity]: expected an integer",
@@ -833,6 +1034,35 @@ mod tests {
                     "parameter": "filter[quantity]",
                     "reason": "expected an integer",
                     "errors": [{"validator": "type", "message": "expected an integer"}],
+                }),
+            ),
+            (
+                &[("filter[quantity][ne]", "many")],
+                "Invalid query parameter filter[quantity]: expected an integer",
+                json!({
+                    "location": "query",
+                    "parameter": "filter[quantity]",
+                    "reason": "expected an integer",
+                    "errors": [{"validator": "type", "message": "expected an integer"}],
+                }),
+            ),
+            (
+                &[("filter[quantity][notIn]", "1,-2")],
+                "Invalid query parameter filter[quantity]: must be at least 0",
+                json!({
+                    "location": "query",
+                    "parameter": "filter[quantity]",
+                    "reason": "must be at least 0",
+                    "errors": [{"validator": "min", "message": "must be at least 0"}],
+                }),
+            ),
+            (
+                &[("filter[kind][notIn]", "bolt,gear")],
+                "Invalid query parameter filter[kind]: expected one of bolt, nut",
+                json!({
+                    "location": "query",
+                    "parameter": "filter[kind]",
+                    "reason": "expected one of bolt, nut",
                 }),
             ),
             (
@@ -903,6 +1133,8 @@ mod tests {
         let filters = read(&[
             ("filter[retiredOn][gte]", " 2026/3/1 "),
             ("filter[retiredOn][in]", "2026-03-01,2026/12/5"),
+            ("filter[retiredOn][notIn]", "2026/1/2"),
+            ("filter[retiredOn][ne]", "2026/7/4"),
             ("filter[price]", "2.50"),
         ]);
         let retired = decode_ordered::<String>(&filters, "retiredOn", &RETIRED_ON).unwrap();
@@ -910,7 +1142,9 @@ mod tests {
             retired,
             Some(Ordered {
                 gte: Some("2026-03-01".to_owned()),
+                ne: Some("2026-07-04".to_owned()),
                 in_: vec!["2026-03-01".to_owned(), "2026-12-05".to_owned()],
+                not_in: vec!["2026-01-02".to_owned()],
                 ..Default::default()
             })
         );
@@ -988,7 +1222,9 @@ mod tests {
     fn check_holds_a_built_filter_to_the_routes_rules() {
         let quantity = Ordered {
             eq: Some(4_i64),
+            ne: Some(5),
             in_: vec![2, 3],
+            not_in: vec![6, 7],
             gte: Some(0),
             ..Default::default()
         };
@@ -1030,7 +1266,7 @@ mod tests {
         let (detail, _) = refusal(null.check(&SPEC, "kind", &KIND));
         assert_eq!(
             detail,
-            "Invalid query parameter filter[kind]: takes no operator isNull; expected one of eq, in"
+            "Invalid query parameter filter[kind]: takes no operator isNull; expected one of eq, ne, in, notIn"
         );
         let null = Equals::<bool> {
             is_null: Some(true),
@@ -1049,6 +1285,71 @@ mod tests {
             "Invalid query parameter filter[quantity]: in must hold at most 100 values"
         );
         assert_eq!(details["errors"][0]["validator"], "max");
+        // A not_in is held as an in_ is: its most values, in the
+        // reader's words, and each value its type refuses. An empty one
+        // is none.
+        let many = Equals {
+            not_in: vec!["bolt"; MAX_IN_VALUES + 1],
+            ..Default::default()
+        };
+        let sent = vec!["bolt"; MAX_IN_VALUES + 1].join(",");
+        let pairs = vec![("filter[kind][notIn]".to_owned(), sent)];
+        let (detail, details) = refusal(many.check(&SPEC, "kind", &KIND));
+        assert_eq!(
+            detail,
+            "Invalid query parameter filter[kind]: notIn must hold at most 100 values"
+        );
+        assert_eq!(details["errors"][0]["validator"], "max");
+        assert_eq!(
+            (detail, details),
+            refusal(SPEC.query(&QueryValues::new(pairs)))
+        );
+        let most = Equals {
+            not_in: vec!["bolt"; MAX_IN_VALUES],
+            ..Default::default()
+        };
+        assert!(most.check(&SPEC, "kind", &KIND).is_ok());
+        let gear = Text {
+            not_in: vec!["bolt", "a long name"],
+            ..Default::default()
+        };
+        let filters = read(&[("filter[name][notIn]", "bolt,a long name")]);
+        assert_eq!(
+            refusal(gear.check(&SPEC, "name", &NAME)),
+            refusal(decode_text::<String>(&filters, "name", &NAME))
+        );
+        let negative = Ordered {
+            ne: Some(-1_i64),
+            ..Default::default()
+        };
+        let filters = read(&[("filter[quantity][ne]", "-1")]);
+        assert_eq!(
+            refusal(negative.check(&SPEC, "quantity", &QUANTITY)),
+            refusal(decode_ordered::<i64>(&filters, "quantity", &QUANTITY))
+        );
+
+        // ne and not_in on a field whose spec holds neither.
+        const EQUALITY: FilterSpec =
+            FilterSpec::new(&[FieldSpec::new("kind", &[Operator::Eq, Operator::In])]);
+        let ne = Equals {
+            ne: Some("bolt"),
+            ..Default::default()
+        };
+        let (detail, _) = refusal(ne.check(&EQUALITY, "kind", &KIND));
+        assert_eq!(
+            detail,
+            "Invalid query parameter filter[kind]: takes no operator ne; expected one of eq, in"
+        );
+        let not_in = Equals {
+            not_in: vec!["bolt"],
+            ..Default::default()
+        };
+        let (detail, _) = refusal(not_in.check(&EQUALITY, "kind", &KIND));
+        assert_eq!(
+            detail,
+            "Invalid query parameter filter[kind]: takes no operator notIn; expected one of eq, in"
+        );
+
         let blank = Text::<String> {
             contains: Some(String::new()),
             ..Default::default()
@@ -1064,7 +1365,7 @@ mod tests {
         let (detail, _) = refusal(quantity.check(&SPEC, "kind", &QUANTITY));
         assert_eq!(
             detail,
-            "Invalid query parameter filter[kind]: takes no operator gte; expected one of eq, in"
+            "Invalid query parameter filter[kind]: takes no operator gte; expected one of eq, ne, in, notIn"
         );
         let unnamed = quantity.check(&SPEC, "color", &QUANTITY).unwrap_err();
         assert_eq!(unnamed.status.as_u16(), 500);

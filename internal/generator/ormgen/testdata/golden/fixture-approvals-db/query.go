@@ -15,8 +15,12 @@ import (
 
 // UUIDFilter provides filtering operations for UUID fields
 type UUIDFilter struct {
-	Eq     *types.IdentityUUID
-	In     []types.IdentityUUID
+	Eq *types.IdentityUUID
+	In []types.IdentityUUID
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne     *types.IdentityUUID
+	NotIn  []types.IdentityUUID
 	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
@@ -32,7 +36,11 @@ type StringFilter struct {
 	// An empty or nil slice adds no condition, so a caller narrowing a result
 	// set must treat "no allowed values" as its own case rather than passing
 	// the empty slice and getting every row back.
-	In    []string
+	In []string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *string
+	NotIn []string
 	ILike *string // Case-insensitive LIKE
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
@@ -40,7 +48,11 @@ type StringFilter struct {
 
 // Int64Filter provides filtering operations for integer fields
 type Int64Filter struct {
-	Eq      *int64
+	Eq *int64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *int64
+	NotIn   []int64
 	Gt      *int64
 	Gte     *int64
 	Lt      *int64
@@ -61,7 +73,11 @@ type Int64Range struct {
 
 // FloatFilter provides filtering operations for float fields
 type FloatFilter struct {
-	Eq      *float64
+	Eq *float64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *float64
+	NotIn   []float64
 	Gt      *float64
 	Gte     *float64
 	Lt      *float64
@@ -83,6 +99,10 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *bool
+	NotIn []bool
 	// In matches any value in the set; an empty or nil slice adds no
 	// condition (D89).
 	In []bool
@@ -92,7 +112,11 @@ type BoolFilter struct {
 
 // DateTimeFilter provides filtering operations for DateTime fields
 type DateTimeFilter struct {
-	Eq      *time.Time
+	Eq *time.Time
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *time.Time
+	NotIn   []time.Time
 	Gt      *time.Time
 	Gte     *time.Time
 	Lt      *time.Time
@@ -112,7 +136,11 @@ type DateTimeRange struct {
 
 // DateFilter provides filtering operations for Date fields
 type DateFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -136,7 +164,10 @@ type DateRange struct {
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
 type DurationFilter struct {
-	Eq      *time.Duration
+	Eq *time.Duration
+	// Ne keeps the rows Eq leaves out (D112), a row whose column is NULL
+	// among them.
+	Ne      *time.Duration
 	Gt      *time.Duration
 	Gte     *time.Duration
 	Lt      *time.Duration
@@ -814,6 +845,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -822,6 +858,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -837,6 +882,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.slug = $%d`, paramNum))
 			*args = append(*args, *f.Slug.Eq)
 		}
+		if f.Slug.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.slug IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Slug.Ne)
+		}
 		if len(f.Slug.In) > 0 {
 			placeholders := make([]string, len(f.Slug.In))
 			for i, value := range f.Slug.In {
@@ -845,6 +895,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.slug IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Slug.NotIn) > 0 {
+			placeholders := make([]string, len(f.Slug.NotIn))
+			for i, value := range f.Slug.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.slug IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Slug.ILike != nil {
 			paramNum++
@@ -865,6 +924,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.title = $%d`, paramNum))
 			*args = append(*args, *f.Title.Eq)
 		}
+		if f.Title.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.title IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Title.Ne)
+		}
 		if len(f.Title.In) > 0 {
 			placeholders := make([]string, len(f.Title.In))
 			for i, value := range f.Title.In {
@@ -873,6 +937,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Title.NotIn) > 0 {
+			placeholders := make([]string, len(f.Title.NotIn))
+			for i, value := range f.Title.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.title IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Title.ILike != nil {
 			paramNum++
@@ -893,6 +966,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.body = $%d`, paramNum))
 			*args = append(*args, *f.Body.Eq)
 		}
+		if f.Body.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.body IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Body.Ne)
+		}
 		if len(f.Body.In) > 0 {
 			placeholders := make([]string, len(f.Body.In))
 			for i, value := range f.Body.In {
@@ -901,6 +979,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.body IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Body.NotIn) > 0 {
+			placeholders := make([]string, len(f.Body.NotIn))
+			for i, value := range f.Body.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.body IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Body.ILike != nil {
 			paramNum++
@@ -921,6 +1008,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.author = $%d`, paramNum))
 			*args = append(*args, f.Author.Eq.ToUUID())
 		}
+		if f.Author.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.author IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Author.Ne.ToUUID())
+		}
 		if len(f.Author.In) > 0 {
 			placeholders := make([]string, len(f.Author.In))
 			for i, id := range f.Author.In {
@@ -929,6 +1021,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.author IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Author.NotIn) > 0 {
+			placeholders := make([]string, len(f.Author.NotIn))
+			for i, id := range f.Author.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.author IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Author.IsNull != nil {
 			if *f.Author.IsNull {
@@ -944,6 +1045,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.pinned = $%d`, paramNum))
 			*args = append(*args, *f.Pinned.Eq)
 		}
+		if f.Pinned.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.pinned IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Pinned.Ne)
+		}
 		if len(f.Pinned.In) > 0 {
 			placeholders := make([]string, len(f.Pinned.In))
 			for i, value := range f.Pinned.In {
@@ -952,6 +1058,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.pinned IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Pinned.NotIn) > 0 {
+			placeholders := make([]string, len(f.Pinned.NotIn))
+			for i, value := range f.Pinned.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.pinned IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Pinned.IsNull != nil {
 			if *f.Pinned.IsNull {
@@ -966,6 +1081,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`note.views = $%d`, paramNum))
 			*args = append(*args, *f.Views.Eq)
+		}
+		if f.Views.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.views IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Views.Ne)
 		}
 		if f.Views.Gt != nil {
 			paramNum++
@@ -1004,6 +1124,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.views IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Views.NotIn) > 0 {
+			placeholders := make([]string, len(f.Views.NotIn))
+			for i, value := range f.Views.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.views IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Views.IsNull != nil {
 			if *f.Views.IsNull {
 				conditions = append(conditions, `note.views IS NULL`)
@@ -1018,6 +1147,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.created_by = $%d`, paramNum))
 			*args = append(*args, f.CreatedBy.Eq.ToUUID())
 		}
+		if f.CreatedBy.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.created_by IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Ne.ToUUID())
+		}
 		if len(f.CreatedBy.In) > 0 {
 			placeholders := make([]string, len(f.CreatedBy.In))
 			for i, id := range f.CreatedBy.In {
@@ -1026,6 +1160,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedBy.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.NotIn))
+			for i, id := range f.CreatedBy.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.created_by IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.CreatedBy.IsNull != nil {
 			if *f.CreatedBy.IsNull {
@@ -1041,6 +1184,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.status = $%d`, paramNum))
 			*args = append(*args, *f.Status.Eq)
 		}
+		if f.Status.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Status.Ne)
+		}
 		if len(f.Status.In) > 0 {
 			placeholders := make([]string, len(f.Status.In))
 			for i, value := range f.Status.In {
@@ -1049,6 +1197,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.status IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Status.NotIn) > 0 {
+			placeholders := make([]string, len(f.Status.NotIn))
+			for i, value := range f.Status.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.status IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Status.ILike != nil {
 			paramNum++
@@ -1068,6 +1225,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at = $%d`, paramNum))
 			*args = append(*args, *f.StatusEnteredAt.Eq)
+		}
+		if f.StatusEnteredAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Ne)
 		}
 		if f.StatusEnteredAt.Gt != nil {
 			paramNum++
@@ -1106,6 +1268,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 			conditions = append(conditions, fmt.Sprintf(`note.status_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.StatusEnteredAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.StatusEnteredAt.NotIn))
+			for i, value := range f.StatusEnteredAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note.status_entered_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.StatusEnteredAt.IsNull != nil {
 			if *f.StatusEnteredAt.IsNull {
 				conditions = append(conditions, `note.status_entered_at IS NULL`)
@@ -1119,6 +1290,11 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`note._version = $%d`, paramNum))
 			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note._version IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Version.Ne)
 		}
 		if f.Version.Gt != nil {
 			paramNum++
@@ -1156,6 +1332,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`note._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Version.NotIn) > 0 {
+			placeholders := make([]string, len(f.Version.NotIn))
+			for i, value := range f.Version.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(note._version IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Version.IsNull != nil {
 			if *f.Version.IsNull {
@@ -1346,6 +1531,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1354,6 +1544,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1369,6 +1568,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.title = $%d`, paramNum))
 			*args = append(*args, *f.Title.Eq)
 		}
+		if f.Title.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.title IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Title.Ne)
+		}
 		if len(f.Title.In) > 0 {
 			placeholders := make([]string, len(f.Title.In))
 			for i, value := range f.Title.In {
@@ -1377,6 +1581,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Title.NotIn) > 0 {
+			placeholders := make([]string, len(f.Title.NotIn))
+			for i, value := range f.Title.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.title IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Title.ILike != nil {
 			paramNum++
@@ -1397,6 +1610,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task."owner" = $%d`, paramNum))
 			*args = append(*args, f.Owner.Eq.ToUUID())
 		}
+		if f.Owner.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task."owner" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Owner.Ne.ToUUID())
+		}
 		if len(f.Owner.In) > 0 {
 			placeholders := make([]string, len(f.Owner.In))
 			for i, id := range f.Owner.In {
@@ -1405,6 +1623,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`task."owner" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Owner.NotIn) > 0 {
+			placeholders := make([]string, len(f.Owner.NotIn))
+			for i, id := range f.Owner.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task."owner" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Owner.IsNull != nil {
 			if *f.Owner.IsNull {
@@ -1420,6 +1647,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.reviewer = $%d`, paramNum))
 			*args = append(*args, f.Reviewer.Eq.ToUUID())
 		}
+		if f.Reviewer.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.reviewer IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Reviewer.Ne.ToUUID())
+		}
 		if len(f.Reviewer.In) > 0 {
 			placeholders := make([]string, len(f.Reviewer.In))
 			for i, id := range f.Reviewer.In {
@@ -1428,6 +1660,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.reviewer IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Reviewer.NotIn) > 0 {
+			placeholders := make([]string, len(f.Reviewer.NotIn))
+			for i, id := range f.Reviewer.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.reviewer IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Reviewer.IsNull != nil {
 			if *f.Reviewer.IsNull {
@@ -1443,6 +1684,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.plan = $%d`, paramNum))
 			*args = append(*args, *f.Plan.Eq)
 		}
+		if f.Plan.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.plan IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Plan.Ne)
+		}
 		if len(f.Plan.In) > 0 {
 			placeholders := make([]string, len(f.Plan.In))
 			for i, value := range f.Plan.In {
@@ -1451,6 +1697,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.plan IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Plan.NotIn) > 0 {
+			placeholders := make([]string, len(f.Plan.NotIn))
+			for i, value := range f.Plan.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.plan IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Plan.ILike != nil {
 			paramNum++
@@ -1471,6 +1726,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.proof = $%d`, paramNum))
 			*args = append(*args, *f.Proof.Eq)
 		}
+		if f.Proof.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.proof IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Proof.Ne)
+		}
 		if len(f.Proof.In) > 0 {
 			placeholders := make([]string, len(f.Proof.In))
 			for i, value := range f.Proof.In {
@@ -1479,6 +1739,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.proof IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Proof.NotIn) > 0 {
+			placeholders := make([]string, len(f.Proof.NotIn))
+			for i, value := range f.Proof.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.proof IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Proof.ILike != nil {
 			paramNum++
@@ -1499,6 +1768,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.urgent = $%d`, paramNum))
 			*args = append(*args, *f.Urgent.Eq)
 		}
+		if f.Urgent.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.urgent IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Urgent.Ne)
+		}
 		if len(f.Urgent.In) > 0 {
 			placeholders := make([]string, len(f.Urgent.In))
 			for i, value := range f.Urgent.In {
@@ -1507,6 +1781,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.urgent IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Urgent.NotIn) > 0 {
+			placeholders := make([]string, len(f.Urgent.NotIn))
+			for i, value := range f.Urgent.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.urgent IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Urgent.IsNull != nil {
 			if *f.Urgent.IsNull {
@@ -1521,6 +1804,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`task.attempts = $%d`, paramNum))
 			*args = append(*args, *f.Attempts.Eq)
+		}
+		if f.Attempts.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.attempts IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Attempts.Ne)
 		}
 		if f.Attempts.Gt != nil {
 			paramNum++
@@ -1559,6 +1847,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.attempts IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Attempts.NotIn) > 0 {
+			placeholders := make([]string, len(f.Attempts.NotIn))
+			for i, value := range f.Attempts.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.attempts IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Attempts.IsNull != nil {
 			if *f.Attempts.IsNull {
 				conditions = append(conditions, `task.attempts IS NULL`)
@@ -1573,6 +1870,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.created_by = $%d`, paramNum))
 			*args = append(*args, f.CreatedBy.Eq.ToUUID())
 		}
+		if f.CreatedBy.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.created_by IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.CreatedBy.Ne.ToUUID())
+		}
 		if len(f.CreatedBy.In) > 0 {
 			placeholders := make([]string, len(f.CreatedBy.In))
 			for i, id := range f.CreatedBy.In {
@@ -1581,6 +1883,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.created_by IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedBy.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedBy.NotIn))
+			for i, id := range f.CreatedBy.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.created_by IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.CreatedBy.IsNull != nil {
 			if *f.CreatedBy.IsNull {
@@ -1596,6 +1907,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`task.status = $%d`, paramNum))
 			*args = append(*args, *f.Status.Eq)
 		}
+		if f.Status.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.status IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Status.Ne)
+		}
 		if len(f.Status.In) > 0 {
 			placeholders := make([]string, len(f.Status.In))
 			for i, value := range f.Status.In {
@@ -1604,6 +1920,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.status IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Status.NotIn) > 0 {
+			placeholders := make([]string, len(f.Status.NotIn))
+			for i, value := range f.Status.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.status IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Status.ILike != nil {
 			paramNum++
@@ -1623,6 +1948,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`task.status_entered_at = $%d`, paramNum))
 			*args = append(*args, *f.StatusEnteredAt.Eq)
+		}
+		if f.StatusEnteredAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task.status_entered_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Ne)
 		}
 		if f.StatusEnteredAt.Gt != nil {
 			paramNum++
@@ -1661,6 +1991,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 			conditions = append(conditions, fmt.Sprintf(`task.status_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.StatusEnteredAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.StatusEnteredAt.NotIn))
+			for i, value := range f.StatusEnteredAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task.status_entered_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.StatusEnteredAt.IsNull != nil {
 			if *f.StatusEnteredAt.IsNull {
 				conditions = append(conditions, `task.status_entered_at IS NULL`)
@@ -1674,6 +2013,11 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`task._version = $%d`, paramNum))
 			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`task._version IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Version.Ne)
 		}
 		if f.Version.Gt != nil {
 			paramNum++
@@ -1711,6 +2055,15 @@ func (f *TaskFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`task._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Version.NotIn) > 0 {
+			placeholders := make([]string, len(f.Version.NotIn))
+			for i, value := range f.Version.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(task._version IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Version.IsNull != nil {
 			if *f.Version.IsNull {

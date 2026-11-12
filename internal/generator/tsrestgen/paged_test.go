@@ -148,18 +148,18 @@ func TestGeneratePagedFilterShape(t *testing.T) {
 	for _, f := range filter.Fields {
 		got = append(got, field{f.Name, f.Type(), f.FieldSpecLiteral()})
 	}
-	equality, ordered := "['eq', 'in']", "['eq', 'in', 'gt', 'gte', 'lt', 'lte']"
+	equality, ordered := "['eq', 'ne', 'in', 'notIn']", "['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte']"
 	want := []field{
 		{"id", "EqualsFilter<IdentityUUID>", "{ name: 'id', kind: 'uuid', operators: " + equality + ", value: { name: 'filter[id]', kind: 'uuid', required: false } }"},
-		{"name", "TextFilter<string>", "{ name: 'name', kind: 'string', operators: ['eq', 'in', 'contains'], value: { name: 'filter[name]', kind: 'string', required: false } }"},
+		{"name", "TextFilter<string>", "{ name: 'name', kind: 'string', operators: ['eq', 'ne', 'in', 'notIn', 'contains'], value: { name: 'filter[name]', kind: 'string', required: false } }"},
 		{"kind", "EqualsFilter<PartKind>", "{ name: 'kind', kind: 'enum', operators: " + equality + ", value: { name: 'filter[kind]', kind: 'enum', required: false, enumValues: ['bolt', 'nut', 'washer'] } }"},
 		{"quantity", "OrderedFilter<number>", "{ name: 'quantity', kind: 'int', operators: " + ordered + ", value: { name: 'filter[quantity]', kind: 'integer', required: false, scalar: { name: 'Generic.Int64', min: -9007199254740991, max: 9007199254740991 } } }"},
 		{"weight", "OrderedFilter<number>", "{ name: 'weight', kind: 'float', operators: " + ordered + ", value: { name: 'filter[weight]', kind: 'number', required: false } }"},
 		{"price", "OrderedFilter<GenericDecimal>", "{ name: 'price', kind: 'decimal', operators: " + ordered + ", value: { name: 'filter[price]', kind: 'string', required: false, scalar: { name: 'Generic.Decimal', pattern: '^[+-]?[0-9]+(\\\\.[0-9]+)?$' } } }"},
 		{"discontinued", "EqualsFilter<boolean>", "{ name: 'discontinued', kind: 'bool', operators: " + equality + ", value: { name: 'filter[discontinued]', kind: 'boolean', required: false } }"},
 		{"madeAt", "OrderedFilter<Date>", "{ name: 'madeAt', kind: 'datetime', operators: " + ordered + ", value: { name: 'filter[madeAt]', kind: 'datetime', required: false } }"},
-		{"retiredOn", "OrderedFilter<TemporalDate>", "{ name: 'retiredOn', kind: 'date', operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[retiredOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } }"},
-		{"supplierId", "EqualsFilter<IdentityUUID>", "{ name: 'supplierId', kind: 'uuid', operators: ['eq', 'in', 'isNull'], value: { name: 'filter[supplierId]', kind: 'uuid', required: false } }"},
+		{"retiredOn", "OrderedFilter<TemporalDate>", "{ name: 'retiredOn', kind: 'date', operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'isNull'], value: { name: 'filter[retiredOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } } }"},
+		{"supplierId", "EqualsFilter<IdentityUUID>", "{ name: 'supplierId', kind: 'uuid', operators: ['eq', 'ne', 'in', 'notIn', 'isNull'], value: { name: 'filter[supplierId]', kind: 'uuid', required: false } }"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		for i := range max(len(got), len(want)) {
@@ -249,7 +249,7 @@ func TestGeneratePagedFilterArgument(t *testing.T) {
 			"router.ts": {
 				"const filter = readFilter(ctx.query, operationSpecs.listParts.filter) as ListPartsFilter;",
 				"            " + argument + ": filter,",
-				"{ name: 'id', kind: 'uuid', operators: ['eq', 'in'], value: { name: 'filter[id]', kind: 'uuid', required: false } },",
+				"{ name: 'id', kind: 'uuid', operators: ['eq', 'ne', 'in', 'notIn'], value: { name: 'filter[id]', kind: 'uuid', required: false } },",
 			},
 		} {
 			source := read(file)

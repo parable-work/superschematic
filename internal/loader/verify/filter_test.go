@@ -51,14 +51,14 @@ func filterFindings(schema *ir.Schema, in Input) []string {
 // of a FilterBy the kind of its item's field, the operators of that kind,
 // isNull on a field that may be null, and the field's type (D106).
 func TestFilterFillsEachFieldsKindAndOperators(t *testing.T) {
-	ordered := []string{"eq", "in", "gt", "gte", "lt", "lte"}
+	ordered := []string{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte"}
 	want := []*ir.FilterField{
-		{Name: "id", Kind: "uuid", Operators: []string{"eq", "in"}, TypeRef: &ir.TypeRef{Name: "Identity.UUID"}},
+		{Name: "id", Kind: "uuid", Operators: []string{"eq", "ne", "in", "notIn"}, TypeRef: &ir.TypeRef{Name: "Identity.UUID"}},
 		{Name: "placedAt", Kind: "datetime", Operators: ordered, TypeRef: &ir.TypeRef{Name: "Temporal.DateTime"}},
 		{Name: "totalCents", Kind: "int", Operators: ordered, TypeRef: &ir.TypeRef{Name: "Generic.Int64"}},
-		{Name: "note", Kind: "string", Operators: []string{"eq", "in", "contains", "isNull"}, TypeRef: &ir.TypeRef{Name: "string"}},
-		{Name: "status", Kind: "enum", Operators: []string{"eq", "in"}, TypeRef: &ir.TypeRef{Name: "OrderStatus"}},
-		{Name: "gift", Kind: "bool", Operators: []string{"eq", "in"}, TypeRef: &ir.TypeRef{Name: "boolean"}},
+		{Name: "note", Kind: "string", Operators: []string{"eq", "ne", "in", "notIn", "contains", "isNull"}, TypeRef: &ir.TypeRef{Name: "string"}},
+		{Name: "status", Kind: "enum", Operators: []string{"eq", "ne", "in", "notIn"}, TypeRef: &ir.TypeRef{Name: "OrderStatus"}},
+		{Name: "gift", Kind: "bool", Operators: []string{"eq", "ne", "in", "notIn"}, TypeRef: &ir.TypeRef{Name: "boolean"}},
 		{Name: "dueOn", Kind: "date", Operators: append(append([]string{}, ordered...), "isNull"), TypeRef: &ir.TypeRef{Name: "Temporal.Date"}},
 		{Name: "weight", Kind: "float", Operators: ordered, TypeRef: &ir.TypeRef{Name: "number"}},
 		{Name: "amount", Kind: "decimal", Operators: ordered, TypeRef: &ir.TypeRef{Name: "Generic.Decimal"}},
@@ -102,7 +102,7 @@ func TestFilterFillsEachFieldsKindAndOperators(t *testing.T) {
 	for _, field := range schema.OperationSets[0].Operations[0].Filter.Fields {
 		audit[field.Name] = field.Kind + " " + strings.Join(field.Operators, ",")
 	}
-	if want := map[string]string{"createdBy": "uuid eq,in", "updatedBy": "uuid eq,in,isNull", "createdAt": "datetime eq,in,gt,gte,lt,lte"}; !reflect.DeepEqual(audit, want) {
+	if want := map[string]string{"createdBy": "uuid eq,ne,in,notIn", "updatedBy": "uuid eq,ne,in,notIn,isNull", "createdAt": "datetime eq,ne,in,notIn,gt,gte,lt,lte"}; !reflect.DeepEqual(audit, want) {
 		t.Errorf("the audit fields filter as %v, want %v", audit, want)
 	}
 }
@@ -147,7 +147,7 @@ func TestFiltersAreHeldToTheirListAndItem(t *testing.T) {
 		{"another kind written", []string{"status"}, func(op *ir.FieldDef, _ *ir.TypeDef) { op.Filter.Fields[0].Kind = "string" },
 			[]string{"Orders.listOrders: filter argument filter gives status the kind string, and OrderView.status is enum; leave the kind out, the loader fills it"}},
 		{"other operators written", []string{"status"}, func(op *ir.FieldDef, _ *ir.TypeDef) { op.Filter.Fields[0].Operators = []string{"eq", "contains"} },
-			[]string{"Orders.listOrders: filter argument filter gives status the operators eq, contains, and a field of kind enum takes eq, in; leave them out, the loader fills them"}},
+			[]string{"Orders.listOrders: filter argument filter gives status the operators eq, contains, and a field of kind enum takes eq, ne, in, notIn; leave them out, the loader fills them"}},
 		{"another type written", []string{"status"}, func(op *ir.FieldDef, _ *ir.TypeDef) { op.Filter.Fields[0].TypeRef = &ir.TypeRef{Name: "string"} },
 			[]string{"Orders.listOrders: filter argument filter gives status the type string, and OrderView.status holds OrderStatus; leave the type out, the loader fills it"}},
 		{"an item that is no object", []string{"id"}, func(op *ir.FieldDef, _ *ir.TypeDef) { op.TypeRef.Name = "OrderStatus" },

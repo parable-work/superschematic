@@ -106,8 +106,10 @@ class {{.FilesTypeName}}(TypedDict, total=False):
 
 
 # The operators of each field of {{.FilterTypeName}} (D106), all optional:
-# eq and the comparisons take a value of the field, in a list of them,
-# contains text, and is_null, for a field that may be null, a bool.
+# eq, ne and the comparisons take a value of the field, in and not_in a
+# list of them, contains text, and is_null, for a field that may be null,
+# a bool. ne and not_in keep the items eq and in leave out, an item whose
+# field is null among them (D112).
 {{- range .FilterFields}}
 {{.OperatorsTypeName}} = TypedDict(
     "{{.OperatorsTypeName}}",

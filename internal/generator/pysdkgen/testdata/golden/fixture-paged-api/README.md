@@ -25,11 +25,13 @@ A list that takes a filter has a typed one, `<Operation>Filter`, a `TypedDict`
 in its namespace's module, as a keyword named for the operation's argument
 (`filter` here), beside its sort and its page: a member per field a caller may
 filter by, holding a value, for equality, or a mapping of the field's
-operators (`eq`, `in`, and by the field's type `gt`, `gte`, `lt`, `lte` or
-`contains`, with `is_null` for a field that may be null). All of them hold at
-once. An `in` lists at most 100 values, and an empty one is left out. The SDK
-writes the filter as `filter[field]=value` and `filter[field][op]=value`, and
-a `<method>_all` sends it with every page.
+operators (`eq`, `ne`, `in`, `not_in`, and by the field's type `gt`, `gte`,
+`lt`, `lte` or `contains`, with `is_null` for a field that may be null). All
+of them hold at once. `ne` and `not_in` keep the items `eq` and `in` leave
+out, an item whose field is null among them. An `in` or a `not_in` lists at
+most 100 values, and an empty one is left out. The SDK writes the filter as
+`filter[field]=value` and `filter[field][op]=value`, `not_in` as `notIn` and
+`is_null` as `isNull`, and a `<method>_all` sends it with every page.
 
 ```python
 page = sdk.issues.list_issues(
@@ -37,6 +39,7 @@ page = sdk.issues.list_issues(
         "state_id": {"in": [open_state, review_state]},
         "priority": {"gte": 2, "lt": 5},
         "title": {"contains": "crash"},
+        "label": {"not_in": ["wontfix", "duplicate"]},
         "assignee_id": {"is_null": True},
         "reporter_id": reporter,
     },
@@ -44,8 +47,8 @@ page = sdk.issues.list_issues(
     limit=50,
 )
 # filter[stateId][in]=…,…&filter[priority][gte]=2&filter[priority][lt]=5
-# &filter[title][contains]=crash&filter[assigneeId][isNull]=true
-# &filter[reporterId]=…
+# &filter[title][contains]=crash&filter[label][notIn]=wontfix,duplicate
+# &filter[assigneeId][isNull]=true&filter[reporterId]=…
 ```
 
 ## Notes

@@ -805,7 +805,7 @@ func createNotesListNotesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
 		// whose refusal is the 400 every server answers at filter[field].
 		// Each value is then decoded as an item of a query list of its
 		// field's type.
-		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "issueId", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "owner", Operators: []filterparse.Operator{"eq", "in"}}}})
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "issueId", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}, {Name: "owner", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}}})
 		if !ok {
 			return
 		}
@@ -1283,7 +1283,7 @@ func createIssuesListIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc 
 		// whose refusal is the 400 every server answers at filter[field].
 		// Each value is then decoded as an item of a query list of its
 		// field's type.
-		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "priority", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "title", Operators: []filterparse.Operator{"eq", "in", "contains"}}, {Name: "estimate", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "dueOn", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "assigneeId", Operators: []filterparse.Operator{"eq", "in", "isNull"}}, {Name: "createdAt", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "createdBy", Operators: []filterparse.Operator{"eq", "in"}}}})
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}, {Name: "priority", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte"}}, {Name: "title", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "contains"}}, {Name: "estimate", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "dueOn", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "assigneeId", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "isNull"}}, {Name: "createdAt", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte"}}, {Name: "createdBy", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}}})
 		if !ok {
 			return
 		}

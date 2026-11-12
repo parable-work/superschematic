@@ -69,6 +69,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -77,6 +82,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -91,6 +105,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`line_list."date" = $%d`, paramNum))
 			*args = append(*args, *f.Date.Eq)
+		}
+		if f.Date.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list."date" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Date.Ne)
 		}
 		if f.Date.Gt != nil {
 			paramNum++
@@ -129,6 +148,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list."date" IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Date.NotIn) > 0 {
+			placeholders := make([]string, len(f.Date.NotIn))
+			for i, value := range f.Date.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list."date" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Date.IsNull != nil {
 			if *f.Date.IsNull {
 				conditions = append(conditions, `line_list."date" IS NULL`)
@@ -143,6 +171,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list."name" = $%d`, paramNum))
 			*args = append(*args, *f.Name.Eq)
 		}
+		if f.Name.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list."name" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Name.Ne)
+		}
 		if len(f.Name.In) > 0 {
 			placeholders := make([]string, len(f.Name.In))
 			for i, value := range f.Name.In {
@@ -151,6 +184,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Name.NotIn) > 0 {
+			placeholders := make([]string, len(f.Name.NotIn))
+			for i, value := range f.Name.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list."name" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Name.ILike != nil {
 			paramNum++
@@ -171,6 +213,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_id = $%d`, paramNum))
 			*args = append(*args, f.AccountId.Eq.ToUUID())
 		}
+		if f.AccountId.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.account_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.AccountId.Ne.ToUUID())
+		}
 		if len(f.AccountId.In) > 0 {
 			placeholders := make([]string, len(f.AccountId.In))
 			for i, id := range f.AccountId.In {
@@ -179,6 +226,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.AccountId.NotIn) > 0 {
+			placeholders := make([]string, len(f.AccountId.NotIn))
+			for i, id := range f.AccountId.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.account_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.AccountId.IsNull != nil {
 			if *f.AccountId.IsNull {
@@ -194,6 +250,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_name = $%d`, paramNum))
 			*args = append(*args, *f.AccountName.Eq)
 		}
+		if f.AccountName.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.account_name IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.AccountName.Ne)
+		}
 		if len(f.AccountName.In) > 0 {
 			placeholders := make([]string, len(f.AccountName.In))
 			for i, value := range f.AccountName.In {
@@ -202,6 +263,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_name IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.AccountName.NotIn) > 0 {
+			placeholders := make([]string, len(f.AccountName.NotIn))
+			for i, value := range f.AccountName.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.account_name IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.AccountName.ILike != nil {
 			paramNum++
@@ -222,6 +292,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_id = $%d`, paramNum))
 			*args = append(*args, f.CategoryId.Eq.ToUUID())
 		}
+		if f.CategoryId.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.category_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.CategoryId.Ne.ToUUID())
+		}
 		if len(f.CategoryId.In) > 0 {
 			placeholders := make([]string, len(f.CategoryId.In))
 			for i, id := range f.CategoryId.In {
@@ -230,6 +305,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CategoryId.NotIn) > 0 {
+			placeholders := make([]string, len(f.CategoryId.NotIn))
+			for i, id := range f.CategoryId.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.category_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.CategoryId.IsNull != nil {
 			if *f.CategoryId.IsNull {
@@ -245,6 +329,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_name = $%d`, paramNum))
 			*args = append(*args, *f.CategoryName.Eq)
 		}
+		if f.CategoryName.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.category_name IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CategoryName.Ne)
+		}
 		if len(f.CategoryName.In) > 0 {
 			placeholders := make([]string, len(f.CategoryName.In))
 			for i, value := range f.CategoryName.In {
@@ -253,6 +342,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_name IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CategoryName.NotIn) > 0 {
+			placeholders := make([]string, len(f.CategoryName.NotIn))
+			for i, value := range f.CategoryName.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.category_name IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.CategoryName.ILike != nil {
 			paramNum++

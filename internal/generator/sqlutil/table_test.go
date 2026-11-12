@@ -150,12 +150,22 @@ func TestTableStatementsOfALedger(t *testing.T) {
 // TestFilterOpsAndClauses holds the operations of each kind of filter and
 // that every clause is a format both runtimes fill.
 func TestFilterOpsAndClauses(t *testing.T) {
-	if got := FilterOps(FilterInt); !slices.Equal(got, []string{"eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"}) {
+	if got := FilterOps(FilterInt); !slices.Equal(got, []string{"eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"}) {
 		t.Errorf("an integer's ops = %v", got)
 	}
 	// A Generic.JSON column's: JSONB equality and IS NULL, no ILIKE (D79).
-	if got := FilterOps(FilterJSON); !slices.Equal(got, []string{"eq", "in", "isNull"}) {
+	if got := FilterOps(FilterJSON); !slices.Equal(got, []string{"eq", "ne", "in", "notIn", "isNull"}) {
 		t.Errorf("a JSON column's ops = %v", got)
+	}
+	// A duration has no in, and so no notIn; ne negates its eq (D112).
+	if got := FilterOps(FilterDuration); !slices.Equal(got, []string{"eq", "ne", "gt", "gte", "lt", "lte", "between", "isNull"}) {
+		t.Errorf("a duration's ops = %v", got)
+	}
+	// ne and notIn keep a row whose column is NULL, which <> and NOT IN
+	// would drop.
+	conditions := FilterConditionsOf("entry.memo")
+	if conditions.Ne != "entry.memo IS DISTINCT FROM $%d" || conditions.NotIn != "(entry.memo IN (%s)) IS NOT TRUE" {
+		t.Errorf("a column's ne and notIn = %q and %q", conditions.Ne, conditions.NotIn)
 	}
 	if got := FilterOps(FilterNone); got != nil {
 		t.Errorf("no filter's ops = %v", got)
@@ -211,7 +221,7 @@ func TestTablesOfModelsVectorsDecimalsAndSealedNames(t *testing.T) {
 	if note := chunk.Column("note"); !note.Encrypted || note.Type != "TEXT" {
 		t.Errorf("Chunk.note = %+v, want an encrypted TEXT column", note)
 	}
-	if ops := FilterOps(FilterDecimal); !slices.Equal(ops, []string{"eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"}) {
+	if ops := FilterOps(FilterDecimal); !slices.Equal(ops, []string{"eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"}) {
 		t.Errorf("a decimal's filter = %v", ops)
 	}
 	vectors := chunk.VectorColumns()

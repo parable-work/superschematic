@@ -171,11 +171,13 @@ function setObjectErrors(errors: ValidationErrors, path: string, objectErrors: V
  * The filter of {{.MethodPath}} (FilterBy, D106): the rows the list keeps.
  * Each member is a field holding a value, for equality, or an object of
  * the field's operators, and a row is kept when every member holds: eq,
- * and in, one of the values, at most {{$.FilterMaxInValues}}, on every field; gt, gte, lt and
- * lte on a number, a date and a time; contains, the text a value holds in
- * any case, on text; and isNull, true for the rows whose field is null
- * and false for the others, on a field that may be null. The method sends
- * it as filter[field]=value and filter[field][op]=value.
+ * and in, one of the values, at most {{$.FilterMaxInValues}}, on every field, with ne and
+ * notIn, which negate them; gt, gte, lt and lte on a number, a date and
+ * a time; contains, the text a value holds in any case, on text; and
+ * isNull, true for the rows whose field is null and false for the
+ * others, on a field that may be null. ne and notIn keep the rows eq and
+ * in leave out, a row whose field is null among them (D112). The method
+ * sends it as filter[field]=value and filter[field][op]=value.
  */
 export interface {{.FilterType}} {
   {{- range .FilterMembers}}

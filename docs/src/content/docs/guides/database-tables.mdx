@@ -106,8 +106,8 @@ whose `Scan` and `Value` canonicalize it; TypeScript holds the text
 (`decodeRow`, and the pool's parser for a raw query, canonicalize it
 through superscalar); Python `decimal.Decimal`; Rust `superscalar::Decimal`.
 A decimal's filter, `DecimalFilter` in Go and `NumberFilter` in TypeScript,
-compares numbers: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In` and
-`IsNull`, each value a decimal's text. A `Finance.SignedMoney` is a
+compares numbers: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In`,
+`NotIn` and `IsNull`, each value a decimal's text. A `Finance.SignedMoney` is a
 `BIGINT` from -(2^53 - 1) to 2^53 - 1, a debit negative, which
 `@display({ currency })` shows in its currency as it does a
 `Finance.Money`.
@@ -127,7 +127,7 @@ precision of an `INTERVAL`, and drops a remainder of nanoseconds toward
 zero. It reads an `INTERVAL` with a day as 24 hours and a month as 30
 days, so one written by hand as `'1 mon 2 days 03:04:05'` reads as
 `771h4m5s`. A duration's filter, `DurationFilter`, takes `time.Duration`
-values: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
+values: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
 `Geo.Location`'s filter, `GeoPointFilter`, has `IsNull` only; [JSON-valued
 scalars](/superschematic/reference/json-scalars/) says why.
 
@@ -871,14 +871,20 @@ column opened. `decode` takes a list of fields too, as `decodeRow` does.
 
 A filter member per column holds its conditions, by the column's kind, as
 the Go ORM's filters do: `eq` and `in` (`in` with no values adds no
-condition), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
+condition), `ne` and `notIn`, which keep the rows those two leave out
+(D112), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
 a time, `ilike` on text, `eq` and `in` on a `Generic.JSON` column, which
 compare JSON values as JSONB does, an object whatever the order of its
 keys and the string `"1"` apart from the number 1, `isNull` on a column
 that may be null, and a relation's key by `<field>Id`; `in` takes a time
 and a boolean too. The Go filters take the same: `Int64Filter`,
 `FloatFilter`, `DateFilter`, `DateTimeFilter` and `BoolFilter` have `In`,
-and the filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
+and the filter of each kind of column has `IsNull`. `ne` and `notIn`
+(`Ne` and `NotIn` in Go) are on every kind that has `eq` and `in`, and
+keep a row whose column is null: `{ assigneeId: { ne: id } }` reads the
+rows assigned to anyone else and the rows assigned to no one, as `IS
+DISTINCT FROM` does and `<>` does not, and `notIn` is `(column IN (...))
+IS NOT TRUE`. Add `isNull: false` to leave the nulls out. A `Generic.JSON` column's Go
 filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
 alike, and whose `ILike` Postgres refuses on JSONB.
 

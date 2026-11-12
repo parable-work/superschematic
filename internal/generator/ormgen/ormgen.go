@@ -606,6 +606,11 @@ func filterConditions(field string, kind sqlutil.FilterKind, sql sqlutil.FilterC
 			if uuid {
 				c.Value = field + ".Eq.ToUUID()"
 			}
+		case sqlutil.FilterNe:
+			c.Member, c.SQL, c.Value = "Ne", sql.Ne, "*"+field+".Ne"
+			if uuid {
+				c.Value = field + ".Ne.ToUUID()"
+			}
 		case sqlutil.FilterGt:
 			c.Member, c.SQL, c.Value = "Gt", sql.Gt, "*"+field+".Gt"
 		case sqlutil.FilterGte:
@@ -618,6 +623,12 @@ func filterConditions(field string, kind sqlutil.FilterKind, sql sqlutil.FilterC
 			c.Member, c.SQL, c.Value = "ILike", sql.ILike, `"%"+*`+field+`.ILike+"%"`
 		case sqlutil.FilterIn:
 			c.Member, c.SQL, c.Loop, c.Value = "In", sql.In, "value", "value"
+			if uuid {
+				c.Loop, c.Value = "id", "id.ToUUID()"
+			}
+		case sqlutil.FilterNotIn:
+			// The template's list form, over NotIn.
+			c.Op, c.Member, c.SQL, c.Loop, c.Value = sqlutil.FilterIn, "NotIn", sql.NotIn, "value", "value"
 			if uuid {
 				c.Loop, c.Value = "id", "id.ToUUID()"
 			}

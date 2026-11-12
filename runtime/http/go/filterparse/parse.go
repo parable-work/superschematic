@@ -6,7 +6,9 @@
 // implementation takes them typed, a member per field (Equals, Ordered,
 // Text), which the route decodes each value into as an item of a query
 // list of the field's type (DecodeEquals, DecodeOrdered, DecodeText).
-// Members are ANDed. The TypeScript runtime's filter.ts and the Rust
+// Members are ANDed. ne and notIn negate eq and in (D112): each keeps the
+// items the other leaves out, an item whose field is null among them. The
+// TypeScript runtime's filter.ts and the Rust
 // runtime's filter module read the same, held to
 // runtime/http/testdata/filter_parity.json.
 package filterparse
@@ -41,7 +43,9 @@ type Operator string
 // The operators, as the wire names them.
 const (
 	OperatorEq       Operator = "eq"
+	OperatorNe       Operator = "ne"
 	OperatorIn       Operator = "in"
+	OperatorNotIn    Operator = "notIn"
 	OperatorGT       Operator = "gt"
 	OperatorGTE      Operator = "gte"
 	OperatorLT       Operator = "lt"
@@ -53,7 +57,7 @@ const (
 // Operators is every operator, in the order a field lists its own and
 // Parse answers them.
 var Operators = []Operator{
-	OperatorEq, OperatorIn, OperatorGT, OperatorGTE, OperatorLT, OperatorLTE, OperatorContains, OperatorIsNull,
+	OperatorEq, OperatorNe, OperatorIn, OperatorNotIn, OperatorGT, OperatorGTE, OperatorLT, OperatorLTE, OperatorContains, OperatorIsNull,
 }
 
 // Spec is an operation's FilterBy as the router carries it: the fields a
@@ -89,9 +93,9 @@ func (s Spec) names() []string {
 }
 
 // Filter is one filter a request holds: the field, the operator and its
-// values as the query sent them. Every operator but in holds one value;
-// in holds its list, split at commas, each value trimmed. isNull's value
-// is true or false.
+// values as the query sent them. Every operator but in and notIn holds one
+// value; those two hold their list, split at commas, each value trimmed.
+// isNull's value is true or false.
 type Filter struct {
 	Field    string
 	Operator Operator
@@ -144,8 +148,8 @@ func at(field string) string {
 //     and a field's operator sent twice (filter[f] and filter[f][eq] are
 //     one), each at filter[field];
 //   - a value the operator does not take, at filter[field]: isNull's is
-//     true or false, in's is 1 to MaxInValues values, and contains needs
-//     text.
+//     true or false, in's and notIn's is 1 to MaxInValues values, and
+//     contains needs text.
 //
 // A value's own type is the route's to check, as it decodes it.
 func Parse(query url.Values, spec Spec) (Request, *apperror.AppError) {
@@ -197,7 +201,7 @@ func Parse(query url.Values, spec Spec) (Request, *apperror.AppError) {
 				return nil, refuse(at(field), "isNull expects true or false", "")
 			}
 			filter.Values = values
-		case OperatorIn:
+		case OperatorIn, OperatorNotIn:
 			for _, part := range strings.Split(values[0], ",") {
 				if part = strings.TrimSpace(part); part != "" {
 					filter.Values = append(filter.Values, part)
@@ -205,9 +209,9 @@ func Parse(query url.Values, spec Spec) (Request, *apperror.AppError) {
 			}
 			switch {
 			case len(filter.Values) == 0:
-				return nil, refuse(at(field), "in names no value", "")
+				return nil, refuse(at(field), fmt.Sprintf("%s names no value", operator), "")
 			case len(filter.Values) > MaxInValues:
-				return nil, refuse(at(field), fmt.Sprintf("in must hold at most %d values", MaxInValues), "max")
+				return nil, refuse(at(field), fmt.Sprintf("%s must hold at most %d values", operator, MaxInValues), "max")
 			}
 		case OperatorContains:
 			if values[0] == "" {
@@ -284,8 +288,8 @@ func Read(w http.ResponseWriter, r *http.Request, spec Spec) (Request, bool) {
 
 // Query writes filters as the bracket form's query parameters, the
 // inverse of Parse: filter[field]=value for eq, filter[field][op]=value
-// for any other operator, an in's values joined by commas. A filter of no
-// value is left out. An SDK writes its typed filter's members with
+// for any other operator, an in's and a notIn's values joined by commas. A
+// filter of no value is left out. An SDK writes its typed filter's members with
 // Equals.Filters, Ordered.Filters and Text.Filters and hands them here, so
 // the wire's form is written in one place; Check tells it first which of
 // them Parse would not read back.
@@ -325,10 +329,12 @@ func (e *CheckError) Error() string {
 // refuses it before the request:
 //
 //   - more than MaxFilters filters that hold a value, at filter;
-//   - an in of more than MaxInValues values, at filter[field][in];
-//   - an in's value that is blank, which Parse drops, or holds a comma,
-//     which Parse reads as two values, or leading or trailing space, which
-//     Parse trims, at filter[field][in][index];
+//   - an in or a notIn of more than MaxInValues values, at
+//     filter[field][in] or filter[field][notIn];
+//   - an in's or a notIn's value that is blank, which Parse drops, or
+//     holds a comma, which Parse reads as two values, or leading or
+//     trailing space, which Parse trims, at filter[field][in][index] or
+//     filter[field][notIn][index];
 //   - a contains of no text, at filter[field][contains].
 //
 // A filter of no value, an empty in among them, is left out by Query and
@@ -349,7 +355,7 @@ func Check(filters []Filter) error {
 		}
 		name := at(filter.Field) + "[" + string(filter.Operator) + "]"
 		switch filter.Operator {
-		case OperatorIn:
+		case OperatorIn, OperatorNotIn:
 			if len(filter.Values) > MaxInValues {
 				return &CheckError{Parameter: name, Validator: "max", Reason: fmt.Sprintf("must hold at most %d values", MaxInValues)}
 			}

@@ -11,7 +11,9 @@ operation's FilterSpec, the fields a caller may filter by, each with its
 operators and the ParamSpec of one of its values, reads the request's
 filters with readFilter, and hands the implementation the typed filter, a
 member per field the request filters by (EqualsFilter, OrderedFilter,
-TextFilter), under the operation's filter argument. Members are ANDed.
+TextFilter), under the operation's filter argument. Members are ANDed. ne
+and notIn negate eq and in (D112): each keeps the items the other leaves
+out, an item whose field is null among them.
 readFilters is the reader alone, the filters as the query sent them; the Go
 runtime's filterparse package and the Rust runtime's filter module read the
 same, held to runtime/http/testdata/filter_parity.json. Nothing here
@@ -28,10 +30,10 @@ export const MAX_FILTERS = 50;
 export const MAX_FILTER_IN_VALUES = 100;
 
 /** The comparison a filter makes, as the wire names it. */
-export type FilterOperator = 'eq' | 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'isNull';
+export type FilterOperator = 'eq' | 'ne' | 'in' | 'notIn' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'isNull';
 
 /** Every operator, in the order a field lists its own and readFilters answers them. */
-export const FILTER_OPERATORS: readonly FilterOperator[] = ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull'];
+export const FILTER_OPERATORS: readonly FilterOperator[] = ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull'];
 
 /**
  * What a field a filter compares holds, as the loader classifies its
@@ -66,9 +68,9 @@ export interface FilterFields {
 
 /**
  * One filter a request holds: the field, the operator and its values as
- * the query sent them. Every operator but in holds one value; in holds its
- * list, split at commas, each value trimmed. isNull's value is true or
- * false.
+ * the query sent them. Every operator but in and notIn holds one value;
+ * those two hold their list, split at commas, each value trimmed. isNull's
+ * value is true or false.
  */
 export interface QueryFilter {
   readonly field: string;
@@ -79,24 +81,29 @@ export interface QueryFilter {
 /*
 A field's filter as an implementation takes it (D106): a member per
 operator the request sent, absent for one it did not. Which type a field's
-is follows its operators: EqualsFilter for eq and in alone (a UUID, an
-enum, a boolean), OrderedFilter for a number, a date and a time, which add
-gt, gte, lt and lte, and TextFilter for text, which adds contains. isNull
-is set only on a field that may be null: true keeps the items whose field
-is null, false the others.
+is follows its operators: EqualsFilter for eq, ne, in and notIn alone (a
+UUID, an enum, a boolean), OrderedFilter for a number, a date and a time,
+which add gt, gte, lt and lte, and TextFilter for text, which adds
+contains. ne and notIn keep the items eq and in leave out (D112), an item
+whose field is null among them. isNull is set only on a field that may be
+null: true keeps the items whose field is null, false the others.
 */
 
 /** The filter of a field compared for equality alone. */
 export interface EqualsFilter<T> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
   readonly isNull?: boolean;
 }
 
 /** The filter of a field whose values have an order: a number, a date or a time. */
 export interface OrderedFilter<T> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
@@ -107,7 +114,9 @@ export interface OrderedFilter<T> {
 /** The filter of a field of text. contains is the text a value holds, in any case. */
 export interface TextFilter<T> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
   readonly contains?: string;
   readonly isNull?: boolean;
 }
@@ -115,7 +124,9 @@ export interface TextFilter<T> {
 /** A field's filter of any shape, as readFilter answers it: the generated router narrows it to the field's own. */
 export interface FieldFilter {
   readonly eq?: unknown;
+  readonly ne?: unknown;
   readonly in?: readonly unknown[];
+  readonly notIn?: readonly unknown[];
   readonly gt?: unknown;
   readonly gte?: unknown;
   readonly lt?: unknown;
@@ -211,8 +222,8 @@ function bracketKey(key: string): { field: string; operator?: string } | undefin
  *   and a field's operator sent twice (filter[f] and filter[f][eq] are
  *   one), each at filter[field];
  * - a value the operator does not take, at filter[field]: isNull's is true
- *   or false, in's is 1 to MAX_FILTER_IN_VALUES values, and contains needs
- *   text.
+ *   or false, in's and notIn's is 1 to MAX_FILTER_IN_VALUES values, and
+ *   contains needs text.
  *
  * A value's own type is not checked here: readFilter decodes it.
  */
@@ -260,12 +271,13 @@ export function readFilters(query: URLSearchParams, spec: FilterFields): QueryFi
         if (value !== 'true' && value !== 'false') refuse(at(field), 'isNull expects true or false');
         break;
       case 'in':
+      case 'notIn':
         read = value
           .split(',')
           .map(part => part.replace(OUTER_SPACE, ''))
           .filter(part => part !== '');
-        if (read.length === 0) refuse(at(field), 'in names no value');
-        if (read.length > MAX_FILTER_IN_VALUES) refuse(at(field), `in must hold at most ${MAX_FILTER_IN_VALUES} values`, 'max');
+        if (read.length === 0) refuse(at(field), `${operator} names no value`);
+        if (read.length > MAX_FILTER_IN_VALUES) refuse(at(field), `${operator} must hold at most ${MAX_FILTER_IN_VALUES} values`, 'max');
         break;
       case 'contains':
         if (value === '') refuse(at(field), 'contains needs text');
@@ -324,7 +336,8 @@ export function readFilter(query: URLSearchParams, spec: FilterSpec): RequestFil
     const first = filter.values[0]!;
     switch (filter.operator) {
       case 'in':
-        member.in = filter.values.map(decode);
+      case 'notIn':
+        member[filter.operator] = filter.values.map(decode);
         break;
       case 'contains':
         member.contains = first;

@@ -154,18 +154,18 @@ func TestFilteredEndpoint(t *testing.T) {
 		name, kind, operators, shape, valueType, goFilterType string
 		nullable                                              bool
 	}
-	ordered := "eq in gt gte lt lte"
+	ordered := "eq ne in notIn gt gte lt lte"
 	want := []field{
-		{"id", ir.FilterKindUUID, "eq in", apigen.FilterShapeEquals, "Identity.UUID", "filterparse.Equals[types.IdentityUUID]", false},
-		{"name", ir.FilterKindString, "eq in contains", apigen.FilterShapeText, "string", "filterparse.Text[string]", false},
-		{"kind", ir.FilterKindEnum, "eq in", apigen.FilterShapeEquals, "PartKind", "filterparse.Equals[types.PartKind]", false},
+		{"id", ir.FilterKindUUID, "eq ne in notIn", apigen.FilterShapeEquals, "Identity.UUID", "filterparse.Equals[types.IdentityUUID]", false},
+		{"name", ir.FilterKindString, "eq ne in notIn contains", apigen.FilterShapeText, "string", "filterparse.Text[string]", false},
+		{"kind", ir.FilterKindEnum, "eq ne in notIn", apigen.FilterShapeEquals, "PartKind", "filterparse.Equals[types.PartKind]", false},
 		{"quantity", ir.FilterKindInt, ordered, apigen.FilterShapeOrdered, "Generic.Int64", "filterparse.Ordered[int64]", false},
 		{"weight", ir.FilterKindFloat, ordered, apigen.FilterShapeOrdered, "number", "filterparse.Ordered[float64]", false},
 		{"price", ir.FilterKindDecimal, ordered, apigen.FilterShapeOrdered, "Generic.Decimal", "filterparse.Ordered[types.GenericDecimal]", false},
-		{"discontinued", ir.FilterKindBool, "eq in", apigen.FilterShapeEquals, "boolean", "filterparse.Equals[bool]", false},
+		{"discontinued", ir.FilterKindBool, "eq ne in notIn", apigen.FilterShapeEquals, "boolean", "filterparse.Equals[bool]", false},
 		{"madeAt", ir.FilterKindDateTime, ordered, apigen.FilterShapeOrdered, "Temporal.DateTime", "filterparse.Ordered[types.TemporalDateTime]", false},
 		{"retiredOn", ir.FilterKindDate, ordered + " isNull", apigen.FilterShapeOrdered, "Temporal.Date", "filterparse.Ordered[types.TemporalDate]", true},
-		{"supplierId", ir.FilterKindUUID, "eq in isNull", apigen.FilterShapeEquals, "Identity.UUID", "filterparse.Equals[types.IdentityUUID]", true},
+		{"supplierId", ir.FilterKindUUID, "eq ne in notIn isNull", apigen.FilterShapeEquals, "Identity.UUID", "filterparse.Equals[types.IdentityUUID]", true},
 	}
 	var got []field
 	for _, f := range filter.Fields {
@@ -185,8 +185,8 @@ func TestFilteredEndpoint(t *testing.T) {
 	if !reflect.DeepEqual(filter.FieldNames(), []string{"id", "name", "kind", "quantity", "weight", "price", "discontinued", "madeAt", "retiredOn", "supplierId"}) {
 		t.Errorf("FieldNames = %v", filter.FieldNames())
 	}
-	if spec := filter.GoSpec(); !strings.HasPrefix(spec, `filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "id", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "name", Operators: []filterparse.Operator{"eq", "in", "contains"}}, `) ||
-		!strings.HasSuffix(spec, `{Name: "supplierId", Operators: []filterparse.Operator{"eq", "in", "isNull"}}}}`) {
+	if spec := filter.GoSpec(); !strings.HasPrefix(spec, `filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "id", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}, {Name: "name", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "contains"}}, `) ||
+		!strings.HasSuffix(spec, `{Name: "supplierId", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "isNull"}}}}`) {
 		t.Errorf("GoSpec = %s", spec)
 	}
 }
@@ -426,7 +426,7 @@ func TestFilteredRoutesBesideQueryParametersCompile(t *testing.T) {
 		t.Fatalf("routes.go has no handler of listItems:\n%s", data)
 	}
 	handler, _, _ = strings.Cut(handler, "\nfunc create")
-	filters := strings.Index(handler, `filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "id", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "name", Operators: []filterparse.Operator{"eq", "in", "contains"}}, {Name: "inStock", Operators: []filterparse.Operator{"eq", "in"}}}})`)
+	filters := strings.Index(handler, `filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "id", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}, {Name: "name", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "contains"}}, {Name: "inStock", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}}})`)
 	page := strings.Index(handler, "page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: ")
 	if filters < 0 || page < filters || !strings.Contains(handler, "impl.ListItems(r.Context(), Ids, InStock, filters, page)") {
 		t.Errorf("listItems's handler does not read the filters, then the page, then pass both:\n%s", handler)

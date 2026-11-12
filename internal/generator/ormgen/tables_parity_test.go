@@ -33,14 +33,15 @@ type parityCall struct {
 // its own per relation, which the TypeScript repositories load only when a
 // read includes them (D90): the TypeScript statements are the Go ones'
 // prefix.
-var hydratingCalls = map[string]bool{"findEntries": true, "pageEntries": true}
+var hydratingCalls = map[string]bool{"findEntries": true, "findEntriesNegated": true, "pageEntries": true, "pageEntriesByMemo": true}
 
 // TestTableParityOfGoAndTypeScriptOnPostgres runs one script of repository
 // calls through the Go ORM and through the TypeScript repositories of
 // fixture-ledger-db (D79), each in a schema of its own on the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, each recording the text of every
 // statement it sends, and requires the two equal, call by call: every
-// read, write, filter kind, search, page, upsert, soft delete and
+// read, write, filter kind, a filter's ne and notIn, search, page, a page
+// after a key by a column that may be null (D112), upsert, soft delete and
 // transaction with an enqueue. Both write their statements from
 // sqlutil.TableStatementsOf and sqlutil.PostgresClauses, so this holds the
 // two fills to one another. A transaction's BEGIN and COMMIT are left out,
@@ -278,6 +279,21 @@ try {
   // statement, the value TypeScript's JSON text and Go's.
   await call('findEntriesByMetadata', () => orm.entry.findMany({ metadata: { eq: { source: 'bank' } } }, { orderBy: [{ field: 'amountCents' }] }));
   await call('pageEntries', () => orm.entry.findPage({ accountId: { in: [cash.id, bank!.id] } }, { sort: { field: 'amountCents', desc: true }, limit: 1 }));
+  // ne and notIn on text, an enum, a key, a number and a date (D112).
+  await call('findEntriesNegated', () =>
+    orm.entry.findMany(
+      {
+        amountCents: { ne: cents(1), notIn: [cents(500), cents(-75)] },
+        bookedOn: { ne: day('2026-10-26') },
+        kind: { ne: 'credit' as never },
+        memo: { ne: 'Transfer', notIn: ['Refund', 'Fee'] },
+        transferId: { ne: cash.id, notIn: [bank!.id] },
+      },
+      { orderBy: [{ field: 'amountCents' }] }
+    )
+  );
+  // A page after a key by memo, which may be null: its nulls last (D112).
+  await call('pageEntriesByMemo', () => orm.entry.findPage(null, { sort: { field: 'memo', desc: true }, after: { id: e1.id }, limit: 2 }));
   await call('updateEntry', () => orm.entry.updateOne(e1.id, { memo: null, amountCents: cents(-1300), transferId: bank!.id }));
   await call('updateEntries', () => orm.entry.updateMany({ accountId: { in: [bank!.id, card!.id] } }, { kind: 'credit' as never }));
   const upsert = { accountId: bank!.id, externalId: 'x1', amountCents: cents(600), bookedOn: day('2026-10-26'), tags: [], kind: 'credit' as never };
@@ -484,6 +500,19 @@ func TestTableParity(t *testing.T) {
 	must(err)
 	rec.call("pageEntries")
 	_, err = db.Entry.FindPage(ctx, &EntryFilter{AccountID: &UUIDFilter{In: []types.IdentityUUID{*cash.Id, *bank.Id}}}, &EntryPageOptions{Fields: EntryFields{}.All(), Sort: EntrySort{Field: EntrySortByAmountCents, Desc: true}, Limit: 1})
+	must(err)
+	rec.call("findEntriesNegated")
+	one := int64(1)
+	_, _, err = db.Entry.FindMany(ctx, &EntryFilter{
+		AmountCents: &Int64Filter{Ne: &one, NotIn: []int64{500, -75}},
+		BookedOn:    &DateFilter{Ne: str("2026-10-26")},
+		Kind:        &StringFilter{Ne: str("credit")},
+		Memo:        &StringFilter{Ne: str("Transfer"), NotIn: []string{"Refund", "Fee"}},
+		TransferID:  &UUIDFilter{Ne: cash.Id, NotIn: []types.IdentityUUID{*bank.Id}},
+	}, &EntryFindOptions{Fields: EntryFields{}.All(), OrderBy: []EntryOrderBy{{Field: EntryOrderByAmountCents}}})
+	must(err)
+	rec.call("pageEntriesByMemo")
+	_, err = db.Entry.FindPage(ctx, nil, &EntryPageOptions{Fields: EntryFields{}.All(), Sort: EntrySort{Field: EntrySortByMemo, Desc: true}, After: &EntryPageKey{Id: *e1.Id}, Limit: 2})
 	must(err)
 	rec.call("updateEntry")
 	amount := types.GenericInt64(-1300)

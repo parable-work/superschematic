@@ -102,8 +102,8 @@ export const orderTable: TableDefinition = {
   table: "\"order\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"placed_at\"",
@@ -237,11 +237,11 @@ export const orderLineTable: TableDefinition = {
   table: "order_line",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "order_line.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "orderId", column: "order_id", field: "order", qualified: "order_line.order_id", uuid: true, required: true, relation: "Order", filter: ["eq", "in", "isNull"] },
-    { name: "productId", column: "product_id", field: "product", qualified: "order_line.product_id", uuid: true, relation: "Product", filter: ["eq", "in", "isNull"] },
-    { name: "quantity", column: "quantity", field: "quantity", qualified: "order_line.quantity", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "note", column: "note", field: "note", qualified: "order_line.note", filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "order_line.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "orderId", column: "order_id", field: "order", qualified: "order_line.order_id", uuid: true, required: true, relation: "Order", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "productId", column: "product_id", field: "product", qualified: "order_line.product_id", uuid: true, relation: "Product", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "quantity", column: "quantity", field: "quantity", qualified: "order_line.quantity", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "note", column: "note", field: "note", qualified: "order_line.note", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
@@ -356,8 +356,8 @@ export const productTable: TableDefinition = {
   table: "product",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "product.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "product.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "product.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "product.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"name\"",
@@ -421,12 +421,14 @@ export type FixtureQueueDbTx = OrmTx<FixtureQueueDbRepositories>;
 export const fixtureQueueDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

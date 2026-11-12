@@ -19,12 +19,12 @@ func ptr[T any](v T) *T { return &v }
 // request does not filter by.
 func TestDecodeReadsEachFieldTyped(t *testing.T) {
 	spec := Spec{Fields: []FieldSpec{
-		{Name: "status", Operators: []Operator{OperatorEq, OperatorIn}},
-		{Name: "priority", Operators: []Operator{OperatorEq, OperatorIn, OperatorGT, OperatorGTE, OperatorLT, OperatorLTE, OperatorIsNull}},
-		{Name: "title", Operators: []Operator{OperatorEq, OperatorIn, OperatorContains}},
+		{Name: "status", Operators: []Operator{OperatorEq, OperatorNe, OperatorIn, OperatorNotIn}},
+		{Name: "priority", Operators: []Operator{OperatorEq, OperatorNe, OperatorIn, OperatorNotIn, OperatorGT, OperatorGTE, OperatorLT, OperatorLTE, OperatorIsNull}},
+		{Name: "title", Operators: []Operator{OperatorEq, OperatorNe, OperatorIn, OperatorNotIn, OperatorContains}},
 		{Name: "done", Operators: []Operator{OperatorEq, OperatorIn}},
 	}}
-	query, err := url.ParseQuery("filter[status][in]=open,done&filter[priority][gte]=2&filter[priority][lt]=5&filter[priority][isNull]=false&filter[title][contains]=crash&filter[title]=a,b&filter[done]=true")
+	query, err := url.ParseQuery("filter[status][in]=open,done&filter[status][ne]=done&filter[priority][gte]=2&filter[priority][lt]=5&filter[priority][notIn]=3,4&filter[priority][isNull]=false&filter[title][contains]=crash&filter[title]=a,b&filter[title][ne]=c,d&filter[done]=true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,13 +41,13 @@ func TestDecodeReadsEachFieldTyped(t *testing.T) {
 	if errs.HasErrors() {
 		t.Fatalf("errors: %v", errs)
 	}
-	if want := (&Equals[status]{In: []status{"open", "done"}}); !reflect.DeepEqual(gotStatus, want) {
+	if want := (&Equals[status]{Ne: ptr(status("done")), In: []status{"open", "done"}}); !reflect.DeepEqual(gotStatus, want) {
 		t.Errorf("status = %+v, want %+v", gotStatus, want)
 	}
-	if want := (&Ordered[int64]{Gte: ptr(int64(2)), Lt: ptr(int64(5)), IsNull: ptr(false)}); !reflect.DeepEqual(gotPriority, want) {
+	if want := (&Ordered[int64]{NotIn: []int64{3, 4}, Gte: ptr(int64(2)), Lt: ptr(int64(5)), IsNull: ptr(false)}); !reflect.DeepEqual(gotPriority, want) {
 		t.Errorf("priority = %+v, want %+v", gotPriority, want)
 	}
-	if want := (&Text[string]{Eq: ptr("a,b"), Contains: ptr("crash")}); !reflect.DeepEqual(gotTitle, want) {
+	if want := (&Text[string]{Eq: ptr("a,b"), Ne: ptr("c,d"), Contains: ptr("crash")}); !reflect.DeepEqual(gotTitle, want) {
 		t.Errorf("title = %+v, want %+v", gotTitle, want)
 	}
 	if want := (&Equals[bool]{Eq: ptr(true)}); !reflect.DeepEqual(gotDone, want) {
@@ -102,21 +102,27 @@ func TestTypedFiltersWriteTheBracketForm(t *testing.T) {
 		t.Errorf("a nil filter = %v, want none", got)
 	}
 	var filters []Filter
-	filters = append(filters, (&Equals[status]{Eq: ptr(status("open")), In: []status{"open", "done"}, IsNull: ptr(true)}).Filters("status")...)
-	filters = append(filters, (&Ordered[int64]{Gt: ptr(int64(1)), Gte: ptr(int64(2)), Lt: ptr(int64(8)), Lte: ptr(int64(9))}).Filters("priority")...)
+	filters = append(filters, (&Equals[status]{Eq: ptr(status("open")), Ne: ptr(status("lost")), In: []status{"open", "done"}, NotIn: []status{"lost", "dropped"}, IsNull: ptr(true)}).Filters("status")...)
+	filters = append(filters, (&Ordered[int64]{Ne: ptr(int64(5)), NotIn: []int64{6, 7}, Gt: ptr(int64(1)), Gte: ptr(int64(2)), Lt: ptr(int64(8)), Lte: ptr(int64(9))}).Filters("priority")...)
 	filters = append(filters, (&Ordered[float64]{Eq: ptr(1.5)}).Filters("score")...)
-	filters = append(filters, (&Text[string]{Contains: ptr("crash on save")}).Filters("title")...)
+	filters = append(filters, (&Text[string]{Ne: ptr("a, b"), NotIn: []string{"x"}, Contains: ptr("crash on save")}).Filters("title")...)
 	filters = append(filters, (&Equals[bool]{Eq: ptr(false)}).Filters("done")...)
 	got := Query(filters)
 	want := url.Values{
 		"filter[status]":          {"open"},
+		"filter[status][ne]":      {"lost"},
 		"filter[status][in]":      {"open,done"},
+		"filter[status][notIn]":   {"lost,dropped"},
 		"filter[status][isNull]":  {"true"},
+		"filter[priority][ne]":    {"5"},
+		"filter[priority][notIn]": {"6,7"},
 		"filter[priority][gt]":    {"1"},
 		"filter[priority][gte]":   {"2"},
 		"filter[priority][lt]":    {"8"},
 		"filter[priority][lte]":   {"9"},
 		"filter[score]":           {"1.5"},
+		"filter[title][ne]":       {"a, b"},
+		"filter[title][notIn]":    {"x"},
 		"filter[title][contains]": {"crash on save"},
 		"filter[done]":            {"false"},
 	}

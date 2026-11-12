@@ -67,7 +67,7 @@ func TestTheRustServerRendersPages(t *testing.T) {
 	for _, want := range []string{
 		`pub const PAGE: PageSpec = PageSpec::new(2, 5).sorted(SortSpec::new("sort", &["name", "sku"], "name"));`,
 		"    pub const FILTER: FilterSpec = FilterSpec::new(&[\n",
-		`        FieldSpec::new("supplierId", &[Operator::Eq, Operator::In, Operator::IsNull]),` + "\n",
+		`        FieldSpec::new("supplierId", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::IsNull]),` + "\n",
 		"        filter: decode_catalog_list_parts_filter(query)?,\n",
 		`        made_at: filter::decode_ordered(&filters, "madeAt", &CATALOG_LIST_PARTS_FILTER_MADE_AT)?,` + "\n",
 	} {
@@ -106,7 +106,7 @@ func TestTheRustServerRendersPages(t *testing.T) {
 				continue
 			}
 			if field.Field != "retired_on" || field.RustType() != "Option<runtime::filter::Ordered<types::TemporalDate>>" ||
-				strings.Join(field.Operators, ",") != "eq,in,gt,gte,lt,lte,isNull" || field.Decode() != "decode_ordered" ||
+				strings.Join(field.Operators, ",") != "eq,ne,in,notIn,gt,gte,lt,lte,isNull" || field.Decode() != "decode_ordered" ||
 				field.Value.Name != "filter[retiredOn]" || field.Value.Spec != "CATALOG_LIST_PARTS_FILTER_RETIRED_ON" {
 				t.Errorf("catalog.listParts filter field retiredOn = %+v", field)
 			}

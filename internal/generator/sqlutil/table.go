@@ -338,12 +338,16 @@ func (c ColumnClass) FilterKind(isArray bool) FilterKind {
 	return FilterNone
 }
 
-// The operations of a filter, as both ORMs name them: Eq, In, ILike, Gt,
-// Gte, Lt, Lte, Between and IsNull in Go, eq, in, ilike, gt, gte, lt, lte,
-// between and isNull in TypeScript.
+// The operations of a filter, as both ORMs name them: Eq, Ne, In, NotIn,
+// ILike, Gt, Gte, Lt, Lte, Between and IsNull in Go, eq, ne, in, notIn,
+// ilike, gt, gte, lt, lte, between and isNull in TypeScript. Ne and NotIn
+// negate Eq and In (D112): each keeps the rows the other leaves out, a row
+// whose column is NULL among them.
 const (
 	FilterEq      = "eq"
+	FilterNe      = "ne"
 	FilterIn      = "in"
+	FilterNotIn   = "notIn"
 	FilterILike   = "ilike"
 	FilterGt      = "gt"
 	FilterGte     = "gte"
@@ -356,17 +360,17 @@ const (
 // filterOps are the operations of each kind of filter, in the order a
 // filter writes their conditions.
 var filterOps = map[FilterKind][]string{
-	FilterUUID:     {FilterEq, FilterIn, FilterIsNull},
-	FilterString:   {FilterEq, FilterIn, FilterILike, FilterIsNull},
-	FilterInt:      {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
-	FilterFloat:    {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
-	FilterDateTime: {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
-	FilterDate:     {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
-	FilterDuration: {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
-	FilterBool:     {FilterEq, FilterIn, FilterIsNull},
+	FilterUUID:     {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
+	FilterString:   {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterILike, FilterIsNull},
+	FilterInt:      {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterFloat:    {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDateTime: {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDate:     {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDuration: {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
+	FilterBool:     {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
 	FilterPoint:    {FilterIsNull},
-	FilterJSON:     {FilterEq, FilterIn, FilterIsNull},
-	FilterDecimal:  {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
+	FilterJSON:     {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDecimal:  {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
 }
 
 // FilterOps are the operations of a filter of kind, in the order its
@@ -377,13 +381,13 @@ func FilterOps(kind FilterKind) []string {
 
 // FilterConditions are a column's conditions for each operation, over the
 // column as Qualify names it. Each holds one placeholder, $%d, the
-// parameter's number, but In, whose %s is its placeholders joined by ", ",
-// and IsNull and IsNotNull, which hold none. Between is its two conditions,
-// Gte then Lte.
+// parameter's number, but In and NotIn, whose %s is its placeholders joined
+// by ", ", and IsNull and IsNotNull, which hold none. Between is its two
+// conditions, Gte then Lte.
 type FilterConditions struct {
-	Eq, Gt, Gte, Lt, Lte, ILike string
-	In                          string
-	IsNull, IsNotNull           string
+	Eq, Ne, Gt, Gte, Lt, Lte, ILike string
+	In, NotIn                       string
+	IsNull, IsNotNull               string
 }
 
 // FilterConditionsOf are the conditions of the column qualified, as
@@ -393,12 +397,14 @@ func FilterConditionsOf(qualified string) FilterConditions {
 	on := func(clause string) string { return strings.Replace(clause, "%s", qualified, 1) }
 	return FilterConditions{
 		Eq:        on(c.Eq),
+		Ne:        on(c.Ne),
 		Gt:        on(c.Gt),
 		Gte:       on(c.Gte),
 		Lt:        on(c.Lt),
 		Lte:       on(c.Lte),
 		ILike:     on(c.ILike),
 		In:        on(c.In),
+		NotIn:     on(c.NoneOf),
 		IsNull:    on(c.IsNull),
 		IsNotNull: on(c.IsNotNull),
 	}

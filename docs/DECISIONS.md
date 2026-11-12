@@ -17794,7 +17794,7 @@ summaries and whose endpoints the tools; `TestSchemaValidateChecksOperationMCP`;
 and `examples/tracker`, whose sixty-seven table operations carry no
 `@docs` and whose MCP endpoint lists their tools.
 
-## D112. A list sorts by a column that may be null, its nulls last in either direction (D60, D79, D106 amended)
+## D112. A list sorts by a column that may be null, its nulls last in either direction, and a filter negates with `ne` and `notIn`, which keep a null (D60, D79, D106 amended)
 
 A tracker's list by due date is the list its users open most, and most
 issues have no due date. `SortBy` refused a `Nullable` field ("a page's
@@ -17814,12 +17814,38 @@ nothing after it. D110 left it.
 | `SortBy` takes a `Nullable` field. `verify.checkSortFields` refuses a `Secret` field, a list, a map and a field that is no text, number or time, as before. An implementation that sorts its own rows reads the same order, so a list's pages mean one thing whoever serves them. | A warning on a hand-written list, which the loader cannot check the order of. |
 | The statements are SQL both Postgres and SQLite read: `NULLS LAST`, a row value and a searched `CASE`. The repositories run on Postgres alone (D79); `page.test.ts` fills the statements a table's types carry and runs them on SQLite, where a null orders before every value by default, and reads the same pages. | Leaving SQLite to the day a repository runs on it, with an order that would then differ silently. |
 
+### A filter that negates
+
+The tracker's two most used views are "not done" and "not mine", and
+`FilterBy` could say neither: D106 gave a field `eq` and `in` and left
+`neq` to the day both ORMs held one, and D110 left it again. A caller
+listed every state but the ones it did not want, and re-listed them when
+a state was added.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field takes `ne` and `notIn` wherever it takes `eq` and `in`, which is every kind: `filter[status][ne]=done` and `filter[status][notIn]=done,cancelled`. `ne` holds one value, read as `eq`'s is, a comma and its spaces kept; `notIn` holds 1 to 100, split at commas, trimmed and an empty one dropped, as `in`'s are, with `in`'s refusals under its own name (`notIn names no value`, `notIn must hold at most 100 values`). The operators' order, in a field's list and in a reader's answer, is `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte`, `contains`, `isNull` (`ir.FilterOperatorOrder`). | `neq`, which `filterparse` once parsed: every other operator is the repositories' name for it, and theirs is two letters. `not[field]=value`, a second bracket form for one more comparison. `notContains`, which no view of the tracker asked for. |
+| `ne` and `notIn` keep exactly the items `eq` and `in` leave out, so each pair divides a list in two, and an item whose field is null is on the negated side: "not assigned to Ada" holds the unassigned issues. A caller who wants only the items with a value adds `isNull=false`, which every field that may be null already takes. | SQL's reading, where `<>` and `NOT IN` drop a null. It is the answer a database gives and never the one a person means, and it makes "is" and "is not" together lose rows, which a UI that toggles between them shows as issues vanishing. A flag per request for which reading, a second thing to get wrong. |
+| The repositories hold the same two, with the same meaning (`Ne` and `NotIn` in Go, `ne` and `notIn` in TypeScript), on every kind of column that has `eq` and `in`; a duration, which has no `in`, takes `ne` alone. The clauses are `sqlutil`'s, one text for both ORMs: `column IS DISTINCT FROM $n` and `(column IN (...)) IS NOT TRUE`. An empty `notIn` adds no condition, as an empty `in` adds none. Types written before this entry carry neither clause, and the TypeScript runtime says so by name. | `column <> $n OR column IS NULL`, which names the column twice where every clause names it once, and `NOT IN`, which a null on either side turns to unknown. Leaving the ORMs' `ne` with SQL's meaning and adding the null in the handlers, two meanings for one name a layer apart. |
+| Each of the three readers reads them (`filterparse`, `filter.ts`, `filter.rs`), held to `filter_parity.json`, whose vectors gain the reads, the refusals and the written queries. The typed filter an implementation takes gains `Ne` and `NotIn` in each shape (`Equals`, `Ordered`, `Text`); Rust's are `ne` and `not_in`. The generated handlers of both servers copy them to the repository's filter as they copy `eq` and `in`. | A fourth shape for the negations, which would move every field to a new type for two members. |
+| The OpenAPI parameter, the tool schema and the four SDKs carry them as they carry `eq` and `in`: `ne` a value, `notIn` an array of 1 to 100. Each SDK and the MCP endpoint refuse, before a request, a `notIn` the route would read as another one: more than 100 values, and a value that is blank or holds a comma or a space at either end. Python's member is `not_in`, and Rust's SDK's is `not_in` beside `one_of`. | Leaving the tool schema closed to them, which would let a browser say what an agent cannot. |
+| A list written by hand must read the two new members. The router admits every operator a field's kind takes, whether or not the implementation reads it, so one that copies `Eq` and `In` alone answers `filter[status][ne]=done` as if no filter were sent, and nothing at the build can see it. acme-shop's three hand-written lists read all four. The guide says so where it shows the copy. | Giving the negations to generated lists alone, which is a second rule for what a field takes, by who serves it. Refusing them on a hand-written list until its declaration opts in, a flag on `FilterBy` whose only job is to describe the implementation. |
+
 Left: an index-served keyset over a column that may be null. The keyset
 is a condition on each row the order passes, so a deep page of a large
 table reads the rows before it; two seeks joined by `UNION ALL`, one over
 the values and one over the nulls, would seek, in both ORMs' page
 statements and their selections. A `nulls: "first"` option. A `@query`'s
-pages (D86), whose keyset is its own.
+pages (D86), whose keyset is its own. "Or" between a filter's members:
+every member still holds at once, and `in` is the only "one or another",
+of one field's values. It did not fall out of this: the repositories have
+`anyOf` (D90), but the wire has no form for a group, and D106 declined an
+expression language in a query string; a list that needs one is written
+by hand over the repository's `anyOf`. A helper that copies a typed
+filter into a repository's whole, so an implementation written by hand
+need not name each operator and cannot miss a new one. A filter through
+a relation without a projection (D110). Topcoat's argument form has no
+control for a negation, as it has none for a range.
 
 Status: built. `TestTableStatementsOfALedger`, `TestTablesOfModelsALedger`
 and `TestViewsOfAProjection`; `TestSortVerifies`; `TestGenerateFindPage`
@@ -17832,4 +17858,16 @@ and a key of no row refused; `page.test.ts` again on SQLite, through the
 statements; and over HTTP on both servers,
 `TestGeneratedTableOperationsEndToEnd` and
 `TestTableOperationsGoServerServesItsTables`, `fixture-tracker-api`'s
-`listIssues` by `dueOn` and `estimate`.
+`listIssues` by `dueOn` and `estimate`. The filters:
+`TestFilterOpsAndClauses`; `filterparse`'s `TestParityVectors`,
+`filter-parity.test.ts` and `tests/filter_parity.rs` over the vectors;
+`TestFilterFillsEachFieldsKindAndOperators`; `TestOpenAPIFilterParameter`
+and `TestFilterToolParameter`; the four SDKs' paged tests, each held to
+the vectors' `queries`; `mcp.test.ts`; the three servers over
+fixture-paged-api's `listParts`, a negation of every kind of field with a
+null kept; on Postgres, the TypeScript ORM's `ledger.test.ts` and
+`TestTableParityOfGoAndTypeScriptOnPostgres`, whose script sends `ne` and
+`notIn` on text, an enum, a key, a number and a date, and a page after a
+key by a column that may be null, through both ORMs as one statement
+each; and over HTTP on both servers, `listIssues` by `ne` and `notIn` of
+each field, each pair dividing the list in two.

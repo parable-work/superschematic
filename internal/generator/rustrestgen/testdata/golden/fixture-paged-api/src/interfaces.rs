@@ -76,25 +76,25 @@ pub struct CatalogListPartsArgs {
 /// once. `check` holds one a caller built to the route's rules.
 #[derive(Debug, Clone, Default)]
 pub struct CatalogListPartsFilter {
-    /// Filters by `id`: eq, in.
+    /// Filters by `id`: eq, ne, in, notIn.
     pub id: Option<runtime::filter::Equals<types::IdentityUUID>>,
-    /// Filters by `name`: eq, in, contains.
+    /// Filters by `name`: eq, ne, in, notIn, contains.
     pub name: Option<runtime::filter::Text<String>>,
-    /// Filters by `kind`: eq, in.
+    /// Filters by `kind`: eq, ne, in, notIn.
     pub kind: Option<runtime::filter::Equals<types::PartKind>>,
-    /// Filters by `quantity`: eq, in, gt, gte, lt, lte.
+    /// Filters by `quantity`: eq, ne, in, notIn, gt, gte, lt, lte.
     pub quantity: Option<runtime::filter::Ordered<types::GenericInt64>>,
-    /// Filters by `weight`: eq, in, gt, gte, lt, lte.
+    /// Filters by `weight`: eq, ne, in, notIn, gt, gte, lt, lte.
     pub weight: Option<runtime::filter::Ordered<f64>>,
-    /// Filters by `price`: eq, in, gt, gte, lt, lte.
+    /// Filters by `price`: eq, ne, in, notIn, gt, gte, lt, lte.
     pub price: Option<runtime::filter::Ordered<types::GenericDecimal>>,
-    /// Filters by `discontinued`: eq, in.
+    /// Filters by `discontinued`: eq, ne, in, notIn.
     pub discontinued: Option<runtime::filter::Equals<bool>>,
-    /// Filters by `madeAt`: eq, in, gt, gte, lt, lte.
+    /// Filters by `madeAt`: eq, ne, in, notIn, gt, gte, lt, lte.
     pub made_at: Option<runtime::filter::Ordered<types::TemporalDateTime>>,
-    /// Filters by `retiredOn`: eq, in, gt, gte, lt, lte, isNull.
+    /// Filters by `retiredOn`: eq, ne, in, notIn, gt, gte, lt, lte, isNull.
     pub retired_on: Option<runtime::filter::Ordered<types::TemporalDate>>,
-    /// Filters by `supplierId`: eq, in, isNull.
+    /// Filters by `supplierId`: eq, ne, in, notIn, isNull.
     pub supplier_id: Option<runtime::filter::Equals<types::IdentityUUID>>,
 }
 

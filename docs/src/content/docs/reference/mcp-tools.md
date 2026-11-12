@@ -351,9 +351,9 @@ A filtered list's filter (`FilterBy`, D106) is one optional property,
 named as the argument is: a closed object with a property per field a
 caller may filter by. A field's property is `oneOf` two schemas, a value
 of the field's type, for equality, and a closed object of the field's
-operators: `eq`, `gt`, `gte`, `lt` and `lte` a value, `in` an array of 1
-to 100 values, `contains` a string of at least one character, and
-`isNull` a boolean. The two differ in their `type`, so the field's
+operators: `eq`, `ne`, `gt`, `gte`, `lt` and `lte` a value, `in` and
+`notIn` an array of 1 to 100 values, `contains` a string of at least one
+character, and `isNull` a boolean. The two differ in their `type`, so the field's
 property has none of its own. For
 `filter: FilterBy<PartView, ["id", "name", "kind", "quantity"]>`, with the
 property of `kind`, an enum, shown:
@@ -365,7 +365,7 @@ property of `kind`, an enum, shown:
   "description": "The rows the list keeps: each member is a field (id, name, kind, quantity) holding a value, for equality, or an object of operators, and all of them hold at once.",
   "properties": {
     "kind": {
-      "description": "Filters by kind: a value it equals, or its operators (eq, in).",
+      "description": "Filters by kind: a value it equals, or its operators (eq, ne, in, notIn).",
       "oneOf": [
         {"type": "string", "enum": ["bolt", "nut", "washer"]},
         {
@@ -376,6 +376,18 @@ property of `kind`, an enum, shown:
             "in": {
               "type": "array",
               "description": "The field is one of the values, at most 100.",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {"type": "string", "enum": ["bolt", "nut", "washer"]}
+            },
+            "ne": {
+              "type": "string",
+              "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+              "enum": ["bolt", "nut", "washer"]
+            },
+            "notIn": {
+              "type": "array",
+              "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them.",
               "minItems": 1,
               "maxItems": 100,
               "items": {"type": "string", "enum": ["bolt", "nut", "washer"]}

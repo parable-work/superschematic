@@ -294,11 +294,11 @@ export const problemTable: TableDefinition = {
   table: "problem",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "problem.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "title", column: "title", field: "title", qualified: "problem.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "status", column: "status", field: "status", qualified: "problem.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "problem.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "_version", column: "_version", field: "_version", qualified: "problem._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "problem.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "problem.title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "problem.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "problem.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "problem._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"title\", \"status\", \"status_entered_at\", \"_version\"",
@@ -643,12 +643,14 @@ export const fixtureSchedulesDbRules: RulesLayout = {
 export const fixtureSchedulesDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

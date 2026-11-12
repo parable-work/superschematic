@@ -15,8 +15,12 @@ import (
 
 // UUIDFilter provides filtering operations for UUID fields
 type UUIDFilter struct {
-	Eq     *types.IdentityUUID
-	In     []types.IdentityUUID
+	Eq *types.IdentityUUID
+	In []types.IdentityUUID
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne     *types.IdentityUUID
+	NotIn  []types.IdentityUUID
 	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
@@ -32,7 +36,11 @@ type StringFilter struct {
 	// An empty or nil slice adds no condition, so a caller narrowing a result
 	// set must treat "no allowed values" as its own case rather than passing
 	// the empty slice and getting every row back.
-	In    []string
+	In []string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *string
+	NotIn []string
 	ILike *string // Case-insensitive LIKE
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
@@ -40,7 +48,11 @@ type StringFilter struct {
 
 // Int64Filter provides filtering operations for integer fields
 type Int64Filter struct {
-	Eq      *int64
+	Eq *int64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *int64
+	NotIn   []int64
 	Gt      *int64
 	Gte     *int64
 	Lt      *int64
@@ -61,7 +73,11 @@ type Int64Range struct {
 
 // FloatFilter provides filtering operations for float fields
 type FloatFilter struct {
-	Eq      *float64
+	Eq *float64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *float64
+	NotIn   []float64
 	Gt      *float64
 	Gte     *float64
 	Lt      *float64
@@ -83,6 +99,10 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *bool
+	NotIn []bool
 	// In matches any value in the set; an empty or nil slice adds no
 	// condition (D89).
 	In []bool
@@ -92,7 +112,11 @@ type BoolFilter struct {
 
 // DateTimeFilter provides filtering operations for DateTime fields
 type DateTimeFilter struct {
-	Eq      *time.Time
+	Eq *time.Time
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *time.Time
+	NotIn   []time.Time
 	Gt      *time.Time
 	Gte     *time.Time
 	Lt      *time.Time
@@ -112,7 +136,11 @@ type DateTimeRange struct {
 
 // DateFilter provides filtering operations for Date fields
 type DateFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -136,7 +164,10 @@ type DateRange struct {
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
 type DurationFilter struct {
-	Eq      *time.Duration
+	Eq *time.Duration
+	// Ne keeps the rows Eq leaves out (D112), a row whose column is NULL
+	// among them.
+	Ne      *time.Duration
 	Gt      *time.Duration
 	Gte     *time.Duration
 	Lt      *time.Duration
@@ -833,6 +864,11 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`"order".id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"order".id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -841,6 +877,15 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`"order".id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`("order".id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -855,6 +900,11 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"order".placed_at = $%d`, paramNum))
 			*args = append(*args, *f.PlacedAt.Eq)
+		}
+		if f.PlacedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"order".placed_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.PlacedAt.Ne)
 		}
 		if f.PlacedAt.Gt != nil {
 			paramNum++
@@ -892,6 +942,15 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`"order".placed_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.PlacedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.PlacedAt.NotIn))
+			for i, value := range f.PlacedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("order".placed_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.PlacedAt.IsNull != nil {
 			if *f.PlacedAt.IsNull {
@@ -1068,6 +1127,11 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`order_line.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1076,6 +1140,15 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`order_line.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(order_line.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1090,6 +1163,11 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`order_line.quantity = $%d`, paramNum))
 			*args = append(*args, *f.Quantity.Eq)
+		}
+		if f.Quantity.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Ne)
 		}
 		if f.Quantity.Gt != nil {
 			paramNum++
@@ -1128,6 +1206,15 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			}
 			conditions = append(conditions, fmt.Sprintf(`order_line.quantity IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Quantity.NotIn) > 0 {
+			placeholders := make([]string, len(f.Quantity.NotIn))
+			for i, value := range f.Quantity.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(order_line.quantity IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Quantity.IsNull != nil {
 			if *f.Quantity.IsNull {
 				conditions = append(conditions, `order_line.quantity IS NULL`)
@@ -1142,6 +1229,11 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`order_line.note = $%d`, paramNum))
 			*args = append(*args, *f.Note.Eq)
 		}
+		if f.Note.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.note IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Note.Ne)
+		}
 		if len(f.Note.In) > 0 {
 			placeholders := make([]string, len(f.Note.In))
 			for i, value := range f.Note.In {
@@ -1150,6 +1242,15 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`order_line.note IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Note.NotIn) > 0 {
+			placeholders := make([]string, len(f.Note.NotIn))
+			for i, value := range f.Note.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(order_line.note IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Note.ILike != nil {
 			paramNum++
@@ -1170,6 +1271,11 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`order_line.order_id = $%d`, paramNum))
 			*args = append(*args, f.OrderID.Eq.ToUUID())
 		}
+		if f.OrderID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.order_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.OrderID.Ne.ToUUID())
+		}
 		if len(f.OrderID.In) > 0 {
 			placeholders := make([]string, len(f.OrderID.In))
 			for i, id := range f.OrderID.In {
@@ -1178,6 +1284,15 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`order_line.order_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.OrderID.NotIn) > 0 {
+			placeholders := make([]string, len(f.OrderID.NotIn))
+			for i, id := range f.OrderID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(order_line.order_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.OrderID.IsNull != nil {
 			if *f.OrderID.IsNull {
@@ -1193,6 +1308,11 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`order_line.product_id = $%d`, paramNum))
 			*args = append(*args, f.ProductID.Eq.ToUUID())
 		}
+		if f.ProductID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.product_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.ProductID.Ne.ToUUID())
+		}
 		if len(f.ProductID.In) > 0 {
 			placeholders := make([]string, len(f.ProductID.In))
 			for i, id := range f.ProductID.In {
@@ -1201,6 +1321,15 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`order_line.product_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ProductID.NotIn) > 0 {
+			placeholders := make([]string, len(f.ProductID.NotIn))
+			for i, id := range f.ProductID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(order_line.product_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.ProductID.IsNull != nil {
 			if *f.ProductID.IsNull {
@@ -1349,6 +1478,11 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`product.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`product.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1357,6 +1491,15 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`product.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(product.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1372,6 +1515,11 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`product."name" = $%d`, paramNum))
 			*args = append(*args, *f.Name.Eq)
 		}
+		if f.Name.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`product."name" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Name.Ne)
+		}
 		if len(f.Name.In) > 0 {
 			placeholders := make([]string, len(f.Name.In))
 			for i, value := range f.Name.In {
@@ -1380,6 +1528,15 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`product."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Name.NotIn) > 0 {
+			placeholders := make([]string, len(f.Name.NotIn))
+			for i, value := range f.Name.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(product."name" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Name.ILike != nil {
 			paramNum++
