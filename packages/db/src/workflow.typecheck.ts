@@ -35,6 +35,20 @@ type NoTo = Workflow<{ states: ["draft"]; transitions: [{ from: "draft" }] }>;
 // @ts-expect-error an outcome is success, failure or neutral
 type BadOutcome = Workflow<{ states: ["draft"]; transitions: []; outcomes: { draft: "lost" } }>;
 
+// A table's transition may list states in from and in to (D109): one
+// transition from each to each, a state of both moving to the others.
+type IssueStatus = Workflow<{
+  states: ["backlog", "todo", "started", "done", "canceled"];
+  transitions: [
+    { from: ["backlog", "todo", "started"]; to: ["backlog", "todo", "started"] },
+    { from: ["backlog", "todo", "started"]; to: ["done", "canceled"]; permission: "issues.close" },
+    { from: "done"; to: "todo" },
+  ];
+}>;
+const started: IssueStatus = "started";
+// @ts-expect-error a list holds states by name
+type NumberedFrom = Workflow<{ states: ["open", "done"]; transitions: [{ from: [1]; to: "done" }] }>;
+
 // A table's Workflow names who makes a transition (by), the permission that
 // moves a caller past by (overridePermission), and a move to the state the
 // row is in answered as no change (repeat) (D104).

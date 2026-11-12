@@ -744,6 +744,7 @@ export interface TableOperation {
   overridePermission?: string;
   parents?: TableOperationParent[];
   projection?: boolean;
+  starts?: string[];
   type?: string;
 }
 

@@ -17697,3 +17697,43 @@ goldens; and on Postgres, over HTTP, one scenario on both servers,
 a list, a read, an update and a delete keep to the caller's rows, the
 override permission and a grant that covers it reach every row, and a
 caller with no id reaches none.
+
+## D109. A table's Workflow lists states in a transition, a build holds a Workflow to its own rules, and a create names the state its row starts in (D103, D106 amended)
+
+The tracker's issues move among five open states and into three closed
+ones. A transition is one move, so that was thirty-five lines, and an
+edit to the set of open states an edit to most of them. A create could
+not say where its row starts: an issue filed as a todo was a create and
+then a `transition`, two calls and a row that existed in the wrong state
+between them. And a transition that named a state the Workflow does not
+have built, as the Timers config of D107 did, and failed every create.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| In a TypeScript schema, a transition of a table's Workflow may list states in `from`, in `to`, or in both: `{ from: ["backlog", "todo"]; to: ["started", "done"] }` is a transition from each to each, in the lists' order, each with the transition's `permission` and `by`. A state both lists hold moves to the others and not to itself, so one list in both is every move among its states. `@superschematic/db`'s `WorkflowTransitionOn` types it. | A wildcard, `from: "*"`, which makes every state one a row can leave, a terminal state among them, by a character. A separate member, `anyOf`, which says the same in more words. A set of named groups of states in the config, which is a second vocabulary for one list. |
+| The TypeScript reader writes the transitions out (`ir.ExpandTransitionLists`) before it holds the config to its schema, so the configSchema, the build's checks, the generators, the behavior operations and the core read plain transitions and none of them knows the short form. | Teaching each of them the short form. Changing Workflow's declaration, which the engine shares: its configSchema, the engine's own parser and the recorded scenarios would all change for a way of writing that changes no behavior. |
+| What only the short form gets wrong fails the load, at the config: a list with no state or with one twice, lists that leave no move, and a move two transitions make when one of them lists it, naming both as written. Two plain transitions that repeat each other stay the core's to refuse. | Letting a later transition replace an earlier one's permission, which a reader of the config would not see. |
+| A JSON or YAML schema file writes each transition out. Its document schema holds a config to the declaration, which takes one state in each. | A second document schema for tables' configs. |
+| The build holds a table's Workflow to the rules the core's `WorkflowConfig::parse` holds it to, in its words and its order, the first only (`verify.workflowRulesProblem`): the initial state is a state; each transition's `from` and `to` are states, it leads somewhere else, and it is listed once; and `outcomes` names states no transition leaves. | Leaving them to the core's define check at a row's first command, where a mistake is every create's 422 (D107 closed the same of Timers and left this). |
+| A create's body may hold the field of a Workflow of its table: the state the row starts in. The loader records it (`ir.TableOperation.Starts`). The handler creates the row in the initial state and makes the Workflow's `transition` to the state the body names, in the create's transaction and as its caller. A body that leaves the member out, sends null or names the initial state makes no move. | Writing the status column at the insert, which would pass over the transition's permission, its `by`, StateRules, Approvals and every behavior that hears a move. A `startIn` option on the decorator, which fixes one state per operation where a body lets a caller choose among the ones the Workflow allows. |
+| The move is one transition from the initial state, held to all a caller's is. A move the Workflow refuses is its refusal, and the transaction keeps no row. | A path of transitions to a state farther away, which would run each one's side effects for a row no caller saw there. |
+| An update's body still may not hold the field, and its refusal now says where a row changes state (`issue.status.transition`). The OpenAPI document leaves the member writable in the create's body, where every other view of an owned field is `readOnly`. | An update that makes a transition, which would give one field two ways to move with different guards. |
+| The TypeScript server serves it. The Go server leaves such a create to the implementation, with the build's warning (D106's last rule). | Holding the feature until both write it. |
+
+Left: a state that a transition leaves and that still counts as finished,
+so an issue may be reopened and still close its parent through
+`allTerminal`. `outcomes` on such a state is refused by the engine and
+the core alike, on purpose, and both of their recorded scenarios hold the
+rule, so changing it is a change to the engine, the core, the scenario
+corpus and this build's mirror of the rule together. Also left: a team's
+own named states tied to the Workflow's; the Go server's create that
+names a state; and the short form in a JSON or YAML schema file.
+
+Status: built. `TestExpandTransitionLists*` in `ir`;
+`TestAWorkflowsListedTransitionsAreWrittenOut`; `TestWorkflowRulesProblem`;
+`TestACreateNamesTheStateItsRowStartsIn`; `table-routes.test.ts`;
+`TestOpenAPIMarksAViewsOwnedFieldsReadOnly`; and on Postgres, over HTTP
+and through the behaviors' core, `TestGeneratedStartStateCreateEndToEnd`:
+a create that names `paid` answers a paid order at its second version, a
+state the initial one does not lead to is the 409 `vetoed` and keeps no
+row, and so does a state the Workflow does not have.

@@ -54,8 +54,32 @@ func addBehaviorErrorResponses(responses map[string]interface{}) {
 // component that a behavior owns (D103): an owned field of the table the
 // component is built from, or a field of a @source view that projects one,
 // by its name. Only the behavior's operations change such a field, so no
-// request carries it.
+// request carries it, but for the body of a create that names the state
+// its row starts in (D109, ir.TableOperation.Starts): that member is the
+// request's to send, and stays writable.
 func markOwnedFieldsReadOnly(components map[string]interface{}, types map[string]*ir.TypeDef, schema *ir.Schema, dependencies map[string]*ir.Schema) {
+	starts := map[string]map[string]bool{} // body type -> the members a create starts its row by
+	for _, set := range schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op == nil || op.TableOperation == nil || len(op.TableOperation.Starts) == 0 {
+				continue
+			}
+			for _, arg := range op.Arguments {
+				if arg == nil || arg.Name != op.TableOperation.Input {
+					continue
+				}
+				if starts[arg.TypeRef.Name] == nil {
+					starts[arg.TypeRef.Name] = map[string]bool{}
+				}
+				for _, member := range op.TableOperation.Starts {
+					starts[arg.TypeRef.Name][member] = true
+				}
+			}
+		}
+	}
 	for name, td := range types {
 		component, ok := components[name].(map[string]interface{})
 		if !ok {
@@ -75,7 +99,7 @@ func markOwnedFieldsReadOnly(components map[string]interface{}, types map[string
 			}
 		}
 		for _, fd := range td.Fields {
-			if !owned[fd.Name] {
+			if !owned[fd.Name] || starts[name][fd.Name] {
 				continue
 			}
 			if property, ok := properties[fd.Name].(map[string]interface{}); ok {

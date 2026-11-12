@@ -542,6 +542,63 @@ describe('a row rule', () => {
   });
 });
 
+describe('a create that names the state its row starts in', () => {
+  const taskColumns = [
+    { name: 'id', column: 'id', required: true, key: true },
+    { name: 'title', column: 'title', required: true },
+    { name: 'status', column: 'status', required: true },
+  ];
+  const createTask: TableOperation = { kind: 'create', type: 'Task', repository: 'task', view: ['id', 'title', 'status'], body: ['title', 'status'], starts: ['status'] };
+  const backlog = { id: 't1', title: 'Write it', status: 'backlog' };
+
+  /** The fake repository of Task with its Workflow's operations, whose transition answers what move gives and records its calls among the repository's. */
+  function tasks(move: (key: unknown, params: unknown) => unknown, found: unknown = { ...backlog, status: 'started' }) {
+    const { orm, calls, state } = fake('task', taskColumns, { createOne: () => backlog, findOne: () => found });
+    const transaction = orm.transaction.bind(orm);
+    orm.transaction = (fn => transaction(tx => fn({ task: { ...(tx.task as object), status: { transition: async (key: unknown, params: unknown) => (calls.push(['status.transition', key, params]), move(key, params)) } } }))) as typeof orm.transaction;
+    return { orm, calls, state };
+  }
+
+  test('creates the row without the state, moves it by the Workflow’s transition, and answers the row as the move left it', async () => {
+    const { orm, calls, state } = tasks(() => ({ from: 'backlog', to: 'started' }));
+    expect(await tableCreate(orm, createTask, ctx, request({}, { title: 'Write it', status: 'started' }))).toEqual({ id: 't1', title: 'Write it', status: 'started' });
+    expect(calls).toEqual([
+      ['createOne', { title: 'Write it' }],
+      ['status.transition', 't1', { to: 'started' }],
+      ['findOne', { id: { eq: 't1' } }],
+    ]);
+    // One transaction holds the create and the move.
+    expect(state.transactions).toBe(1);
+  });
+
+  test('a body that names no state, null, or the state the row is created in makes no move', async () => {
+    for (const body of [{ title: 'Write it' }, { title: 'Write it', status: null }, { title: 'Write it', status: 'backlog' }]) {
+      const { orm, calls } = tasks(() => {
+        throw new Error('no move was asked for');
+      });
+      expect(await tableCreate(orm, createTask, ctx, request({}, body))).toEqual(backlog);
+      expect(calls).toEqual([['createOne', { title: 'Write it' }]]);
+    }
+  });
+
+  test('a move the Workflow refuses is its refusal, and the create is rolled back with it', async () => {
+    const refusal = Object.assign(new Error('Task t1 cannot move from backlog to done'), { name: 'RulesRefusal', status: 409, code: 'no_transition', details: { from: 'backlog', to: 'done' } });
+    const { orm, state } = tasks(() => {
+      throw refusal;
+    });
+    await expect(tableCreate(orm, createTask, ctx, request({}, { title: 'Write it', status: 'done' }))).rejects.toBeDefined();
+    // The transaction threw, so the row it created is not kept.
+    expect(state.failed).toBeDefined();
+  });
+
+  test('a repository with no such Workflow is the generator’s error', async () => {
+    const { orm } = fake('task', taskColumns, { createOne: () => backlog });
+    await expect(tableCreate(orm, createTask, ctx, request({}, { title: 'Write it', status: 'started' }))).rejects.toThrow(
+      "table operation: a create of Task starts its row in status, and its repository has no status.transition; rebuild the database's types"
+    );
+  });
+});
+
 describe('an error of the transaction', () => {
   /** What an update answers when its write throws error. */
   const failing = (error: unknown) =>

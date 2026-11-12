@@ -6562,6 +6562,13 @@
           "default": false,
           "type": "boolean"
         },
+        "starts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "type": {
           "default": "",
           "type": "string"

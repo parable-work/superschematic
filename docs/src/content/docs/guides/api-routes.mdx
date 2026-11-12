@@ -1032,7 +1032,7 @@ loader refuses, in it and in an update's body:
 | the key of a table that generates its own; in an update, any key | the table generates it; it names the row and never changes |
 | an audit field: `createdAt`, `createdBy`, `updatedAt`, `updatedBy`, `deletedAt`, `deletedBy` | the repository stamps it |
 | internal metadata, `_version` | no write sets it |
-| a field a behavior owns, such as a `Workflow` field | only the behavior's operations change it |
+| a field a behavior owns | only the behavior's operations change it. A create's body may hold a `Workflow` field: [the state a row starts in](#the-state-a-row-starts-in) |
 | the relation a path parameter sets, `teamId` under `teams/{teamId}/issues` | the path sets it |
 | `@virtual` | no column holds it |
 
@@ -1045,6 +1045,51 @@ Issues.createIssue: its body CreateIssueInput leaves out title, which Issue requ
 
 A member of a create's body that the request leaves out, or sends as
 null, is left unset, so its column takes the table's default, or null.
+
+### The state a row starts in
+
+A table's `Workflow` field starts every row in its initial state, and
+only the Workflow's `transition` moves it. A create's body may hold the
+field all the same, as the state the row starts in:
+
+```ts
+// What a caller sets to place an order: its title and, when it is not a
+// draft, the state it starts in.
+@source(Order)
+export abstract class PlaceOrderInput {
+  title: string;
+  status: Nullable<string>;
+}
+
+@rest(HttpMethod.POST, "orders")
+@tableOperation()
+placeOrder(input: PlaceOrderInput): OrderView {
+  throw new Error("schema declaration only");
+}
+```
+
+The handler creates the row in the initial state and then makes the
+Workflow's own transition to the state the body names, in the create's
+transaction and as its caller. So the move is held to everything a
+caller's transition is: it needs a transition from the initial state to
+that state, the transition's permission and its `by`, and every behavior
+that hears a move hears this one. A move the Workflow refuses is its
+refusal, the 409 `vetoed` a `transition` answers, and no row is kept. A
+body that leaves the member out, sends null, or names the initial state
+makes no move.
+
+It is one move. A state the initial one does not lead to in one
+transition is refused: list a transition to it, or create the row and
+move it. An update's body may not hold the field: a row that exists
+changes state through the Workflow's operations
+([A table's behavior operations](#a-tables-behavior-operations)), and the
+loader says so. The OpenAPI document leaves the member writable in the
+create's body, where every other view of the field is `readOnly`.
+
+The TypeScript server serves it. A Go server leaves such a create to the
+implementation, with the build's warning.
+
+### An update's members
 
 An update's members are all optional, `Nullable` each, and the loader
 refuses a required one. The request's own JSON says what to write:
@@ -1340,7 +1385,7 @@ Each of these has something that stands in until it is:
 | an upsert by `PUT` | a `PUT` is refused; write the operation by hand |
 | one declaration that serves a whole table | each operation and each view is declared |
 | the Rust server's handlers | a Rust API implements these operations by hand |
-| the Go server's handlers over a projection, over a view that holds a list, a map, a JSON value or an embedded object, and for a row rule that names text | a Go API implements those operations by hand; the TypeScript server serves them |
+| the Go server's handlers over a projection, over a view that holds a list, a map, a JSON value or an embedded object, for a row rule that names text, and for a create that names the state its row starts in | a Go API implements those operations by hand; the TypeScript server serves them |
 
 ## A table's behavior operations
 
@@ -1409,7 +1454,8 @@ name the set `<Table>Actions` to put them under the table's name. The
 OpenAPI document, the permission catalog and the tool documents list the
 operations as any other, and the document
 marks the fields a behavior owns `readOnly`, in the table's own component
-and in a `@source` view's that projects one.
+and in a `@source` view's that projects one, but for the body of a create
+that names [the state its row starts in](#the-state-a-row-starts-in).
 
 The class's decorators guard every route it serves, as a method's guard
 its route: `@auth`, `@requirePermission([...])` and `@publicRoute`, which

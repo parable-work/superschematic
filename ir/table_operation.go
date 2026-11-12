@@ -93,6 +93,13 @@ type TableOperation struct {
 	// OverridePermission is the permission whose holder By does not hold
 	// back: they reach every row, as an operation without By does.
 	OverridePermission string `json:"overridePermission,omitempty" yaml:"overridePermission,omitempty"`
+	// Starts are the members of a create's body that name the state the
+	// row starts in (D109), each the field of a Workflow of the table, in
+	// the body view's order: the handler creates the row in the Workflow's
+	// initial state and makes the transition to the state the body names,
+	// in the create's transaction and as its caller. The loader fills
+	// them; none for any other kind.
+	Starts []string `json:"starts,omitempty" yaml:"starts,omitempty"`
 }
 
 // TableOperationParent is one path parameter that holds a table

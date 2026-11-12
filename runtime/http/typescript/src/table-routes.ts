@@ -34,6 +34,12 @@ is the 404 of one that is not there, and a create sets each member but
 createdBy to the caller. A caller who holds the rule's override permission
 reaches every row.
 
+A create whose body names the state its row starts in (D109), the field of
+a Workflow of the table, creates the row in the Workflow's initial state
+and makes the Workflow's transition to that state in the same transaction,
+as the caller; a state the initial one does not lead to, or a transition
+the caller may not make, is the transition's refusal, and no row is kept.
+
 The refusals are the ones a hand-written operation answers (D42), mapped
 once the transaction has rolled back: 404 not_found for a key that holds
 no live row under the path's parents, 409 conflict for a unique key
@@ -91,6 +97,12 @@ export interface TableOperation {
   readonly by?: readonly string[];
   /** The permission whose holder the row rule does not hold back. */
   readonly overridePermission?: string;
+  /**
+   * The members of a create's body that name the state the row starts in
+   * (D109), each the field of a Workflow of the table: the row is created
+   * in the Workflow's initial state and moved by its transition.
+   */
+  readonly starts?: readonly string[];
 }
 
 /** The request a table operation's handler takes: what the route decoded of it. */
@@ -120,6 +132,8 @@ interface ColumnShape {
   readonly audit?: string;
   /** The operations of the column's filter. */
   readonly filter?: readonly string[];
+  /** The primary key. */
+  readonly key?: boolean;
 }
 
 /** A table's repository, as the handlers run it (orm.ts's Repository), with the definition it holds. */
@@ -130,6 +144,11 @@ interface RepositoryShape {
   createOne(input: Values): Promise<Row>;
   updateOne(id: unknown, update: Values): Promise<Row>;
   deleteOne(id: unknown): Promise<void>;
+}
+
+/** A Workflow's operations on a repository, under the field's member (orm.ts's UseOperations): what a create that names a starting state runs. */
+interface UseShape {
+  transition?(key: unknown, params: Values): Promise<unknown>;
 }
 
 /** The repositories, as the handlers open a transaction of them (orm.ts's Orm). */
@@ -468,8 +487,11 @@ export function tableList(
 export function tableCreate(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
   return inTransaction(orm, operation, ctx, async repository => {
     const body = bodyOf(operation, request);
+    const starts = operation.starts ?? [];
     const input: Values = {};
     for (const member of operation.body ?? []) {
+      // The state a row starts in is its Workflow's to set, below.
+      if (starts.includes(member)) continue;
       const value = Object.hasOwn(body, member) ? body[member] : undefined;
       if (value !== undefined && value !== null) input[member] = value;
     }
@@ -487,7 +509,29 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
       }
       input[member] = subject;
     }
-    return viewOf(operation, await repository.createOne(input));
+    const created = await repository.createOne(input);
+    // The state the body names for the row to start in (D109): the row is
+    // created in its Workflow's initial state, and moved by the Workflow's
+    // own transition, in this transaction and as the route's caller, so
+    // the transition's permission, its by and every behavior that hears
+    // the move hold as they do for a caller who makes it. A refusal of
+    // the move rolls the create back.
+    let moved = false;
+    for (const member of starts) {
+      const to = Object.hasOwn(body, member) ? body[member] : undefined;
+      if (to === undefined || to === null || to === created[member]) continue;
+      const key = columns.find(column => column.key)?.name;
+      const use = (repository as unknown as Readonly<Record<string, UseShape | undefined>>)[member];
+      if (key === undefined || typeof use?.transition !== 'function') {
+        throw new Error(`table operation: a create of ${operation.type} starts its row in ${member}, and its repository has no ${member}.transition; rebuild the database's types`);
+      }
+      await use.transition(created[key], { to });
+      moved = true;
+    }
+    if (!moved) return viewOf(operation, created);
+    const key = columns.find(column => column.key)!.name;
+    const row = await repository.findOne({ [key]: { eq: created[key] } });
+    return viewOf(operation, row ?? created);
   });
 }
 

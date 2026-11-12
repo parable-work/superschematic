@@ -86,6 +86,10 @@ func checkEngineWorkflowConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 // A config the configSchema refuses is reported by checkTypeBehaviors and
 // left alone here.
 func checkWorkflowConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
+	if reason := workflowRulesProblem(ref.Config); reason != "" {
+		r.errorf(td.Owner, "type %s: field %s: behavior Workflow config: %s", td.Name, ref.Field, reason)
+		return
+	}
 	var config struct {
 		Transitions []struct {
 			From string   `json:"from"`
@@ -122,6 +126,72 @@ func checkWorkflowConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, 
 			}
 		}
 	}
+}
+
+// workflowRulesProblem is why a Workflow's config is no state machine, or
+// "" when it is one: the rules of the core's WorkflowConfig::parse
+// (superschematic_rules_behaviors::workflow) that read the config alone,
+// in its order and its words, the first only, as the core reports them.
+// The initial state is one of the states; each transition's from and to
+// are states, and it moves somewhere, once; and outcomes names states no
+// transition leaves. Without it a config that breaks one built, and the
+// core refused it at the table's first command, as every create's 422
+// (D107 met the same of Timers). A config the configSchema refuses is
+// left to it.
+func workflowRulesProblem(raw json.RawMessage) string {
+	var config struct {
+		States      []string `json:"states"`
+		Initial     *string  `json:"initial"`
+		Transitions []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		} `json:"transitions"`
+		Outcomes map[string]json.RawMessage `json:"outcomes"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &config) != nil {
+		return ""
+	}
+	all := strings.Join(config.States, ", ")
+	has := func(state string) bool { return slices.Contains(config.States, state) }
+	quote := func(state string) string { return `"` + state + `"` }
+	if config.Initial != nil && !has(*config.Initial) {
+		return "the initial state " + quote(*config.Initial) + " is not one of its states (" + all + ")"
+	}
+	seen := map[[2]string]bool{}
+	for _, transition := range config.Transitions {
+		named := "the transition from " + quote(transition.From) + " to " + quote(transition.To)
+		for _, state := range []string{transition.From, transition.To} {
+			if !has(state) {
+				return named + " names " + quote(state) + ", which is not one of its states (" + all + ")"
+			}
+		}
+		if transition.From == transition.To {
+			return "a transition from " + quote(transition.From) + " to itself changes nothing"
+		}
+		move := [2]string{transition.From, transition.To}
+		if seen[move] {
+			return named + " is listed twice"
+		}
+		seen[move] = true
+	}
+	// A config's members are in name order as the loader holds it, the
+	// order the core reads them in.
+	outcomes := make([]string, 0, len(config.Outcomes))
+	for state := range config.Outcomes {
+		outcomes = append(outcomes, state)
+	}
+	slices.Sort(outcomes)
+	for _, state := range outcomes {
+		if !has(state) {
+			return "outcomes names " + quote(state) + ", which is not one of its states (" + all + ")"
+		}
+		for _, transition := range config.Transitions {
+			if transition.From == state {
+				return "outcomes names " + quote(state) + ", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome"
+			}
+		}
+	}
+	return ""
 }
 
 // byProblem is why entry, an entry of a Workflow transition's by on td,

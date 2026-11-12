@@ -52,8 +52,24 @@ export interface WorkflowConfig extends Omit<BehaviorConfigs["Workflow"], "trans
   readonly repeat?: "unchanged";
 }
 
-/** One move a table's Workflow may make: @superschematic/schema's WorkflowTransition, and who may make it. */
-export interface WorkflowTransitionOn extends WorkflowTransition {
+/**
+ * One move a table's Workflow may make, or several written as one (D109):
+ * @superschematic/schema's WorkflowTransition, whose from and to may each
+ * list states, and who may make it.
+ */
+export interface WorkflowTransitionOn extends Omit<WorkflowTransition, "from" | "to"> {
+  /**
+   * The state the row is in, or a list of them: a transition from each.
+   * `{ from: ["backlog", "todo"], to: "started" }` is two transitions, each
+   * with this one's permission and by.
+   */
+  readonly from: string | readonly string[];
+  /**
+   * The state the row moves to, or a list of them: a transition to each.
+   * A state both lists hold moves to the others and not to itself, so the
+   * same list in from and to is every move among its states.
+   */
+  readonly to: string | readonly string[];
   /**
    * The row's own fields that hold a subject (string, Identity.UUID or
    * Identity.UserID), createdBy among them, and seats of the table's Seats,
