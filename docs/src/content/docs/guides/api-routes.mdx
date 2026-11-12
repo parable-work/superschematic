@@ -955,9 +955,10 @@ export class Issues extends Authenticated {
 ```
 
 The method stays an ordinary declaration. Its `@rest` route, its guards,
-its `@docs`, `@mcp` and `@rateLimit`, its arguments and its result are
-what it writes, and the OpenAPI document, the SDKs, the permission catalog
-and the tool documents read it as any operation. The decorator changes one
+its `@rateLimit`, its arguments and its result are what it writes, its
+`@docs` and `@mcp` what it writes or what [its declaration gives
+it](#docs-and-tools), and the OpenAPI document, the SDKs, the permission
+catalog and the tool documents read it as any operation. The decorator changes one
 thing: the server mounts the route on a handler the build writes, and the
 implementation's interface and its scaffold leave the method out. Take the
 decorator off and the operation is one you implement, with the same route,
@@ -1325,6 +1326,53 @@ What a rule does not say yet:
 
 A row rule is the generated handler's. An operation you write by hand,
 an ORM call in a worker and SQL of your own reach every row, as before.
+
+### Docs and tools
+
+A table operation says what it does in its declaration, so it documents
+itself. One that declares no `@docs` is given them, and one that declares
+no `@mcp` is a tool, as an operation of a `@behaviorOperations` set is:
+
+| | From | `listIssues` in `Issues` |
+| --- | --- | --- |
+| title | the method's name, as words | `List issues` |
+| description | the method's comment; without one, a sentence of its kind and its table | `A team's issues, newest first unless the caller sorts them, searched by their text and filtered by their fields.` |
+| capability | the set and the method | `issues.list-issues` |
+| lifecycle, visibility | | `active`, `public` |
+| replay mode | a read and a list | `read_only` |
+| tool handle | the method's name in snake_case | `list_issues` |
+| invocation policy | the policy's default | `auto` |
+
+So a table's five operations are five `@rest` lines, their guards and
+their views. Write the comment for the person and the agent who will read
+it: it is the OpenAPI description and the tool's.
+
+What the operation declares is kept. `@docs` replaces the docs, `@mcp`
+the tool, and each is given when only the other is written:
+
+```ts
+// Deletes the issue, which is kept, and answers it as it was.
+@rest(HttpMethod.DELETE, "issues/{id}")
+@requirePermission(["issues.write"])
+@mcp({ handle: "delete_issue", invocationPolicy: "ask" })
+@tableOperation()
+deleteIssue(id: Identity.UUID): IssueView {
+  throw new Error("schema declaration only");
+}
+```
+
+`@mcp({ hidden: true, reason: "..." })` keeps an operation out of the
+tools. An operation only a calling service reaches (`@requireService`) is
+hidden without being asked, and so is one whose payload is encrypted.
+
+An API's tools are told apart by their handles and their names. When two
+sets each declare a method of one name, `list` say, or a default would
+repeat a handle or a title another operation declares, the defaults take
+the set's before them: `teams_list` and `members_list`, "Teams: list" and
+"Members: list".
+
+An operation you implement by hand is given neither: take `@tableOperation`
+off and its `@docs` and `@mcp` are yours to write.
 
 ### The servers
 

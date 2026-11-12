@@ -17764,3 +17764,30 @@ Status: built. `TestFilterFillsEachFieldsKindAndOperators` and
 `listIssues`; and on Postgres, on both servers,
 `TestGeneratedTableOperationsEndToEnd` and
 `TestTableOperationsGoServerServesItsTables`.
+
+## D111. A table operation documents itself: its docs and its tool come from its declaration (D106 amended)
+
+The tracker declares seventy-two operations, sixty-seven of them
+`@tableOperation`. Each carried five decorators, and two of the five said
+nothing its method did not: `@docs({ title: "List issues", description:
+..., capability: "issues.list", lifecycle: "active", visibility:
+"public", replayMode: "read_only" })` and `@mcp({ handle: "list_issues"
+})`, above a method named `listIssues` with a comment that was the
+description. An operation the loader adds for a behavior has had both
+from its declaration since D103. One the build serves from a table knows
+as much about itself.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `@tableOperation` that declares no `@docs` is given them once the loader has filled it (`verify.documentTableOperations`): the title is the method's name as words (`List issues`), the description its comment as one paragraph, or a sentence of its kind and its table without one, the capability its set and its method (`issues.list-issues`), `active`, `public` and `mapped`, and a read and a list replay as `read_only`. | A title from the kind and the table, "List Issue", which two reads of one table would share and which says less than the name its author chose. Requiring `@docs` and offering a snippet, which is the boilerplate. |
+| One that declares no `@mcp` is a visible tool: its handle the method's name in snake_case (`list_issues`), its invocation the policy's default. An operation only a calling service reaches is hidden with that reason (D37), and so is one whose payload is encrypted, which no tool call seals. | Tools only on request, as a hand-written operation's are. The route's guards hold a tool's call as they hold a request's, so a tool reaches nothing its caller could not; and `@mcp({ hidden: true, reason })` says otherwise in one line. `ask` for a delete by default, which would fail the build of an API that names no confirmation key (D93). |
+| A name another operation of the API holds takes its set's before it, in the handle and the title: two sets that each declare `list` are `teams_list` and `members_list`, "Teams: list" and "Members: list". So does a default that would repeat a handle or a title another operation declares. | Failing the build for a clash between two defaults, which no declaration the author wrote would explain. |
+| What the operation declares is kept: `@docs` and `@mcp` are each the author's when written and each given when only the other is. An operation the project implements is given neither. | Defaults for every operation of an API, whose hand-written ones the loader cannot describe beyond their names. |
+
+Left: one declaration that serves a whole table, its five operations
+from the table, its views and a path (D106's list), which would take the
+`@rest` lines too; and a per-kind invocation policy for a set.
+
+Status: built. `TestTableOperationsDocumentThemselves`;
+`TestTableOperationEndpoints`, whose OpenAPI document carries the
+summaries and whose endpoints the tools.
