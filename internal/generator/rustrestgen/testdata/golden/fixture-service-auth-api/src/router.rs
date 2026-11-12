@@ -55,41 +55,44 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `options.openapi_base_url` as the generated Go server states its
 /// `Config`'s.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
+    // With no transport under the router (`Api::handle`, D116), each
+    // route's rate limit, body limit and timeout are its host's.
+    let transport = options.transport;
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .allow_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .apply(get(handle_ledger_list_reservations));
     router = router.route("/api/ledger/reservations", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .require_service(Arc::clone(&state.implementations.service_authenticator), &[])
         .apply(post(handle_stock_reindex_stock));
     router = router.route("/api/stock/reindex", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .require_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .authorize(Arc::clone(&state.implementations.authenticator), &["stock.reserve"])
         .apply(post(handle_stock_reserve_stock));
     router = router.route("/api/stock/reservations", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .identify_service(Arc::clone(&state.implementations.service_authenticator))
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .apply(get(handle_stock_get_reservation));
     router = router.route("/api/stock/reservations/{id}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .allow_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .authorize(Arc::clone(&state.implementations.authenticator), &["stock.write"])
         .apply(post(handle_stock_release_reservation));
     router = router.route("/api/stock/reservations/{id}/release", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .identify_service(Arc::clone(&state.implementations.service_authenticator))
         .apply(get(handle_sync_sync_status));
     router = router.route("/api/sync/status", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .require_service(Arc::clone(&state.implementations.service_authenticator), &["fixture-service-caller-api"])
         .apply(post(handle_sync_sync_stock));
     router = router.route("/api/sync/stock", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .allow_service(Arc::clone(&state.implementations.service_authenticator), &[])
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .apply(post(handle_sync_sync_my_stock));
@@ -423,4 +426,62 @@ async fn handle_sync_sync_my_stock(
         .sync_my_stock(ctx)
         .await;
     operation_response(result, request_id.as_deref())
+}
+
+/// The API with no transport under it (D116): a request in and a response
+/// out, for a host that has no HTTP server of its own to mount a router
+/// on, or wants none between itself and the API. `handle` does what the
+/// router does for a request it holds whole: it finds the route,
+/// authenticates the caller through the implementation's authenticator,
+/// admits by the route's rule, decodes and checks each argument, runs the
+/// operation and writes the envelope or the problem, through the handlers
+/// `build_router`'s routes run.
+///
+/// What needs a socket, a clock or a store shared between requests stays
+/// the host's: the listener, TLS, the body's limit (`handle` takes a body
+/// already read), timeouts, rate limits, CORS and draining. A host tells
+/// the API what it knows of a connection through the request's extensions,
+/// which the authenticator receives.
+///
+/// The implementation's methods are asynchronous. A host with no async
+/// runtime drives `handle` with the runtime's `block_on`, which polls on
+/// the calling thread: an API whose databases are SQLite files, and that
+/// calls no other server, awaits nothing that needs a reactor.
+#[derive(Clone)]
+pub struct Api {
+    router: Router,
+}
+
+impl Api {
+    /// The operations `handle` does not route, by name: the
+    /// @manualRouteRegistration ones, whose handlers a service mounts on
+    /// a router of its own (`build_router_with_manual_routes`).
+    pub const UNROUTED: &'static [&'static str] = &[
+    ];
+
+    /// The API over `implementations`.
+    pub fn new(implementations: Implementations) -> Self {
+        Self::with(implementations, RouterOptions::default())
+    }
+
+    /// `new` with `options`, but for its `transport`, which an `Api` has
+    /// none of.
+    pub fn with(implementations: Implementations, options: RouterOptions) -> Self {
+        let options = RouterOptions {
+            transport: false,
+            ..options
+        };
+        Self {
+            router: build_router_with(implementations, options),
+        }
+    }
+
+    /// Answers `request`, whose body is read already, with a response
+    /// whose body is whole.
+    pub async fn handle(
+        &self,
+        request: axum::http::Request<axum::body::Bytes>,
+    ) -> axum::http::Response<axum::body::Bytes> {
+        superschematic_http_runtime::handle(&self.router, request).await
+    }
 }

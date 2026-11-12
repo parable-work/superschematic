@@ -37,6 +37,12 @@ pub struct RouterOptions {
     /// clients alone; routers built from one registry, or from clones of
     /// one `RouterOptions`, share each operation's budget.
     pub rate_limits: RateLimits,
+    /// The router serves with a transport under it, which is the case
+    /// unless a host calls it with requests it holds whole (D116): each
+    /// route then holds its `@rateLimit`, `@bodyLimit` and `@timeout`.
+    /// Off, those are the host's, which has the socket, the clock and the
+    /// store of counts they need.
+    pub transport: bool,
 }
 
 impl Default for RouterOptions {
@@ -46,6 +52,7 @@ impl Default for RouterOptions {
             openapi_version: DEFAULT_OPENAPI_VERSION.to_owned(),
             openapi_base_url: DEFAULT_OPENAPI_BASE_URL.to_owned(),
             rate_limits: RateLimits::new(),
+            transport: true,
         }
     }
 }

@@ -60,6 +60,9 @@ pub struct RouteControls {
     service: Option<ServiceStep>,
     authorization: Option<Authorization>,
     timeout: Option<Duration>,
+    /// The route is served with no transport under it (D116): its rate
+    /// limit, body limit and timeout are its host's.
+    hostless: bool,
 }
 
 #[derive(Clone)]
@@ -83,6 +86,19 @@ struct ServiceRule {
 impl RouteControls {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The controls of a route of a router that serves with a transport
+    /// under it, or with none ([`crate::RouterOptions::transport`]). With
+    /// none, a request arrives whole from a host that counts, limits and
+    /// times it itself, so the route's rate limit, body limit and timeout
+    /// are left to it (D116), and its service step and its permission
+    /// check hold as they do under a transport.
+    pub fn under(transport: bool) -> Self {
+        Self {
+            hostless: !transport,
+            ..Self::default()
+        }
     }
 
     /// `@rateLimit({ requestsPerMinute })`: a limiter of this route's own,
@@ -211,7 +227,7 @@ impl RouteControls {
         // route_layer runs the layer added last first, so the controls are
         // added innermost first.
         let mut route = route;
-        if let Some(timeout) = self.timeout {
+        if let Some(timeout) = self.timeout.filter(|_| !self.hostless) {
             route = route.route_layer(from_fn(move |request: Request, next: Next| {
                 time_out(timeout, request, next)
             }));
@@ -225,14 +241,14 @@ impl RouteControls {
                 gate.clone().run(request, next)
             }));
         }
-        if let Some(limit) = self.body_limit {
+        if let Some(limit) = self.body_limit.filter(|_| !self.hostless) {
             route = route
                 .route_layer(DefaultBodyLimit::max(limit))
                 .route_layer(from_fn(move |request: Request, next: Next| {
                     limit_body(limit, request, next)
                 }));
         }
-        if let Some(limiter) = self.rate_limit {
+        if let Some(limiter) = self.rate_limit.filter(|_| !self.hostless) {
             route = route.route_layer(from_fn(move |request: Request, next: Next| {
                 admit(Arc::clone(&limiter), request, next)
             }));
@@ -623,6 +639,30 @@ mod tests {
             (status, code(&body)),
             (StatusCode::GATEWAY_TIMEOUT, "gateway_timeout")
         );
+    }
+
+    // With no transport under it (D116), a route's rate limit, body limit
+    // and timeout are its host's, and its permission check still holds.
+    #[tokio::test(start_paused = true)]
+    async fn a_route_with_no_transport_leaves_its_limits_to_the_host() {
+        let log = Log::default();
+        let controls = RouteControls::under(false)
+            .rate_limit(1)
+            .body_limit_bytes(4)
+            .authorize(tokens(&log), &["orders.read"])
+            .timeout_seconds(1);
+        let app = app(controls, &log);
+        for body in ["too long", "slow", "fast"] {
+            let (status, _, _) = send(&app, Some("ana:orders.read"), body).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+        }
+        let (status, _, body) = send(&app, None, "fast").await;
+        assert_eq!(
+            (status, code(&body)),
+            (StatusCode::UNAUTHORIZED, "unauthorized")
+        );
+        let (status, _, body) = send(&app, Some("ana:orders.write"), "fast").await;
+        assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, "forbidden"));
     }
 
     // The cheap refusals come first: the rate limit before the body limit

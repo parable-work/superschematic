@@ -8,7 +8,7 @@ use api::database_types::orm::sqlite::Repositories;
 use api::database_types::orm::{Equals, FindOptions, IssueFilter, Text};
 use api::runtime::orm::sqlite::{rusqlite, Database};
 use api::runtime::{ApiError, Authenticator, Principal, RequestContext};
-use api::{build_router, Handlers, Implementations, TeamsImplementation, TeamsSummarizeTeamArgs};
+use api::{build_router, Api, Handlers, Implementations, TeamsImplementation, TeamsSummarizeTeamArgs};
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::Router;
@@ -82,8 +82,15 @@ impl TeamsImplementation for Teams {
 /// The router over a file of the test's own, holding the build's SQLite
 /// DDL, and the directory that holds the file.
 fn server() -> (Router, std::path::PathBuf) {
+    let (implementations, dir) = implementations("router");
+    (build_router(implementations), dir)
+}
+
+/// The implementations over a file of the test's own, holding the build's
+/// SQLite DDL, and the directory that holds the file.
+fn implementations(name: &str) -> (Implementations, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
-        "tracker-sqlite-{}-{:?}",
+        "tracker-sqlite-{name}-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
@@ -98,7 +105,7 @@ fn server() -> (Router, std::path::PathBuf) {
         teams: Arc::new(Teams { db: Arc::clone(&db) }),
         authenticator: Arc::new(Bearer),
     };
-    (build_router(Implementations::new(handlers, db)), dir)
+    (Implementations::new(handlers, db), dir)
 }
 
 struct Reply {
@@ -263,6 +270,71 @@ async fn the_router_serves_its_tables_from_a_sqlite_file() {
     assert_eq!(listed.data()["items"].as_array().map(Vec::len), Some(0));
     let mine = get("/notes".into()).await.data().clone();
     assert_eq!(mine["items"].as_array().map(Vec::len), Some(1));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A request to the API with no transport under it (D116), answered on
+/// the calling thread: no socket, no router of the host's, and no async
+/// runtime, since nothing the API awaits over a SQLite file needs one.
+fn ask(api: &Api, token: &str, method: Method, path: &str, body: Option<Value>) -> Reply {
+    let mut request = Request::builder().method(method).uri(format!("/api{path}"));
+    if !token.is_empty() {
+        request = request.header(http::header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    let body = match body {
+        Some(body) => {
+            request = request.header(http::header::CONTENT_TYPE, "application/json");
+            axum::body::Bytes::from(body.to_string())
+        }
+        None => axum::body::Bytes::new(),
+    };
+    let response = api::runtime::block_on(api.handle(request.body(body).expect("a request")));
+    let status = response.status();
+    let body = if response.body().is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(response.body()).expect("a JSON body")
+    };
+    Reply { status, body }
+}
+
+#[test]
+fn the_api_answers_a_request_with_no_transport_and_no_runtime_under_it() {
+    assert!(
+        tokio::runtime::Handle::try_current().is_err(),
+        "the test is to run with no async runtime"
+    );
+    let (implementations, dir) = implementations("api");
+    let api = Api::new(implementations);
+    let ada = format!("{ADA}{EVERY}");
+
+    // A generated table handler writes and reads the file.
+    let core = ask(&api, &ada, Method::POST, "/teams", Some(json!({"key": "core", "name": "Core"})))
+        .data()
+        .clone();
+    let team = core["id"].as_str().expect("the team's id").to_owned();
+    assert_eq!(ask(&api, &ada, Method::GET, &format!("/teams/{team}"), None).data(), &core);
+    ask(&api, &ada, Method::POST, &format!("/teams/{team}/issues"), Some(json!({"title": "Crash on save"}))).data();
+
+    // The project's own implementation runs, through the repositories.
+    let summary = ask(&api, &ada, Method::GET, &format!("/teams/{team}/summary"), None);
+    assert_eq!(summary.data()["openIssues"], 1.0, "{}", summary.body);
+
+    // What the router refuses, `handle` refuses the same way: no caller,
+    // a body that does not decode, a row that is not there and a path no
+    // route has.
+    ask(&api, "", Method::GET, "/teams", None).refused(401, "Authentication required");
+    let malformed = ask(&api, &ada, Method::POST, "/teams", Some(json!({"key": 7})));
+    assert_eq!(malformed.status, StatusCode::BAD_REQUEST, "{}", malformed.body);
+    ask(&api, &ada, Method::GET, "/teams/33333333-3333-4333-8333-333333333333", None).refused(404, "Team not found");
+    let unrouted = ask(&api, &ada, Method::GET, "/nowhere", None);
+    assert_eq!(unrouted.status, StatusCode::NOT_FOUND, "{}", unrouted.body);
+    assert!(Api::UNROUTED.is_empty());
+
+    // A clone of the API serves the same file.
+    let again = api.clone();
+    assert_eq!(ask(&again, &ada, Method::GET, &format!("/teams/{team}"), None).data(), &core);
 
     let _ = std::fs::remove_dir_all(dir);
 }

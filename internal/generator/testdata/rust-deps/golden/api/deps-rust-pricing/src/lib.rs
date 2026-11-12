@@ -18,5 +18,5 @@ pub use superschematic_http_runtime as runtime;
 
 pub use deps::{Deps, Handlers};
 pub use interfaces::*;
-pub use router::{build_router, build_router_with, webhook_verified, RouterState};
+pub use router::{build_router, build_router_with, webhook_verified, Api, RouterState};
 pub use superschematic_http_runtime::{request_ids, RouterOptions};

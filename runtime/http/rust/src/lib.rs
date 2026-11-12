@@ -34,6 +34,9 @@ mod http_client;
 pub mod identity;
 mod jws;
 mod jwt;
+// A request in and a response out with no transport, and the block_on a
+// host with no runtime drives it with (D116).
+mod handle;
 mod loopback;
 // An API's MCP endpoint (D81, D116): the stateless transport over a tool
 // set, a call's confirmation (D93, D98), and a router's tools as requests
@@ -97,6 +100,7 @@ pub use body::{json_body, query_values};
 pub use context::RequestContext;
 pub use controls::RouteControls;
 pub use error::ApiError;
+pub use handle::{block_on, handle};
 #[cfg(feature = "http-client")]
 pub use http_client::HttpFetcher;
 #[cfg(feature = "identity")]
