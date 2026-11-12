@@ -94,7 +94,7 @@ pub struct {{ .TypeName }} {
 pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
 {{- $namespace := . }}
 {{- range $.Endpoints }}
-{{- if and (eq .Namespace $namespace) (not .Behavior) }}
+{{- if and (eq .Namespace $namespace) (not .RouterServed) }}
     {{- if .Description }}
     /// {{ index (splitLines .Description) 0 }}
     {{- end }}
@@ -192,6 +192,12 @@ pub struct Implementations {
     /// on which the router's handler of each runs it through the behaviors'
     /// core, so no namespace trait has a method for it.
     pub behaviors: crate::behaviors::Behaviors,
+{{- end }}
+{{- if .HasTableOperations }}
+    /// What the table operations are served from (D106): the repositories
+    /// of {{ .TableDatabase }}, over which the router's handler of each runs it,
+    /// so no namespace trait has a method for it.
+    pub tables: crate::tables::Tables,
 {{- end }}
 }
 {{- if .WebhookProviders }}

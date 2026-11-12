@@ -15,6 +15,7 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use deadpool_postgres::GenericClient;
 use serde::de::DeserializeOwned;
@@ -25,13 +26,15 @@ use tokio_postgres::types::{FromSql, ToSql, Type};
 use tokio_postgres::Row;
 
 use super::plan::{Plan, Statement};
+use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
     row, values, wire, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete, CoreUpdate,
     Definition, Dialect, Error, FieldKeys, FindOptions, Found, PageOptions, RowPage, Session,
     Table, UpsertOptions, Upserted, Values, WriteOptions,
 };
-use crate::error::chain;
+use crate::auth::Principal;
+use crate::error::{chain, ApiError};
 use crate::queue::codec::{numeric, param_text, Column as Cell, Text};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
 
@@ -165,6 +168,114 @@ impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
             repository: self.table(name)?,
             types: PhantomData,
         })
+    }
+}
+
+impl<C: GenericClient + Sync> Repositories<'_, C> {
+    /// Runs a table operation (D106) on its table's repository, for the
+    /// route's caller, and answers the row's view or a page of views. The
+    /// repositories act as whom the caller of this names: a route's
+    /// caller, by [`routes::acting`].
+    pub async fn table_operation(
+        &self,
+        operation: &TableOperation,
+        principal: Option<&Principal>,
+        request: &TableRequest,
+    ) -> Result<TableOutcome, ApiError> {
+        let repository = self.table(&operation.table)?;
+        let routes = Routes {
+            runner: repository.runner(),
+            operation,
+            principal,
+        };
+        routes.serve(request).await
+    }
+}
+
+/// What runs a table's behaviors in a transaction of a server's pool.
+pub type PoolRules = dyn for<'t> Rules<deadpool_postgres::Transaction<'t>>;
+
+/// What a generated router serves its table operations from on Postgres
+/// (D106, D116): the server's pool, the database's definition, and what
+/// its repositories seal with and run behaviors through.
+#[derive(Clone)]
+pub struct Tables {
+    pool: deadpool_postgres::Pool,
+    definition: fn() -> Result<&'static Definition, Error>,
+    keys: Option<Arc<dyn FieldKeys>>,
+    rules: Option<Arc<PoolRules>>,
+}
+
+impl Tables {
+    /// The tables in the database `pool` reaches, of the definition
+    /// `definition` answers: a types crate's `orm::postgres_definition`.
+    pub fn new(
+        pool: deadpool_postgres::Pool,
+        definition: fn() -> Result<&'static Definition, Error>,
+    ) -> Self {
+        Self {
+            pool,
+            definition,
+            keys: None,
+            rules: None,
+        }
+    }
+
+    /// The tables with the keys of the database's `Encrypted<T>` fields.
+    #[must_use]
+    pub fn with_keys(mut self, keys: Arc<dyn FieldKeys>) -> Self {
+        self.keys = Some(keys);
+        self
+    }
+
+    /// The tables with what runs the behaviors of the tables that compose
+    /// them.
+    #[must_use]
+    pub fn with_rules(mut self, rules: Arc<PoolRules>) -> Self {
+        self.rules = Some(rules);
+        self
+    }
+
+    /// The pool the tables are reached through.
+    pub fn pool(&self) -> &deadpool_postgres::Pool {
+        &self.pool
+    }
+
+    /// Runs `operation` for `principal` in one transaction of the pool,
+    /// which commits when the operation answers and rolls back when it
+    /// refuses.
+    pub async fn serve(
+        &self,
+        operation: &TableOperation,
+        principal: Option<Principal>,
+        request: TableRequest,
+    ) -> Result<TableOutcome, ApiError> {
+        let unreachable = |err: &dyn std::error::Error| {
+            ApiError::service_unavailable(format!("the database is unreachable: {err}"))
+        };
+        let mut client = self.pool.get().await.map_err(|err| unreachable(&err))?;
+        let transaction = client
+            .transaction()
+            .await
+            .map_err(|err| unreachable(&err))?;
+        let outcome = {
+            let mut repositories = Repositories::new(&transaction, (self.definition)()?)?
+                .acting(routes::acting(principal.as_ref()));
+            if let Some(keys) = self.keys.as_deref() {
+                repositories = repositories.with_keys(keys);
+            }
+            if let Some(rules) = self.rules.as_deref() {
+                repositories = repositories.with_rules(rules);
+            }
+            repositories
+                .table_operation(operation, principal.as_ref(), &request)
+                .await?
+        };
+        transaction
+            .commit()
+            .await
+            .map_err(|err| ApiError::internal(format!("commit: {}", chain(&err))))?;
+        Ok(outcome)
     }
 }
 

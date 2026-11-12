@@ -435,14 +435,14 @@ func (o *APIOutput) DepsExports() string {
 // Rust types as database_types: for its workers' messages and queues,
 // a behavior worker's among them (D65, D103).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0)
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
 // Rust types for an API with workers or derivers, nil without one or when
 // the crate depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if (!o.HasDatabaseTypes() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
+	if o.Deps == nil || (!o.HasDatabaseTypes() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
@@ -451,6 +451,18 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 		}
 	}
 	return &DependencyCrate{Name: o.Deps.DatabaseTypesCrate, Path: o.Deps.DatabaseTypesPath}
+}
+
+// DependencyFeatures is what follows the path of the Cargo.toml dependency
+// on the crate name: for the database's Rust types of an API with table
+// operations, the feature of the database's dialect, which the
+// repositories they are served from are behind (D116); empty for any
+// other crate.
+func (o *APIOutput) DependencyFeatures(name string) string {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || !o.HasTableOperations() {
+		return ""
+	}
+	return `, features = ["postgres"]`
 }
 
 // SetDeps sets what Deps holds, so the crate writes src/deps.rs, refusing
@@ -489,6 +501,10 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return err
 	}
 	o.Deps = &deps
+	if err := o.checkTableDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
 	return nil
 }
 
@@ -607,7 +623,7 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() {
 		params = append(params, "db: Pool")
 	}
 	return rustFn("    ", "pub fn new", params, "Self")

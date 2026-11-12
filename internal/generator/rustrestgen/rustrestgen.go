@@ -103,6 +103,11 @@ type EndpointInfo struct {
 	// handler runs it through the behaviors' core (src/behaviors.rs), so
 	// no namespace trait has a method for it.
 	Behavior *BehaviorInfo
+
+	// Table is the table operation the endpoint is (D106), nil for every
+	// other: the router's handler serves it from the table's repository
+	// (src/tables.rs), and its namespace's trait has no method for it.
+	Table *TableInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -802,7 +807,14 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if info.Behavior, err = behaviorInfo(endpoint, info); err != nil {
 			return nil, err
 		}
+		// A table operation's handler serves it from the table's
+		// repository (D106): its namespace has no method for it either.
 		if info.Behavior == nil {
+			if info.Table, err = tableInfo(schema, endpoint, info); err != nil {
+				return nil, err
+			}
+		}
+		if !info.RouterServed() {
 			namespaceSet[info.Namespace] = struct{}{}
 		}
 		output.Endpoints = append(output.Endpoints, info)
@@ -977,6 +989,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"deps.tmpl", "deps.rs", output.Deps != nil},
 		{"apps.tmpl", "apps.rs", output.HasApps()},
 		{"behaviors.tmpl", "behaviors.rs", output.HasBehaviors()},
+		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {

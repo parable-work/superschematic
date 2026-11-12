@@ -74,8 +74,8 @@ pub struct CoverCreate {
     #[serde(rename = "refId")]
     pub ref_id: IdentityUUID,
     /// True when the row deletes the entity on its ref.
-    #[serde(rename = "deletedOnRef")]
-    pub deleted_on_ref: bool,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
 }
 
 /// What an update of a row of `Cover` sets: each member that is `Some`.
@@ -169,8 +169,8 @@ pub struct IngredientCreate {
     #[serde(rename = "refId")]
     pub ref_id: IdentityUUID,
     /// True when the row deletes the entity on its ref.
-    #[serde(rename = "deletedOnRef")]
-    pub deleted_on_ref: bool,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
 }
 
 /// What an update of a row of `Ingredient` sets: each member that is `Some`.
@@ -270,8 +270,8 @@ pub struct NoteCreate {
     #[serde(rename = "refId")]
     pub ref_id: IdentityUUID,
     /// True when the row deletes the entity on its ref.
-    #[serde(rename = "deletedOnRef")]
-    pub deleted_on_ref: bool,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
 }
 
 /// What an update of a row of `Note` sets: each member that is `Some`.
@@ -975,8 +975,8 @@ pub struct StepCreate {
     #[serde(rename = "refId")]
     pub ref_id: IdentityUUID,
     /// True when the row deletes the entity on its ref.
-    #[serde(rename = "deletedOnRef")]
-    pub deleted_on_ref: bool,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
 }
 
 /// What an update of a row of `Step` sets: each member that is `Some`.
@@ -1119,8 +1119,8 @@ pub struct TastingCreate {
     #[serde(rename = "refId")]
     pub ref_id: IdentityUUID,
     /// True when the row deletes the entity on its ref.
-    #[serde(rename = "deletedOnRef")]
-    pub deleted_on_ref: bool,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
 }
 
 /// What an update of a row of `Tasting` sets: each member that is `Some`.
@@ -1251,8 +1251,8 @@ pub struct UtensilCreate {
     #[serde(rename = "refId")]
     pub ref_id: IdentityUUID,
     /// True when the row deletes the entity on its ref.
-    #[serde(rename = "deletedOnRef")]
-    pub deleted_on_ref: bool,
+    #[serde(rename = "deletedOnRef", skip_serializing_if = "Option::is_none")]
+    pub deleted_on_ref: Option<bool>,
 }
 
 /// What an update of a row of `Utensil` sets: each member that is `Some`.
@@ -1439,6 +1439,7 @@ pub const POSTGRES: &str = r#"{
           "field": "deletedOnRef",
           "qualified": "cover.deleted_on_ref",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",
@@ -1653,6 +1654,7 @@ pub const POSTGRES: &str = r#"{
           "field": "deletedOnRef",
           "qualified": "ingredient.deleted_on_ref",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",
@@ -1851,6 +1853,7 @@ pub const POSTGRES: &str = r#"{
           "field": "deletedOnRef",
           "qualified": "note.deleted_on_ref",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",
@@ -3474,6 +3477,7 @@ pub const POSTGRES: &str = r#"{
           "field": "deletedOnRef",
           "qualified": "step.deleted_on_ref",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",
@@ -3845,6 +3849,7 @@ pub const POSTGRES: &str = r#"{
           "field": "deletedOnRef",
           "qualified": "tasting.deleted_on_ref",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",
@@ -4027,6 +4032,7 @@ pub const POSTGRES: &str = r#"{
           "field": "deletedOnRef",
           "qualified": "utensil.deleted_on_ref",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",

@@ -638,7 +638,6 @@ func (r run) generateAPI() error {
 		}
 		return r.generateGoAPI()
 	case APILanguageRust:
-		r.warnTableOperationsUnserved("Rust")
 		return r.generateRustAPI()
 	case APILanguageTypeScript:
 		return r.generateTypeScriptAPI()
@@ -1721,7 +1720,7 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 // no database here.
 func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	if len(r.Schema.Workers) == 0 && len(r.Schema.Derivers) == 0 {
-		return nil
+		return r.rustTableTypes(db, apiDir, deps)
 	}
 	schema, err := r.LoadDependency(db)
 	if err != nil {
@@ -1741,6 +1740,38 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 			}
 			if !outputs.TypesEnabled(LangRust) {
 				return fmt.Errorf("generator: the Rust workers of %s handle the queues of %s, whose Rust types declare the messages and hold the queues' descriptors, and %s generates none; enable outputs.types.%s in %s's config (D65)", r.Config.Name, db, db, LangRust, db)
+			}
+		}
+	}
+	path, err := naming.RelPath(apiDir, TypesDir(r.Options.OutputRoot, LangRust, db))
+	if err != nil {
+		return fmt.Errorf("generator: the Rust types of %s from %s: %w", db, r.Config.Name, err)
+	}
+	deps.DatabaseTypesCrate = r.Options.Naming.RustTypesCrate(db)
+	deps.DatabaseTypesPath = path
+	return nil
+}
+
+// rustTableTypes sets the Rust types of db, the database of the API whose
+// crate is at apiDir, in deps when the API has an operation marked
+// @tableOperation (D106, D116): its handlers are served from the tables'
+// repositories, which the types crate's src/orm.rs holds. The Rust types
+// of db must be generated.
+func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
+	if !r.Schema.HasTableOperations() {
+		return nil
+	}
+	if r.Options.DependencyConfig != nil {
+		if cfg, ok := r.Options.DependencyConfig(db); ok {
+			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+			if err != nil {
+				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) {
+				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from the repositories of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D106, D116)", r.Config.Name, db, db, LangRust, db)
+			}
+			if first := outputs.SQLDialects()[0]; first != registry.SQLDialectPostgres {
+				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from %s, whose DB service lists %s first; its entrypoint opens a Postgres pool alone so far, so list postgres first in %s's outputs.sql.dialects (D116)", r.Config.Name, db, first, db)
 			}
 		}
 	}

@@ -72,10 +72,10 @@ pub struct TenantCreate {
     pub email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<TenantStatus>,
-    #[serde(rename = "isActive")]
-    pub is_active: bool,
-    #[serde(rename = "seatCount")]
-    pub seat_count: f64,
+    #[serde(rename = "isActive", skip_serializing_if = "Option::is_none")]
+    pub is_active: Option<bool>,
+    #[serde(rename = "seatCount", skip_serializing_if = "Option::is_none")]
+    pub seat_count: Option<f64>,
     pub metadata: GenericJSON,
 }
 
@@ -370,6 +370,7 @@ pub const POSTGRES: &str = r#"{
           "column": "status",
           "field": "status",
           "qualified": "tenant.status",
+          "auto": true,
           "required": true,
           "default": "active",
           "filter": [
@@ -387,6 +388,7 @@ pub const POSTGRES: &str = r#"{
           "field": "isActive",
           "qualified": "tenant.is_active",
           "boolean": true,
+          "auto": true,
           "required": true,
           "filter": [
             "eq",
@@ -401,6 +403,7 @@ pub const POSTGRES: &str = r#"{
           "column": "seat_count",
           "field": "seatCount",
           "qualified": "tenant.seat_count",
+          "auto": true,
           "required": true,
           "filter": [
             "eq",

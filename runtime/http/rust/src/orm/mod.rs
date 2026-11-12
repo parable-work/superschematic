@@ -25,9 +25,12 @@
 mod plan;
 #[cfg(feature = "postgres")]
 pub mod postgres;
+pub mod routes;
 mod run;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
+#[cfg(feature = "sqlite")]
+mod sqlite_file;
 
 use std::collections::BTreeMap;
 use std::fmt;

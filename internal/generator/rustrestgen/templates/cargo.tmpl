@@ -47,10 +47,10 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- end }}
 {{- end }}
 {{- range .DependencyCrates }}
-{{ .Name }} = { path = "{{ .Path }}" }
+{{ .Name }} = { path = "{{ .Path }}"{{ $.DependencyFeatures .Name }} }
 {{- end }}
 {{- with .DatabaseTypesDependency }}
-{{ .Name }} = { path = "{{ .Path }}" }
+{{ .Name }} = { path = "{{ .Path }}"{{ $.DependencyFeatures .Name }} }
 {{- end }}
 {{- with .Deps }}
 {{- range .Calls }}

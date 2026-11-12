@@ -186,6 +186,10 @@ required-features = ["postgres"]
 
 # The queue client and the worker loop on a SQLite file (D53, amended).
 [[test]]
+name = "orm_sqlite_file"
+required-features = ["sqlite"]
+
+[[test]]
 name = "queue_sqlite"
 required-features = ["sqlite"]
 

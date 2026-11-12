@@ -468,6 +468,11 @@ type RustAPI struct {
 	// router's handlers run each through the behaviors' core.
 	Behaviors bool
 
+	// Tables is true when the API serves table operations (D106):
+	// Implementations::new then takes Database's pool too, from whose
+	// repositories the router's handlers serve each.
+	Tables bool
+
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
 	Engine *RustEngine
@@ -900,6 +905,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose behavior operations run on %s (D103), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.BehaviorDatabase())
 			}
 			api.Behaviors = true
+		}
+		if o.HasTableOperations() {
+			if api.Database == nil || api.Database.Service != o.TableDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose table operations are served from %s (D106), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.TableDatabase())
+			}
+			api.Tables = true
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
@@ -1756,7 +1767,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 		}
 		args = append(args, authenticator)
 	}
-	if a.Behaviors {
+	if a.Behaviors || a.Tables {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	return args
