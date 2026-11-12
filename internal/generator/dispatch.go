@@ -405,6 +405,7 @@ func (r run) generateRustTypes() error {
 		Registry:         r.Registry,
 		EngineDocument:   engineDocument,
 		SQLite:           r.Outputs.SQLDialect(registry.SQLDialectSQLite),
+		Actor:            r.ormActor(),
 		Clock:            r.Options.Clock,
 	})
 	if err != nil {

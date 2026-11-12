@@ -35,3 +35,16 @@ serde = { version = "1.0.228", features = ["derive"] }
 {{.Naming.VersionGraphRustCrate}} = "0.0.0"
 {{- end}}
 {{- end}}
+{{- if .ORM}}
+# The repositories (D79, D116): src/orm.rs runs each table through the HTTP
+# runtime's orm module, on the dialect each feature names.
+{{- if .HTTPRuntimeDepPath}}
+{{.Naming.HTTPRuntimeRustCrate}} = { path = "{{.HTTPRuntimeDepPath}}", default-features = false, optional = true }
+{{- else}}
+{{.Naming.HTTPRuntimeRustCrate}} = { version = "0.0.0", default-features = false, optional = true }
+{{- end}}
+
+[features]
+postgres = ["dep:{{.Naming.HTTPRuntimeRustCrate}}", "{{.Naming.HTTPRuntimeRustCrate}}/postgres"]
+sqlite = ["dep:{{.Naming.HTTPRuntimeRustCrate}}", "{{.Naming.HTTPRuntimeRustCrate}}/sqlite"]
+{{- end}}

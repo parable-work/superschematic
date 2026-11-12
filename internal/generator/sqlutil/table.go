@@ -590,6 +590,22 @@ type UniqueKey struct {
 	// is the row an upsert that sets no field leaves as it was and reads
 	// back (D105). Empty for a key over columns, whose Rows reads it.
 	Held string
+
+	// SQLiteRows and SQLiteHeld are Rows and Held on SQLite (D116), where a
+	// repository also reads by them, before an upsert, whether a row holds
+	// the key, since its statement cannot say which rows it inserted.
+	// SQLite reads a list of row values after IN as VALUES, and names the
+	// columns of a row of parameters in a SELECT, with no cast: a value
+	// there keeps the type it was bound with.
+	SQLiteRows string
+	SQLiteHeld string
+}
+
+// SQLite is the key as a repository on SQLite reads it: Rows and Held are
+// SQLiteRows and SQLiteHeld.
+func (k UniqueKey) SQLite() UniqueKey {
+	k.Rows, k.Held = k.SQLiteRows, k.SQLiteHeld
+	return k
 }
 
 // Reference is a to-one relation of another table, Source, through its
@@ -940,7 +956,7 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 		}
 		seen[key.Name] = true
 		deletedAt := false
-		var casts []string
+		var casts, named []string
 		for _, field := range fields {
 			column := table.columnOfKey(field)
 			if column == nil {
@@ -949,6 +965,7 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 			key.Columns = append(key.Columns, column.Name)
 			deletedAt = deletedAt || column.Audit == AuditDeletedAt
 			casts = append(casts, fmt.Sprintf("CAST($%d AS %s)", len(casts)+1, column.SQLType()))
+			named = append(named, fmt.Sprintf("?%d AS %s", len(named)+1, QuoteIdentifier(column.Name)))
 		}
 		quoted := make([]string, len(key.Columns))
 		for i, column := range key.Columns {
@@ -960,15 +977,18 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 		// alone (IndexPredicate).
 		key.Conflict = "(" + strings.Join(quoted, ", ") + ")"
 		key.Rows = "SELECT " + table.columnList() + " FROM " + table.Quoted + " WHERE " + key.Conflict + " IN (%s)"
+		key.SQLiteRows = "SELECT " + table.columnList() + " FROM " + table.Quoted + " WHERE " + key.Conflict + " IN (VALUES %s)"
 		if idx != nil {
 			if idx.Expression != "" {
 				key.Conflict = "((" + idx.Expression + "))"
-				key.Expression, key.Rows = true, ""
+				key.Expression, key.Rows, key.SQLiteRows = true, "", ""
 				// The expression reads the key's columns (ir.IndexDef), so
 				// over a row of the input's values under the table's name
 				// and theirs it is the input's value of the key.
 				key.Held = "SELECT " + table.columnList() + " FROM " + table.Quoted +
 					" WHERE (" + idx.Expression + ") = (SELECT (" + idx.Expression + ") FROM (VALUES (" + strings.Join(casts, ", ") + ")) AS " + table.Quoted + " (" + strings.Join(quoted, ", ") + "))"
+				key.SQLiteHeld = "SELECT " + table.columnList() + " FROM " + table.Quoted +
+					" WHERE (" + idx.Expression + ") = (SELECT (" + idx.Expression + ") FROM (SELECT " + strings.Join(named, ", ") + ") AS " + table.Quoted + ")"
 			}
 			live := ""
 			if table.SoftDelete && !deletedAt {
@@ -981,6 +1001,12 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 				}
 				if key.Held != "" {
 					key.Held += " AND (" + predicate + ")"
+				}
+				if key.SQLiteRows != "" {
+					key.SQLiteRows += " AND (" + predicate + ")"
+				}
+				if key.SQLiteHeld != "" {
+					key.SQLiteHeld += " AND (" + predicate + ")"
 				}
 			}
 		}

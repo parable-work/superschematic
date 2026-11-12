@@ -59,6 +59,10 @@ pub mod queue;
 mod ratelimit;
 mod request_id;
 mod response;
+// A database's repositories (D79, D116), with the `postgres` or `sqlite`
+// feature.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod orm;
 // The words, LIKE patterns and case folding of a SearchQuery (D62).
 pub mod search;
 mod service_auth;

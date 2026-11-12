@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -269,6 +270,16 @@ type ModuleOutput struct {
 	// names the crate's version instead.
 	SchemaRuntimeDepPath string
 
+	// ORM is the schema's tables as src/orm.rs types and describes them
+	// (D79, D116); nil for a schema with no table.
+	ORM *ORMInfo
+
+	// HTTPRuntimeDepPath is the Cargo.toml path entry for the HTTP runtime
+	// crate (Naming.HTTPRuntimeRustCrate), whose orm module src/orm.rs
+	// runs its tables through, relative to the output directory, set by
+	// SetHTTPRuntimePath. Empty names the crate's version instead.
+	HTTPRuntimeDepPath string
+
 	// Behaviors are the types that compose behaviors, each with its
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as src/behaviors.rs. Nil when no type composes one.
@@ -311,8 +322,13 @@ type Options struct {
 
 	// SQLite is whether the DB service lists the sqlite dialect, whose
 	// statements each queue's descriptor in queues.rs then carries beside
-	// Postgres's (D53, amended).
+	// Postgres's (D53, amended), and each table's definition in orm.rs
+	// (D116).
 	SQLite bool
+
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87), which orm.rs's definitions carry.
+	Actor sqlutil.Actor
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -443,6 +459,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if opts.EngineDocument != nil {
 		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
 	}
+	if output.ORM, err = rustORM(schema, opts, output); err != nil {
+		return nil, err
+	}
 	if output.Queues, err = RustQueues(schema, opts.SQLite); err != nil {
 		return nil, err
 	}
@@ -487,14 +506,34 @@ func SetSchemaRuntimePath(output *ModuleOutput, paths naming.LocalPaths, outputD
 	return nil
 }
 
+// SetHTTPRuntimePath points the HTTP runtime crate the repositories run
+// through at its directory under paths, relative to outputDir.
+func SetHTTPRuntimePath(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	rel, err := naming.RelPath(outputDir, paths.HTTPRuntimeRust)
+	if err != nil {
+		return fmt.Errorf("http runtime crate path: %w", err)
+	}
+	output.HTTPRuntimeDepPath = rel
+	return nil
+}
+
+// HTTPRuntimeIdent is the HTTP runtime crate as a Rust path names it.
+func (o *ModuleOutput) HTTPRuntimeIdent() string {
+	return strings.ReplaceAll(o.Naming.HTTPRuntimeRustCrate, "-", "_")
+}
+
 // SetLocalPaths points every runtime crate the types crate depends on at
-// its directory under paths: the scalar library, the version graph's engine
-// and the schema runtime. An unset path names the crate's version instead.
+// its directory under paths: the scalar library, the version graph's
+// engine, the schema runtime and the HTTP runtime. An unset path names the
+// crate's version instead.
 func SetLocalPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
 	if err := SetScalarLibPath(output, paths, outputDir); err != nil {
 		return err
 	}
 	if err := SetVersionGraphPath(output, paths, outputDir); err != nil {
+		return err
+	}
+	if err := SetHTTPRuntimePath(output, paths, outputDir); err != nil {
 		return err
 	}
 	return SetSchemaRuntimePath(output, paths, outputDir)
