@@ -13,7 +13,9 @@ import (
 // so the servers route it to their identity runtime.
 
 // RouteTypes are the types and the enum the route expansion can add, in
-// the order it adds them. An API with a route set reserves every name.
+// the order it adds them. An API with a route set reserves every name. The
+// types of a set with apiKeys (ir.IdentityAPIKeyTypes, D114) are reserved
+// only in an API one of whose sets has it.
 var RouteTypes = []string{
 	ir.IdentitySessionTransportEnum,
 	ir.IdentityLoginInputType,
@@ -102,7 +104,8 @@ func newRouteExpansion(api, db *ir.Schema, prefix string) *routeExpansion {
 
 // sessionOperations returns the operations of @userSessions under its
 // path: login, logout, me, capabilities and changePassword, me and
-// capabilities alone without the login, and register with Register.
+// capabilities alone without the login, register with Register, and
+// createApiKey, listApiKeys and revokeApiKey with APIKeys (D114).
 func (e *routeExpansion) sessionOperations(cfg *ir.UserSessionsConfig) []*ir.FieldDef {
 	path := cfg.UserSessionsPath()
 	var ops []*ir.FieldDef
@@ -148,11 +151,30 @@ func (e *routeExpansion) sessionOperations(cfg *ir.UserSessionsConfig) []*ir.Fie
 		hiddenTool(register)
 		ops = append(ops, register)
 	}
+	if cfg.APIKeys && !cfg.NoLogin {
+		keys := path + "/keys"
+		create := e.operation(ir.IdentityOpCreateAPIKey, "POST", keys, ir.IdentityCreatedAPIKeyType,
+			"Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key.")
+		e.input(create, ir.IdentityCreateAPIKeyInputType)
+		create.Auth = true
+		rateLimited(create, ir.IdentityCreateAPIKeyRateLimit)
+		create.MCP = &ir.OperationMCP{Hidden: true, HiddenReason: ir.IdentityAPIKeyToolReason}
+		list := e.operation(ir.IdentityOpListAPIKeys, "GET", keys, ir.IdentityAPIKeyType,
+			"Lists the caller's API keys that are not revoked, newest first, each without its token.")
+		list.TypeRef.IsArray = true
+		list.Auth = true
+		revoke := e.operation(ir.IdentityOpRevokeAPIKey, "DELETE", keys+"/{id}", "boolean",
+			"Revokes an API key of the caller's, which authenticates no request after. It answers true.")
+		e.pathArgument(revoke, ir.IdentityIDArgument, ir.IdentityAPIKeyKeyScalar)
+		revoke.Auth = true
+		ops = append(ops, create, list, revoke)
+	}
 	return ops
 }
 
 // administrationOperations returns the operations of @userAdministration
-// under its path, each needing one of the four permissions.
+// under its path, each needing one of the four permissions, with
+// listUserApiKeys and revokeUserApiKey when the set has APIKeys (D114).
 func (e *routeExpansion) administrationOperations(cfg *ir.UserAdministrationConfig) []*ir.FieldDef {
 	path := cfg.UserAdministrationPath()
 	users, user, roles, role := path+"/users", path+"/users/{id}", path+"/roles", path+"/roles/{id}"
@@ -212,10 +234,25 @@ func (e *routeExpansion) administrationOperations(cfg *ir.UserAdministrationConf
 	e.permission(ir.IdentityPermissionUsersWrite, createUser, disableUser, enableUser, approveUser, setPassword)
 	e.permission(ir.IdentityPermissionRolesRead, listRoles)
 	e.permission(ir.IdentityPermissionRolesWrite, createRole, updateRole, deleteRole, grantRole, revokeRole)
-	return []*ir.FieldDef{
+	ops := []*ir.FieldDef{
 		createUser, listUsers, getUser, disableUser, enableUser, approveUser, setPassword,
 		listRoles, createRole, updateRole, deleteRole, grantRole, revokeRole,
 	}
+	if cfg.APIKeys {
+		keys := user + "/keys"
+		listKeys := e.operation(ir.IdentityOpListUserAPIKeys, "GET", keys, ir.IdentityAPIKeyType,
+			"Lists a user's API keys that are not revoked, newest first, each without its token.")
+		listKeys.TypeRef.IsArray = true
+		e.pathArgument(listKeys, ir.IdentityIDArgument, e.userKey)
+		revokeKey := e.operation(ir.IdentityOpRevokeUserAPIKey, "DELETE", keys+"/{keyId}", "boolean",
+			"Revokes an API key of a user's, which authenticates no request after. It answers true.")
+		e.pathArgument(revokeKey, ir.IdentityIDArgument, e.userKey)
+		e.pathArgument(revokeKey, ir.IdentityKeyIDArgument, ir.IdentityAPIKeyKeyScalar)
+		e.permission(ir.IdentityPermissionUsersRead, listKeys)
+		e.permission(ir.IdentityPermissionUsersWrite, revokeKey)
+		ops = append(ops, listKeys, revokeKey)
+	}
+	return ops
 }
 
 // operation returns the operation named name, at method and route, with
@@ -424,8 +461,42 @@ func (e *routeExpansion) typeDef(name string) *ir.TypeDef {
 	case ir.IdentityRoleType:
 		td = output(name, "A role and the permissions it grants.",
 			id(e.roleKey), field("name", e.roleName, true, ""), permissions("The permissions the role grants."))
+	case ir.IdentityCreateAPIKeyInputType:
+		keyName := field("name", "string", true, "What the caller calls the key, 1 to 100 characters.")
+		minLength, maxLength := 1, ir.IdentityAPIKeyNameMaxLength
+		keyName.ValidateMinLength, keyName.ValidateMaxLength = &minLength, &maxLength
+		expires := field("expiresInSeconds", "Generic.Int64", false, "How long the key lives, in seconds, from 1 to the longest the API's identity config allows; that longest when absent.")
+		subset := field("permissions", "string", false, "The permissions the key holds, each of which the caller holds; every permission the caller holds, as their roles change, when absent.")
+		subset.TypeRef.IsArray = true
+		td = input(name, "What createApiKey takes: the key's name, how long it lives, and the subset of the caller's permissions it holds.",
+			keyName, expires, subset)
+	case ir.IdentityAPIKeyType:
+		td = output(name, "An API key as its user and an administrator see it: never its token.",
+			apiKeyFields()...)
+	case ir.IdentityCreatedAPIKeyType:
+		token := field("token", "string", true, "The key's token, sent as Authorization: Bearer. It is answered this once; the database keeps its hash.")
+		token.Secret = true
+		fields := apiKeyFields()
+		// A key just made has authenticated nothing: no lastUsedAt.
+		fields = append(fields[:len(fields)-1], token)
+		td = output(name, "An API key just made, with its token, which is answered once.", fields...)
 	}
 	return td
+}
+
+// apiKeyFields are an ApiKey's fields (D114): its id, its name, the
+// permissions it was made with, and its times, lastUsedAt last.
+func apiKeyFields() []*ir.FieldDef {
+	subset := field("permissions", "string", false, "The permissions the key was made with, each held while its user holds it; absent for a key that holds every permission of its user.")
+	subset.TypeRef.IsArray = true
+	return []*ir.FieldDef{
+		field("id", ir.IdentityAPIKeyKeyScalar, true, ""),
+		field("name", "string", true, "What its user calls the key."),
+		subset,
+		field("createdAt", "Temporal.DateTime", true, "When the key was made."),
+		field("expiresAt", "Temporal.DateTime", true, "When the key ends."),
+		field("lastUsedAt", "Temporal.DateTime", false, "When the key last authenticated a request; absent until it has."),
+	}
 }
 
 func input(name, comment string, fields ...*ir.FieldDef) *ir.TypeDef {

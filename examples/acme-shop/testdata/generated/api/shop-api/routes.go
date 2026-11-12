@@ -404,7 +404,7 @@ func createProductListProductsHandler(impl ProductImplementation) gohttp.Handler
 		// whose refusal is the 400 every server answers at filter[field].
 		// Each value is then decoded as an item of a query list of its
 		// field's type.
-		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "inStock", Operators: []filterparse.Operator{"eq", "in"}}}})
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "inStock", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}}})
 		if !ok {
 			return
 		}

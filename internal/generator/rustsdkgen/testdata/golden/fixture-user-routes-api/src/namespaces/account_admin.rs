@@ -186,6 +186,23 @@ impl AccountAdminNamespace {
             .request_json("GET", path, &query_params, None, options)
             .await
     }
+    /// Lists a user's API keys that are not revoked, newest first, each without its token.
+    ///
+    /// Requires authentication.
+    ///
+    /// - `options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_hook`: optional request builder hook.
+    pub async fn list_user_api_keys(
+        &self,
+        id: types::IdentityUUID,
+        options: Option<&runtime::RequestOptions>,
+    ) -> Result<Vec<types::ApiKey>, SDKError> {
+        let path = &format!("/api/auth/admin/users/{}/keys", runtime::path_segment(&id));
+        let query_params: Vec<(String, String)> = Vec::new();
+        self.client
+            .request_json("GET", path, &query_params, None, options)
+            .await
+    }
     /// Lists the users and the roles each holds.
     ///
     /// Requires authentication.
@@ -220,6 +237,24 @@ impl AccountAdminNamespace {
         options: Option<&runtime::RequestOptions>,
     ) -> Result<types::IdentityUser, SDKError> {
         let path = &format!("/api/auth/admin/users/{}/roles/{}", runtime::path_segment(&id), runtime::path_segment(&role_id));
+        let query_params: Vec<(String, String)> = Vec::new();
+        self.client
+            .request_json("DELETE", path, &query_params, None, options)
+            .await
+    }
+    /// Revokes an API key of a user's, which authenticates no request after. It answers true.
+    ///
+    /// Requires authentication.
+    ///
+    /// - `options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_hook`: optional request builder hook.
+    pub async fn revoke_user_api_key(
+        &self,
+        id: types::IdentityUUID,
+        key_id: types::IdentityUUID,
+        options: Option<&runtime::RequestOptions>,
+    ) -> Result<bool, SDKError> {
+        let path = &format!("/api/auth/admin/users/{}/keys/{}", runtime::path_segment(&id), runtime::path_segment(&key_id));
         let query_params: Vec<(String, String)> = Vec::new();
         self.client
             .request_json("DELETE", path, &query_params, None, options)

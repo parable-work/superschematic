@@ -2,6 +2,7 @@ package apigen_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,8 +64,11 @@ func generateUserRoutesAPI(t *testing.T, schema *ir.Schema) *apigen.APIOutput {
 // and the tool manifest read them.
 func TestUserRoutesAreEndpoints(t *testing.T) {
 	output := generateUserRoutesAPI(t, loadUserRoutesAPI(t))
-	if len(output.Endpoints) != 20 {
-		t.Fatalf("got %d endpoints, want 20", len(output.Endpoints))
+	// The six session routes and the three API key routes of Account, the
+	// thirteen administration routes and the two API key routes of
+	// AccountAdmin (D114), and greet.
+	if len(output.Endpoints) != 25 {
+		t.Fatalf("got %d endpoints, want 25", len(output.Endpoints))
 	}
 	byName := map[string]apigen.EndpointInfo{}
 	for _, endpoint := range output.Endpoints {
@@ -100,6 +104,51 @@ func TestUserRoutesAreEndpoints(t *testing.T) {
 	if list := byName["listUsers"]; len(list.ScalarArgs) != 1 || list.ScalarArgs[0].Name != "pending" || list.ArgumentsInBody() {
 		t.Errorf("listUsers' arguments = %+v, want pending in the query", list.ScalarArgs)
 	}
+	// The API key routes (D114): a signed-in user's own under auth/keys,
+	// createApiKey rate-limited and hidden as a tool for the credential it
+	// answers, and an administrator's under a user, behind users.read and
+	// users.write.
+	create := byName["createApiKey"]
+	if create.Path != "/api/auth/keys" || create.Method != "POST" || create.PublicRoute || !create.RequiresAuth ||
+		create.InputType != "CreateApiKeyInput" || create.OutputType != "CreatedApiKey" || create.RateLimit == nil || *create.RateLimit != ir.IdentityCreateAPIKeyRateLimit ||
+		len(create.RequiredPerms) != 0 || len(create.PathParams) != 0 ||
+		create.MCP == nil || !create.MCP.Hidden || create.MCP.HiddenReason != ir.IdentityAPIKeyToolReason {
+		t.Errorf("createApiKey = %+v, mcp %+v", create, create.MCP)
+	}
+	if list := byName["listApiKeys"]; list.Path != "/api/auth/keys" || list.Method != "GET" || !list.RequiresAuth ||
+		list.OutputType != "ApiKey" || !list.OutputIsArray || list.RateLimit != nil || len(list.RequiredPerms) != 0 || list.MCP != nil {
+		t.Errorf("listApiKeys = %+v", list)
+	}
+	if revoke := byName["revokeApiKey"]; revoke.Path != "/api/auth/keys/{id}" || revoke.Method != "DELETE" || !revoke.RequiresAuth ||
+		revoke.OutputType != "boolean" || revoke.RateLimit != nil || len(revoke.RequiredPerms) != 0 || revoke.MCP != nil ||
+		len(revoke.PathParams) != 1 || revoke.PathParams[0].Name != ir.IdentityIDArgument {
+		t.Errorf("revokeApiKey = %+v", revoke)
+	}
+	if list := byName["listUserApiKeys"]; list.Path != "/api/auth/admin/users/{id}/keys" || list.Method != "GET" ||
+		!slices.Equal(list.RequiredPerms, []string{"identity.users.read"}) || list.OutputType != "ApiKey" || !list.OutputIsArray || list.MCP != nil ||
+		len(list.PathParams) != 1 || list.PathParams[0].Name != ir.IdentityIDArgument {
+		t.Errorf("listUserApiKeys = %+v", list)
+	}
+	if revoke := byName["revokeUserApiKey"]; revoke.Path != "/api/auth/admin/users/{id}/keys/{keyId}" || revoke.Method != "DELETE" ||
+		!slices.Equal(revoke.RequiredPerms, []string{"identity.users.write"}) || revoke.OutputType != "boolean" || revoke.MCP != nil ||
+		len(revoke.PathParams) != 2 || revoke.PathParams[0].Name != ir.IdentityIDArgument || revoke.PathParams[1].Name != ir.IdentityKeyIDArgument {
+		t.Errorf("revokeUserApiKey = %+v", revoke)
+	}
+	// The operations that carry a password are hidden with that reason, and
+	// createApiKey with its own: the six hidden tools of the two sets.
+	hidden := map[string]string{}
+	for _, endpoint := range output.Endpoints {
+		if endpoint.MCP != nil && endpoint.MCP.Hidden {
+			hidden[endpoint.Name] = endpoint.MCP.HiddenReason
+		}
+	}
+	if want := map[string]string{
+		"login": ir.IdentityPasswordToolReason, "register": ir.IdentityPasswordToolReason, "changePassword": ir.IdentityPasswordToolReason,
+		"createUser": ir.IdentityPasswordToolReason, "setUserPassword": ir.IdentityPasswordToolReason,
+		"createApiKey": ir.IdentityAPIKeyToolReason,
+	}; !maps.Equal(hidden, want) {
+		t.Errorf("hidden tools = %v, want %v", hidden, want)
+	}
 	if reg := output.Registration; reg == nil || !reg.Approval() || !slices.Equal(reg.DefaultRoles, []string{"member"}) || reg.FirstUser == nil {
 		t.Errorf("Registration = %+v, want approval with member and a first administrator", output.Registration)
 	}
@@ -126,7 +175,7 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if len(view.Endpoints) != 1 || view.Endpoints[0].Name != "greet" {
 		t.Fatalf("view endpoints = %+v", view.Endpoints)
 	}
-	if len(view.IdentityEndpoints) != 19 || len(view.RoutedEndpoints()) != 20 {
+	if len(view.IdentityEndpoints) != 24 || len(view.RoutedEndpoints()) != 25 {
 		t.Fatalf("view: %d identity endpoints, %d routed", len(view.IdentityEndpoints), len(view.RoutedEndpoints()))
 	}
 	// The administration routes' permission check is the identity
@@ -138,7 +187,7 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if !view.Auth.Identity || !view.AuthWired() || view.IsPublic {
 		t.Errorf("view: Auth %+v, AuthWired %v, IsPublic %v; want the identity wiring without public", view.Auth, view.AuthWired(), view.IsPublic)
 	}
-	if view.OpenAPISpecRaw != output.OpenAPISpecRaw || len(output.Endpoints) != 20 {
+	if view.OpenAPISpecRaw != output.OpenAPISpecRaw || len(output.Endpoints) != 25 {
 		t.Error("the view changed the output, or its OpenAPI document")
 	}
 	plain := generateServiceAuthFixtureAPI(t)
@@ -155,8 +204,8 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(alone.Endpoints) != 0 || !alone.HasAuth || alone.HasPermissionEndpoints || !alone.RoutesNeedTime {
-		t.Errorf("the route sets alone: %d endpoints, HasAuth %v, HasPermissionEndpoints %v, RoutesNeedTime %v", len(alone.Endpoints), alone.HasAuth, alone.HasPermissionEndpoints, alone.RoutesNeedTime)
+	if len(alone.Endpoints) != 0 || len(alone.IdentityEndpoints) != 24 || !alone.HasAuth || alone.HasPermissionEndpoints || !alone.RoutesNeedTime {
+		t.Errorf("the route sets alone: %d endpoints, %d identity endpoints, HasAuth %v, HasPermissionEndpoints %v, RoutesNeedTime %v", len(alone.Endpoints), len(alone.IdentityEndpoints), alone.HasAuth, alone.HasPermissionEndpoints, alone.RoutesNeedTime)
 	}
 }
 
@@ -214,6 +263,17 @@ func TestOpenAPIUserRoutesGolden(t *testing.T) {
 		{"/api/auth/admin/users/{id}/approve", "post", []string{"200", "400", "401", "403", "404", "409", "500"}},
 		{"/api/auth/me", "get", []string{"200", "400", "401", "500"}},
 		{"/api/auth/admin/roles/{id}", "put", []string{"200", "400", "401", "403", "404", "409", "422", "500"}},
+		// logout and changePassword refuse a caller authenticated by an API
+		// key, beside the cross-origin refusal (D114).
+		{"/api/auth/logout", "post", []string{"200", "400", "401", "403", "500"}},
+		{"/api/auth/password", "post", []string{"200", "400", "401", "403", "500"}},
+		// The API key routes: createApiKey answers 422 for a malformed
+		// permission, and a revoke 404 for a key that is not there.
+		{"/api/auth/keys", "post", []string{"200", "400", "401", "403", "422", "500"}},
+		{"/api/auth/keys", "get", []string{"200", "400", "401", "403", "500"}},
+		{"/api/auth/keys/{id}", "delete", []string{"200", "400", "401", "403", "404", "500"}},
+		{"/api/auth/admin/users/{id}/keys", "get", []string{"200", "400", "401", "403", "404", "500"}},
+		{"/api/auth/admin/users/{id}/keys/{keyId}", "delete", []string{"200", "400", "401", "403", "404", "500"}},
 		{"/api/greeting", "get", []string{"200", "400", "500"}},
 	} {
 		if got := statuses(tc.path, tc.method); !slices.Equal(got, tc.want) {
@@ -226,14 +286,46 @@ func TestOpenAPIUserRoutesGolden(t *testing.T) {
 	if got := spec.Paths["/api/auth/login"]["post"].Responses["403"].Description; !strings.Contains(got, ir.IdentityCodePendingApproval+": ") {
 		t.Errorf("login's 403 = %q, want pending_approval among its codes", got)
 	}
-	for path, method := range map[string]string{
-		"/api/auth/login": "post", "/api/auth/logout": "post", "/api/auth/me": "get", "/api/auth/capabilities": "get",
-		"/api/auth/password": "post", "/api/auth/register": "post", "/api/auth/admin/users/{id}/roles/{roleId}": "delete",
-		"/api/greeting": "get",
+	// A caller authenticated by an API key does not act on its own account:
+	// the session routes that change it, and the user's own key routes,
+	// answer it 403 forbidden, a code those routes' 403 did not have before
+	// (D114).
+	for _, route := range [][2]string{
+		{"/api/auth/logout", "post"}, {"/api/auth/password", "post"},
+		{"/api/auth/keys", "post"}, {"/api/auth/keys", "get"}, {"/api/auth/keys/{id}", "delete"},
 	} {
-		if _, ok := spec.Paths[path][method]; !ok {
-			t.Errorf("the OpenAPI document has no %s %s", method, path)
+		if got := spec.Paths[route[0]][route[1]].Responses["403"].Description; !strings.HasPrefix(got, ir.IdentityCodeForbidden+": ") {
+			t.Errorf("%s %s's 403 = %q, want %s first among its codes", route[1], route[0], got, ir.IdentityCodeForbidden)
 		}
+	}
+	if got := spec.Paths["/api/auth/keys"]["post"].Responses["422"].Description; !strings.HasPrefix(got, ir.IdentityCodeInvalidPermission+": ") {
+		t.Errorf("createApiKey's 422 = %q", got)
+	}
+	for _, route := range [][2]string{
+		{"/api/auth/keys/{id}", "delete"}, {"/api/auth/admin/users/{id}/keys", "get"}, {"/api/auth/admin/users/{id}/keys/{keyId}", "delete"},
+	} {
+		if got := spec.Paths[route[0]][route[1]].Responses["404"].Description; !strings.HasPrefix(got, ir.IdentityCodeNotFound+": ") {
+			t.Errorf("%s %s's 404 = %q", route[1], route[0], got)
+		}
+	}
+	for _, route := range [][2]string{
+		{"/api/auth/login", "post"}, {"/api/auth/logout", "post"}, {"/api/auth/me", "get"}, {"/api/auth/capabilities", "get"},
+		{"/api/auth/password", "post"}, {"/api/auth/register", "post"}, {"/api/auth/admin/users/{id}/roles/{roleId}", "delete"},
+		{"/api/auth/keys", "post"}, {"/api/auth/keys", "get"}, {"/api/auth/keys/{id}", "delete"},
+		{"/api/auth/admin/users/{id}/keys", "get"}, {"/api/auth/admin/users/{id}/keys/{keyId}", "delete"},
+		{"/api/greeting", "get"},
+	} {
+		if _, ok := spec.Paths[route[0]][route[1]]; !ok {
+			t.Errorf("the OpenAPI document has no %s %s", route[1], route[0])
+		}
+	}
+	// Each operation is a path's method, once: the 25 endpoints.
+	operations := 0
+	for _, methods := range spec.Paths {
+		operations += len(methods)
+	}
+	if operations != 25 {
+		t.Errorf("the OpenAPI document describes %d operations, want 25", operations)
 	}
 }
 
@@ -258,12 +350,12 @@ func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 		return string(src)
 	}
 	routes, interfaces, identity := read("routes.go"), read("interfaces.go"), read("identity.go")
-	for _, absent := range []string{"Login", "ChangePassword", "AccountAdmin", "LoginInput"} {
+	for _, absent := range []string{"Login", "ChangePassword", "AccountAdmin", "LoginInput", "ApiKey"} {
 		if strings.Contains(interfaces, absent) {
 			t.Errorf("interfaces.go mentions %s, which the identity runtime serves", absent)
 		}
 	}
-	for _, absent := range []string{"createAccountLoginHandler", "Implementations.Account", "LoginInput"} {
+	for _, absent := range []string{"createAccountLoginHandler", "createAccountCreateApiKeyHandler", "Implementations.Account", "LoginInput", "CreateApiKeyInput"} {
 		if strings.Contains(routes, absent) {
 			t.Errorf("routes.go mentions %s, which the identity runtime serves", absent)
 		}
@@ -274,6 +366,13 @@ func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 		`Handler: identityHandler(cfg.Identity, "grantRole"),`,
 		`cfg.Identity.RequirePermissions("identity.roles.write"),`,
 		`runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),`,
+		// The API key routes (D114), createApiKey behind its rate limit and
+		// an administrator's behind users.read and users.write.
+		"\t\t\tPath:    \"/auth/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"createApiKey\"),\n\t\t\tMiddlewares: []runtimerouting.Middleware{\n\t\t\t\truntimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),\n",
+		"\t\t\tPath:    \"/auth/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"listApiKeys\"),\n\t\t},\n",
+		"\t\t\tPath:    \"/auth/keys/{id}\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"revokeApiKey\"),\n\t\t},\n",
+		"\t\t\tPath:    \"/auth/admin/users/{id}/keys\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"listUserApiKeys\"),\n\t\t\tMiddlewares: []runtimerouting.Middleware{\n\t\t\t\tcfg.Identity.RequirePermissions(\"identity.users.read\"),\n",
+		"\t\t\tPath:    \"/auth/admin/users/{id}/keys/{keyId}\",\n\t\t\tHandler: identityHandler(cfg.Identity, \"revokeUserApiKey\"),\n\t\t\tMiddlewares: []runtimerouting.Middleware{\n\t\t\t\tcfg.Identity.RequirePermissions(\"identity.users.write\"),\n",
 		"Identity *identity.Service",
 		"cfg.AuthMiddleware = cfg.Identity.Middleware",
 		"r.Use(cfg.Identity.CORS())",
@@ -287,6 +386,11 @@ func TestWriteAPIGoldenUserRoutes(t *testing.T) {
 		`{OperationID: "AccountLoginHandler"},`,
 		`{OperationID: "AccountMeHandler", RequiresAuth: true},`,
 		`{OperationID: "AccountAdminGrantRoleHandler", RequiresAuth: true, Permissions: []string{"identity.roles.write"}},`,
+		`{OperationID: "AccountCreateApiKeyHandler", RequiresAuth: true},`,
+		`{OperationID: "AccountListApiKeysHandler", RequiresAuth: true},`,
+		`{OperationID: "AccountRevokeApiKeyHandler", RequiresAuth: true},`,
+		`{OperationID: "AccountAdminListUserApiKeysHandler", RequiresAuth: true, Permissions: []string{"identity.users.read"}},`,
+		`{OperationID: "AccountAdminRevokeUserApiKeyHandler", RequiresAuth: true, Permissions: []string{"identity.users.write"}},`,
 		`{OperationID: "GreetingGreetHandler", RequiresAuth: true},`,
 		`const IdentityPermissionPrefix = "identity"`,
 		"identity.WithRoutes(IdentityRoutes())",
@@ -343,7 +447,7 @@ func TestUserRoutesHaveNoScaffold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range files {
-		if strings.Contains(file, "account") || strings.Contains(file, "login") {
+		if strings.Contains(file, "account") || strings.Contains(file, "login") || strings.Contains(file, "key") {
 			t.Errorf("scaffold %s is for a user model operation", file)
 		}
 	}
@@ -359,7 +463,7 @@ func TestUserRoutesHaveNoScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(src), "Login(") || strings.Contains(string(src), "CreateUser(") || !strings.Contains(string(src), "Greet(") {
+	if strings.Contains(string(src), "Login(") || strings.Contains(string(src), "CreateUser(") || strings.Contains(string(src), "ApiKey") || !strings.Contains(string(src), "Greet(") {
 		t.Errorf("implementation scaffold:\n%s", src)
 	}
 }

@@ -81,7 +81,13 @@ func newHarness(t *testing.T, db testDB, config string) *harness {
 // has no role grant yet.
 func newHarnessWith(t *testing.T, db testDB, config string, seed bool, opts ...identity.Option) *harness {
 	t.Helper()
-	store, err := identity.NewSQLStore(db.db, db.dialect, descriptorJSON(t, nil))
+	return newHarnessOver(t, db, descriptorJSON(t, nil), config, seed, opts...)
+}
+
+// newHarnessOver is newHarnessWith over a store built from descriptor.
+func newHarnessOver(t *testing.T, db testDB, descriptor []byte, config string, seed bool, opts ...identity.Option) *harness {
+	t.Helper()
+	store, err := identity.NewSQLStore(db.db, db.dialect, descriptor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,8 +723,15 @@ func TestHandlers(t *testing.T) {
 	if got := paths(h.svc.Routes(&ir.UserSessionsConfig{}, nil)); strings.Contains(got, "register") || !strings.Contains(got, "POST /auth/login") {
 		t.Errorf("register: false routes %s", got)
 	}
-	if got := len(h.svc.Routes(&ir.UserSessionsConfig{Register: true}, &ir.UserAdministrationConfig{})); got != len(identity.Operations) {
-		t.Errorf("every set routes %d operations, want %d", got, len(identity.Operations))
+	// The API key operations are routed only when turned on (D114).
+	apiKeyOps := 0
+	for _, op := range identity.Operations {
+		if op.APIKeys {
+			apiKeyOps++
+		}
+	}
+	if got := len(h.svc.Routes(&ir.UserSessionsConfig{Register: true}, &ir.UserAdministrationConfig{})); got != len(identity.Operations)-apiKeyOps {
+		t.Errorf("every set routes %d operations, want %d", got, len(identity.Operations)-apiKeyOps)
 	}
 	for _, op := range identity.Operations {
 		if op.Name == ir.IdentityOpGrantRole && op.Path != "users/{id}/roles/{roleId}" {

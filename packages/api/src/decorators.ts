@@ -321,18 +321,23 @@ export function source(_target: unknown): ClassDecorator {
  * leaves me and capabilities, for an API whose users sign in through
  * another API of the same authDb. `register`, false by default, adds
  * register, which anyone may call, and needs the login; the
- * RegistrationConfig members shape it.
+ * RegistrationConfig members shape it. `apiKeys`, false by default, adds
+ * createApiKey, listApiKeys and revokeApiKey (D114), with which a user
+ * signed in with a session makes, lists and revokes API keys: named,
+ * long-lived tokens a program calls as them with. It needs the login.
  */
 export type UserSessionsConfig =
   | {
       readonly path?: string;
       readonly login?: true;
       readonly register?: false;
+      readonly apiKeys?: boolean;
     }
   | ({
       readonly path?: string;
       readonly login?: true;
       readonly register: true;
+      readonly apiKeys?: boolean;
     } & RegistrationConfig)
   | {
       readonly path?: string;
@@ -363,15 +368,22 @@ export type RegistrationConfig = {
   readonly firstUser?: { readonly role: string; readonly permissions: readonly string[] };
 };
 
-/** The routes @userAdministration adds. `path` prefixes them, "auth/admin" by default. */
+/**
+ * The routes @userAdministration adds. `path` prefixes them, "auth/admin"
+ * by default. `apiKeys`, false by default, adds listUserApiKeys and
+ * revokeUserApiKey (D114), with which an administrator lists and revokes
+ * any user's API keys.
+ */
 export type UserAdministrationConfig = {
   readonly path?: string;
+  readonly apiKeys?: boolean;
 };
 
 /**
  * The user model's session routes, on a class with no methods:
  * superschematic adds login, logout, me, capabilities and changePassword
- * under the path, and register with `register: true`. The identity runtime
+ * under the path, register with `register: true`, and the API key routes
+ * with `apiKeys: true`. The identity runtime
  * serves them, so the implementation has no method for them. The API's
  * authDb must name a DB schema with a User table, and an API takes one
  * such class. The class takes no Authenticated or Encrypted base and no

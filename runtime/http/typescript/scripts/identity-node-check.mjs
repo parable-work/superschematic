@@ -43,6 +43,10 @@ for (const c of corpus.tokens) {
   assert.equal(identity.newToken(() => new Uint8Array(Buffer.from(c.bytes, 'hex'))), c.token, c.name);
   assert.equal(identity.hashToken(c.token), c.hash, c.name);
 }
+for (const c of corpus.apiKeys) {
+  assert.equal(identity.newApiKey(() => new Uint8Array(Buffer.from(c.bytes, 'hex'))), c.token, c.name);
+  assert.equal(identity.hashToken(c.token), c.hash, c.name);
+}
 for (const c of corpus.config) {
   if (c.want === null) assert.throws(() => identity.parseIdentityConfig(c.input), c.name);
   else assert.deepEqual(identity.parseIdentityConfig(c.input), c.want, c.name);

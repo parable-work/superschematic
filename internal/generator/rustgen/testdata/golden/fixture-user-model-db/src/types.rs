@@ -48,6 +48,35 @@ pub struct User {
     pub created_at: TemporalDateTime,
 }
 
+/// An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserApiKey {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The user the key calls as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    /// What its user calls the key.
+    pub name: String,
+    /// The SHA-256 of the key's token, which only its holder has.
+    #[serde(rename = "tokenHash")]
+    pub token_hash: CryptoSHA256,
+    /// The permissions the key was made with, each held while its user holds it; null for every permission its user holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the key ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the key last authenticated a request, written at most once a minute.
+    #[serde(default, rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<TemporalDateTime>,
+    /// When the key was revoked, by its user, by an administrator, or when its user was disabled.
+    #[serde(default, rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
 /// A user's password hash, kept apart from the user row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserCredential {

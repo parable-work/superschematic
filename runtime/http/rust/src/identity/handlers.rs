@@ -33,8 +33,8 @@ use crate::{
 use super::cross_origin::first;
 use super::errors::unauthenticated;
 use super::service::{
-    ChangePasswordInput, CreateUserInput, IdentityPrincipal, Input, IssuedSession, LoginInput,
-    RegisterInput, Registered, RoleInput, Service, SetPasswordInput,
+    ChangePasswordInput, CreateApiKeyInput, CreateUserInput, IdentityPrincipal, Input,
+    IssuedSession, LoginInput, RegisterInput, Registered, RoleInput, Service, SetPasswordInput,
 };
 use super::token::Transport;
 
@@ -49,6 +49,13 @@ pub const OP_ME: &str = "me";
 pub const OP_CAPABILITIES: &str = "capabilities";
 pub const OP_CHANGE_PASSWORD: &str = "changePassword";
 pub const OP_REGISTER: &str = "register";
+/// The API key operations of `@userSessions` (D114), each a caller's who
+/// is signed in with a session: `POST <path>/keys`, `CreateApiKeyInput` to
+/// `CreatedApiKey`; `GET <path>/keys`, to `ApiKey[]`; and `DELETE
+/// <path>/keys/{id}`, to `true`.
+pub const OP_CREATE_API_KEY: &str = "createApiKey";
+pub const OP_LIST_API_KEYS: &str = "listApiKeys";
+pub const OP_REVOKE_API_KEY: &str = "revokeApiKey";
 /// The operations of `@userAdministration`.
 pub const OP_CREATE_USER: &str = "createUser";
 pub const OP_LIST_USERS: &str = "listUsers";
@@ -63,19 +70,28 @@ pub const OP_UPDATE_ROLE: &str = "updateRole";
 pub const OP_DELETE_ROLE: &str = "deleteRole";
 pub const OP_GRANT_ROLE: &str = "grantRole";
 pub const OP_REVOKE_ROLE: &str = "revokeRole";
+/// The API key operations of `@userAdministration` (D114): `GET
+/// <path>/users/{id}/keys`, to `ApiKey[]` (`users.read`), and `DELETE
+/// <path>/users/{id}/keys/{keyId}`, to `true` (`users.write`).
+pub const OP_LIST_USER_API_KEYS: &str = "listUserApiKeys";
+pub const OP_REVOKE_USER_API_KEY: &str = "revokeUserApiKey";
 
 /// The default route prefixes of the two sets.
 pub const DEFAULT_USER_SESSIONS_PATH: &str = "auth";
 pub const DEFAULT_USER_ADMINISTRATION_PATH: &str = "auth/admin";
 
 /// One of the user model's routes: its operation's name, the set it belongs
-/// to, its method and its path under the set's path, with `{id}` and
-/// `{roleId}` for its path parameters.
+/// to, its method and its path under the set's path, with `{id}`,
+/// `{roleId}` and `{keyId}` for its path parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Operation {
     pub name: &'static str,
     /// The route is `@userAdministration`'s; otherwise `@userSessions`'.
     pub administration: bool,
+    /// The route is one of the API key operations (D114), which its set
+    /// has only when they are turned on for it ([`Service::with_api_keys`],
+    /// [`Service::with_api_key_administration`]).
+    pub api_keys: bool,
     pub method: &'static str,
     pub path: &'static str,
 }
@@ -89,12 +105,30 @@ const fn op(
     Operation {
         name,
         administration,
+        api_keys: false,
         method,
         path,
     }
 }
 
-/// Every route of the user model, in `ir/identity_routes.go`'s order.
+/// An API key operation.
+const fn key_op(
+    name: &'static str,
+    administration: bool,
+    method: &'static str,
+    path: &'static str,
+) -> Operation {
+    Operation {
+        name,
+        administration,
+        api_keys: true,
+        method,
+        path,
+    }
+}
+
+/// Every route of the user model, in `ir/identity_routes.go`'s order, each
+/// set's API key operations after its others.
 pub const OPERATIONS: &[Operation] = &[
     op(OP_LOGIN, false, "POST", "login"),
     op(OP_LOGOUT, false, "POST", "logout"),
@@ -102,6 +136,9 @@ pub const OPERATIONS: &[Operation] = &[
     op(OP_CAPABILITIES, false, "GET", "capabilities"),
     op(OP_CHANGE_PASSWORD, false, "POST", "password"),
     op(OP_REGISTER, false, "POST", "register"),
+    key_op(OP_CREATE_API_KEY, false, "POST", "keys"),
+    key_op(OP_LIST_API_KEYS, false, "GET", "keys"),
+    key_op(OP_REVOKE_API_KEY, false, "DELETE", "keys/{id}"),
     op(OP_CREATE_USER, true, "POST", "users"),
     op(OP_LIST_USERS, true, "GET", "users"),
     op(OP_GET_USER, true, "GET", "users/{id}"),
@@ -115,6 +152,13 @@ pub const OPERATIONS: &[Operation] = &[
     op(OP_DELETE_ROLE, true, "DELETE", "roles/{id}"),
     op(OP_GRANT_ROLE, true, "PUT", "users/{id}/roles/{roleId}"),
     op(OP_REVOKE_ROLE, true, "DELETE", "users/{id}/roles/{roleId}"),
+    key_op(OP_LIST_USER_API_KEYS, true, "GET", "users/{id}/keys"),
+    key_op(
+        OP_REVOKE_USER_API_KEY,
+        true,
+        "DELETE",
+        "users/{id}/keys/{keyId}",
+    ),
 ];
 
 /// `@userSessions` on an operation set, as `ir.UserSessionsConfig` holds it.
@@ -122,7 +166,8 @@ pub const OPERATIONS: &[Operation] = &[
 pub struct UserSessions {
     /// The set's route prefix; [`DEFAULT_USER_SESSIONS_PATH`] when empty.
     pub path: String,
-    /// `login: false`: `me` and `capabilities` alone.
+    /// `login: false`: without `login`, `logout`, `changePassword` and
+    /// `register`.
     pub no_login: bool,
     /// `register: true`: also `register`.
     pub register: bool,
@@ -137,9 +182,10 @@ pub struct UserAdministration {
 }
 
 /// The router's [`Authenticator`] over the identity service: the caller of
-/// a request is its session's user, with the permissions of the user's
-/// roles, so `admit`, `RouteControls::authorize` and an in-process caller's
-/// `OperationInfo::admit` work unchanged. A request with no credential has
+/// a request is its session's user, or its API key's, with the permissions
+/// of the user's roles, narrowed to the ones an API key made with
+/// permissions names, so `admit`, `RouteControls::authorize` and an
+/// in-process caller's `OperationInfo::admit` work unchanged. A request with no credential has
 /// no caller (401 from the router); one whose credential is refused is the
 /// service's 401 `unauthorized`, whose problem clears a refused session
 /// cookie, or 403 `cross_origin`.
@@ -189,9 +235,11 @@ impl Service {
     /// [`IdentityAuthenticator`] put on the request, or authenticates the
     /// request itself without one. Success is 200 with the success envelope:
     /// the operation's result, or `true` for `logout`, `changePassword`,
-    /// `setUserPassword` and `deleteRole`, which the contract types as a
-    /// boolean since the schema language has no void result. A refusal is
-    /// the problem.
+    /// `setUserPassword`, `deleteRole`, `revokeApiKey` and
+    /// `revokeUserApiKey`, which the contract types as a boolean since the
+    /// schema language has no void result. A refusal is the problem. An API
+    /// key operation has its handler whether the operations are turned on
+    /// or not; [`Service::routes`] is what leaves it out.
     pub fn handler<S>(self: &Arc<Self>, op: &str) -> Option<MethodRouter<S>>
     where
         S: Clone + Send + Sync + 'static,
@@ -212,8 +260,10 @@ impl Service {
     /// handler)`: `@userSessions`' under its path when `sessions` is given
     /// (`login`, `logout` and `changePassword` unless `no_login`,
     /// `register` only with `register`), and `@userAdministration`'s under
-    /// its path when `administration` is. Paths start with `/`; the caller
-    /// adds its server's own prefix.
+    /// its path when `administration` is. A set has its API key routes
+    /// only when the service turns them on for it
+    /// ([`Service::with_api_keys`], [`Service::with_api_key_administration`]).
+    /// Paths start with `/`; the caller adds its server's own prefix.
     pub fn routes<S>(
         self: &Arc<Self>,
         sessions: Option<&UserSessions>,
@@ -226,6 +276,7 @@ impl Service {
         for operation in OPERATIONS {
             let base = if operation.administration {
                 match administration {
+                    Some(_) if operation.api_keys && !self.api_key_administration() => continue,
                     Some(set) if set.path.is_empty() => DEFAULT_USER_ADMINISTRATION_PATH,
                     Some(set) => set.path.as_str(),
                     None => continue,
@@ -233,11 +284,16 @@ impl Service {
             } else {
                 match sessions {
                     Some(set)
-                        if set.no_login && !matches!(operation.name, OP_ME | OP_CAPABILITIES) =>
+                        if set.no_login
+                            && matches!(
+                                operation.name,
+                                OP_LOGIN | OP_LOGOUT | OP_CHANGE_PASSWORD | OP_REGISTER
+                            ) =>
                     {
                         continue
                     }
                     Some(set) if !set.register && operation.name == OP_REGISTER => continue,
+                    Some(_) if operation.api_keys && !self.api_keys() => continue,
                     Some(set) if set.path.is_empty() => DEFAULT_USER_SESSIONS_PATH,
                     Some(set) => set.path.as_str(),
                     None => continue,
@@ -339,6 +395,14 @@ impl Service {
         match op {
             OP_LOGOUT | OP_ME | OP_CAPABILITIES | OP_CHANGE_PASSWORD => {
                 self.serve_session(op, &caller, body, request_id).await
+            }
+            OP_CREATE_API_KEY
+            | OP_LIST_API_KEYS
+            | OP_REVOKE_API_KEY
+            | OP_LIST_USER_API_KEYS
+            | OP_REVOKE_USER_API_KEY => {
+                self.serve_api_keys(op, &caller, parts, body, request_id)
+                    .await
             }
             OP_CREATE_USER | OP_LIST_USERS | OP_GET_USER | OP_DISABLE_USER | OP_ENABLE_USER
             | OP_APPROVE_USER | OP_SET_USER_PASSWORD => {
@@ -447,6 +511,41 @@ impl Service {
         }
     }
 
+    /// The API key routes of both sets (D114). They read the key's id as
+    /// `{id}` under `keys`, and the user's as `{id}` and the key's as
+    /// `{keyId}` under `users`.
+    async fn serve_api_keys(
+        &self,
+        op: &str,
+        caller: &IdentityPrincipal,
+        parts: &mut Parts,
+        body: Body,
+        request_id: Option<&str>,
+    ) -> Result<Response, ApiError> {
+        let ok = |data: &dyn ErasedSerialize| respond(data, request_id);
+        match op {
+            OP_CREATE_API_KEY => {
+                let input: CreateApiKeyInput = decode(body).await?;
+                Ok(ok(&self.create_api_key(caller, &input).await?))
+            }
+            OP_LIST_API_KEYS => Ok(ok(&self.list_api_keys(caller).await?)),
+            _ => {
+                let id = path_param(parts, "id").await?;
+                match op {
+                    OP_REVOKE_API_KEY => self.revoke_api_key(caller, &id).await?,
+                    OP_LIST_USER_API_KEYS => {
+                        return Ok(ok(&self.list_user_api_keys(caller, &id).await?))
+                    }
+                    _ => {
+                        let key_id = path_param(parts, "keyId").await?;
+                        self.revoke_user_api_key(caller, &id, &key_id).await?;
+                    }
+                }
+                Ok(done(request_id))
+            }
+        }
+    }
+
     /// The request's caller: the one the router's authenticator put on it,
     /// or one authenticated now.
     async fn caller(&self, parts: &Parts) -> Result<IdentityPrincipal, ApiError> {
@@ -507,7 +606,8 @@ fn respond(data: &dyn ErasedSerialize, request_id: Option<&str>) -> Response {
 }
 
 /// The answer of an operation whose result is `true`: `logout`,
-/// `changePassword`, `setUserPassword` and `deleteRole`.
+/// `changePassword`, `setUserPassword`, `deleteRole`, `revokeApiKey` and
+/// `revokeUserApiKey`.
 fn done(request_id: Option<&str>) -> Response {
     respond(&true, request_id)
 }

@@ -352,6 +352,30 @@ func (s *memoryStore) revokeUser(userID, exceptSession string, at time.Time) {
 	}
 }
 
+// The shop serves no API keys (D114), and this store has no table of them:
+// it answers as the runtime's SQLStore does for a descriptor without one.
+func (s *memoryStore) HasAPIKeys() bool { return false }
+
+func (s *memoryStore) CreateAPIKey(context.Context, identity.NewAPIKeyRow) (identity.APIKey, error) {
+	return identity.APIKey{}, identity.ErrNoAPIKeys
+}
+
+func (s *memoryStore) FindAPIKey(context.Context, string) (identity.APIKeyRecord, error) {
+	return identity.APIKeyRecord{}, identity.ErrNotFound
+}
+
+func (s *memoryStore) TouchAPIKey(context.Context, string, time.Time, time.Time) error {
+	return identity.ErrNoAPIKeys
+}
+
+func (s *memoryStore) ListAPIKeys(context.Context, string) ([]identity.APIKey, error) {
+	return nil, identity.ErrNoAPIKeys
+}
+
+func (s *memoryStore) RevokeAPIKey(context.Context, string, string, time.Time) error {
+	return identity.ErrNoAPIKeys
+}
+
 func (s *memoryStore) HasRoles() bool { return true }
 
 func (s *memoryStore) UserRoles(_ context.Context, userID string) ([]identity.Role, error) {

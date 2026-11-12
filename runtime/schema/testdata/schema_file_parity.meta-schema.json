@@ -7010,6 +7010,10 @@
     "UserAdministrationConfig": {
       "additionalProperties": false,
       "properties": {
+        "apiKeys": {
+          "default": false,
+          "type": "boolean"
+        },
         "path": {
           "default": "",
           "type": "string"
@@ -7025,6 +7029,10 @@
     "UserSessionsConfig": {
       "additionalProperties": false,
       "properties": {
+        "apiKeys": {
+          "default": false,
+          "type": "boolean"
+        },
         "defaultRoles": {
           "default": [],
           "items": {

@@ -1262,6 +1262,339 @@ func UserFromYAMLNonStrict(data []byte) (*User, error) {
 	return decoded, nil
 }
 
+// UserApiKey - An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.
+type UserApiKey struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	User User `json:"user"`
+
+	Name string `json:"name"`
+
+	TokenHash CryptoSHA256 `json:"tokenHash"`
+
+	Permissions []string `json:"permissions,omitzero"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	LastUsedAt *TemporalDateTime `json:"lastUsedAt,omitempty"`
+
+	RevokedAt *TemporalDateTime `json:"revokedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of UserApiKey with secret fields cleared.
+func (t *UserApiKey) MaskSecrets() *UserApiKey {
+	if t == nil {
+		return nil
+	}
+
+	masked := &UserApiKey{}
+
+	masked.Id = t.Id
+
+	maskedValueUser := t.User.MaskSecrets()
+	if maskedValueUser != nil {
+		masked.User = *maskedValueUser
+	}
+
+	masked.Name = t.Name
+
+	masked.TokenHash = t.TokenHash
+
+	if t.Permissions != nil {
+		masked.Permissions = make([]string, len(t.Permissions))
+
+		copy(masked.Permissions, t.Permissions)
+
+	}
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.LastUsedAt = t.LastUsedAt
+
+	masked.RevokedAt = t.RevokedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys UserApiKey's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*UserApiKey) JSONFieldNames() []string {
+	return []string{"id", "user", "name", "tokenHash", "permissions", "createdAt", "expiresAt", "lastUsedAt", "revokedAt"}
+}
+
+// Validate validates all fields in UserApiKey
+func (t *UserApiKey) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate user (required nested type)
+
+	if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("user", fieldErrs)
+	}
+
+	{
+		value := t.Name
+
+		if utf8.RuneCountInString(string(value)) > 100 {
+			errors.AddFieldError("name", "maxLength", "must be at most 100 characters")
+		}
+
+		if utf8.RuneCountInString(string(value)) < 1 {
+			errors.AddFieldError("name", "minLength", "must be at least 1 characters")
+		}
+
+	}
+
+	// Validate tokenHash (required)
+
+	if valid, fieldErrs := validateCryptoSHA256Value(t.TokenHash, true); !valid {
+		errors.SetFieldErrors("tokenHash", fieldErrs)
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate lastUsedAt (optional)
+
+	// Validate optional pointer field
+	if t.LastUsedAt != nil {
+		if valid, fieldErrs := t.LastUsedAt.Validate(); !valid {
+			errors.SetFieldErrors("lastUsedAt", fieldErrs)
+		}
+	}
+
+	// Validate revokedAt (optional)
+
+	// Validate optional pointer field
+	if t.RevokedAt != nil {
+		if valid, fieldErrs := t.RevokedAt.Validate(); !valid {
+			errors.SetFieldErrors("revokedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals UserApiKey to JSON
+func (t *UserApiKey) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias UserApiKey
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfUserApiKey are the list fields of UserApiKey; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfUserApiKey = []jsonListField{
+	{name: "permissions", depth: 1},
+}
+
+// UnmarshalJSON unmarshals UserApiKey from JSON with validation
+func (t *UserApiKey) UnmarshalJSON(data []byte) error {
+	type Alias UserApiKey
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("UserApiKey", data, listFieldsOfUserApiKey); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts UserApiKey into a map representation.
+func (t *UserApiKey) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert UserApiKey to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert UserApiKey to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes UserApiKey from a map using lenient decoding.
+func (t *UserApiKey) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode UserApiKey from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode UserApiKey from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes UserApiKey from a map and rejects unknown fields.
+func (t *UserApiKey) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserApiKey from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode UserApiKey from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes UserApiKey from JSON and rejects unknown fields.
+func (t *UserApiKey) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserApiKey from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode UserApiKey from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode UserApiKey from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes UserApiKey from JSON using lenient decoding.
+func (t *UserApiKey) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode UserApiKey from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode UserApiKey from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode UserApiKey from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes UserApiKey from YAML and rejects unknown fields.
+func (t *UserApiKey) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode UserApiKey from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode UserApiKey from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode UserApiKey from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes UserApiKey from YAML using lenient decoding.
+func (t *UserApiKey) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode UserApiKey from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode UserApiKey from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode UserApiKey from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// UserApiKeyFromMap builds UserApiKey from a map using lenient decoding.
+func UserApiKeyFromMap(value map[string]any) (*UserApiKey, error) {
+	decoded := &UserApiKey{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserApiKeyFromMapStrict builds UserApiKey from a map and rejects unknown fields.
+func UserApiKeyFromMapStrict(value map[string]any) (*UserApiKey, error) {
+	decoded := &UserApiKey{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserApiKeyFromJSON builds UserApiKey from JSON and rejects unknown fields.
+func UserApiKeyFromJSON(data []byte) (*UserApiKey, error) {
+	decoded := &UserApiKey{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserApiKeyFromJSONNonStrict builds UserApiKey from JSON using lenient decoding.
+func UserApiKeyFromJSONNonStrict(data []byte) (*UserApiKey, error) {
+	decoded := &UserApiKey{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserApiKeyFromYAML builds UserApiKey from YAML and rejects unknown fields.
+func UserApiKeyFromYAML(data []byte) (*UserApiKey, error) {
+	decoded := &UserApiKey{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UserApiKeyFromYAMLNonStrict builds UserApiKey from YAML using lenient decoding.
+func UserApiKeyFromYAMLNonStrict(data []byte) (*UserApiKey, error) {
+	decoded := &UserApiKey{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // UserCredential - A user's password hash, kept apart from the user row.
 type UserCredential struct {
 	Id *IdentityUUID `json:"id,omitempty"`

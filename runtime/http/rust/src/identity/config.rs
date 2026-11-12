@@ -16,6 +16,9 @@ pub const DEFAULT_SESSION_TTL_SECONDS: i64 = 14 * 24 * 60 * 60;
 /// How often a request writes `lastSeenAt` at most, without
 /// `touchIntervalSeconds`.
 pub const DEFAULT_TOUCH_INTERVAL_SECONDS: i64 = 60;
+/// The longest an API key lasts without `apiKeyMaxTtlSeconds` (D114): 365
+/// days.
+pub const DEFAULT_API_KEY_MAX_TTL_SECONDS: i64 = 365 * 24 * 60 * 60;
 /// The cookie's `SameSite` without `cookie.sameSite`.
 pub const DEFAULT_SAME_SITE: &str = "Lax";
 
@@ -41,9 +44,12 @@ pub struct Config {
     pub session_ttl_seconds: i64,
     /// How long a session may go unseen; 0 is no limit.
     pub idle_timeout_seconds: i64,
-    /// How often a request writes a session's `lastSeenAt`, at most; 0
-    /// writes it on every request.
+    /// How often a request writes a session's `lastSeenAt`, or an API
+    /// key's `lastUsedAt`, at most; 0 writes it on every request.
     pub touch_interval_seconds: i64,
+    /// The longest an API key lasts (D114), and how long one lasts when its
+    /// create names no lifetime.
+    pub api_key_max_ttl_seconds: i64,
     pub cookie: CookieConfig,
     /// The origins (`scheme://host[:port]`) a cookie request may come from
     /// across origins, and the only ones the CORS layer answers.
@@ -88,6 +94,7 @@ impl Default for Config {
             session_ttl_seconds: DEFAULT_SESSION_TTL_SECONDS,
             idle_timeout_seconds: 0,
             touch_interval_seconds: DEFAULT_TOUCH_INTERVAL_SECONDS,
+            api_key_max_ttl_seconds: DEFAULT_API_KEY_MAX_TTL_SECONDS,
             cookie: CookieConfig {
                 name: HOST_COOKIE_NAME.to_owned(),
                 domain: String::new(),
@@ -122,10 +129,11 @@ impl Config {
         Ok(config)
     }
 
-    /// Refuses a config no deployment means: a session that never lasts, an
-    /// idle timeout the touch interval outlasts, a cookie name or `SameSite`
-    /// a browser would refuse, an origin that is not `scheme://host`, and an
-    /// argon2 cost the algorithm does not take. Every problem is reported.
+    /// Refuses a config no deployment means: a session or an API key that
+    /// never lasts, an idle timeout the touch interval outlasts, a cookie
+    /// name or `SameSite` a browser would refuse, an origin that is not
+    /// `scheme://host`, and an argon2 cost the algorithm does not take.
+    /// Every problem is reported.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let mut problems: Vec<String> = Vec::new();
         if self.session_ttl_seconds <= 0 {
@@ -151,6 +159,12 @@ impl Config {
             problems.push(format!(
                 "touchIntervalSeconds ({}) must be less than idleTimeoutSeconds ({}), or a session idles out between two writes of lastSeenAt",
                 self.touch_interval_seconds, self.idle_timeout_seconds
+            ));
+        }
+        if self.api_key_max_ttl_seconds <= 0 {
+            problems.push(format!(
+                "apiKeyMaxTtlSeconds must be positive, not {}",
+                self.api_key_max_ttl_seconds
             ));
         }
         self.cookie.problems(&mut problems);
@@ -179,9 +193,16 @@ impl Config {
         seconds(self.idle_timeout_seconds)
     }
 
-    /// How often a request writes a session's `lastSeenAt`, at most.
+    /// How often a request writes a session's `lastSeenAt`, or an API
+    /// key's `lastUsedAt`, at most.
     pub fn touch_interval(&self) -> Duration {
         seconds(self.touch_interval_seconds)
+    }
+
+    /// The longest an API key lasts, and how long one lasts when its create
+    /// names no lifetime.
+    pub fn api_key_max_ttl(&self) -> Duration {
+        seconds(self.api_key_max_ttl_seconds)
     }
 
     /// The session cookie's name.
@@ -240,13 +261,14 @@ impl CookieConfig {
 fn read(value: &Value) -> Result<Config, String> {
     let mut config = Config::default();
     let object = json::object(value, "the config")?;
-    let [ttl, idle, touch, cookie, origins, password] = take(
+    let [ttl, idle, touch, key_ttl, cookie, origins, password] = take(
         object,
         "the config",
         [
             "sessionTtlSeconds",
             "idleTimeoutSeconds",
             "touchIntervalSeconds",
+            "apiKeyMaxTtlSeconds",
             "cookie",
             "trustedOrigins",
             "password",
@@ -260,6 +282,9 @@ fn read(value: &Value) -> Result<Config, String> {
     }
     if let Some(v) = touch {
         config.touch_interval_seconds = json::int64(v, "touchIntervalSeconds")?;
+    }
+    if let Some(v) = key_ttl {
+        config.api_key_max_ttl_seconds = json::int64(v, "apiKeyMaxTtlSeconds")?;
     }
     let mut name = String::new();
     if let Some(v) = cookie {

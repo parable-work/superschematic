@@ -186,6 +186,109 @@
       ]
     },
     {
+      "checks": [
+        {
+          "column": "name",
+          "maxLength": 100,
+          "minLength": 1,
+          "name": "ck_user_api_key_name"
+        }
+      ],
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "UserApiKey.id",
+          "type": "UUID"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserApiKey.user",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "UserApiKey.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "UserApiKey.tokenHash",
+          "type": "VARCHAR(64)"
+        },
+        {
+          "name": "permissions",
+          "nullable": true,
+          "origin": "UserApiKey.permissions",
+          "type": "TEXT[]"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "UserApiKey.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "expires_at",
+          "origin": "UserApiKey.expiresAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "UserApiKey.lastUsedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "UserApiKey.revokedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_api_key_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_user_api_key_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_api_key",
+      "origin": "UserApiKey",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_api_key_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "user_api_key_token_hash_key"
+        }
+      ]
+    },
+    {
       "columns": [
         {
           "default": "gen_random_uuid()",

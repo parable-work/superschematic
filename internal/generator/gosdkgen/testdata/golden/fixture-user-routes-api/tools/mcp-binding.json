@@ -17,6 +17,75 @@
       ]
     },
     {
+      "toolName": "account.listApiKeys",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "listApiKeys",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "account.createApiKey",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "createApiKey",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "name",
+          "required": true,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "expiresInSeconds",
+          "required": false,
+          "kind": "input",
+          "target": "input.expiresInSeconds"
+        },
+        {
+          "toolParameter": "permissions",
+          "required": false,
+          "kind": "input",
+          "target": "input.permissions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["name", "expiresInSeconds", "permissions"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.revokeApiKey",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account",
+      "methodName": "revokeApiKey",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
       "toolName": "account.login",
       "apiId": "fixture-user-routes-api",
       "namespace": "account",
@@ -394,6 +463,58 @@
           "kind": "path",
           "target": "path",
           "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.listUserApiKeys",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "listUserApiKeys",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.revokeUserApiKey",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "revokeUserApiKey",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "keyId",
+          "required": true,
+          "kind": "path",
+          "target": "path.keyId"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "keyId"]
         }
       ]
     },

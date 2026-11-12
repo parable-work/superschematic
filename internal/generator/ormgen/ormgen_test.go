@@ -142,7 +142,7 @@ func TestWriteORMGolden(t *testing.T) {
 		}},
 		{"fixture-optimistic-db", []string{"repository_shelf.go", "repository_stock.go"}},
 		{"fixture-user-model-db", []string{
-			"repository_role.go", "repository_session.go", "repository_user.go",
+			"repository_role.go", "repository_session.go", "repository_user.go", "repository_user_api_key.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
 		{"fixture-queue-db", []string{"repository_order.go", "repository_order_line.go", "repository_product.go", "queues.go", "queues_sqlite.go"}},

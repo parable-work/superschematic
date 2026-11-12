@@ -24,8 +24,9 @@ package ir
 // operation that answers nothing else answers the boolean true, since every
 // route answers a value. login, register, changePassword, createUser and
 // setUserPassword carry a password an agent does not hold, so each is @mcp
-// hidden with IdentityPasswordToolReason; the rest are tools as any
-// operation is.
+// hidden with IdentityPasswordToolReason, and createApiKey answers a
+// credential, so it is hidden with IdentityAPIKeyToolReason (D114); the
+// rest are tools as any operation is.
 
 // IsIdentityRoutes reports whether the set is @userSessions or
 // @userAdministration, whose operations the loader adds.
@@ -48,6 +49,9 @@ const (
 	// parameter (D81): true lists the users waiting for approval alone,
 	// false the others.
 	IdentityPendingArgument = "pending"
+	// IdentityKeyIDArgument is the {keyId} of an administrator's route to
+	// one of a user's API keys, users/{id}/keys/{keyId} (D114).
+	IdentityKeyIDArgument = "keyId"
 )
 
 // The requests per minute the rate-limited operations allow, per client.
@@ -55,11 +59,20 @@ const (
 	IdentityLoginRateLimit          = 10
 	IdentityRegisterRateLimit       = 5
 	IdentityChangePasswordRateLimit = 10
+	IdentityCreateAPIKeyRateLimit   = 10
 )
 
 // IdentityPasswordToolReason is the @mcp hidden reason of the operations
 // that carry a password.
 const IdentityPasswordToolReason = "It carries a password, which an agent does not hold."
+
+// IdentityAPIKeyToolReason is the @mcp hidden reason of createApiKey
+// (D114), whose answer is a credential.
+const IdentityAPIKeyToolReason = "It answers a credential, which an agent's context should not hold."
+
+// The key of the UserApiKey table, which the loader adds: an
+// AutoGenerate<Identity.UUID>, whatever the User table's key is.
+const IdentityAPIKeyKeyScalar = "Identity.UUID"
 
 // UserSessionsConfig is @userSessions on an operation set: the routes a user
 // signs in, out and about themselves with.
@@ -98,6 +111,11 @@ type UserSessionsConfig struct {
 	// beside DefaultRoles. Two such registrations at once make one
 	// administrator. It needs Register and a UserRole table in the authDb.
 	FirstUser *IdentityFirstUser `json:"firstUser,omitempty" yaml:"firstUser,omitempty"`
+
+	// APIKeys is @userSessions({ apiKeys: true }) (D114): the set also has
+	// createApiKey, listApiKeys and revokeApiKey, with which a user signed
+	// in with a session makes, lists and revokes their API keys.
+	APIKeys bool `json:"apiKeys,omitempty" yaml:"apiKeys,omitempty"`
 }
 
 // IdentityFirstUser is @userSessions' firstUser: the role the first
@@ -126,6 +144,11 @@ type UserAdministrationConfig struct {
 	// Path prefixes every route of the set. Empty means
 	// DefaultUserAdministrationPath.
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+
+	// APIKeys is @userAdministration({ apiKeys: true }) (D114): the set
+	// also has listUserApiKeys and revokeUserApiKey, with which an
+	// administrator lists and revokes any user's API keys.
+	APIKeys bool `json:"apiKeys,omitempty" yaml:"apiKeys,omitempty"`
 }
 
 // The default route prefixes.
@@ -179,6 +202,18 @@ const (
 	// session for an active user (the first administrator), 202 with none
 	// for a user who waits for approval.
 	IdentityOpRegister = "register"
+	// IdentityOpCreateAPIKey is POST <path>/keys, CreateApiKeyInput to
+	// CreatedApiKey: @auth and rate-limited, only with APIKeys (D114). It
+	// needs a caller signed in with a session, and answers the key's token
+	// this once.
+	IdentityOpCreateAPIKey = "createApiKey"
+	// IdentityOpListAPIKeys is GET <path>/keys, to ApiKey[]: @auth, only
+	// with APIKeys; the caller's keys that are not revoked, newest first,
+	// never a token.
+	IdentityOpListAPIKeys = "listApiKeys"
+	// IdentityOpRevokeAPIKey is DELETE <path>/keys/{id}, to true: @auth,
+	// only with APIKeys; revokes a key of the caller's.
+	IdentityOpRevokeAPIKey = "revokeApiKey"
 )
 
 // A set with NoLogin has IdentityOpMe and IdentityOpCapabilities alone;
@@ -237,6 +272,12 @@ const (
 	// IdentityOpRevokeRole is DELETE <path>/users/{id}/roles/{roleId}, to
 	// IdentityUser (roles.write).
 	IdentityOpRevokeRole = "revokeRole"
+	// IdentityOpListUserAPIKeys is GET <path>/users/{id}/keys, to ApiKey[]
+	// (users.read), only with APIKeys (D114).
+	IdentityOpListUserAPIKeys = "listUserApiKeys"
+	// IdentityOpRevokeUserAPIKey is DELETE <path>/users/{id}/keys/{keyId},
+	// to true (users.write), only with APIKeys (D114).
+	IdentityOpRevokeUserAPIKey = "revokeUserApiKey"
 )
 
 // DefaultIdentityPermissionPrefix is the naming key
@@ -310,7 +351,22 @@ const (
 	IdentityRoleInputType = "RoleInput"
 	// IdentityRoleType: id, name, permissions (string[]).
 	IdentityRoleType = "IdentityRole"
+	// IdentityCreateAPIKeyInputType (D114): name, expiresInSeconds
+	// (optional; the config's longest when absent), permissions (string[],
+	// optional; every permission its user holds when absent).
+	IdentityCreateAPIKeyInputType = "CreateApiKeyInput"
+	// IdentityAPIKeyType (D114): id, name, permissions (string[], absent
+	// for a key that holds every permission of its user), createdAt,
+	// expiresAt, lastUsedAt (absent until its first request).
+	IdentityAPIKeyType = "ApiKey"
+	// IdentityCreatedAPIKeyType (D114): an ApiKey's id, name, permissions,
+	// createdAt and expiresAt, and token, a Secret string answered once.
+	IdentityCreatedAPIKeyType = "CreatedApiKey"
 )
+
+// IdentityAPIKeyTypes are the types the route expansion adds for a set
+// with APIKeys (D114), which an API reserves only then.
+var IdentityAPIKeyTypes = []string{IdentityCreateAPIKeyInputType, IdentityAPIKeyType, IdentityCreatedAPIKeyType}
 
 // The values of IdentitySessionTransportEnum.
 const (
@@ -326,7 +382,7 @@ const (
 	// current password, that does not verify, for whatever reason.
 	IdentityCodeInvalidCredentials = "invalid_credentials"
 	// IdentityCodeUnauthorized (401): a route that needs a caller, without a
-	// usable session.
+	// usable session or API key.
 	IdentityCodeUnauthorized = "unauthorized"
 	// IdentityCodeForbidden (403): the caller lacks the route's permission,
 	// or grants a permission they do not hold.
@@ -368,7 +424,7 @@ func IdentityOperationErrors(op string) []IdentityRouteError {
 }
 
 var identityOperationErrors = func() map[string][]IdentityRouteError {
-	unauthorized := IdentityRouteError{401, IdentityCodeUnauthorized, "The request carries no usable session."}
+	unauthorized := IdentityRouteError{401, IdentityCodeUnauthorized, "The request carries no usable session or API key."}
 	permission := IdentityRouteError{403, IdentityCodeForbidden, "The caller lacks the route's permission."}
 	granting := IdentityRouteError{403, IdentityCodeForbidden, "The caller lacks the route's permission, or grants a permission they do not hold; details.permissions lists those."}
 	crossOrigin := IdentityRouteError{403, IdentityCodeCrossOrigin, "The cross-origin check refused a cookie request."}
@@ -380,6 +436,9 @@ var identityOperationErrors = func() map[string][]IdentityRouteError {
 	noUserOrRole := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id, or no role the roleId."}
 	invalidPermission := IdentityRouteError{422, IdentityCodeInvalidPermission, "A permission is not dotted segments of letters, digits, _ and -; details.permissions lists them."}
 	notPending := IdentityRouteError{409, IdentityCodeNotPending, "The user is not waiting for approval."}
+	byKey := IdentityRouteError{403, IdentityCodeForbidden, "The caller is authenticated by an API key, which does not act on its own account."}
+	noKey := IdentityRouteError{404, IdentityCodeNotFound, "No API key of the caller's has the id, or it is revoked."}
+	noUserKey := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id, or no API key of theirs the keyId, or it is revoked."}
 	return map[string][]IdentityRouteError{
 		IdentityOpLogin: {
 			{401, IdentityCodeInvalidCredentials, "The login or the password does not verify, or the user is disabled."},
@@ -387,26 +446,37 @@ var identityOperationErrors = func() map[string][]IdentityRouteError {
 			{403, IdentityCodePendingApproval, "The password verifies, and the user waits for an administrator's approval."},
 		},
 		IdentityOpRegister:     {cookieLogin, loginTaken},
-		IdentityOpLogout:       {unauthorized, crossOrigin},
+		IdentityOpLogout:       {unauthorized, byKey, crossOrigin},
 		IdentityOpMe:           {unauthorized},
 		IdentityOpCapabilities: {unauthorized},
 		IdentityOpChangePassword: {
 			unauthorized,
 			{401, IdentityCodeInvalidCredentials, "The current password does not verify."},
+			byKey,
 			crossOrigin,
 		},
-		IdentityOpCreateUser:      {unauthorized, permission, crossOrigin, loginTaken},
-		IdentityOpListUsers:       {unauthorized, permission},
-		IdentityOpGetUser:         {unauthorized, permission, noUser},
-		IdentityOpDisableUser:     {unauthorized, permission, crossOrigin, noUser},
-		IdentityOpEnableUser:      {unauthorized, permission, crossOrigin, noUser},
-		IdentityOpApproveUser:     {unauthorized, permission, crossOrigin, noUser, notPending},
-		IdentityOpSetUserPassword: {unauthorized, permission, crossOrigin, noUser},
-		IdentityOpListRoles:       {unauthorized, permission},
-		IdentityOpCreateRole:      {unauthorized, granting, crossOrigin, nameTaken, invalidPermission},
-		IdentityOpUpdateRole:      {unauthorized, granting, crossOrigin, noRole, nameTaken, invalidPermission},
-		IdentityOpDeleteRole:      {unauthorized, permission, crossOrigin, noRole},
-		IdentityOpGrantRole:       {unauthorized, granting, crossOrigin, noUserOrRole},
-		IdentityOpRevokeRole:      {unauthorized, permission, crossOrigin, noUserOrRole},
+		IdentityOpCreateAPIKey: {
+			unauthorized,
+			{403, IdentityCodeForbidden, "The caller is authenticated by an API key, or names a permission they do not hold."},
+			crossOrigin,
+			invalidPermission,
+		},
+		IdentityOpListAPIKeys:      {unauthorized, byKey},
+		IdentityOpRevokeAPIKey:     {unauthorized, byKey, crossOrigin, noKey},
+		IdentityOpListUserAPIKeys:  {unauthorized, permission, noUser},
+		IdentityOpRevokeUserAPIKey: {unauthorized, permission, crossOrigin, noUserKey},
+		IdentityOpCreateUser:       {unauthorized, permission, crossOrigin, loginTaken},
+		IdentityOpListUsers:        {unauthorized, permission},
+		IdentityOpGetUser:          {unauthorized, permission, noUser},
+		IdentityOpDisableUser:      {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpEnableUser:       {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpApproveUser:      {unauthorized, permission, crossOrigin, noUser, notPending},
+		IdentityOpSetUserPassword:  {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpListRoles:        {unauthorized, permission},
+		IdentityOpCreateRole:       {unauthorized, granting, crossOrigin, nameTaken, invalidPermission},
+		IdentityOpUpdateRole:       {unauthorized, granting, crossOrigin, noRole, nameTaken, invalidPermission},
+		IdentityOpDeleteRole:       {unauthorized, permission, crossOrigin, noRole},
+		IdentityOpGrantRole:        {unauthorized, granting, crossOrigin, noUserOrRole},
+		IdentityOpRevokeRole:       {unauthorized, permission, crossOrigin, noUserOrRole},
 	}
 }()

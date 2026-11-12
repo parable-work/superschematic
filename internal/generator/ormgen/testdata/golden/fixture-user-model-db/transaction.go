@@ -68,6 +68,7 @@ func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
 	wrapped.Role = &RoleRepository{tx: tx, txDB: db}
 	wrapped.Session = &SessionRepository{tx: tx, txDB: db}
 	wrapped.User = &UserRepository{tx: tx, txDB: db}
+	wrapped.UserApiKey = &UserApiKeyRepository{tx: tx, txDB: db}
 	wrapped.UserCredential = &UserCredentialRepository{tx: tx, txDB: db}
 	wrapped.UserRoleGrant = &UserRoleGrantRepository{tx: tx, txDB: db}
 	return wrapped

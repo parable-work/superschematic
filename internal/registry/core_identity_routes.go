@@ -28,16 +28,18 @@ func identityRouteDecorators() []DecoratorSpec {
 }
 
 // applyUserSessions reads @userSessions({ path?, login?, register?,
-// registration?, defaultRoles?, firstUser? }). login is true and register
-// false when absent, and register needs the login; registration,
-// defaultRoles and firstUser (D81) need register.
+// registration?, defaultRoles?, firstUser?, apiKeys? }). login is true and
+// register false when absent, and register needs the login; registration,
+// defaultRoles and firstUser (D81) need register. apiKeys (D114), false
+// when absent, needs the login too: a key is made by a caller with a
+// session.
 func applyUserSessions(args []any, set *ir.OperationSet) error {
 	const name = "userSessions"
 	if err := identityRoutesDeclared(name, set); err != nil {
 		return err
 	}
 	cfg := &ir.UserSessionsConfig{}
-	login, register := true, false
+	login, register, apiKeys := true, false, false
 	var registrationKeys []string
 	err := identityRoutesConfig(name, args, map[string]func(any) error{
 		"path": func(v any) error { return identityRoutesPath(name, v, &cfg.Path) },
@@ -70,6 +72,9 @@ func applyUserSessions(args []any, set *ir.OperationSet) error {
 			cfg.FirstUser = first
 			return err
 		},
+		"apiKeys": func(v any) error {
+			return identityRoutesFlag(name, "apiKeys", v, &apiKeys)
+		},
 	})
 	if err != nil {
 		return err
@@ -84,7 +89,10 @@ func applyUserSessions(args []any, set *ir.OperationSet) error {
 		}
 		return ArgErrorf(0, "@userSessions: %s %s register: true", joinKeys(registrationKeys), verb)
 	}
-	cfg.NoLogin, cfg.Register = !login, register
+	if apiKeys && !login {
+		return ArgErrorf(0, "@userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false")
+	}
+	cfg.NoLogin, cfg.Register, cfg.APIKeys = !login, register, apiKeys
 	set.UserSessions = cfg
 	return nil
 }
@@ -153,7 +161,7 @@ func identityRoutesFirstUser(v any) (*ir.IdentityFirstUser, error) {
 	return first, nil
 }
 
-// applyUserAdministration reads @userAdministration({ path? }).
+// applyUserAdministration reads @userAdministration({ path?, apiKeys? }).
 func applyUserAdministration(args []any, set *ir.OperationSet) error {
 	const name = "userAdministration"
 	if err := identityRoutesDeclared(name, set); err != nil {
@@ -161,7 +169,8 @@ func applyUserAdministration(args []any, set *ir.OperationSet) error {
 	}
 	cfg := &ir.UserAdministrationConfig{}
 	err := identityRoutesConfig(name, args, map[string]func(any) error{
-		"path": func(v any) error { return identityRoutesPath(name, v, &cfg.Path) },
+		"path":    func(v any) error { return identityRoutesPath(name, v, &cfg.Path) },
+		"apiKeys": func(v any) error { return identityRoutesFlag(name, "apiKeys", v, &cfg.APIKeys) },
 	})
 	if err != nil {
 		return err

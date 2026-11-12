@@ -26,6 +26,7 @@
       "identity": true,
       "operations": [
         "AccountAdminGetUserHandler",
+        "AccountAdminListUserApiKeysHandler",
         "AccountAdminListUsersHandler"
       ]
     },
@@ -37,6 +38,7 @@
         "AccountAdminCreateUserHandler",
         "AccountAdminDisableUserHandler",
         "AccountAdminEnableUserHandler",
+        "AccountAdminRevokeUserApiKeyHandler",
         "AccountAdminSetUserPasswordHandler"
       ]
     }

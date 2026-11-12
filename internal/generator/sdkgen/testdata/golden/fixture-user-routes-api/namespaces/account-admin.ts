@@ -3,6 +3,7 @@
 import { HttpClient, toRequestOptions } from '../client';
 import { ValidationError } from '../types';
 import type {
+  ApiKey,
   CreateUserInput,
   IdentityRole,
   IdentityUser,
@@ -12,6 +13,7 @@ import type {
 } from '@schemas/fixture-user-routes-api-types';
 import {
   newValidationErrors,
+  parseApiKeyFromJSON,
   parseIdentityRoleFromJSON,
   parseIdentityUserFromJSON,
   setFieldErrors,
@@ -293,6 +295,53 @@ export class AccountAdminNamespace {
       { ...toRequestOptions(signal) }
     );
     return parseIdentityUserFromJSON(result);
+  }
+
+  /**
+   * Lists a user's API keys that are not revoked, newest first, each without its token.
+   * @requires Authentication
+   * @param id - id parameter
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Array of ApiKey
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async listUserApiKeys(
+    id: string,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<ApiKey[]> {
+    // Make GET request
+    const result = await this.client.get<ApiKey[]>(
+      `/api/auth/admin/users/${encodeURIComponent(id)}/keys`,
+      { ...toRequestOptions(signal) }
+    );
+    return Array.isArray(result) ? result.map(parseApiKeyFromJSON) : result;
+  }
+
+  /**
+   * Revokes an API key of a user's, which authenticates no request after. It answers true.
+   * @requires Authentication
+   * @param id - id parameter
+   * @param keyId - keyId parameter
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns boolean
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async revokeUserApiKey(
+    id: string,
+    keyId: string,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<boolean> {
+    // Make DELETE request; config.data carries its input or its arguments as
+    // the body, where the route reads them.
+    const result = await this.client.delete<boolean>(
+      `/api/auth/admin/users/${encodeURIComponent(id)}/keys/${encodeURIComponent(keyId)}`,
+      { ...toRequestOptions(signal) }
+    );
+    return result;
   }
 
   /**

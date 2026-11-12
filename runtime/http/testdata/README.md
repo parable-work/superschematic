@@ -44,6 +44,7 @@ Otherwise `want` is the config the runtime runs with, every member present:
 ```json
 {
   "sessionTtlSeconds": 1209600, "idleTimeoutSeconds": 0, "touchIntervalSeconds": 60,
+  "apiKeyMaxTtlSeconds": 31536000,
   "cookie": {"name": "__Host-session", "domain": "", "secure": true, "sameSite": "Lax"},
   "trustedOrigins": [],
   "password": {"argon2": {"memoryKiB": 19456, "iterations": 2, "parallelism": 1}}
@@ -60,6 +61,9 @@ The rules the cases pin:
   `touchIntervalSeconds` must not be negative; an idle timeout of 0 is
   off, and a touch interval of 0 writes `lastSeenAt` on every request.
   With an idle timeout, the touch interval must be less than it.
+- `apiKeyMaxTtlSeconds` must be positive. It is the longest an API key
+  lasts and how long one lasts when its create names no lifetime (D114),
+  365 days by default; no member of a session's bounds it.
 - `cookie.sameSite` is exactly `Lax`, `Strict` or `None` (case matters).
   `None` needs `cookie.secure`.
 - `cookie.domain`, when set, is dot-separated labels of ASCII letters,
@@ -125,6 +129,13 @@ hex), encoded as base64url without padding (`token`, 43 characters). The
 database keeps `hash`, the lowercase hexadecimal SHA-256 of the token's
 text (its 43 ASCII bytes, not the decoded bytes).
 
+### apiKeys
+
+`{name, bytes, token, hash}`: an API key (D114) is `key_` followed by 32
+random bytes (`bytes`, hex) encoded as base64url without padding (`token`,
+47 characters). The database keeps `hash`, the lowercase hexadecimal
+SHA-256 of the key's whole text, its prefix included.
+
 ### cookies
 
 `{name, config, token, maxAgeSeconds, want}`. Under `config` (an input as
@@ -146,22 +157,28 @@ carries `Expires`.
 `{name, cookieName, headers, want}`. `headers` are the request's headers
 as `[name, value]` pairs, in order, a name repeated when the request
 repeats it; names are case-insensitive. The session cookie is named
-`cookieName`. `want` is `{outcome, transport, token}`:
+`cookieName`. `want` is `{outcome, transport, token, apiKey}`:
 
-- `outcome` `usable`: `token` is the session token the request carries,
-  and `transport` (`bearer` or `cookie`) says where.
+- `outcome` `usable`: `token` is the session token or the API key the
+  request carries, `transport` (`bearer` or `cookie`) says where, and
+  `apiKey` is true when it is an API key.
 - `outcome` `invalid`: the request carries a credential that is no token
   (`token` null), and `transport` says which. The route answers 401
   `unauthorized` and does not look further; a refused cookie is cleared.
 - `outcome` `none`: no credential (`transport` and `token` null).
 
+`apiKey` is false with every outcome but a usable API key.
+
 The rule: when the request has an `Authorization` header, it is the
 credential and the cookie is not read, even when the header is unusable.
 It is usable only when it appears once and is the scheme `Bearer` in any
-case, one or more spaces (not tabs), and a token: exactly 43 characters of
-`A-Z a-z 0-9 - _`. Without `Authorization`, the credential is the first
-cookie named `cookieName` (names compare exactly) across every `Cookie`
-header, usable when its value is a token; none such is `none`.
+case, one or more spaces (not tabs), and either a session token, exactly
+43 characters of `A-Z a-z 0-9 - _`, or an API key, `key_` in that case
+exactly and 43 such characters after it. Without `Authorization`, the
+credential is the first cookie named `cookieName` (names compare exactly)
+across every `Cookie` header, usable when its value is a session token;
+none such is `none`. The cookie carries no API key: one there is `invalid`,
+as any value that is no session token.
 
 ### crossOrigin
 
@@ -220,6 +237,20 @@ answers 403 `forbidden` with `details.permissions` the uncovered ones, after
 `users.write` is checked, and a password's rule, and 404 for a user that
 is not there.
 
+### keyPermissions
+
+`{name, held, named, want}`: what an API key made with the permissions
+`named` holds of a role that carries `held` (D114). `want` lists, in
+`named`'s order and once each, the named permissions some held permission
+covers, by the rule of `grants`. So a key holds each permission it names
+while the role holds it, and no part of one it names more broadly than the
+role does (`issues` named, `issues.read` held: nothing).
+
+The principal of a key made with permissions holds each of its user's
+roles narrowed so, in the roles' order, a role left with no permission
+dropped, and its permissions are those roles' (`effectivePermissions`). A
+key made without permissions holds its user's roles as they are.
+
 ### capabilities
 
 `{routes, callers}`. `routes` are the route requirements a server passes:
@@ -242,11 +273,70 @@ What the vectors cannot hold, which the runtimes keep the same:
   401 `unauthorized`. `lastSeenAt` is written when it is null or at least
   the touch interval old, by an update that also requires it to be null or
   older than `now - interval`.
+- An API key (D114) authenticates as its user, in `Authorization: Bearer`
+  alone. Its row is found by its hash, and it ends, checked in this order,
+  when no row has the hash, when `revokedAt` is set, when
+  `now >= expiresAt`, when its user is disabled, and when its user waits
+  for approval. Each is 401 `unauthorized`. No idle timeout ends a key, and
+  the cross-origin check does not run. `lastUsedAt` is written as
+  `lastSeenAt` is: when it is null or at least the touch interval old, by
+  an update that also requires it to be null or older than
+  `now - interval`. The principal has the key's id and no session id.
+- A key does not act on its own account. `createApiKey`, `listApiKeys`,
+  `revokeApiKey`, `logout` and `changePassword` answer a key's principal
+  403 `forbidden` with the detail
+  `An API key does not act on its own account: sign in with a session`,
+  once the body is read as the operation's input (a body that is not is
+  400 first) and before any member of it is checked. `me`, `capabilities`
+  and every other route, the administration routes included, answer it by
+  its roles and permissions (`keyPermissions`).
+- `createApiKey` refuses its input in this order. 400 `bad_request` with
+  `errors` by member, every refused member at once: `name`, trimmed of
+  surrounding white space (the characters of Unicode's White_Space
+  property, so U+0085 and not U+FEFF), is 1 to 100 characters (`required`,
+  `maxLength`; characters are Unicode code points, and the trimmed name is
+  the one kept); `expiresInSeconds`, when present, is 1 to
+  `apiKeyMaxTtlSeconds` (`min`, `max`); `permissions`, when present, are 1
+  to 100 (`listMin`, `listMax`). Then 422 `invalid_permission`, with
+  `details.permissions` each permission that has not a permission's form
+  and each that repeats an earlier one, in the order given. Then 403
+  `forbidden` with the detail
+  `An API key names only permissions its user holds` and
+  `details.permissions` the ones the caller's permissions do not cover
+  (`grants`). A member that is null is one left out. The key's
+  `createdAt` is now to the millisecond, and its `expiresAt` that plus
+  `expiresInSeconds`, or plus `apiKeyMaxTtlSeconds` without it. The token
+  is answered this once, and the row keeps its hash.
+- `listApiKeys` and `listUserApiKeys` answer the user's keys whose
+  `revokedAt` is null, expired ones included, by `createdAt` descending and
+  then by the row's key descending, as the database orders it (the UUID,
+  not its base62 form). An `ApiKey` and a `CreatedApiKey` leave out
+  `permissions` for a key that holds every permission of its user, and an
+  `ApiKey` leaves out `lastUsedAt` until the key's first request; neither
+  is ever null. `listUserApiKeys` of a user that is not there is 404
+  `not_found`, `User not found`.
+- `revokeApiKey` and `revokeUserApiKey` set `revokedAt` on the user's key
+  with the id when it is null. A key that is not there, is another
+  user's or is revoked already, and an id that is no key's, is 404
+  `not_found`, `API key not found`. The administration routes need
+  `users.read` and `users.write` alone, and act on any user's keys.
+- Disabling a user revokes their live keys in the transaction that
+  revokes their sessions, and enabling them brings none back. Deleting a
+  user deletes their keys. A password change, the user's own or an
+  administrator's, ends no key.
+- A store whose descriptor has no `apiKey` has no API keys: a bearer API
+  key is 401 `unauthorized`, and each key operation answers 404
+  `not_found` with the detail
+  `API keys are not available: this database's types hold no API key table`,
+  once its caller is admitted (401 and 403 come first).
 - Every failed login (unknown login, a login its scalar refuses, no
   password, a wrong one, a disabled user) is 401 `invalid_credentials`,
   after a verify against a hash at the config's cost.
 - On SQLite a store writes a timestamp as text in UTC to the millisecond,
   `YYYY-MM-DDTHH:MM:SS.sssZ` (the DDL's `strftime('%Y-%m-%dT%H:%M:%fZ',
-  'now')`), and a role's permissions as a JSON array. A key of a scalar
-  whose SQL type is `UUID` (`Identity.UUID`) is hyphenated lowercase text
-  in the database and its base62 form on the wire.
+  'now')`), and a role's permissions as a JSON array. An API key's
+  permissions are stored as a role's are, a JSON array on SQLite and a
+  `TEXT[]` on Postgres, or null for a key that holds every permission of
+  its user; a list, an empty one included, is the permissions it names. A
+  key of a scalar whose SQL type is `UUID` (`Identity.UUID`) is hyphenated
+  lowercase text in the database and its base62 form on the wire.

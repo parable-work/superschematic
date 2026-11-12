@@ -43,6 +43,20 @@ export const identityDescriptor = {
       "pendingAt": "pending_at"
     }
   },
+  "apiKey": {
+    "table": "user_api_key",
+    "columns": {
+      "id": "id",
+      "user": "user_id",
+      "name": "name",
+      "tokenHash": "token_hash",
+      "permissions": "permissions",
+      "createdAt": "created_at",
+      "expiresAt": "expires_at",
+      "lastUsedAt": "last_used_at",
+      "revokedAt": "revoked_at"
+    }
+  },
   "role": {
     "type": "Role",
     "table": "role",

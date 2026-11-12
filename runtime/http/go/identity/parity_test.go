@@ -42,6 +42,7 @@ type parityFile struct {
 	Hashes               []hashCase         `json:"hashes"`
 	Verify               []verifyCase       `json:"verify"`
 	Tokens               []tokenCase        `json:"tokens"`
+	APIKeys              []tokenCase        `json:"apiKeys"`
 	Cookies              []cookieCase       `json:"cookies"`
 	Credentials          []credentialCase   `json:"credentials"`
 	CrossOrigin          []crossOriginCase  `json:"crossOrigin"`
@@ -49,6 +50,7 @@ type parityFile struct {
 	EffectivePermissions []effectiveCase    `json:"effectivePermissions"`
 	Grants               []grantCase        `json:"grants"`
 	UserWrites           []userWriteCase    `json:"userWrites"`
+	KeyPermissions       []narrowCase       `json:"keyPermissions"`
 	Capabilities         capabilitiesTable  `json:"capabilities"`
 }
 
@@ -66,6 +68,7 @@ type effectiveConfig struct {
 	SessionTTLSeconds    int64    `json:"sessionTtlSeconds"`
 	IdleTimeoutSeconds   int64    `json:"idleTimeoutSeconds"`
 	TouchIntervalSeconds int64    `json:"touchIntervalSeconds"`
+	APIKeyMaxTTLSeconds  int64    `json:"apiKeyMaxTtlSeconds"`
 	Cookie               cookieFx `json:"cookie"`
 	TrustedOrigins       []string `json:"trustedOrigins"`
 	Password             struct {
@@ -86,6 +89,7 @@ func effective(c identity.Config) *effectiveConfig {
 		SessionTTLSeconds:    *c.SessionTTLSeconds,
 		IdleTimeoutSeconds:   *c.IdleTimeoutSeconds,
 		TouchIntervalSeconds: *c.TouchIntervalSeconds,
+		APIKeyMaxTTLSeconds:  *c.APIKeyMaxTTLSeconds,
 		Cookie:               cookieFx{Name: c.Cookie.Name, Domain: c.Cookie.Domain, Secure: *c.Cookie.Secure, SameSite: c.Cookie.SameSite},
 		TrustedOrigins:       c.TrustedOrigins,
 	}
@@ -127,7 +131,7 @@ type verifyWant struct {
 }
 
 // tokenCase: the token's random bytes (hex) encode as token, whose stored
-// hash is hash.
+// hash is hash. An API key's case is the same, its token the key's text.
 type tokenCase struct {
 	Name  string `json:"name"`
 	Bytes string `json:"bytes"`
@@ -166,6 +170,8 @@ type credentialWant struct {
 	Transport *string `json:"transport"`
 	// Token is the token read, null unless usable.
 	Token *string `json:"token"`
+	// APIKey: the token read is an API key.
+	APIKey bool `json:"apiKey"`
 }
 
 // crossOriginCase: the cross-origin check on a request with method, the
@@ -219,6 +225,15 @@ type userWriteCase struct {
 	Held  []string     `json:"held"`
 	Roles []parityRole `json:"roles"`
 	Want  grantWant    `json:"want"`
+}
+
+// narrowCase: an API key made with named holds want of a role carrying
+// held.
+type narrowCase struct {
+	Name  string   `json:"name"`
+	Held  []string `json:"held"`
+	Named []string `json:"named"`
+	Want  []string `json:"want"`
 }
 
 // capabilitiesTable: for each caller, an authenticated principal holding
@@ -318,6 +333,19 @@ func TestParityVectors(t *testing.T) {
 			check(t, c.Name, [2]string{token, identity.HashToken(c.Token)}, [2]string{c.Token, c.Hash})
 		}
 	})
+	t.Run("apiKeys", func(t *testing.T) {
+		for _, c := range unique(t, file.APIKeys, func(c tokenCase) string { return c.Name }) {
+			b, err := hex.DecodeString(c.Bytes)
+			if err != nil {
+				t.Fatalf("%s: bytes: %v", c.Name, err)
+			}
+			key, err := identity.NewAPIKey(bytes.NewReader(b))
+			if err != nil {
+				t.Fatalf("%s: %v", c.Name, err)
+			}
+			check(t, c.Name, [2]string{key, identity.HashToken(c.Token)}, [2]string{c.Token, c.Hash})
+		}
+	})
 	t.Run("cookies", func(t *testing.T) {
 		for _, c := range unique(t, file.Cookies, func(c cookieCase) string { return c.Name }) {
 			check(t, c.Name, cookies(t, c), c.Want)
@@ -353,6 +381,11 @@ func TestParityVectors(t *testing.T) {
 		for _, c := range unique(t, file.UserWrites, func(c userWriteCase) string { return c.Name }) {
 			uncovered := identity.UncoveredUser(c.Held, sessionRoles(c.Roles))
 			check(t, c.Name, grantWant{Allowed: len(uncovered) == 0, Uncovered: uncovered}, c.Want)
+		}
+	})
+	t.Run("keyPermissions", func(t *testing.T) {
+		for _, c := range unique(t, file.KeyPermissions, func(c narrowCase) string { return c.Name }) {
+			check(t, c.Name, identity.NarrowPermissions(c.Held, c.Named), c.Want)
 		}
 	})
 	t.Run("capabilities", func(t *testing.T) {
@@ -417,6 +450,7 @@ func credential(c credentialCase) credentialWant {
 		want.Outcome = "usable"
 		token := cred.Token
 		want.Token = &token
+		want.APIKey = cred.APIKey
 	case identity.InvalidCredential:
 		want.Outcome = "invalid"
 	}
@@ -467,6 +501,7 @@ func parityCorpus(t *testing.T) parityFile {
 		Hashes:               hashCorpus(),
 		Verify:               verifyCorpus(),
 		Tokens:               tokenCorpus(),
+		APIKeys:              apiKeyCorpus(),
 		Cookies:              cookieCorpus(t),
 		Credentials:          credentialCorpus(t),
 		CrossOrigin:          crossOriginCorpus(t),
@@ -474,6 +509,7 @@ func parityCorpus(t *testing.T) parityFile {
 		EffectivePermissions: effectiveCorpus(),
 		Grants:               grantCorpus(),
 		UserWrites:           userWriteCorpus(),
+		KeyPermissions:       narrowCorpus(),
 		Capabilities:         capabilitiesCorpus(),
 	}
 }
@@ -485,7 +521,7 @@ func configCorpus(t *testing.T) []configCase {
 		ok          bool
 	}{
 		{"empty object takes every default", `{}`, true},
-		{"every member set", `{"sessionTtlSeconds": 3600, "idleTimeoutSeconds": 900, "touchIntervalSeconds": 30, "cookie": {"name": "sid", "domain": "example.com", "secure": true, "sameSite": "Strict"}, "trustedOrigins": ["https://app.example.com", "http://localhost:5173"], "password": {"argon2": {"memoryKiB": 65536, "iterations": 3, "parallelism": 4}}}`, true},
+		{"every member set", `{"sessionTtlSeconds": 3600, "idleTimeoutSeconds": 900, "touchIntervalSeconds": 30, "apiKeyMaxTtlSeconds": 7776000, "cookie": {"name": "sid", "domain": "example.com", "secure": true, "sameSite": "Strict"}, "trustedOrigins": ["https://app.example.com", "http://localhost:5173"], "password": {"argon2": {"memoryKiB": 65536, "iterations": 3, "parallelism": 4}}}`, true},
 		{"a domain names the cookie __Secure-session", `{"cookie": {"domain": "example.com"}}`, true},
 		{"secure false names the cookie session", `{"cookie": {"secure": false}}`, true},
 		{"secure false with a domain is still session", `{"cookie": {"secure": false, "domain": "localhost"}}`, true},
@@ -496,10 +532,19 @@ func configCorpus(t *testing.T) []configCase {
 		{"idle timeout 0 is off", `{"idleTimeoutSeconds": 0, "touchIntervalSeconds": 600}`, true},
 		{"null trusted origins are none", `{"trustedOrigins": null}`, true},
 		{"the lowest argon2 cost", `{"password": {"argon2": {"memoryKiB": 8, "iterations": 1, "parallelism": 1}}}`, true},
+		{"an API key lifetime left out is 365 days, whatever a session's is", `{"sessionTtlSeconds": 3600}`, true},
+		{"an API key lifetime set", `{"apiKeyMaxTtlSeconds": 86400}`, true},
+		{"an API key lifetime of one second", `{"apiKeyMaxTtlSeconds": 1}`, true},
+		{"an API key lifetime shorter than a session's", `{"sessionTtlSeconds": 86400, "apiKeyMaxTtlSeconds": 3600}`, true},
 		{"a session TTL of 0 is refused", `{"sessionTtlSeconds": 0}`, false},
 		{"a negative session TTL is refused", `{"sessionTtlSeconds": -1}`, false},
 		{"a negative idle timeout is refused", `{"idleTimeoutSeconds": -5}`, false},
 		{"a negative touch interval is refused", `{"touchIntervalSeconds": -1}`, false},
+		{"an API key lifetime of 0 is refused", `{"apiKeyMaxTtlSeconds": 0}`, false},
+		{"a negative API key lifetime is refused", `{"apiKeyMaxTtlSeconds": -1}`, false},
+		{"a fractional API key lifetime is refused", `{"apiKeyMaxTtlSeconds": 1.5}`, false},
+		{"an API key lifetime as a string is refused", `{"apiKeyMaxTtlSeconds": "86400"}`, false},
+		{"the API key lifetime named in another case is refused", `{"apiKeyMaxTTLSeconds": 86400}`, false},
 		{"an idle timeout equal to the touch interval is refused", `{"idleTimeoutSeconds": 60}`, false},
 		{"an idle timeout below the touch interval is refused", `{"idleTimeoutSeconds": 30, "touchIntervalSeconds": 60}`, false},
 		{"SameSite in lower case is refused", `{"cookie": {"sameSite": "lax"}}`, false},
@@ -693,10 +738,23 @@ func tokenCorpus() []tokenCase {
 	return out
 }
 
-// testToken is a token-shaped value the vectors use.
+// apiKeyCorpus is tokenCorpus for API keys: the same random bytes, each
+// key the prefix and their base64url, hashed whole.
+func apiKeyCorpus() []tokenCase {
+	cases := tokenCorpus()
+	for i := range cases {
+		cases[i].Token = identity.APIKeyPrefix + cases[i].Token
+		cases[i].Hash = identity.HashToken(cases[i].Token)
+	}
+	return cases
+}
+
+// testToken is a token-shaped value the vectors use, and testAPIKey an API
+// key.
 var (
 	testToken  = base64.RawURLEncoding.EncodeToString(fixedSalt(0, 32))
 	otherToken = base64.RawURLEncoding.EncodeToString(fixedSalt(100, 32))
+	testAPIKey = identity.APIKeyPrefix + base64.RawURLEncoding.EncodeToString(fixedSalt(200, 32))
 )
 
 func cookieCorpus(t *testing.T) []cookieCase {
@@ -733,6 +791,8 @@ func credentialCorpus(t *testing.T) []credentialCase {
 	}
 	none := credentialWant{Outcome: "none"}
 	h := identity.HostCookieName
+	key := testAPIKey
+	usableKey := credentialWant{Outcome: "usable", Transport: &bearer, Token: &key, APIKey: true}
 	cases := []credentialCase{
 		{Name: "no credential", Headers: [][2]string{}, Want: none},
 		{Name: "a bearer token", Headers: [][2]string{{"Authorization", "Bearer " + token}}, Want: usable(bearer, token)},
@@ -763,6 +823,18 @@ func credentialCorpus(t *testing.T) []credentialCase {
 		{Name: "an empty session cookie", Headers: [][2]string{{"Cookie", h + "="}}, Want: invalid(cookie)},
 		{Name: "the plain session cookie name", CookieName: identity.PlainCookieName, Headers: [][2]string{{"Cookie", "session=" + token}}, Want: usable(cookie, token)},
 		{Name: "the __Secure- cookie name", CookieName: identity.SecureCookieName, Headers: [][2]string{{"Cookie", h + "=" + other + "; " + identity.SecureCookieName + "=" + token}}, Want: usable(cookie, token)},
+		{Name: "a bearer API key", Headers: [][2]string{{"Authorization", "Bearer " + key}}, Want: usableKey},
+		{Name: "a bearer API key after the scheme in lower case and several spaces", Headers: [][2]string{{"Authorization", "bearer   " + key}}, Want: usableKey},
+		{Name: "an API key with 42 characters after its prefix", Headers: [][2]string{{"Authorization", "Bearer " + key[:len(key)-1]}}, Want: invalid(bearer)},
+		{Name: "an API key with 44 characters after its prefix", Headers: [][2]string{{"Authorization", "Bearer " + key + "A"}}, Want: invalid(bearer)},
+		{Name: "an API key's prefix in upper case", Headers: [][2]string{{"Authorization", "Bearer KEY_" + key[len(identity.APIKeyPrefix):]}}, Want: invalid(bearer)},
+		{Name: "an API key's prefix alone", Headers: [][2]string{{"Authorization", "Bearer " + identity.APIKeyPrefix}}, Want: invalid(bearer)},
+		{Name: "an API key without its prefix's underscore", Headers: [][2]string{{"Authorization", "Bearer key" + key[len(identity.APIKeyPrefix):]}}, Want: invalid(bearer)},
+		{Name: "an API key with a character outside base64url", Headers: [][2]string{{"Authorization", "Bearer " + key[:len(key)-1] + "+"}}, Want: invalid(bearer)},
+		{Name: "a session token that starts with an API key's prefix", Headers: [][2]string{{"Authorization", "Bearer " + identity.APIKeyPrefix + token[:39]}}, Want: usable(bearer, identity.APIKeyPrefix+token[:39])},
+		{Name: "an API key in the session cookie", Headers: [][2]string{{"Cookie", h + "=" + key}}, Want: invalid(cookie)},
+		{Name: "an API key in the cookie beside a bearer session token", Headers: [][2]string{{"Authorization", "Bearer " + token}, {"Cookie", h + "=" + key}}, Want: usable(bearer, token)},
+		{Name: "a bearer API key wins over the session cookie", Headers: [][2]string{{"Authorization", "Bearer " + key}, {"Cookie", h + "=" + token}}, Want: usableKey},
 	}
 	for i := range cases {
 		if cases[i].CookieName == "" {
@@ -891,6 +963,27 @@ func userWriteCorpus() []userWriteCase {
 	for i := range cases {
 		uncovered := identity.UncoveredUser(cases[i].Held, sessionRoles(cases[i].Roles))
 		cases[i].Want = grantWant{Allowed: len(uncovered) == 0, Uncovered: uncovered}
+	}
+	return cases
+}
+
+func narrowCorpus() []narrowCase {
+	cases := []narrowCase{
+		{Name: "an exact match", Held: []string{"issues.read"}, Named: []string{"issues.read"}},
+		{Name: "a named permission under a held one", Held: []string{"issues"}, Named: []string{"issues.read", "issues.comment.write"}},
+		{Name: "a named permission broader than what is held is dropped", Held: []string{"issues.read"}, Named: []string{"issues"}},
+		{Name: "a sibling of what is held is dropped", Held: []string{"issues.read"}, Named: []string{"issues.write", "issues.read"}},
+		{Name: "a repeat in named is kept once", Held: []string{"issues"}, Named: []string{"issues.read", "issues.read", "issues"}},
+		{Name: "the order is named's", Held: []string{"a", "b", "c"}, Named: []string{"c.x", "a.x", "b"}},
+		{Name: "nothing held", Held: []string{}, Named: []string{"issues.read"}},
+		{Name: "nothing named", Held: []string{"issues"}, Named: []string{}},
+		{Name: "a held prefix covers only at a dot", Held: []string{"issue"}, Named: []string{"issues.read"}},
+		{Name: "two held permissions covering one named keep it once", Held: []string{"issues", "issues.read"}, Named: []string{"issues.read"}},
+		{Name: "comparison is exact in case", Held: []string{"Issues"}, Named: []string{"issues.read", "Issues.read"}},
+		{Name: "what is held and not named is not kept", Held: []string{"issues", "orders"}, Named: []string{"orders.read"}},
+	}
+	for i := range cases {
+		cases[i].Want = identity.NarrowPermissions(cases[i].Held, cases[i].Named)
 	}
 	return cases
 }

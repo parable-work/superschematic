@@ -2,8 +2,9 @@
 //!
 //! The core user model's wiring (D50). The API's users are the
 //! `fixture-user-model-db` schema's, its authDb: the identity runtime signs them
-//! in and out, resolves a request's session to its caller, and manages
-//! users, roles and grants over the tables this module's descriptor names.
+//! in and out, resolves a request's session or API key to its caller, and
+//! manages users, roles and grants over the tables this module's
+//! descriptor names.
 //! A service builds the identity service over a store and its config, and
 //! hands `Implementations` the authenticator over it:
 //!
@@ -69,6 +70,20 @@ pub const IDENTITY_DESCRIPTOR: &str = r#"{
       "passwordChangedAt": "password_changed_at",
       "disabledAt": "disabled_at",
       "pendingAt": "pending_at"
+    }
+  },
+  "apiKey": {
+    "table": "user_api_key",
+    "columns": {
+      "id": "id",
+      "user": "user_id",
+      "name": "name",
+      "tokenHash": "token_hash",
+      "permissions": "permissions",
+      "createdAt": "created_at",
+      "expiresAt": "expires_at",
+      "lastUsedAt": "last_used_at",
+      "revokedAt": "revoked_at"
     }
   },
   "role": {
@@ -146,6 +161,9 @@ pub fn registration() -> Registration {
 pub fn routes() -> Vec<Route> {
     vec![
         Route::of("AccountCapabilitiesHandler", &operations::ACCOUNT_CAPABILITIES),
+        Route::of("AccountListApiKeysHandler", &operations::ACCOUNT_LIST_API_KEYS),
+        Route::of("AccountCreateApiKeyHandler", &operations::ACCOUNT_CREATE_API_KEY),
+        Route::of("AccountRevokeApiKeyHandler", &operations::ACCOUNT_REVOKE_API_KEY),
         Route::of("AccountLoginHandler", &operations::ACCOUNT_LOGIN),
         Route::of("AccountLogoutHandler", &operations::ACCOUNT_LOGOUT),
         Route::of("AccountMeHandler", &operations::ACCOUNT_ME),
@@ -161,6 +179,8 @@ pub fn routes() -> Vec<Route> {
         Route::of("AccountAdminApproveUserHandler", &operations::ACCOUNT_ADMIN_APPROVE_USER),
         Route::of("AccountAdminDisableUserHandler", &operations::ACCOUNT_ADMIN_DISABLE_USER),
         Route::of("AccountAdminEnableUserHandler", &operations::ACCOUNT_ADMIN_ENABLE_USER),
+        Route::of("AccountAdminListUserApiKeysHandler", &operations::ACCOUNT_ADMIN_LIST_USER_API_KEYS),
+        Route::of("AccountAdminRevokeUserApiKeyHandler", &operations::ACCOUNT_ADMIN_REVOKE_USER_API_KEY),
         Route::of("AccountAdminSetUserPasswordHandler", &operations::ACCOUNT_ADMIN_SET_USER_PASSWORD),
         Route::of("AccountAdminRevokeRoleHandler", &operations::ACCOUNT_ADMIN_REVOKE_ROLE),
         Route::of("AccountAdminGrantRoleHandler", &operations::ACCOUNT_ADMIN_GRANT_ROLE),

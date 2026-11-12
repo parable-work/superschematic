@@ -3,6 +3,7 @@
 import type { FixtureUserRoutesApiSDK } from '../index';
 import type {
   ChangePasswordInput,
+  CreateApiKeyInput,
   CreateUserInput,
   LoginInput,
   RegisterInput,
@@ -15,6 +16,19 @@ import type {
  */
 
 export interface AccountCapabilitiesParams {
+}
+
+export interface AccountListApiKeysParams {
+}
+
+export interface AccountCreateApiKeyParams {
+  expiresInSeconds?: CreateApiKeyInput['expiresInSeconds'];
+  name: string;
+  permissions?: string[];
+}
+
+export interface AccountRevokeApiKeyParams {
+  id: string;
 }
 
 export interface AccountLoginParams {
@@ -83,6 +97,15 @@ export interface AccountAdminDisableUserParams {
 
 export interface AccountAdminEnableUserParams {
   id: string;
+}
+
+export interface AccountAdminListUserApiKeysParams {
+  id: string;
+}
+
+export interface AccountAdminRevokeUserApiKeyParams {
+  id: string;
+  keyId: string;
 }
 
 export interface AccountAdminSetUserPasswordParams {
@@ -215,6 +238,9 @@ export interface AnthropicTool {
  * Tool name constants
  */
 export const ACCOUNT_CAPABILITIES = 'account.capabilities' as const;
+export const ACCOUNT_LIST_API_KEYS = 'account.listApiKeys' as const;
+export const ACCOUNT_CREATE_API_KEY = 'account.createApiKey' as const;
+export const ACCOUNT_REVOKE_API_KEY = 'account.revokeApiKey' as const;
 export const ACCOUNT_LOGIN = 'account.login' as const;
 export const ACCOUNT_LOGOUT = 'account.logout' as const;
 export const ACCOUNT_ME = 'account.me' as const;
@@ -230,6 +256,8 @@ export const ACCOUNT_ADMIN_GET_USER = 'account-admin.getUser' as const;
 export const ACCOUNT_ADMIN_APPROVE_USER = 'account-admin.approveUser' as const;
 export const ACCOUNT_ADMIN_DISABLE_USER = 'account-admin.disableUser' as const;
 export const ACCOUNT_ADMIN_ENABLE_USER = 'account-admin.enableUser' as const;
+export const ACCOUNT_ADMIN_LIST_USER_API_KEYS = 'account-admin.listUserApiKeys' as const;
+export const ACCOUNT_ADMIN_REVOKE_USER_API_KEY = 'account-admin.revokeUserApiKey' as const;
 export const ACCOUNT_ADMIN_SET_USER_PASSWORD = 'account-admin.setUserPassword' as const;
 export const ACCOUNT_ADMIN_REVOKE_ROLE = 'account-admin.revokeRole' as const;
 export const ACCOUNT_ADMIN_GRANT_ROLE = 'account-admin.grantRole' as const;
@@ -240,6 +268,9 @@ export const GREETING_GREET = 'greeting.greet' as const;
  */
 export type ToolName =
   | typeof ACCOUNT_CAPABILITIES
+  | typeof ACCOUNT_LIST_API_KEYS
+  | typeof ACCOUNT_CREATE_API_KEY
+  | typeof ACCOUNT_REVOKE_API_KEY
   | typeof ACCOUNT_LOGIN
   | typeof ACCOUNT_LOGOUT
   | typeof ACCOUNT_ME
@@ -255,6 +286,8 @@ export type ToolName =
   | typeof ACCOUNT_ADMIN_APPROVE_USER
   | typeof ACCOUNT_ADMIN_DISABLE_USER
   | typeof ACCOUNT_ADMIN_ENABLE_USER
+  | typeof ACCOUNT_ADMIN_LIST_USER_API_KEYS
+  | typeof ACCOUNT_ADMIN_REVOKE_USER_API_KEY
   | typeof ACCOUNT_ADMIN_SET_USER_PASSWORD
   | typeof ACCOUNT_ADMIN_REVOKE_ROLE
   | typeof ACCOUNT_ADMIN_GRANT_ROLE
@@ -265,6 +298,9 @@ export type ToolName =
  */
 export const TOOL_NAMES: ToolName[] = [
   ACCOUNT_CAPABILITIES,
+  ACCOUNT_LIST_API_KEYS,
+  ACCOUNT_CREATE_API_KEY,
+  ACCOUNT_REVOKE_API_KEY,
   ACCOUNT_LOGIN,
   ACCOUNT_LOGOUT,
   ACCOUNT_ME,
@@ -280,6 +316,8 @@ export const TOOL_NAMES: ToolName[] = [
   ACCOUNT_ADMIN_APPROVE_USER,
   ACCOUNT_ADMIN_DISABLE_USER,
   ACCOUNT_ADMIN_ENABLE_USER,
+  ACCOUNT_ADMIN_LIST_USER_API_KEYS,
+  ACCOUNT_ADMIN_REVOKE_USER_API_KEY,
   ACCOUNT_ADMIN_SET_USER_PASSWORD,
   ACCOUNT_ADMIN_REVOKE_ROLE,
   ACCOUNT_ADMIN_GRANT_ROLE,
@@ -318,6 +356,109 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     returns: {
       type: 'object',
       description: `Capabilities object`
+    }
+  },
+  [ACCOUNT_LIST_API_KEYS]: {
+    name: 'account.listApiKeys',
+    operationId: 'AccountListApiKeysHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `Lists the caller's API keys that are not revoked, newest first, each without its token. (Requires authentication)`,
+    namespace: 'account',
+    methodName: 'listApiKeys',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+      }
+    },
+    returns: {
+      type: 'array',
+      description: `Array of ApiKey`,
+      items: {
+        type: 'object',
+        description: `ApiKey object`
+      }
+    }
+  },
+  [ACCOUNT_CREATE_API_KEY]: {
+    name: 'account.createApiKey',
+    operationId: 'AccountCreateApiKeyHandler',
+    title: ``,
+    mcp: {
+      hidden: true,
+      hiddenReason: `It answers a credential, which an agent's context should not hold.`
+    },
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key. (Requires authentication)`,
+    namespace: 'account',
+    methodName: 'createApiKey',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:aed6c6b7c9e496d40c648350870a1e0c00711c9421709b615aaabdf5b0acec07',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        expiresInSeconds: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        name: {"description":"A string value","maxLength":100,"minLength":1,"type":"string"},
+        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+      },
+      required: ['name']
+    },
+    returns: {
+      type: 'object',
+      description: `CreatedApiKey object`
+    }
+  },
+  [ACCOUNT_REVOKE_API_KEY]: {
+    name: 'account.revokeApiKey',
+    operationId: 'AccountRevokeApiKeyHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `Revokes an API key of the caller's, which authenticates no request after. It answers true. (Requires authentication)`,
+    namespace: 'account',
+    methodName: 'revokeApiKey',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    },
+    returns: {
+      type: 'boolean',
+      description: `A boolean value (true or false)`
     }
   },
   [ACCOUNT_LOGIN]: {
@@ -824,6 +965,75 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       description: `IdentityUser object`
     }
   },
+  [ACCOUNT_ADMIN_LIST_USER_API_KEYS]: {
+    name: 'account-admin.listUserApiKeys',
+    operationId: 'AccountAdminListUserApiKeysHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['identity.users.read'],
+    replay: null,
+    description: `Lists a user's API keys that are not revoked, newest first, each without its token. (Requires authentication)`,
+    namespace: 'account-admin',
+    methodName: 'listUserApiKeys',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    },
+    returns: {
+      type: 'array',
+      description: `Array of ApiKey`,
+      items: {
+        type: 'object',
+        description: `ApiKey object`
+      }
+    }
+  },
+  [ACCOUNT_ADMIN_REVOKE_USER_API_KEY]: {
+    name: 'account-admin.revokeUserApiKey',
+    operationId: 'AccountAdminRevokeUserApiKeyHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['identity.users.write'],
+    replay: null,
+    description: `Revokes an API key of a user's, which authenticates no request after. It answers true. (Requires authentication)`,
+    namespace: 'account-admin',
+    methodName: 'revokeUserApiKey',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:6bb5af2db2a454913f0f0d7a2da8e245d4abf88ca3ef6edd849f4ffdb10ed73a',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        keyId: {"description":"keyId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id', 'keyId']
+    },
+    returns: {
+      type: 'boolean',
+      description: `A boolean value (true or false)`
+    }
+  },
   [ACCOUNT_ADMIN_SET_USER_PASSWORD]: {
     name: 'account-admin.setUserPassword',
     operationId: 'AccountAdminSetUserPasswordHandler',
@@ -974,6 +1184,42 @@ export const openAIFunctions: OpenAIFunction[] = [
     }
   },
   {
+    name: 'account.listApiKeys',
+    description: `Lists the caller's API keys that are not revoked, newest first, each without its token. (Requires authentication)`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+      }
+    }
+  },
+  {
+    name: 'account.createApiKey',
+    description: `Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key. (Requires authentication)`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        expiresInSeconds: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        name: {"description":"A string value","maxLength":100,"minLength":1,"type":"string"},
+        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'account.revokeApiKey',
+    description: `Revokes an API key of the caller's, which authenticates no request after. It answers true. (Requires authentication)`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    }
+  },
+  {
     name: 'account.login',
     description: `Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.`,
     parameters: {
@@ -1155,6 +1401,31 @@ export const openAIFunctions: OpenAIFunction[] = [
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
+    }
+  },
+  {
+    name: 'account-admin.listUserApiKeys',
+    description: `Lists a user's API keys that are not revoked, newest first, each without its token. (Requires authentication)`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'account-admin.revokeUserApiKey',
+    description: `Revokes an API key of a user's, which authenticates no request after. It answers true. (Requires authentication)`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        keyId: {"description":"keyId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id', 'keyId']
     }
   },
   {
@@ -1224,6 +1495,42 @@ export const anthropicTools: AnthropicTool[] = [
     }
   },
   {
+    name: 'account.listApiKeys',
+    description: `Lists the caller's API keys that are not revoked, newest first, each without its token. (Requires authentication)`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+      }
+    }
+  },
+  {
+    name: 'account.createApiKey',
+    description: `Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key. (Requires authentication)`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        expiresInSeconds: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        name: {"description":"A string value","maxLength":100,"minLength":1,"type":"string"},
+        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'account.revokeApiKey',
+    description: `Revokes an API key of the caller's, which authenticates no request after. It answers true. (Requires authentication)`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    }
+  },
+  {
     name: 'account.login',
     description: `Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.`,
     input_schema: {
@@ -1408,6 +1715,31 @@ export const anthropicTools: AnthropicTool[] = [
     }
   },
   {
+    name: 'account-admin.listUserApiKeys',
+    description: `Lists a user's API keys that are not revoked, newest first, each without its token. (Requires authentication)`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'account-admin.revokeUserApiKey',
+    description: `Revokes an API key of a user's, which authenticates no request after. It answers true. (Requires authentication)`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        keyId: {"description":"keyId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id', 'keyId']
+    }
+  },
+  {
     name: 'account-admin.setUserPassword',
     description: `Sets a user's password and ends their sessions. It answers true. (Requires authentication)`,
     input_schema: {
@@ -1463,6 +1795,9 @@ export const anthropicTools: AnthropicTool[] = [
  */
 export type ToolParams = {
   [ACCOUNT_CAPABILITIES]: AccountCapabilitiesParams;
+  [ACCOUNT_LIST_API_KEYS]: AccountListApiKeysParams;
+  [ACCOUNT_CREATE_API_KEY]: AccountCreateApiKeyParams;
+  [ACCOUNT_REVOKE_API_KEY]: AccountRevokeApiKeyParams;
   [ACCOUNT_LOGIN]: AccountLoginParams;
   [ACCOUNT_LOGOUT]: AccountLogoutParams;
   [ACCOUNT_ME]: AccountMeParams;
@@ -1478,6 +1813,8 @@ export type ToolParams = {
   [ACCOUNT_ADMIN_APPROVE_USER]: AccountAdminApproveUserParams;
   [ACCOUNT_ADMIN_DISABLE_USER]: AccountAdminDisableUserParams;
   [ACCOUNT_ADMIN_ENABLE_USER]: AccountAdminEnableUserParams;
+  [ACCOUNT_ADMIN_LIST_USER_API_KEYS]: AccountAdminListUserApiKeysParams;
+  [ACCOUNT_ADMIN_REVOKE_USER_API_KEY]: AccountAdminRevokeUserApiKeyParams;
   [ACCOUNT_ADMIN_SET_USER_PASSWORD]: AccountAdminSetUserPasswordParams;
   [ACCOUNT_ADMIN_REVOKE_ROLE]: AccountAdminRevokeRoleParams;
   [ACCOUNT_ADMIN_GRANT_ROLE]: AccountAdminGrantRoleParams;
@@ -1509,6 +1846,12 @@ export async function invokeTool<T extends ToolName>(
   switch (toolName) {
     case ACCOUNT_CAPABILITIES:
       return sdk.account.capabilities();
+    case ACCOUNT_LIST_API_KEYS:
+      return sdk.account.listApiKeys();
+    case ACCOUNT_CREATE_API_KEY:
+      return sdk.account.createApiKey({ name: (params as AccountCreateApiKeyParams).name, expiresInSeconds: (params as AccountCreateApiKeyParams).expiresInSeconds, permissions: (params as AccountCreateApiKeyParams).permissions });
+    case ACCOUNT_REVOKE_API_KEY:
+      return sdk.account.revokeApiKey((params as AccountRevokeApiKeyParams).id);
     case ACCOUNT_LOGIN:
       return sdk.account.login({ login: (params as AccountLoginParams).login, password: (params as AccountLoginParams).password, session: (params as AccountLoginParams).session });
     case ACCOUNT_LOGOUT:
@@ -1539,6 +1882,10 @@ export async function invokeTool<T extends ToolName>(
       return sdk.accountAdmin.disableUser((params as AccountAdminDisableUserParams).id);
     case ACCOUNT_ADMIN_ENABLE_USER:
       return sdk.accountAdmin.enableUser((params as AccountAdminEnableUserParams).id);
+    case ACCOUNT_ADMIN_LIST_USER_API_KEYS:
+      return sdk.accountAdmin.listUserApiKeys((params as AccountAdminListUserApiKeysParams).id);
+    case ACCOUNT_ADMIN_REVOKE_USER_API_KEY:
+      return sdk.accountAdmin.revokeUserApiKey((params as AccountAdminRevokeUserApiKeyParams).id, (params as AccountAdminRevokeUserApiKeyParams).keyId);
     case ACCOUNT_ADMIN_SET_USER_PASSWORD:
       return sdk.accountAdmin.setUserPassword((params as AccountAdminSetUserPasswordParams).id, { password: (params as AccountAdminSetUserPasswordParams).password });
     case ACCOUNT_ADMIN_REVOKE_ROLE:

@@ -33,6 +33,7 @@ def _load_types_package() -> Any | None:
     return _TYPES_PACKAGE_MODULE
 if TYPE_CHECKING:
     from schemas_types_fixture_user_routes_api import (
+        ApiKey,
         CreateUserInput,
         IdentityRole,
         IdentityUser,
@@ -509,6 +510,19 @@ class AccountAdminNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "IdentityRole", True)
+    def list_user_api_keys(self, id: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[ApiKey]:
+        path = f"/api/auth/admin/users/{path_segment(id)}/keys"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "ApiKey", True)
     def list_users(self, pending: bool | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[IdentityUser]:
         path = "/api/auth/admin/users"
         query_params: dict[str, Any] | None = None
@@ -541,6 +555,19 @@ class AccountAdminNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "IdentityUser", False)
+    def revoke_user_api_key(self, id: str, key_id: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> bool:
+        path = f"/api/auth/admin/users/{path_segment(id)}/keys/{path_segment(key_id)}"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="DELETE",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
     def set_user_password(self, id: str, input_data: SetPasswordInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> bool:
         path = f"/api/auth/admin/users/{path_segment(id)}/password"
         if input_data is None:

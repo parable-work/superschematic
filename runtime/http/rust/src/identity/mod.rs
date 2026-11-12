@@ -1,6 +1,7 @@
 //! The Rust runtime of the core user model (D50): it signs users in and
-//! out, resolves a request's session to a principal, and manages users,
-//! roles and grants over the tables the core owns. A generated Rust server
+//! out, resolves a request's session or API key to a principal, and
+//! manages users, roles, grants and API keys over the tables the core
+//! owns. A generated Rust server
 //! wires it in and adds no logic. The Go and TypeScript runtimes do what it
 //! does, held to the same vectors (`runtime/http/testdata/identity_parity.json`,
 //! whose harness `runtime/http/testdata/README.md` states).
@@ -8,18 +9,20 @@
 //! The pieces:
 //!
 //! - [`Config`], the JSON every runtime reads alike: the session's
-//!   lifetime, idle timeout and touch interval, the cookie, the trusted
-//!   origins and the password hash's cost.
+//!   lifetime, idle timeout and touch interval, an API key's longest
+//!   lifetime, the cookie, the trusted origins and the password hash's
+//!   cost.
 //! - Passwords: argon2id as PHC strings ([`hash_password`],
 //!   [`verify_password`], which also says when a hash should be written
 //!   again at the config's cost), and `Auth.Password`'s rule
 //!   ([`check_password`]).
 //! - Tokens: 32 random bytes in base64url ([`new_token`]), kept as their
-//!   SHA-256 ([`hash_token`]).
+//!   SHA-256 ([`hash_token`]). An API key (D114) is as many after its
+//!   prefix ([`new_api_key`]), kept the same way.
 //! - The credential on a request ([`extract_credential`]): `Authorization:
-//!   Bearer` first, the session cookie only without an `Authorization`
-//!   header, and no fallback to the cookie when `Authorization` is not a
-//!   usable bearer token.
+//!   Bearer` first, a session token or an API key, the session cookie only
+//!   without an `Authorization` header, and no fallback to the cookie when
+//!   `Authorization` is neither.
 //! - The session cookie ([`Config::session_cookie`], [`Config::clear_cookie`]).
 //! - The cross-origin check on a cookie request and a cookie login
 //!   ([`check_cross_origin`], Go's `net/http.CrossOriginProtection`), and
@@ -27,9 +30,10 @@
 //! - Roles: the permission form ([`valid_permission`]), a principal's
 //!   permissions ([`effective_permissions`]), the rule that no one grants
 //!   what they do not hold ([`uncovered`]), nor sets the password of,
-//!   disables or enables a user who holds it ([`uncovered_user`]), and
-//!   capabilities over the router's operation table ([`Route`],
-//!   [`capabilities_of`]).
+//!   disables or enables a user who holds it ([`uncovered_user`]), the
+//!   permissions an API key made with some holds of its user's roles
+//!   ([`narrow_permissions`], [`narrow_roles`]), and capabilities over the
+//!   router's operation table ([`Route`], [`capabilities_of`]).
 //! - [`Store`], and [`SqlStore`], its implementation for Postgres and
 //!   SQLite built from the schema's identity descriptor, over a SQL
 //!   [`Client`]: [`TokioPostgres`] with the `identity-postgres` feature,
@@ -39,7 +43,11 @@
 //! - [`Service`], every session and administration operation, its axum
 //!   handlers ([`Service::handler`], [`Service::routes`]) and the router's
 //!   [`IdentityAuthenticator`], which hands `admit` and the router a
-//!   [`crate::Principal`].
+//!   [`crate::Principal`]. The API key operations (D114) are among them: a
+//!   user makes, lists and revokes their own keys with a session, and an
+//!   administrator lists and revokes any user's. [`Service::routes`] lists
+//!   a set's key routes only when the service turns them on
+//!   ([`Service::with_api_keys`], [`Service::with_api_key_administration`]).
 
 mod config;
 mod cookie;
@@ -58,15 +66,15 @@ mod time;
 mod token;
 
 pub use config::{
-    Config, ConfigError, CookieConfig, PasswordConfig, DEFAULT_SAME_SITE,
-    DEFAULT_SESSION_TTL_SECONDS, DEFAULT_TOUCH_INTERVAL_SECONDS, HOST_COOKIE_NAME,
-    PLAIN_COOKIE_NAME, SECURE_COOKIE_NAME,
+    Config, ConfigError, CookieConfig, PasswordConfig, DEFAULT_API_KEY_MAX_TTL_SECONDS,
+    DEFAULT_SAME_SITE, DEFAULT_SESSION_TTL_SECONDS, DEFAULT_TOUCH_INTERVAL_SECONDS,
+    HOST_COOKIE_NAME, PLAIN_COOKIE_NAME, SECURE_COOKIE_NAME,
 };
 pub use cross_origin::{check_cross_origin, request_host, CrossOriginRefusal};
 pub use descriptor::{
-    CredentialColumns, Descriptor, DescriptorCredential, DescriptorRole, DescriptorRoleGrant,
-    DescriptorSession, DescriptorUser, RoleColumns, RoleGrantColumns, SessionColumns, UserColumns,
-    DESCRIPTOR_VERSION,
+    ApiKeyColumns, CredentialColumns, Descriptor, DescriptorApiKey, DescriptorCredential,
+    DescriptorRole, DescriptorRoleGrant, DescriptorSession, DescriptorUser, RoleColumns,
+    RoleGrantColumns, SessionColumns, UserColumns, DESCRIPTOR_VERSION,
 };
 pub use errors::{
     CODE_CONFLICT, CODE_CROSS_ORIGIN, CODE_FORBIDDEN, CODE_INVALID_CREDENTIALS,
@@ -76,24 +84,28 @@ pub use errors::{
 pub use handlers::{
     Cors, CorsLayer, IdentityAuthenticator, Operation, UserAdministration, UserSessions,
     DEFAULT_USER_ADMINISTRATION_PATH, DEFAULT_USER_SESSIONS_PATH, OPERATIONS, OP_APPROVE_USER,
-    OP_CAPABILITIES, OP_CHANGE_PASSWORD, OP_CREATE_ROLE, OP_CREATE_USER, OP_DELETE_ROLE,
-    OP_DISABLE_USER, OP_ENABLE_USER, OP_GET_USER, OP_GRANT_ROLE, OP_LIST_ROLES, OP_LIST_USERS,
-    OP_LOGIN, OP_LOGOUT, OP_ME, OP_REGISTER, OP_REVOKE_ROLE, OP_SET_USER_PASSWORD, OP_UPDATE_ROLE,
+    OP_CAPABILITIES, OP_CHANGE_PASSWORD, OP_CREATE_API_KEY, OP_CREATE_ROLE, OP_CREATE_USER,
+    OP_DELETE_ROLE, OP_DISABLE_USER, OP_ENABLE_USER, OP_GET_USER, OP_GRANT_ROLE, OP_LIST_API_KEYS,
+    OP_LIST_ROLES, OP_LIST_USERS, OP_LIST_USER_API_KEYS, OP_LOGIN, OP_LOGOUT, OP_ME, OP_REGISTER,
+    OP_REVOKE_API_KEY, OP_REVOKE_ROLE, OP_REVOKE_USER_API_KEY, OP_SET_USER_PASSWORD,
+    OP_UPDATE_ROLE,
 };
 pub use password::{
     check_password, hash_password, hash_password_with_salt, verify_password, Argon2Params,
     HashError, MalformedHash, Verified, KEY_BYTES, PASSWORD_SCALAR, SALT_BYTES,
 };
 pub use permissions::{
-    capabilities_of, effective_permissions, uncovered, uncovered_user, valid_permission, Route,
+    capabilities_of, effective_permissions, narrow_permissions, narrow_roles, uncovered,
+    uncovered_user, valid_permission, Route,
 };
 pub use scalars::{parse_uuid, uuid_to_base62, Scalars};
 pub use service::{
-    Capabilities, ChangePasswordInput, Clock, CreateUserInput, CurrentUser, IdentityPrincipal,
-    IdentityRole, IdentityUser, Input, IssuedSession, LoginInput, LoginResult, Permits,
-    RegisterInput, RegisterResult, Registered, Registration, RoleInput, RoleRef, Service,
-    SessionUser, SetPasswordInput, DEFAULT_PERMISSION_PREFIX, PERMISSION_ROLES_READ,
-    PERMISSION_ROLES_WRITE, PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
+    Capabilities, ChangePasswordInput, Clock, CreateApiKeyInput, CreateUserInput, CreatedApiKey,
+    CurrentUser, IdentityApiKey, IdentityPrincipal, IdentityRole, IdentityUser, Input,
+    IssuedSession, LoginInput, LoginResult, Permits, RegisterInput, RegisterResult, Registered,
+    Registration, RoleInput, RoleRef, Service, SessionUser, SetPasswordInput,
+    API_KEY_MAX_PERMISSIONS, API_KEY_NAME_MAX_LENGTH, DEFAULT_PERMISSION_PREFIX,
+    PERMISSION_ROLES_READ, PERMISSION_ROLES_WRITE, PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
 };
 #[cfg(all(feature = "identity-postgres", feature = "postgres"))]
 pub use sql::PostgresPool;
@@ -103,11 +115,12 @@ pub use sql::Rusqlite;
 pub use sql::TokioPostgres;
 pub use sql::{Client, ClientError, Conn, Dialect, SqlStore, SqlValue};
 pub use store::{
-    FirstUser, LoginRecord, NewSession, NewUser, NewUserGrants, Role, Session, SessionRecord,
-    Store, StoreError, User,
+    ApiKey, ApiKeyRecord, FirstUser, LoginRecord, NewApiKey, NewSession, NewUser, NewUserGrants,
+    Role, Session, SessionRecord, Store, StoreError, User,
 };
 pub use time::{format_rfc3339, format_sqlite, parse_timestamp};
 pub use token::{
-    extract_credential, hash_token, is_token, new_token, token_from_bytes, Credential,
-    CredentialOutcome, NoRandomness, Transport, TOKEN_BYTES, TOKEN_LENGTH,
+    api_key_from_bytes, extract_credential, hash_token, is_api_key, is_token, new_api_key,
+    new_token, token_from_bytes, Credential, CredentialOutcome, NoRandomness, Transport,
+    API_KEY_LENGTH, API_KEY_PREFIX, TOKEN_BYTES, TOKEN_LENGTH,
 };

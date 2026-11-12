@@ -32,6 +32,9 @@ type Descriptor struct {
 	User       User       `json:"user"`
 	Session    Session    `json:"session"`
 	Credential Credential `json:"credential"`
+	// APIKey is the UserApiKey table (D114). A descriptor written before it
+	// has none, and a store built from one has no API keys.
+	APIKey *APIKey `json:"apiKey,omitempty"`
 	// Role and RoleGrant are nil when the schema has no UserRole table.
 	Role      *Role      `json:"role,omitempty"`
 	RoleGrant *RoleGrant `json:"roleGrant,omitempty"`
@@ -128,6 +131,25 @@ type RoleGrantColumns struct {
 	GrantedAt string `json:"grantedAt"`
 }
 
+// APIKey is the UserApiKey table the loader adds (D114).
+type APIKey struct {
+	Table   string        `json:"table"`
+	Columns APIKeyColumns `json:"columns"`
+}
+
+// APIKeyColumns are every column of the UserApiKey table.
+type APIKeyColumns struct {
+	ID          string `json:"id"`
+	User        string `json:"user"`
+	Name        string `json:"name"`
+	TokenHash   string `json:"tokenHash"`
+	Permissions string `json:"permissions"`
+	CreatedAt   string `json:"createdAt"`
+	ExpiresAt   string `json:"expiresAt"`
+	LastUsedAt  string `json:"lastUsedAt"`
+	RevokedAt   string `json:"revokedAt"`
+}
+
 // JSON is the descriptor as written to identity/<schema>.json and into the
 // types' constants: two-space indented, with a trailing newline.
 func (d Descriptor) JSON() ([]byte, error) {
@@ -220,6 +242,29 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 	}
 	if credential.err != nil {
 		return Descriptor{}, credential.err
+	}
+
+	keyTable, err := added(schema, ir.IdentityAPIKeyTable)
+	if err != nil {
+		return Descriptor{}, err
+	}
+	apiKey := columnsOf(schema, keyTable)
+	d.APIKey = &APIKey{
+		Table: codegen.ToSnakeCase(keyTable.Name),
+		Columns: APIKeyColumns{
+			ID:          apiKey.column(apiKey.key()),
+			User:        apiKey.relation(ir.IdentityAPIKeyUserField, userTable),
+			Name:        apiKey.column(apiKey.field(ir.IdentityAPIKeyNameField)),
+			TokenHash:   apiKey.column(apiKey.field(ir.IdentityAPIKeyTokenHashField)),
+			Permissions: apiKey.column(apiKey.field(ir.IdentityAPIKeyPermissionsField)),
+			CreatedAt:   apiKey.column(apiKey.field(ir.IdentityAPIKeyCreatedAtField)),
+			ExpiresAt:   apiKey.column(apiKey.field(ir.IdentityAPIKeyExpiresAtField)),
+			LastUsedAt:  apiKey.column(apiKey.field(ir.IdentityAPIKeyLastUsedAtField)),
+			RevokedAt:   apiKey.column(apiKey.field(ir.IdentityAPIKeyRevokedAtField)),
+		},
+	}
+	if apiKey.err != nil {
+		return Descriptor{}, apiKey.err
 	}
 
 	if roleTable == nil {

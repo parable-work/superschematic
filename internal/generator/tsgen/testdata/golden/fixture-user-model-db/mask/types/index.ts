@@ -2,5 +2,6 @@
 export * from './role';
 export * from './session';
 export * from './user';
+export * from './userapikey';
 export * from './usercredential';
 export * from './userrolegrant';

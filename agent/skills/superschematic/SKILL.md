@@ -186,6 +186,14 @@ path for when the store is unavailable.
   `@userSessions` on an API class) instead of writing auth. Seed the
   roles new users get with `@seedRoles([{ name, permissions }])` on the
   `UserRole` table, so an approved user can act with no admin step.
+  An agent or a script that calls as a user gets an API key, not the
+  user's session and not a key table of your own:
+  `@userSessions({ apiKeys: true })` adds `createApiKey`, `listApiKeys`
+  and `revokeApiKey` (D114). A key is sent as `Authorization: Bearer
+  key_...`, lives up to the config's `apiKeyMaxTtlSeconds`, and holds its
+  user's permissions or the subset `permissions` names. The subset
+  narrows permissions, not routes: give an agent that should reach less a
+  user and a role of its own.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
   transaction as the change that causes them; `key` with `onDuplicate` or

@@ -10,6 +10,8 @@ import {
   hashPasswordWithSalt,
   hashToken,
   isPassword,
+  narrowPermissions,
+  newApiKey,
   newToken,
   parseIdentityConfig,
   parseIdentityConfigJSON,
@@ -62,6 +64,7 @@ const SECTIONS = [
   'hashes',
   'verify',
   'tokens',
+  'apiKeys',
   'cookies',
   'credentials',
   'crossOrigin',
@@ -69,6 +72,7 @@ const SECTIONS = [
   'effectivePermissions',
   'grants',
   'userWrites',
+  'keyPermissions',
   'capabilities',
 ];
 
@@ -118,6 +122,15 @@ describe('tokens', () => {
   for (const c of section<Named & { bytes: string; token: string; hash: string }>('tokens')) {
     test(c.name, () => {
       expect(newToken(() => new Uint8Array(Buffer.from(c.bytes, 'hex')))).toBe(c.token);
+      expect(hashToken(c.token)).toBe(c.hash);
+    });
+  }
+});
+
+describe('apiKeys', () => {
+  for (const c of section<Named & { bytes: string; token: string; hash: string }>('apiKeys')) {
+    test(c.name, () => {
+      expect(newApiKey(() => new Uint8Array(Buffer.from(c.bytes, 'hex')))).toBe(c.token);
       expect(hashToken(c.token)).toBe(c.hash);
     });
   }
@@ -183,6 +196,14 @@ describe('userWrites', () => {
     test(c.name, () => {
       const missing = uncoveredUser(c.held, c.roles);
       expect({ allowed: missing.length === 0, uncovered: missing }).toEqual(c.want);
+    });
+  }
+});
+
+describe('keyPermissions', () => {
+  for (const c of section<Named & { held: string[]; named: string[]; want: string[] }>('keyPermissions')) {
+    test(c.name, () => {
+      expect(narrowPermissions(c.held, c.named)).toEqual(c.want);
     });
   }
 });

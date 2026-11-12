@@ -46,6 +46,9 @@ type route struct {
 	rule                       string // "public", "auth" or the permission
 	rateLimit                  int
 	hidden                     bool
+	// credential marks createApiKey, hidden because it answers a credential
+	// (D114), not because it carries a password, as hidden marks.
+	credential bool
 }
 
 func routeOf(op *ir.FieldDef) route {
@@ -73,6 +76,7 @@ func routeOf(op *ir.FieldDef) route {
 	}
 	if op.MCP != nil {
 		r.hidden = op.MCP.Hidden && op.MCP.HiddenReason == ir.IdentityPasswordToolReason
+		r.credential = op.MCP.Hidden && op.MCP.HiddenReason == ir.IdentityAPIKeyToolReason
 	}
 	return r
 }
@@ -225,6 +229,142 @@ func TestExpandRoutesAdministration(t *testing.T) {
 	}
 	if got := fieldsOf(api.Types[ir.IdentityRoleRefType]); got != "id:Identity.Slug!,name:string!" {
 		t.Errorf("RoleRef = %s", got)
+	}
+}
+
+// TestExpandRoutesAPIKeys: apiKeys (D114) adds createApiKey, listApiKeys
+// and revokeApiKey after a @userSessions set's other operations, and
+// listUserApiKeys and revokeUserApiKey after a @userAdministration set's,
+// each with its rule. A key's id is an Identity.UUID whatever the User
+// table's key is. createApiKey alone is rate-limited, and hidden as a tool
+// with the reason of its own. Each set opts in for itself, and a set
+// without the login makes no key.
+func TestExpandRoutesAPIKeys(t *testing.T) {
+	db := routesDB()
+	db.Scalars["Identity.Slug"] = &ir.ScalarDef{Name: "Identity.Slug", LanguagePrimitive: ir.LanguageString}
+	for _, fd := range db.Types["Account"].Fields {
+		if fd.Key {
+			fd.TypeRef.Name = "Identity.Slug"
+		}
+	}
+	api := routesAPI(&ir.UserSessionsConfig{APIKeys: true}, &ir.UserAdministrationConfig{Path: "staff/admin", APIKeys: true})
+	scalars := ExpandRoutes(api, db, "acme.iam")
+
+	sessions := routesOf(t, api.OperationSets[0])
+	wantSessions := []route{
+		{name: "createApiKey", method: "POST", path: "auth/keys", result: "CreatedApiKey", args: "input:CreateApiKeyInput", rule: "auth", rateLimit: 10, credential: true},
+		{name: "listApiKeys", method: "GET", path: "auth/keys", result: "ApiKey", array: true, rule: "auth"},
+		{name: "revokeApiKey", method: "DELETE", path: "auth/keys/{id}", result: "boolean", args: "id:Identity.UUID", rule: "auth"},
+	}
+	if len(sessions) != 8 || !reflect.DeepEqual(sessions[5:], wantSessions) {
+		t.Errorf("@userSessions({ apiKeys: true }) operations after its five:\n got %+v\nwant %+v", sessions, wantSessions)
+	}
+
+	admin := routesOf(t, api.OperationSets[1])
+	wantAdmin := []route{
+		{name: "listUserApiKeys", method: "GET", path: "staff/admin/users/{id}/keys", result: "ApiKey", array: true, args: "id:Identity.Slug", rule: "acme.iam.users.read"},
+		{name: "revokeUserApiKey", method: "DELETE", path: "staff/admin/users/{id}/keys/{keyId}", result: "boolean", args: "id:Identity.Slug,keyId:Identity.UUID", rule: "acme.iam.users.write"},
+	}
+	if len(admin) != 15 || !reflect.DeepEqual(admin[13:], wantAdmin) {
+		t.Errorf("@userAdministration({ apiKeys: true }) operations after its thirteen:\n got %+v\nwant %+v", admin, wantAdmin)
+	}
+
+	for name, fields := range map[string]string{
+		"CreateApiKeyInput": "name:string!,expiresInSeconds:Generic.Int64,permissions:string[]",
+		"ApiKey":            "id:Identity.UUID!,name:string!,permissions:string[],createdAt:Temporal.DateTime!,expiresAt:Temporal.DateTime!,lastUsedAt:Temporal.DateTime",
+		"CreatedApiKey":     "id:Identity.UUID!,name:string!,permissions:string[],createdAt:Temporal.DateTime!,expiresAt:Temporal.DateTime!,token:string!*",
+	} {
+		td := api.Types[name]
+		if got := fieldsOf(td); got != fields {
+			t.Errorf("%s = %s, want %s", name, got, fields)
+			continue
+		}
+		role := ir.RoleEmbeddedStruct
+		if name == "CreateApiKeyInput" {
+			role = ir.RoleAPIInput
+		}
+		if td.Role != role || td.Origin != ir.OriginIdentity || td.Owner != api.Name || td.Comment == "" {
+			t.Errorf("%s: role %s, origin %q, owner %q, comment %q", name, td.Role, td.Origin, td.Owner, td.Comment)
+		}
+		for _, fd := range td.Fields {
+			if fd.Origin != ir.OriginIdentity {
+				t.Errorf("%s.%s has origin %q", name, fd.Name, fd.Origin)
+			}
+		}
+	}
+	if !slices.Equal(ir.IdentityAPIKeyTypes, []string{"CreateApiKeyInput", "ApiKey", "CreatedApiKey"}) {
+		t.Errorf("ir.IdentityAPIKeyTypes = %v", ir.IdentityAPIKeyTypes)
+	}
+	keyName := api.Types["CreateApiKeyInput"].Fields[0]
+	if keyName.ValidateMinLength == nil || *keyName.ValidateMinLength != 1 || keyName.ValidateMaxLength == nil || *keyName.ValidateMaxLength != 100 {
+		t.Errorf("CreateApiKeyInput.name's length = %v to %v, want 1 to 100", keyName.ValidateMinLength, keyName.ValidateMaxLength)
+	}
+	for _, name := range []string{"Identity.UUID", "Generic.Int64", "Temporal.DateTime"} {
+		if !slices.Contains(scalars, name) || api.Scalars[name] == nil {
+			t.Errorf("the key routes' scalar %s: returned %v, held %v", name, scalars, api.Scalars[name] != nil)
+		}
+	}
+
+	// Each set opts in for itself: the sessions' keys add the three types
+	// and leave the administration its thirteen, and the administration's
+	// add ApiKey alone and leave the sessions their five.
+	names := func(set *ir.OperationSet) []string {
+		var out []string
+		for _, op := range set.Operations {
+			out = append(out, op.Name)
+		}
+		return out
+	}
+	keyTypes := func(api *ir.Schema) []string {
+		var out []string
+		for _, name := range ir.IdentityAPIKeyTypes {
+			if api.Types[name] != nil {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	own := routesAPI(&ir.UserSessionsConfig{APIKeys: true}, &ir.UserAdministrationConfig{})
+	ExpandRoutes(own, routesDB(), ir.DefaultIdentityPermissionPrefix)
+	if got := names(own.OperationSets[1]); len(got) != 13 || slices.Contains(got, "listUserApiKeys") || slices.Contains(got, "revokeUserApiKey") {
+		t.Errorf("@userAdministration() beside the sessions' apiKeys = %v, want its thirteen", got)
+	}
+	if got := keyTypes(own); !slices.Equal(got, ir.IdentityAPIKeyTypes) {
+		t.Errorf("the sessions' apiKeys added %v, want %v", got, ir.IdentityAPIKeyTypes)
+	}
+	staff := routesAPI(&ir.UserSessionsConfig{}, &ir.UserAdministrationConfig{APIKeys: true})
+	ExpandRoutes(staff, routesDB(), ir.DefaultIdentityPermissionPrefix)
+	if got, want := names(staff.OperationSets[0]), []string{"login", "logout", "me", "capabilities", "changePassword"}; !slices.Equal(got, want) {
+		t.Errorf("@userSessions() beside the administration's apiKeys = %v, want %v", got, want)
+	}
+	if got, want := keyTypes(staff), []string{"ApiKey"}; !slices.Equal(got, want) {
+		t.Errorf("the administration's apiKeys added %v, want %v", got, want)
+	}
+
+	// Without apiKeys neither set has a key route or a key type.
+	none := routesAPI(&ir.UserSessionsConfig{Register: true}, &ir.UserAdministrationConfig{})
+	ExpandRoutes(none, routesDB(), ir.DefaultIdentityPermissionPrefix)
+	for _, set := range none.OperationSets[:2] {
+		for _, op := range set.Operations {
+			if strings.Contains(op.Name, "ApiKey") || strings.Contains(op.RestPath, "/keys") {
+				t.Errorf("%s.%s at %s without apiKeys", set.Name, op.Name, op.RestPath)
+			}
+		}
+	}
+	if got := keyTypes(none); len(got) != 0 {
+		t.Errorf("types %v added without apiKeys", got)
+	}
+
+	// A key is made by a caller signed in with a session, so a set without
+	// the login has none, whatever its apiKeys: the decorator refuses the
+	// pair.
+	noLogin := routesAPI(&ir.UserSessionsConfig{NoLogin: true, APIKeys: true}, nil)
+	ExpandRoutes(noLogin, routesDB(), ir.DefaultIdentityPermissionPrefix)
+	if got, want := names(noLogin.OperationSets[0]), []string{"me", "capabilities"}; !slices.Equal(got, want) {
+		t.Errorf("@userSessions without the login = %v, want %v", got, want)
+	}
+	if got := keyTypes(noLogin); len(got) != 0 {
+		t.Errorf("types %v added without the login", got)
 	}
 }
 

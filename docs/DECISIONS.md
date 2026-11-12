@@ -17941,3 +17941,59 @@ re-recorded, not edited. One thing the replayer of the core's transcripts
 now skips: a define the engine records as refused for a table-only member
 (its reason names the table form, `on a DB table, D104)`) is not compared with the core,
 which takes that member; the engine's own replay still holds the refusal.
+
+## D114. A user makes API keys: named, long-lived tokens of a table of their own that call as the user, with a subset of the user's permissions when the key names one (D33, D50, D81 amended)
+
+An agent that calls an API over MCP or HTTP signed in as a person and
+held that person's session: a token that ends in 14 days, or sooner by an
+idle timeout meant for a browser, that no list shows and nothing revokes
+but a logout made with the token itself, and that carries everything the
+person may do. The tracker's agents signed in again every two weeks.
+`examples/acme-schematic` showed the other way out, an auth provider of
+its own with a table of keys, which gives up the core user model to get
+one feature of it. D50 foresaw a credential kind beside the password
+getting "a table of its own joined to the user".
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API key is a row of a table of its own, `UserApiKey` (`user_api_key`), which the loader adds beside `Session` for a `User` table: `id`, `user` (cascade), `name`, `tokenHash` (unique, the SHA-256 of the token, never the token), `permissions` (a nullable list), `createdAt`, `expiresAt`, `lastUsedAt`, `revokedAt`, indexed on `user`. `UserApiKey` joins the names a schema with a `User` table may not use. | A `Session` row with a name and a lifetime of its own. It is one nullable column where this is one table, but every rule of a session would then need its exception: the idle timeout, `changePassword` and `setUserPassword` revoking "the user's sessions", `logout`. And the session's own read, the statement every authenticated request runs, would name the new column, so a server deployed before its migration would fail every request; a key in its own table fails only keys, and the disabling of a user, which revokes them. `ApiKey`, the name acme-schematic's own table has. |
+| The identity descriptor gains one optional member, `apiKey`, the table and its nine columns, and stays version 1. A descriptor written before this entry has none, and a store built from one has no API keys: a bearer key is the 401 of any unknown token, and the key operations answer 404 with what is missing. That 404 is not among the operations' documented errors, as the role operations' `The schema has no roles` is not: it is a server whose database types were built before its API. | Version 2. The runtimes refuse an unknown member already, which is the lockstep a version would add, and a required member would make every runtime refuse the descriptor of every project built before it. |
+| A key's token is `key_` and 43 characters of base64url, 32 random bytes, stored as the SHA-256 of the whole text. It travels as a session's does, `Authorization: Bearer`, and only so: a cookie holds session tokens alone. The prefix tells the runtime which table to read, one statement a request, and tells a person and a secret scanner what they are looking at. | A token shaped as a session's, found by reading both tables. A key in the cookie, a credential a browser would send by itself. |
+| A key lives until its `expiresAt`, which a create sets from `expiresInSeconds`, 1 to the config's `apiKeyMaxTtlSeconds`, or from that maximum when it names none: 31536000, 365 days, unless the config says otherwise. It has no idle rule. `lastUsedAt` is written as a session's `lastSeenAt` is, at most once in a touch interval. `sessionTtlSeconds` and `idleTimeoutSeconds` are sessions' alone. | A key that never expires, which is the credential nobody remembers making. One lifetime for sessions and keys. The idle timeout, which ends an agent's key over a quiet weekend. |
+| What ends a key: its expiry, a revocation, its user being disabled, which revokes the user's keys with the sessions and for good, and the user's deletion. A password change does not, the user's own or an administrator's: a key is no session of that password, and its user sees it in the list and revokes it there. | Revoking every key at a password change, as sessions are. It is the safer default against a key an intruder made, and it breaks every agent of a user who rotates a password; the guard against that key is that only a session makes one, and that the list shows it. |
+| The routes are opt-in. `@userSessions({ apiKeys: true })` adds `createApiKey` (`POST auth/keys`, answering the key and its token, once), `listApiKeys` (`GET auth/keys`, the caller's keys that are not revoked, newest first, never a token) and `revokeApiKey` (`DELETE auth/keys/{id}`). `@userAdministration({ apiKeys: true })` adds `listUserApiKeys` and `revokeUserApiKey` under `users/{id}/keys`, behind `users.read` and `users.write`. A key authenticates wherever the store has the table, whatever the routes. `apiKeys` needs the login, in a decorator and in a JSON or YAML schema file alike: a key is made by a caller signed in with a session. | The routes on every `@userSessions` class, a way to mint a year-long credential that an API gets by upgrading. An administrator creating a key for another user, which is signing in as them. |
+| The operations that act on the caller's own account need a session: `createApiKey`, `listApiKeys`, `revokeApiKey`, and `logout` and `changePassword` beside them. A caller authenticated by a key is the 403 `forbidden` for each. So a key that leaks cannot make another, revoke the others, or take the account. `me` and `capabilities` answer a key as they answer anyone. | A key that manages keys, for an agent that rotates its own: it is the same door for whoever holds a leaked one. |
+| A key carries every permission its user holds, or the subset it was made with: `permissions`, a list of permission names, each of which the caller must hold at the create, or it is a 403 and no key is made. At each request the key holds those of its names that its user still holds (a role's permission covers it), so a user who loses a role takes it from their keys, and a key never widens to part of what it names. A key with no list follows its user. The principal's roles are the user's, each narrowed to the key's names, so the role-based matcher of the Go runtime and the permission lists of the other two read one rule (`NarrowPermissions`, in the parity vectors). | Every key carrying everything, which is what an agent should not hold. Scopes of the key's own, apart from permissions, a second vocabulary for what a route already names. A key keeping a permission its user lost. |
+| What the subset costs: a column, a narrowing rule in three runtimes with its vectors, and a limit to say plainly. It narrows permissions, not routes: a route that asks only for a caller admits every key of every user, and a row rule (D108) sees the key's user. A project that wants an agent held to less gives the agent a user of its own with a role of its own. | Confining a key to named operations, which needs every route to name itself to the check, a different model of authorization from the one the routes declare. |
+| `createApiKey` is hidden from the tool documents, as the operations that carry a password are: its answer is a credential. `listApiKeys`, `revokeApiKey` and the two administration operations are tools. | A tool that hands a model a year-long token in its context. |
+| The three runtimes build it alike: the store's methods on Postgres and SQLite, the service's operations, the bearer path, the config member and the descriptor member, held to the vectors (`apiKeys`, `keyPermissions`, the `credentials` and `config` cases) and to mirrored tests of what the vectors cannot hold. A generated server mounts each operation by name from what its schema declares, so each runtime serves the handler of every key operation whatever its options; the options (`WithAPIKeys`, `WithAPIKeyAdministration` and their twins) gate only the runtime's own route table, for a server written by hand that mounts all of it. | A runtime that refuses the routes until built: the fallback this entry kept for one that could not be finished. |
+
+Left: a key's use log beyond `lastUsedAt`; a hint of the token (its last
+characters) in the list, for telling two keys of one name apart; rotation
+as one call, a new token for the same row; rate limits per key; a key
+bound to an origin or an address; `ask`-style confirmation of a tool call
+made with a key; Topcoat's account and administration pages, which show
+no keys; and the engine's own server (`engineApp` of
+`runtime/engine/typescript`), where a bearer key authenticates and the key
+routes are mounted only for a service built with the two options, which no
+test of the engine covers.
+
+Status: built, in the three runtimes. The loader adds the table and the
+operations (`TestExpandRoutesAPIKeys`, `TestLoadUserRoutesAPIKeysAreOptIn`,
+the reserved names and the refusals in `verify`, the readers and the
+writers of the three schema forms). The Go runtime is the reference
+(`runtime/http/go/identity`, `apikeys_test.go`), the TypeScript and Rust
+runtimes its ports (`apikeys.test.ts`; `tests/identity_store.rs` and
+`tests/identity_http.rs`), each on SQLite and Postgres and each held to
+`runtime/http/testdata/identity_parity.json`. fixture-user-routes-api
+turns both sets' routes on, and its goldens hold the OpenAPI document, the
+Go, TypeScript and Rust routers, the four SDKs and the tool schemas, with
+`createApiKey` hidden. End to end through each generated server, called
+with its SDK: a session makes a key with a subset and one without, the
+key calls as its user and holds what it names, gets 403 on the five
+operations of its own account, is listed without a token, is revoked by
+its user and by an administrator, and is then 401
+(`TestUserRoutesServerServesTheSDK` on SQLite and Postgres,
+`TestGeneratedUserRoutesEndToEnd` on bun:sqlite,
+`TestRustSDKCallsTheUserModelRoutes` on SQLite and Postgres). The 401's
+documented meaning is now "no usable session or API key".

@@ -94,6 +94,9 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 			if cfg.NoLogin && cfg.Register {
 				r.errorf("", "%s: @userSessions: register needs the login; drop register: true or login: false", set.Name)
 			}
+			if cfg.NoLogin && cfg.APIKeys {
+				r.errorf("", "%s: @userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false", set.Name)
+			}
 			checkIdentityRoutesPath(set, "@userSessions", cfg.Path, r)
 			checkIdentityRegistration(set, cfg, r)
 			if sessions != nil {
@@ -200,9 +203,20 @@ func checkIdentityRegistration(set *ir.OperationSet, cfg *ir.UserSessionsConfig,
 
 // checkIdentityRouteNames refuses an authored type, enum or union named as
 // one of the types the route expansion adds: an API with a route set
-// reserves every one, whichever its sets use.
+// reserves every one, whichever its sets use, and the types of the API
+// key routes (D114) when one of its sets has apiKeys.
 func checkIdentityRouteNames(schema *ir.Schema, r *Result) {
-	for _, name := range identity.RouteTypes {
+	names := identity.RouteTypes
+	for _, set := range schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		if (set.UserSessions != nil && set.UserSessions.APIKeys) || (set.UserAdministration != nil && set.UserAdministration.APIKeys) {
+			names = append(append([]string{}, names...), ir.IdentityAPIKeyTypes...)
+			break
+		}
+	}
+	for _, name := range names {
 		owner := ""
 		switch {
 		case schema.Types[name] != nil && schema.Types[name].Origin == "":

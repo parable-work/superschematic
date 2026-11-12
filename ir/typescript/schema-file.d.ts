@@ -851,6 +851,7 @@ export interface UnionFile {
 }
 
 export interface UserAdministrationConfig {
+  apiKeys?: boolean;
   path?: string;
 }
 
@@ -858,6 +859,7 @@ export interface UserRoleTrait {
 }
 
 export interface UserSessionsConfig {
+  apiKeys?: boolean;
   defaultRoles?: string[];
   firstUser?: IdentityFirstUser;
   noLogin?: boolean;

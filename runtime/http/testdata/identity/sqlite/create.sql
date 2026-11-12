@@ -1,6 +1,6 @@
 -- Generated SQLite DDL for schema: fixture-user-model-db
 -- This file is auto-generated. Do not edit manually.
--- It is the migration plan from an empty database to model 49b7866e0ba67c03f26f6a4711ebd6e175438a4e9720871194d49e33a683ab36.
+-- It is the migration plan from an empty database to model bc11ea827f5a60de59d3dea18f5f69e633253917cec34d754ebf3c11d9d860a1.
 
 CREATE TABLE "role" (
   "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
@@ -32,6 +32,21 @@ CREATE TABLE "user" (
 );
 CREATE UNIQUE INDEX "user_email_key" ON "user" ("email");
 
+CREATE TABLE "user_api_key" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "user_id" TEXT NOT NULL,
+  "name" TEXT NOT NULL CHECK (length("name") >= 1 AND length("name") <= 100),
+  "token_hash" TEXT NOT NULL,
+  "permissions" TEXT,
+  "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "expires_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "last_used_at" TEXT,
+  "revoked_at" TEXT,
+  PRIMARY KEY ("id"),
+  FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX "user_api_key_token_hash_key" ON "user_api_key" ("token_hash");
+
 CREATE TABLE "user_credential" (
   "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
   "user_id" TEXT NOT NULL,
@@ -55,5 +70,7 @@ CREATE TABLE "user_role_grant" (
 );
 
 CREATE INDEX "idx_session_user" ON "session" ("user_id");
+
+CREATE INDEX "idx_user_api_key_user" ON "user_api_key" ("user_id");
 
 CREATE UNIQUE INDEX "uq_user_role_grant_user_role" ON "user_role_grant" ("user_id", "role_id");
