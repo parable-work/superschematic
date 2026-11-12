@@ -1036,6 +1036,7 @@ jobs:
             runtime/http/rust
             runtime/schema/rust
             runtime/schema/rust-ir
+            runtime/migrate/rust
 
       - name: Cache the superscalar checkout
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1112,6 +1113,20 @@ jobs:
           cargo test --features otel
           cargo clippy --all-targets --features postgres,otel -- -D warnings
           cargo test --features postgres,otel
+          cargo clippy --all-targets --features sqlite -- -D warnings
+          cargo test --features sqlite
+          cargo clippy --all-targets --features postgres,sqlite,logging -- -D warnings
+          cargo test --features postgres,sqlite,logging
+
+      # The runner an embedded environment's binary carries (D116). Its
+      # parity tests with the Go runner's binary run under `make rust`,
+      # where Go is set up; here they return early.
+      - name: migration runner fmt / clippy / test
+        working-directory: runtime/migrate/rust
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust

@@ -252,7 +252,10 @@ python:
 # store on Redis (D75), whose tests run on the Valkey
 # SUPERSCHEMATIC_TEST_MEMORY_STORE names, when it is set, and beside a
 # worker's two; and otel, a deployable's
-# trace export (D67), alone and with postgres, as a worker builds it.
+# trace export (D67), alone and with postgres, as a worker builds it. The
+# migration runner an embedded environment's binary carries (D116,
+# runtime/migrate/rust) runs its tests beside the Go runner's binary, which
+# this builds first: each continues a file the other migrated.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -280,6 +283,9 @@ rust:
 		&& cargo test --features postgres,sqlite,logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate
+	cd runtime/migrate/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& SUPERSCHEMATIC_MIGRATE_BIN=$(CURDIR)/bin/superschematic-migrate cargo test
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --all-features -- -D warnings \
 		&& cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings \

@@ -63,6 +63,8 @@ Version sites (relative to the repository root):
   examples/acme-shop/topcoat/Cargo.lock
                                       the superschematic-http-runtime and
                                       superschematic-schema-runtime packages
+  runtime/migrate/rust/Cargo.toml     [package] version
+  runtime/migrate/rust/Cargo.lock     the superschematic-migrate package
   runtime/schema/rust/Cargo.toml      [package] version
   runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/schema/rust-ir/Cargo.toml   [package] version
@@ -403,6 +405,22 @@ def sites():
         (
             ROOT / "runtime" / "schema" / "rust" / "Cargo.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    # The migration runner an embedded environment's binary carries (D116):
+    # the release version, in its manifest and its lockfile.
+    out.append(
+        (
+            ROOT / "runtime" / "migrate" / "rust" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-migrate"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "migrate" / "rust" / "Cargo.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-migrate"\nversion = ")' + V + r'(")', 1)],
             "semver",
         )
     )
