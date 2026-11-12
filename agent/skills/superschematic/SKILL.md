@@ -276,7 +276,10 @@ Most are load errors; knowing them saves a build round-trip:
   "canceled"]; permission: "issues.close" }` is four transitions, and the
   same list in both is every move among its states. The build holds the
   config to the core's rules (states exist, no move to itself or listed
-  twice, outcomes only on states nothing leaves).
+  twice, outcomes only on states nothing leaves). A state a row may leave
+  that still counts as finished, a done task that may be reopened, goes
+  in `finished: { done: "success" }` beside `{ from: "done"; to: "todo" }`
+  (D113), a table's alone; `outcomes` keeps the states nothing leaves.
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read
@@ -391,7 +394,9 @@ Most are load errors; knowing them saves a build round-trip:
   database, `link` its to-one relation to this one); a `then` moves this
   row's Workflow, or with `link` the row a to-one relation of this table
   points at. Give the Workflow fields' terminal states `outcomes` for
-  `allTerminal` and `anyTerminal`. `holds` and `revised` are refused on a
+  `allTerminal` and `anyTerminal`, and a state a row may leave that still
+  counts as finished `finished` (D113); reopening a row moves no parent
+  back unless the parent lists the transition and a rule makes it. `holds` and `revised` are refused on a
   table. A rule runs after the write commits, for every write of the row,
   raw SQL included, when a `@behaviorWorker` of the table runs its change
   queue: declare one for each table with a change queue, the linking table

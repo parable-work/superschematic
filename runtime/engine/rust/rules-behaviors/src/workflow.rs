@@ -13,6 +13,17 @@
 //! [`state_outcome`], to tell a blocker or a child that finished well from
 //! one that failed.
 //!
+//! A state a transition leaves may count as finished too (D113): the
+//! config's `finished` names its outcome, success, failure or neutral, as a
+//! task that is done and may be reopened still closes its parent.
+//! [`state_outcome`] answers for it as for a terminal state, so what reads
+//! an outcome counts it: Reactions' `allTerminal` and `anyTerminal`. It is
+//! not terminal, since a transition leaves it: the guard's `terminal_state`
+//! never names it, and what asks whether a transition leaves a state
+//! (Lease's expiry count, Retries' default `from`, Reconcile's settled
+//! rows) is answered as before. `finished` names only a state a transition
+//! leaves, and `outcomes` only a terminal one, whose rule stays as it was.
+//!
 //! Workflow owns two fields: `status`, the state the row is in and the
 //! value a field anchor's field is, and `enteredAt`, when the status last
 //! changed, the create's time and then each transition's, in epoch
@@ -93,12 +104,12 @@
 //! configChange: while the type has rows, a new version keeps every state
 //! of the old config, since a row may be in any of them; with none it may
 //! drop any. A changed config that drops a state reads whether the type has
-//! rows. Transitions, their permissions, the initial state and outcomes may
-//! change; outcomes, like transitions, are read when they are needed, so a
-//! new version's apply at the next read. Workflow cannot be added to or
-//! removed from a type that has rows: they would have no status, or lose
-//! it. The core asks about an added or a removed use only when the type has
-//! rows.
+//! rows. Transitions, their permissions, the initial state, outcomes and
+//! finished may change; outcomes and finished, like transitions, are read
+//! when they are needed, so a new version's apply at the next read.
+//! Workflow cannot be added to or removed from a type that has rows: they
+//! would have no status, or lose it. The core asks about an added or a
+//! removed use only when the type has rows.
 //!
 //! What the engine kept beside the behavior is the host's now: a row's
 //! sequence, version and timestamps, the filter on the status and its
@@ -135,14 +146,16 @@ pub const TRANSITION: &str = "transition";
 pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Workflow.behavior.json");
 
 // What the configSchema holds a state's name to, in its states and in the
-// keys of its outcomes: the rule every declared name follows.
+// keys of its outcomes and its finished: the rule every declared name
+// follows.
 #[cfg(test)]
 const STATE_PATTERN: &str = schema::NAME_PATTERN;
 #[cfg(test)]
 const STATE_MAX_LENGTH: usize = schema::NAME_MAX_LENGTH;
 
 // The members the configSchema's closed objects take.
-const CONFIG_KEYS: [&str; 6] = [
+const CONFIG_KEYS: [&str; 7] = [
+    "finished",
     "initial",
     "outcomes",
     "overridePermission",
@@ -187,7 +200,8 @@ pub enum WorkflowRepeat {
     Unchanged,
 }
 
-/// The outcome of a terminal state: how the work it ends went.
+/// The outcome of a terminal state, or of a state finished names (D113):
+/// how the work it ends went.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkflowOutcome {
@@ -218,7 +232,8 @@ impl WorkflowOutcome {
 }
 
 /// Workflow's config, parsed: the initial state filled in, every terminal
-/// state's outcome, and the type of each field a transition's `by` names.
+/// state's outcome, the outcome of each state `finished` names, and the
+/// type of each field a transition's `by` names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowConfig {
     pub states: Vec<String>,
@@ -226,6 +241,9 @@ pub struct WorkflowConfig {
     pub transitions: Vec<WorkflowTransition>,
     /// The outcome of each terminal state, in the order of `states`.
     pub outcomes: Vec<(String, WorkflowOutcome)>,
+    /// The outcome of each state finished names, a state a transition
+    /// leaves (D113), in the order of `states`.
+    pub finished: Vec<(String, WorkflowOutcome)>,
     /// The permission that moves a caller past every transition's by (D104).
     pub override_permission: Option<String>,
     pub repeat: WorkflowRepeat,
@@ -249,6 +267,8 @@ struct RawConfig {
     transitions: Vec<WorkflowTransition>,
     #[serde(default)]
     outcomes: Option<Map<String, Value>>,
+    #[serde(default)]
+    finished: Option<Map<String, Value>>,
     #[serde(default, rename = "overridePermission")]
     override_permission: Option<String>,
     #[serde(default)]
@@ -260,8 +280,9 @@ impl WorkflowConfig {
     /// target names: as the declaration's configSchema holds it, each issue
     /// at its path in the schema loader's words, then as a state machine, a
     /// rule's reason in the engine's words, which the core prefixes with
-    /// the type and the behavior, and then each transition's `by` against
-    /// the type's fields (D104).
+    /// the type and the behavior, then `finished` against its states
+    /// (D113), and then each transition's `by` against the type's fields
+    /// (D104).
     pub fn parse(raw: &Value, target: &ConfigTarget<'_>) -> Result<WorkflowConfig, ConfigError> {
         let issues = config_issues(raw);
         if !issues.is_empty() {
@@ -307,6 +328,7 @@ impl WorkflowConfig {
             initial,
             transitions: raw.transitions,
             outcomes: Vec::new(),
+            finished: Vec::new(),
             override_permission: raw.override_permission,
             repeat: match raw.repeat.as_deref() {
                 Some(REPEAT_UNCHANGED) => WorkflowRepeat::Unchanged,
@@ -340,6 +362,32 @@ impl WorkflowConfig {
                     .and_then(Value::as_str)
                     .and_then(WorkflowOutcome::parse);
                 (state.clone(), named.unwrap_or(WorkflowOutcome::Success))
+            })
+            .collect();
+        // finished names a state a transition leaves (D113): a terminal
+        // state's outcome is outcomes'.
+        let named = raw.finished.unwrap_or_default();
+        for state in named.keys() {
+            if !has(state) {
+                return Err(format!(
+                    "finished names \"{state}\", which is not one of its states ({all})"
+                )
+                .into());
+            }
+            if config.is_terminal(state) {
+                return Err(format!(
+                    "finished names \"{state}\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
+                ).into());
+            }
+        }
+        config.finished = states
+            .iter()
+            .filter_map(|state| {
+                let outcome = named
+                    .get(state.as_str())
+                    .and_then(Value::as_str)
+                    .and_then(WorkflowOutcome::parse)?;
+                Some((state.clone(), outcome))
             })
             .collect();
         (config.subject_types, config.seats) = by_entries(&config.transitions, target)?;
@@ -376,11 +424,19 @@ impl WorkflowConfig {
                 .any(|transition| transition.from == state)
     }
 
-    /// The outcome of a terminal state; `None` for any other state.
+    /// Whether a state counts as finished: a terminal state, or one
+    /// finished names, which a transition leaves (D113).
+    pub fn is_finished(&self, state: &str) -> bool {
+        self.is_terminal(state) || self.finished.iter().any(|(named, _)| named == state)
+    }
+
+    /// The outcome of a terminal state, or of a state finished names
+    /// (D113); `None` for any other state.
     pub fn outcome(&self, state: &str) -> Option<WorkflowOutcome> {
         self.outcomes
             .iter()
-            .find(|(terminal, _)| terminal == state)
+            .chain(&self.finished)
+            .find(|(named, _)| named == state)
             .map(|(_, outcome)| *outcome)
     }
 
@@ -477,21 +533,22 @@ pub fn is_terminal_state(config: &Value, state: &str) -> bool {
             .any(|transition| transition.get("from").and_then(Value::as_str) == Some(state))
 }
 
-/// The outcome of a terminal state of a Workflow config, as a type holds
-/// it (`stateOutcome`): the one its outcomes names, or success. A state
-/// that is not terminal has none.
+/// The outcome of a state of a Workflow config, as a type holds it
+/// (`stateOutcome`): for a terminal state, the one its outcomes names, or
+/// success; for a state a transition leaves, the one its finished names
+/// (D113). Any other state has none.
 pub fn state_outcome(config: &Value, state: &str) -> Option<WorkflowOutcome> {
-    if !is_terminal_state(config, state) {
-        return None;
-    }
-    Some(
+    let named = |member: &str| {
         config
-            .get("outcomes")
+            .get(member)
             .and_then(|outcomes| outcomes.get(state))
             .and_then(Value::as_str)
             .and_then(WorkflowOutcome::parse)
-            .unwrap_or(WorkflowOutcome::Success),
-    )
+    };
+    if is_terminal_state(config, state) {
+        return Some(named("outcomes").unwrap_or(WorkflowOutcome::Success));
+    }
+    named("finished")
 }
 
 /// The status of a row a host read, under a Workflow use's id (`Workflow`
@@ -862,7 +919,10 @@ fn config_issues(raw: &Value) -> Issues {
         transition_list_issues(transitions, &mut issues);
     }
     if let Some(outcomes) = config.get("outcomes") {
-        outcome_issues(outcomes, &mut issues);
+        outcome_issues("/outcomes", outcomes, &mut issues);
+    }
+    if let Some(finished) = config.get("finished") {
+        outcome_issues("/finished", finished, &mut issues);
     }
     if let Some(permission) = config.get("overridePermission") {
         schema::text_issues("/overridePermission", permission, &mut issues);
@@ -979,17 +1039,15 @@ fn by_issues(at: &str, by: &Value, issues: &mut Issues) {
     }
 }
 
-fn outcome_issues(outcomes: &Value, issues: &mut Issues) {
+// outcome_issues lists what outcomes, or finished, breaks of its schema, at
+// its path: a non-empty object of an outcome by a state's name.
+fn outcome_issues(at: &str, outcomes: &Value, issues: &mut Issues) {
     let Some(named) = outcomes.as_object() else {
-        issues.push("/outcomes", "type", "must be object");
+        issues.push(at, "type", "must be object");
         return;
     };
     if named.is_empty() {
-        issues.push(
-            "/outcomes",
-            "minProperties",
-            "must NOT have fewer than 1 properties",
-        );
+        issues.push(at, "minProperties", "must NOT have fewer than 1 properties");
     }
     for (state, outcome) in named {
         // A key that is no state's name fails the object's propertyNames,
@@ -997,16 +1055,16 @@ fn outcome_issues(outcomes: &Value, issues: &mut Issues) {
         let broken = name_issues(state);
         if !broken.is_empty() {
             for (keyword, message) in broken {
-                issues.push("/outcomes", keyword, message);
+                issues.push(at, keyword, message);
             }
-            issues.push("/outcomes", "propertyNames", "property name must be valid");
+            issues.push(at, "propertyNames", "property name must be valid");
         }
         if !outcome
             .as_str()
             .is_some_and(|text| OUTCOMES.contains(&text))
         {
             issues.push(
-                schema::member("/outcomes", state),
+                schema::member(at, state),
                 "enum",
                 format!("must be one of {}", OUTCOMES.map(schema::quoted).join(", ")),
             );
@@ -1069,6 +1127,23 @@ mod tests {
                 {"from": "open", "to": "shipped", "permission": "orders.ship"},
                 {"from": "open", "to": "cancelled"}
             ]
+        })
+    }
+
+    // A task is done and may be reopened: finished names done, which a
+    // transition leaves, a success; dropped and failed are terminal.
+    fn task_flow() -> Value {
+        json!({
+            "states": ["todo", "doing", "done", "dropped", "failed"],
+            "transitions": [
+                {"from": "todo", "to": "doing"},
+                {"from": "doing", "to": "done"},
+                {"from": "doing", "to": "dropped"},
+                {"from": "doing", "to": "failed"},
+                {"from": "done", "to": "todo"}
+            ],
+            "outcomes": {"dropped": "neutral"},
+            "finished": {"done": "success"}
         })
     }
 
@@ -1153,6 +1228,171 @@ mod tests {
     }
 
     #[test]
+    fn a_state_finished_names_is_finished_though_a_transition_leaves_it() {
+        let flow = task_flow();
+        let config = parse(&flow).expect("a state machine");
+        // done is not terminal: a transition leaves it.
+        assert!(!config.is_terminal("done"));
+        assert!(!is_terminal_state(&flow, "done"));
+        assert!(config.is_finished("done"));
+        assert_eq!(config.outcome("done"), Some(WorkflowOutcome::Success));
+        assert_eq!(
+            config.finished,
+            vec![("done".to_owned(), WorkflowOutcome::Success)]
+        );
+        // outcomes keeps the terminal states alone, named or a success.
+        assert_eq!(
+            config.outcomes,
+            vec![
+                ("dropped".to_owned(), WorkflowOutcome::Neutral),
+                ("failed".to_owned(), WorkflowOutcome::Success)
+            ]
+        );
+        assert!(config.is_terminal("dropped") && config.is_finished("dropped"));
+        assert_eq!(config.outcome("dropped"), Some(WorkflowOutcome::Neutral));
+        // A state a transition leaves that finished does not name is not
+        // finished, nor is a state the config does not list.
+        for state in ["todo", "doing", "lost"] {
+            assert!(!config.is_finished(state), "{state}");
+            assert_eq!(config.outcome(state), None, "{state}");
+        }
+        // A config without finished names none.
+        let plain = parse(&order_flow()).expect("a state machine");
+        assert!(plain.finished.is_empty());
+        assert!(!plain.is_finished("open") && plain.is_finished("shipped"));
+        // finished comes in the order of states, whatever order names them,
+        // and a config may have no terminal state.
+        let round = parse(&json!({
+            "states": ["a", "b", "c"],
+            "transitions": [{"from": "a", "to": "b"}, {"from": "b", "to": "c"}, {"from": "c", "to": "a"}],
+            "finished": {"c": "failure", "a": "neutral"}
+        }))
+        .expect("a state machine");
+        assert_eq!(
+            round.finished,
+            vec![
+                ("a".to_owned(), WorkflowOutcome::Neutral),
+                ("c".to_owned(), WorkflowOutcome::Failure)
+            ]
+        );
+        assert!(round.outcomes.is_empty());
+        assert!(round.is_finished("c") && !round.is_finished("b"));
+    }
+
+    #[test]
+    fn state_outcome_answers_for_a_state_finished_names_as_for_a_terminal_one() {
+        let flow = task_flow();
+        // A state a transition leaves, which finished names.
+        assert_eq!(state_outcome(&flow, "done"), Some(WorkflowOutcome::Success));
+        // A terminal state outcomes names, and one it does not.
+        assert_eq!(
+            state_outcome(&flow, "dropped"),
+            Some(WorkflowOutcome::Neutral)
+        );
+        assert_eq!(
+            state_outcome(&flow, "failed"),
+            Some(WorkflowOutcome::Success)
+        );
+        // A state that is neither, and one the config does not list.
+        assert_eq!(state_outcome(&flow, "doing"), None);
+        assert_eq!(state_outcome(&flow, "todo"), None);
+        assert_eq!(state_outcome(&flow, "lost"), None);
+        // Each outcome finished may name.
+        for outcome in OUTCOMES {
+            let mut named = task_flow();
+            named["finished"]["done"] = json!(outcome);
+            assert_eq!(
+                state_outcome(&named, "done"),
+                WorkflowOutcome::parse(outcome)
+            );
+        }
+        // Without finished, a state a transition leaves has none, as before.
+        let mut plain = task_flow();
+        plain
+            .as_object_mut()
+            .expect("an object")
+            .shift_remove("finished");
+        assert_eq!(state_outcome(&plain, "done"), None);
+    }
+
+    #[test]
+    fn finished_names_only_a_state_a_transition_leaves() {
+        let reason = |config: Value| match parse(&config) {
+            Err(ConfigError::Rule(reason)) => reason,
+            other => panic!("not a rule's refusal: {other:?}"),
+        };
+        let with = |members: Value| {
+            let mut flow = task_flow();
+            for (key, value) in members.as_object().expect("an object") {
+                flow[key] = value.clone();
+            }
+            flow
+        };
+        let all = "(todo, doing, done, dropped, failed)";
+        assert_eq!(
+            reason(with(json!({"finished": {"lost": "success"}}))),
+            format!("finished names \"lost\", which is not one of its states {all}")
+        );
+        assert_eq!(
+            reason(with(json!({"finished": {"dropped": "neutral"}}))),
+            "finished names \"dropped\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
+        );
+        // The first key that breaks, in the order the config holds them.
+        assert_eq!(
+            reason(with(json!({"finished": {"done": "success", "failed": "failure", "lost": "neutral"}}))),
+            "finished names \"failed\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
+        );
+        // After outcomes' rules, which stay as they were, and before by's.
+        assert_eq!(
+            reason(with(json!({"outcomes": {"done": "success"}, "finished": {"lost": "success"}}))),
+            "outcomes names \"done\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome"
+        );
+        let mut by = with(json!({"finished": {"lost": "success"}}));
+        by["transitions"][0]["by"] = json!(["askee"]);
+        assert_eq!(
+            reason(by),
+            format!("finished names \"lost\", which is not one of its states {all}")
+        );
+    }
+
+    #[test]
+    fn finished_is_held_to_its_schema_as_outcomes_is() {
+        // The issues as the core lists them: `<pointer>: <message>`, joined.
+        let reason = |member: &str, value: Value| {
+            let mut flow = task_flow();
+            flow[member] = value;
+            ConfigError::Schema(config_issues(&flow).into_issues()).to_string()
+        };
+        let pattern = format!("must match pattern \"{STATE_PATTERN}\"");
+        for member in ["finished", "outcomes"] {
+            assert_eq!(
+                reason(member, json!({})),
+                format!("/{member}: must NOT have fewer than 1 properties")
+            );
+            assert_eq!(
+                reason(member, json!({"done": "aborted"})),
+                format!("/{member}/done: must be one of \"success\", \"failure\", \"neutral\"")
+            );
+            assert_eq!(
+                reason(member, json!({"done": true})),
+                format!("/{member}/done: must be one of \"success\", \"failure\", \"neutral\"")
+            );
+            assert_eq!(
+                reason(member, json!(["done"])),
+                format!("/{member}: must be object")
+            );
+            assert_eq!(
+                reason(member, json!({"in review": "failure"})),
+                format!("/{member}: {pattern}; /{member}: property name must be valid")
+            );
+        }
+        assert_eq!(
+            ConfigError::Schema(config_issues(&task_flow()).into_issues()).to_string(),
+            ""
+        );
+    }
+
+    #[test]
     fn a_parsed_config_fills_in_its_initial_state_and_lists_moves() {
         let config = parse(&order_flow()).expect("a state machine");
         assert_eq!(config.initial, "draft");
@@ -1209,6 +1449,12 @@ mod tests {
             json!({
                 "additionalProperties": false,
                 "properties": {
+                    "finished": {
+                        "additionalProperties": {"enum": OUTCOMES},
+                        "minProperties": 1,
+                        "propertyNames": name,
+                        "type": "object"
+                    },
                     "initial": {"type": "string"},
                     "outcomes": {
                         "additionalProperties": {"enum": OUTCOMES},

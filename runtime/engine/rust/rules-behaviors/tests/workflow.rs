@@ -10,7 +10,8 @@
 //! Then what only a table's Workflow takes (D104), which the engine
 //! recorded none of: who makes a transition (`by`, and the
 //! `overridePermission` past it), a move to the state a row is in answered
-//! as no change (`repeat`), and the state a caller read (`from`).
+//! as no change (`repeat`), and the state a caller read (`from`); and a
+//! state a transition leaves that counts as finished (`finished`, D113).
 
 use std::collections::BTreeMap;
 
@@ -749,6 +750,9 @@ fn define_takes_a_state_machine() {
         order_flow(),
         flow_with(json!({"initial": "open", "outcomes": {"cancelled": "failure"}})),
         json!({"states": ["only"], "transitions": []}),
+        // finished names states a transition leaves (D113), beside outcomes.
+        flow_with(json!({"outcomes": {"cancelled": "failure"}, "finished": {"open": "neutral"}})),
+        reopen_flow(),
     ] {
         let outcome = core().drive(&order(config), &command, &mut Memory::default());
         assert_eq!(changed(outcome), ChangeSet::default());
@@ -792,6 +796,20 @@ fn define_refuses_a_config_its_schema_lets_through_that_is_not_a_state_machine()
         ),
         (
             flow_with(json!({"outcomes": {"shipped": "success", "open": "failure"}})),
+            "outcomes names \"open\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome".to_owned(),
+        ),
+        // finished names a state a transition leaves (D113), checked after
+        // outcomes, whose rule stays: the first key that breaks.
+        (
+            flow_with(json!({"finished": {"lost": "failure"}})),
+            format!("finished names \"lost\", which is not one of its states {all}"),
+        ),
+        (
+            flow_with(json!({"finished": {"open": "neutral", "shipped": "success"}})),
+            "finished names \"shipped\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome".to_owned(),
+        ),
+        (
+            flow_with(json!({"outcomes": {"open": "failure"}, "finished": {"shipped": "success"}})),
             "outcomes names \"open\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome".to_owned(),
         ),
     ];
@@ -852,6 +870,28 @@ fn define_refuses_a_config_the_declarations_config_schema_refuses() {
                 "/config/outcomes",
                 "must NOT have fewer than 1 properties".to_owned(),
             )],
+        ),
+        (
+            flow_with(json!({"finished": {"open": "aborted"}})),
+            vec![(
+                "/config/finished/open",
+                "must be one of \"success\", \"failure\", \"neutral\"".to_owned(),
+            )],
+        ),
+        (
+            flow_with(json!({"finished": {}})),
+            vec![(
+                "/config/finished",
+                "must NOT have fewer than 1 properties".to_owned(),
+            )],
+        ),
+        (
+            flow_with(json!({"finished": {"in review": "failure"}, "outcomes": ["shipped"]})),
+            vec![
+                ("/config/finished", format!("must match pattern {pattern}")),
+                ("/config/finished", "property name must be valid".to_owned()),
+                ("/config/outcomes", "must be object".to_owned()),
+            ],
         ),
         (
             json!({}),
@@ -1957,4 +1997,134 @@ fn the_config_checks_refuse_a_seat_a_missing_field_and_a_field_that_holds_no_sub
         );
         assert_eq!(changed(outcome), ChangeSet::default());
     }
+}
+
+// ---- a state a transition leaves that counts as finished (D113) ----
+
+// A task that is done may be reopened: finished names done, which a
+// transition leaves, a success; dropped is terminal, and neutral.
+fn reopen_flow() -> Value {
+    json!({
+        "states": ["todo", "doing", "done", "dropped"],
+        "transitions": [
+            {"from": "todo", "to": "doing"},
+            {"from": "doing", "to": "done"},
+            {"from": "doing", "to": "dropped"},
+            {"from": "done", "to": "todo"}
+        ],
+        "outcomes": {"dropped": "neutral"},
+        "finished": {"done": "success"}
+    })
+}
+
+// tasks is a host of one Task type whose Workflow is a config's.
+fn tasks(config: Value) -> Host {
+    let spec = TypeSpec::new("Task")
+        .with(workflow(config))
+        .with_field(FieldSpec::new("title", "string"));
+    Host::of(core(), spec)
+}
+
+#[test]
+fn a_row_leaves_a_state_finished_names_and_enters_it_again() {
+    let mut host = tasks(reopen_flow());
+    host.ask("t1", json!({"title": "Sweep"}));
+    let moves = [
+        ("todo", "doing"),
+        ("doing", "done"),
+        ("done", "todo"),
+        ("todo", "doing"),
+        ("doing", "done"),
+    ];
+    let mut now = START;
+    for (from, to) in moves {
+        now += 1_000;
+        let moved = changed(host.move_row(
+            &alice(),
+            "t1",
+            "Workflow",
+            "transition",
+            json!({"to": to}),
+            now,
+        ));
+        assert_eq!(moved.result, json!({"from": from, "to": to}));
+    }
+    assert_eq!(
+        host.stored("t1").owned,
+        owned(json!({"Workflow": {"status": "done", "enteredAt": START + 5_000}}))
+    );
+    // done is not terminal: a move out of it that no transition makes is
+    // refused as from any state a transition leaves, naming where it can go.
+    assert_eq!(
+        refused(host.to(&alice(), "t1", json!({"to": "dropped"}))),
+        json!({"class": "BehaviorVetoError", "code": "vetoed", "message": "behavior Workflow vetoes transition of Task t1: no transition leads from done to dropped; from done it can move to todo", "details": {"behavior": "Workflow", "action": "transition", "reason": "no transition leads from done to dropped; from done it can move to todo", "vetoCode": "transition_not_allowed", "vetoDetails": {"from": "done", "to": "dropped", "allowed": ["todo"]}}})
+    );
+    // A terminal state stays one: no transition leaves dropped.
+    host.ask("t2", json!({"title": "Mop"}));
+    changed(host.to(&alice(), "t2", json!({"to": "doing"})));
+    changed(host.to(&alice(), "t2", json!({"to": "dropped"})));
+    assert_eq!(
+        refused(host.to(&alice(), "t2", json!({"to": "todo"})))["details"]["vetoCode"],
+        json!("terminal_state")
+    );
+}
+
+#[test]
+fn a_new_version_may_change_finished_as_it_may_change_outcomes() {
+    let with = |members: Value| {
+        let mut flow = reopen_flow();
+        let config = flow.as_object_mut().expect("an object");
+        for (key, value) in members.as_object().expect("an object") {
+            if value.is_null() {
+                config.shift_remove(key);
+            } else {
+                config.insert(key.clone(), value.clone());
+            }
+        }
+        flow
+    };
+    let mut host = tasks(reopen_flow());
+    host.ask("t1", json!({"title": "Sweep"}));
+    changed(host.to(&alice(), "t1", json!({"to": "doing"})));
+    changed(host.to(&alice(), "t1", json!({"to": "done"})));
+    // With a row in done, finished changes its outcome, goes and comes back.
+    let steps = [
+        reopen_flow(),
+        with(json!({"finished": {"done": "neutral"}})),
+        with(json!({"finished": null})),
+        reopen_flow(),
+    ];
+    let spec = |config: &Value| {
+        TypeSpec::new("Task")
+            .with(workflow(config.clone()))
+            .with_field(FieldSpec::new("title", "string"))
+    };
+    for pair in steps.windows(2) {
+        host.spec = spec(&pair[1]);
+        changed(host.publish(spec(&pair[0])));
+    }
+    // A version that drops the transition out of done makes done terminal,
+    // whose outcome is outcomes' to name.
+    let mut closed = reopen_flow();
+    closed["transitions"]
+        .as_array_mut()
+        .expect("transitions")
+        .pop();
+    host.spec = spec(&closed);
+    let refusal = host
+        .publish(spec(&reopen_flow()))
+        .into_result()
+        .expect_err("refused");
+    assert_eq!(refusal.code, Code::InvalidSchema);
+    assert_eq!(
+        refusal.message,
+        "type Task: behavior Workflow config: finished names \"done\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
+    );
+    closed["outcomes"]["done"] = json!("success");
+    closed
+        .as_object_mut()
+        .expect("an object")
+        .shift_remove("finished");
+    host.spec = spec(&closed);
+    changed(host.publish(spec(&reopen_flow())));
 }

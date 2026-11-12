@@ -1136,8 +1136,49 @@ each.
 The build also holds a table's Workflow to the rules the behaviors' core
 holds it to at a row's first command, in the core's words: the initial
 state is one of the states, each transition's `from` and `to` are states,
-no transition leads to its own state or is listed twice, and `outcomes`
-names states no transition leaves.
+no transition leads to its own state or is listed twice, `outcomes`
+names states no transition leaves, and `finished` names states a
+transition does leave.
+
+A state no transition leaves is terminal, and a terminal state has an
+outcome, `success` unless `outcomes` names it `failure` or `neutral`.
+Other tables' Reactions read it: a project closes when every task is in a
+state with an outcome
+([A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)).
+A state a row may leave has none, so a task that may be reopened, with
+`{ from: "done"; to: "todo" }`, would never close its project. `finished`
+(D113) names the outcome of such a state:
+
+```ts
+status: Workflow<{
+  states: ["todo", "doing", "done", "dropped"];
+  transitions: [
+    { from: "todo"; to: "doing" },
+    { from: "doing"; to: ["done", "dropped"] },
+    { from: "done"; to: "todo" }
+  ];
+  outcomes: { dropped: "neutral" };
+  finished: { done: "success" };
+}>;
+```
+
+`done` counts as finished for the rules that read an outcome, as a
+terminal state does, and a row may still leave it. `outcomes` keeps the
+terminal states and `finished` the ones a transition leaves, so the build
+names the other when a transition is added or taken away. `finished`
+changes nothing else: a transition out of `done` is made as any is, and
+Lease, Retries and Reconcile, which ask whether a transition leaves a
+state, still ask that. It is a table's alone, as `by` is: an engine
+type's Workflow refuses it, since its blockers and rollups rely on a
+finished instance staying finished.
+
+Reopening a row moves no other row back. A project that closed when its
+last task was done stays done when a task is reopened, unless its own
+Workflow lists a transition back and a rule makes it: the task's
+`{ when: { enters: "doing" }; then: { link: "project"; transition:
+"active" } }` takes a done project up again once the project lists
+`{ from: "done"; to: "active" }`, and the project closes again when the
+task is done again.
 
 ```
 type Issue: field status: behavior Workflow config: the transition from "todo" to "closed" names "closed", which is not one of its states (backlog, todo, done)

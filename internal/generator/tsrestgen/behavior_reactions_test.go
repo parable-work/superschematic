@@ -196,6 +196,7 @@ func TestGeneratedReactionsAPICompiles(t *testing.T) {
 var reactionsCases = []string{
 	"a task that starts moves its project to active",
 	"a project whose tasks are all done moves to done",
+	"a task that is done, reopened and done again closes its project each time, and starting it again takes the project up",
 	"a task that fails moves its project to failed",
 	"a raw SQL write of a task's status is heard and moves its project",
 	"a raw SQL write of a task's priority to urgent starts it, which moves its project",

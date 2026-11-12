@@ -140,9 +140,11 @@ const rulesLayoutJSON = `{
           {
             "behavior": "Workflow",
             "config": {
+              "finished": {
+                "done": "success"
+              },
               "outcomes": {
                 "cancelled": "neutral",
-                "done": "success",
                 "failed": "failure"
               },
               "states": [
@@ -172,6 +174,10 @@ const rulesLayoutJSON = `{
                 {
                   "from": "active",
                   "to": "cancelled"
+                },
+                {
+                  "from": "done",
+                  "to": "active"
                 }
               ]
             },
@@ -294,8 +300,10 @@ const rulesLayoutJSON = `{
           {
             "behavior": "Workflow",
             "config": {
+              "finished": {
+                "done": "success"
+              },
               "outcomes": {
-                "done": "success",
                 "dropped": "neutral",
                 "failed": "failure"
               },
@@ -326,6 +334,10 @@ const rulesLayoutJSON = `{
                 {
                   "from": "doing",
                   "to": "dropped"
+                },
+                {
+                  "from": "done",
+                  "to": "todo"
                 }
               ]
             },

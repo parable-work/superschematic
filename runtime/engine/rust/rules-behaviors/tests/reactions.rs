@@ -5,10 +5,12 @@
 //! delete, and one that acts only while the field still holds; allTerminal
 //! with and without outcomes, over more than one page, with none linked
 //! and from a row that is gone; anyTerminal by an entry and by a link moved
-//! here), a relation to a type keyed by a number, each then that leaves its
-//! target as it is, a move the worker may not make refusing the change, the
-//! config's checks in the core's words, the cycle check, what it listens
-//! to, and the config held to the declaration file's configSchema.
+//! here; both over a state the linking type's Workflow names in finished,
+//! which a row leaves and enters again, D113), a relation to a type keyed by
+//! a number, each then that leaves its target as it is, a move the worker
+//! may not make refusing the change, the config's checks in the core's
+//! words, the cycle check, what it listens to, and the config held to the
+//! declaration file's configSchema.
 
 use std::collections::BTreeMap;
 
@@ -829,6 +831,203 @@ fn any_terminal_fires_on_an_entry_and_on_a_link_moved_here() {
     let changes = changed(host.change("Task", "t1", titled));
     assert!(changes.rows.is_empty());
     assert_eq!(host.status("Project", "p1"), "active");
+}
+
+// ---- a state a transition leaves that counts as finished (D113) ----
+
+// A task that is done may be reopened, and one that failed tried again:
+// finished names done, a success, and failed, a failure, each of which a
+// transition leaves; dropped stays terminal.
+fn reopening_task_flow() -> Value {
+    json!({
+        "states": ["todo", "doing", "done", "failed", "dropped"],
+        "transitions": [
+            {"from": "todo", "to": "doing"},
+            {"from": "todo", "to": "dropped"},
+            {"from": "doing", "to": "done"},
+            {"from": "doing", "to": "failed"},
+            {"from": "doing", "to": "dropped"},
+            {"from": "done", "to": "todo"},
+            {"from": "failed", "to": "todo"}
+        ],
+        "outcomes": {"dropped": "neutral"},
+        "finished": {"done": "success", "failed": "failure"}
+    })
+}
+
+// A project that is done or failed goes back to active when its work
+// starts again: finished names both, and cancelled stays terminal.
+fn reopening_project_flow() -> Value {
+    json!({
+        "states": ["planned", "active", "done", "failed", "cancelled"],
+        "transitions": [
+            {"from": "planned", "to": "active"},
+            {"from": "planned", "to": "cancelled"},
+            {"from": "active", "to": "done"},
+            {"from": "active", "to": "failed"},
+            {"from": "active", "to": "cancelled"},
+            {"from": "done", "to": "active"},
+            {"from": "failed", "to": "active"}
+        ],
+        "outcomes": {"cancelled": "neutral"},
+        "finished": {"done": "success", "failed": "failure"}
+    })
+}
+
+// with_flow is a type with its status's Workflow config replaced.
+fn with_flow(mut spec: TypeSpec, flow: Value) -> TypeSpec {
+    let status = spec
+        .uses
+        .iter_mut()
+        .find(|entry| entry.id() == "status")
+        .expect("a status");
+    *status = UseSpec::on_field("status", "Workflow", flow);
+    spec
+}
+
+// reopening is a host of a project and its tasks, whose done and failed a
+// transition leaves: the tasks' always, the project's when it reopens too.
+fn reopening(project_reopens: bool) -> Host {
+    let project = if project_reopens {
+        with_flow(project(project_rules()), reopening_project_flow())
+    } else {
+        project(project_rules())
+    };
+    let mut host = Host::new([
+        project,
+        with_flow(task(task_rules()), reopening_task_flow()),
+    ]);
+    host.put("Project", "p1", json!({}), "active", 1);
+    host
+}
+
+// step moves a task of p1 from a state to another, as its table has it
+// after the write, and runs the write through the core.
+fn step(host: &mut Host, key: &str, from: &str, to: &str) -> ChangeSet {
+    host.put("Task", key, json!({"projectId": "p1"}), to, 2);
+    let (key, change) = task_moved(key, from, to);
+    changed(host.change("Task", &key, change))
+}
+
+/// allTerminal counts a row in a state its Workflow's finished names as it
+/// counts one in a terminal state, with the outcome finished names: every
+/// task done closes the project, though a task may leave done. A task
+/// reopened moves nothing by itself, and a project whose done no transition
+/// leaves stays done whatever its tasks do next.
+#[test]
+fn all_terminal_counts_a_state_finished_names_and_a_reopened_row_moves_nothing() {
+    let mut host = reopening(false);
+    tasks(&mut host, &[("t1", "doing"), ("t2", "doing")]);
+    assert!(step(&mut host, "t1", "doing", "done").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "active");
+    let closed = step(&mut host, "t2", "doing", "done");
+    assert_eq!(written(&closed), ["Project p1"]);
+    assert_eq!(host.status("Project", "p1"), "done");
+    // A task reopened leaves the project as it is.
+    assert!(step(&mut host, "t2", "done", "todo").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "done");
+    // Its starting again finds no transition out of the project's done.
+    assert!(step(&mut host, "t2", "todo", "doing").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "done");
+
+    // A failure finished names is not a success, which [success] does not
+    // count; with no outcomes listed, every state finished names counts, as
+    // every terminal state does.
+    for (terminal, closes) in [
+        (
+            json!({"schema": "Task", "link": "project", "outcomes": ["success"]}),
+            false,
+        ),
+        (json!({"schema": "Task", "link": "project"}), true),
+    ] {
+        let rules =
+            json!({"rules": [{"when": {"allTerminal": terminal}, "then": {"transition": "done"}}]});
+        let mut host = Host::new([
+            project(rules),
+            with_flow(task(task_rules()), reopening_task_flow()),
+        ]);
+        host.put("Project", "p1", json!({}), "active", 1);
+        tasks(
+            &mut host,
+            &[("t1", "done"), ("t2", "doing"), ("t3", "dropped")],
+        );
+        step(&mut host, "t2", "doing", "failed");
+        assert_eq!(host.status("Project", "p1") == "done", closes);
+    }
+
+    // Without finished, a state a transition leaves has no outcome, and a
+    // task in it counts for nothing, as before.
+    let mut plain = reopening_task_flow();
+    plain
+        .as_object_mut()
+        .expect("an object")
+        .shift_remove("finished");
+    let mut host = Host::new([
+        project(project_rules()),
+        with_flow(task(task_rules()), plain),
+    ]);
+    host.put("Project", "p1", json!({}), "active", 1);
+    tasks(&mut host, &[("t1", "done")]);
+    assert!(step(&mut host, "t1", "doing", "done").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "active");
+}
+
+/// A project whose done a transition leaves, and finished names, goes back
+/// to active when a reopened task starts again, through the task's own
+/// rule, and closes again when the task is done again.
+#[test]
+fn a_reopened_row_starting_again_moves_its_project_back_and_closes_it_again() {
+    let mut host = reopening(true);
+    tasks(&mut host, &[("t1", "done"), ("t2", "doing")]);
+    let closed = step(&mut host, "t2", "doing", "done");
+    assert_eq!(written(&closed), ["Project p1"]);
+    assert_eq!(host.status("Project", "p1"), "done");
+    // Reopened: nothing moves a project back by itself.
+    assert!(step(&mut host, "t2", "done", "todo").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "done");
+    // Started again: the task's rule moves its project to active.
+    let started = step(&mut host, "t2", "todo", "doing");
+    assert_eq!(written(&started), ["Project p1"]);
+    assert_eq!(host.status("Project", "p1"), "active");
+    // Done again: every task is done, and the project closes again.
+    let closed = step(&mut host, "t2", "doing", "done");
+    assert_eq!(written(&closed), ["Project p1"]);
+    assert_eq!(host.status("Project", "p1"), "done");
+}
+
+/// anyTerminal fires when a row enters a state its Workflow's finished
+/// names with an outcome the rule lists, and again when the row enters it
+/// again after leaving it; a row that leaves it fires nothing.
+#[test]
+fn any_terminal_fires_each_time_a_row_enters_a_state_finished_names() {
+    let mut host = reopening(true);
+    tasks(&mut host, &[("t1", "doing"), ("t2", "todo")]);
+    let failed = step(&mut host, "t1", "doing", "failed");
+    assert_eq!(written(&failed), ["Project p1"]);
+    assert_eq!(host.status("Project", "p1"), "failed");
+    // Tried again: leaving failed fires nothing.
+    assert!(step(&mut host, "t1", "failed", "todo").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "failed");
+    step(&mut host, "t1", "todo", "doing");
+    assert_eq!(host.status("Project", "p1"), "active");
+    // Failed again: heard again.
+    let again = step(&mut host, "t1", "doing", "failed");
+    assert_eq!(written(&again), ["Project p1"]);
+    assert_eq!(host.status("Project", "p1"), "failed");
+    // A success finished names is not a failure: [failure] does not hear it.
+    let mut host = reopening(true);
+    tasks(&mut host, &[("t1", "doing"), ("t2", "todo")]);
+    assert!(step(&mut host, "t1", "doing", "done").rows.is_empty());
+    assert_eq!(host.status("Project", "p1"), "active");
+    // A link moved here while the row is in a state finished names.
+    let mut host = reopening(true);
+    host.put("Task", "t1", json!({"projectId": "p1"}), "failed", 1);
+    let moved = update(
+        image(json!({"projectId": "p9"}), Some(("failed", 1))),
+        image(json!({"projectId": "p1"}), Some(("failed", 1))),
+    );
+    changed(host.change("Task", "t1", moved));
+    assert_eq!(host.status("Project", "p1"), "failed");
 }
 
 /// A to-one relation to a type keyed by a number holds the key as a number,

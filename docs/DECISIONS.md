@@ -17871,3 +17871,73 @@ null kept; on Postgres, the TypeScript ORM's `ledger.test.ts` and
 key by a column that may be null, through both ORMs as one statement
 each; and over HTTP on both servers, `listIssues` by `ne` and `notIn` of
 each field, each pair dividing the list in two.
+
+## D113. A table's Workflow names the states a transition leaves that still count as finished (`finished`), and Reactions reads them as it reads a terminal state (D16, D103, D104, D109 amended)
+
+A tracker's issue that is done may be reopened, so its Workflow lists
+`{ from: "done"; to: "todo" }`, and with that one line the issue never
+closes its parent. A state has an outcome only when no transition leaves
+it: `outcomes` naming `done` is refused ("which is not a terminal state: a
+transition leaves it, and only a terminal state has an outcome"), and
+`state_outcome`, the one function Reactions, Dependencies and Rollups ask
+whether a row is finished, answers none for it. D109 left this and said
+why it was more than a line: the rule is the engine's on purpose, and the
+engine, the core, both recorded corpora and the build's mirror hold it.
+
+Two designs were weighed. The first lets `outcomes` name a state a
+transition leaves, everywhere. The second adds a member a table's
+Workflow alone takes.
+
+Who reads the answer decides it:
+- On an engine type, Dependencies reads it to open a gate: a transition
+  into a gated state is refused while a blocker is unfinished, and a row
+  in a terminal gated state takes no open blocker. Both stand on a
+  finished instance staying finished. Rollups counts finished children.
+  A blocker that finished, let its dependent through and was reopened
+  would leave the dependent past a gate with an open blocker, a state the
+  behavior has no rule for.
+- On a table, the core has no Dependencies and no Rollups. Reactions
+  alone reads an outcome, and it promises nothing about what stays true:
+  a rule acts where it can, when a write is heard.
+- Lease, Retries and Reconcile read no outcome. Each asks whether a
+  transition leaves the state (`moves::is_terminal`): Lease to leave an
+  expiry uncounted, Retries for the states exhaustion moves a row from,
+  Reconcile for the rows an observation no longer moves.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A table's Workflow takes `finished`, a map as `outcomes` is: each key a state a transition leaves, each value its outcome (`success`, `failure` or `neutral`). `finished: { done: "success" }` beside `{ from: "done"; to: "todo" }` is a task that is done, counts as done, and may be reopened. | `outcomes` naming such a state, on a table and an engine type alike. It reverses a rule three engine behaviors stand on, for a case no engine type asked for, and changes what the recorded scenarios of the engine must answer. The same, on a table alone: one member with two rules by where it is written, which the core and the engine would then answer differently for the same config, and every replay of the engine's recordings through the core would need the two steps that record the refusal left out. A list of states with no outcomes, which cannot say that a cancelled issue that may be reopened is no success. |
+| `outcomes` keeps its rule and its words: it names terminal states, in the engine and the core alike. `finished` names the others: a key that is no state, and a key that is a terminal state, are each refused at define (`finished names "done", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome`). So each state's outcome is said in one place, and adding or removing a transition out of a state is answered with which member holds it now. | `finished` taking any state, terminal ones too, which gives a terminal state two places for its outcome and a rule for when they disagree. |
+| `finished` is a table's alone, as `by`, `overridePermission` and `repeat` are (D104): the shared declaration says so, the engine refuses it at define (`finished is a table's Workflow's ...: on an engine type a state a transition leaves has no outcome`), the build refuses it on an engine type first, and the core implements it. | Building it into the engine, which is a design of what Dependencies does when a blocker reopens: left below. |
+| `state_outcome` answers for a state `finished` names, and `is_terminal_state` is unchanged: no transition leaves it. So Reactions' `allTerminal` and `anyTerminal` count such a state with no change of their own, under the names they have. | `allFinished` and `anyFinished` beside them, two more rule forms that mean the same on every table without `finished`. Renaming the two, which the engine shares. |
+| Nothing else reads `finished`. The guard still refuses a transition out of a terminal state alone; a transition out of a finished state is made as any is, with its permission and its `by`. Lease's expiry, Retries' default `from` and Reconcile's settled rows ask whether a transition leaves a state, and still do. | Reading `finished` in the three. A lease that expires on a row that is done and may be reopened would then go uncounted, and Retries would no longer move such a row on exhaustion, each a change to a behavior that no table with a reopenable state asked for; a table that wants either says so in that behavior's own config (`from`). |
+| Reopening a row moves no other row back. A parent that a rule closed stays closed when a child is reopened: no `when` hears a row leave a state, and a `then` moves a row only along a transition its Workflow lists. A table that wants the parent taken up again says both: the parent lists the transition (`{ from: "done"; to: "active" }`, with `finished: { done: "success" }` of its own) and a rule makes it, the child's `{ when: { enters: "doing" }; then: { link: "project"; transition: "active" } }`. When the child is done again every child is done again, and `allTerminal` closes the parent again. | A rule that undoes a move when its condition stops holding. It needs the state the parent was in before, which no row keeps, and a parent a person closed by hand would be reopened by a child. `when: { leaves: state }`, a fifth form: `enters` on the state the child moves to says the same today. |
+| The build's mirror holds `finished` to the core's two rules, after the outcomes, by name (`verify.workflowRulesProblem`), and where the core refuses an outcome on a state a transition leaves, the build adds after the core's words that a table names such a state in `finished`. | Changing the core's message, which the engine shares and both corpora record. |
+
+Left: Dependencies and Rollups on a table, which the core does not have,
+and with them what a dependent does when its blocker is reopened; the
+same on an engine type, where `finished` is refused until that is
+designed. Lease, Retries and Reconcile reading `finished`. A rule that
+hears a row leave a state. The short form of a transition (D109) in a
+JSON or YAML schema file, unchanged by this.
+
+Status: built. In the core, `workflow.rs`'s parse and `state_outcome`
+with their unit tests, and `tests/reactions.rs`: every child done closes
+the parent, a reopened child leaves it, a child started again takes it up
+where it lists the transition, and done again closes it again. The engine
+refuses the member at define (`core_workflow_table_members.rs`, and the
+engine's TypeScript suite, recorded in the corpus). A hand-written
+scenario in `core-workflow-principals.json`, replayed by every adapter.
+`TestWorkflowRulesProblem` and
+`TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes`;
+`workflow.typecheck.ts`. On Postgres through the three servers and their
+workers, over fixture-reactions-db, whose task and project both leave
+`done`: `TestGeneratedReactionsEndToEnd`,
+`TestReactionsGoServerAndWorkerOnPostgres` and
+`TestRustReactionsOperationsAndWorkerOnPostgres`, a task done, reopened,
+started and done again, and its project closed, left closed, taken up and
+closed again. The core's transcripts and the engine's corpus are
+re-recorded, not edited. One thing the replayer of the core's transcripts
+now skips: a define the engine records as refused for a table-only member
+(its reason names the table form, `on a DB table, D104)`) is not compared with the core,
+which takes that member; the engine's own replay still holds the refusal.

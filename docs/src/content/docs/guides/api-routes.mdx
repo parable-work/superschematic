@@ -1983,7 +1983,12 @@ export abstract class Task implements Reactions<Task, {
 
 `projectFlow` and `taskFlow` are Workflow configs declared `as const`,
 whose terminal states each name an `outcome` (`success`, `failure` or
-`neutral`), which `allTerminal` and `anyTerminal` read.
+`neutral`), which `allTerminal` and `anyTerminal` read. A state a
+transition leaves has an outcome when the table's Workflow names it in
+`finished` (D113), and counts in both rules as a terminal state does: a
+task whose `done` may be reopened still closes its project
+([A Workflow field's transitions](/superschematic/guides/database-tables/#a-workflow-fields-transitions)). In the
+table below, "a terminal state" includes such a state.
 
 | `when` | Fires when |
 | --- | --- |

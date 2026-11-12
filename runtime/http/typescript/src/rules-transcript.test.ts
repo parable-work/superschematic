@@ -119,7 +119,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-timers', floor: 139 },
   { file: 'core-reactions', floor: 586 },
   { file: 'core-reactions-changes', floor: 60 },
-  { file: 'core-workflow-principals', floor: 92 },
+  { file: 'core-workflow-principals', floor: 101 },
   { file: 'core-constants', floor: 39 },
   { file: 'core-staterules', floor: 76 },
   { file: 'core-approvals', floor: 122 },

@@ -66,6 +66,19 @@ const answered: QuestionStatus = "answered";
 const withdraw: WorkflowTransitionOn = { from: "open", to: "withdrawn", by: ["createdBy"] };
 const moderated: WorkflowConfig = { states: ["open"], transitions: [], overridePermission: "questions.moderate" };
 
+// A table's Workflow names the outcome of a state a transition leaves in
+// finished (D113): a task that is done may be reopened and still counts as
+// done for the rules that read an outcome.
+type TaskStatus = Workflow<{
+  states: ["todo", "doing", "done", "dropped"];
+  transitions: [{ from: "todo"; to: "doing" }, { from: "doing"; to: ["done", "dropped"] }, { from: "done"; to: "todo" }];
+  outcomes: { dropped: "neutral" };
+  finished: { done: "success" };
+}>;
+const done: TaskStatus = "done";
+// @ts-expect-error a finished state's outcome is success, failure or neutral
+type BadFinished = Workflow<{ states: ["todo", "done"]; transitions: [{ from: "done"; to: "todo" }]; finished: { done: "closed" } }>;
+
 // by is a list of fields, and repeat is unchanged alone.
 // @ts-expect-error by lists fields
 type OneBy = Workflow<{ states: ["open", "done"]; transitions: [{ from: "open"; to: "done"; by: "assignee" }] }>;
@@ -75,7 +88,7 @@ type AlwaysRepeat = Workflow<{ states: ["open"]; transitions: []; repeat: "alway
 type NumberOverride = Workflow<{ states: ["open"]; transitions: []; overridePermission: 5 }>;
 
 // An engine type's @behavior("Workflow", ...) takes @superschematic/schema's
-// config, which has none of by, overridePermission and repeat.
+// config, which has none of by, overridePermission, repeat and finished.
 // @ts-expect-error by is a table's Workflow's
 @behavior("Workflow", { states: ["open", "done"], transitions: [{ from: "open", to: "done", by: ["assignee"] }] })
 export abstract class EngineRequest {}
@@ -85,6 +98,9 @@ export abstract class EngineTicket {}
 // @ts-expect-error overridePermission is a table's Workflow's
 @behavior("Workflow", { states: ["open"], transitions: [], overridePermission: "tickets.moderate" })
 export abstract class EngineNote {}
+// @ts-expect-error finished is a table's Workflow's
+@behavior("Workflow", { states: ["open", "done"], transitions: [{ from: "done", to: "open" }], finished: { done: "success" } })
+export abstract class EngineTask {}
 
-export const checked: readonly unknown[] = [paid, lost, sent, answered, withdraw, moderated];
-export type Refused = OneState | NoTo | BadOutcome | OneBy | AlwaysRepeat | NumberOverride;
+export const checked: readonly unknown[] = [paid, lost, sent, answered, withdraw, moderated, done];
+export type Refused = OneState | NoTo | BadOutcome | BadFinished | OneBy | AlwaysRepeat | NumberOverride;

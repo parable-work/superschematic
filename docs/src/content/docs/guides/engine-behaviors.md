@@ -897,7 +897,10 @@ that are not successes in `outcomes`:
 - A terminal state `outcomes` does not name is a `success`, so a config
   without `outcomes` behaves as it always did.
 - A key that is not a state, or names a state a transition leaves, is
-  refused when the schema is defined.
+  refused when the schema is defined. A table's Workflow names the
+  outcome of a state a transition leaves in `finished` (D113); an engine
+  type refuses `finished`, since Dependencies and Rollups rely on a
+  finished instance staying finished.
 - `Workflow` itself ignores outcomes. The behaviors that look at other
   instances read them: a blocker that failed does not release its
   dependents, and a rollup or a reaction can tell children that

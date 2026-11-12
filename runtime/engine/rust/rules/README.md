@@ -928,10 +928,11 @@ them changes, in 4 scenarios; `core-constants` to 39 steps, 19 checks and
 20 commands, in 4 scenarios; `core-staterules` to 76 steps, 33 checks and
 43 commands, in 7 scenarios; `core-approvals` to 122 steps, 29 checks and
 93 commands, 71 of them operations and 5 changes, in 9 scenarios;
-`core-workflow-principals` to 92 steps,
-34 define and publish checks, twelve of them refused, and 58 commands, five
-of them repeats answered unchanged, in 9 scenarios (its tenth, test.Gate's,
-runs on the reference host alone); `core-freezes-and-sign-offs` to 115
+`core-workflow-principals` to 101 steps,
+38 define and publish checks, fourteen of them refused, and 63 commands, five
+of them repeats answered unchanged, in 10 scenarios, the one of a state
+`finished` names among them (D113; test.Gate's runs on the reference host
+alone); `core-freezes-and-sign-offs` to 115
 steps, 40 checks and 75 commands, in 12 scenarios; and, of the behaviors
 only the core implements (D104, step 3), `core-seats` to 88 steps, 22
 checks and 66 commands, four of them repeats, in 7 scenarios, and
@@ -1149,19 +1150,21 @@ deadline's (D104, step 3); and an emit of a kind the declaration lists
 landing in the change set with its row, use and payload, and one of a
 kind it does not list, by a behavior that declares events and by one that
 declares none, a defect (D104, step 3's second part).
-`rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18),
-`tests/reactions.rs` (16), `tests/constants.rs` (11), `tests/staterules.rs`
+`rules-behaviors`' `tests/workflow.rs` (36), `tests/timers.rs` (18),
+`tests/reactions.rs` (19), `tests/constants.rs` (11), `tests/staterules.rs`
 (11), `tests/approvals.rs` (14), `tests/lease.rs` (16) and
 `tests/retries.rs` (14), and `tests/seats.rs` (19), `tests/reconcile.rs`
 (12) and `tests/schedules.rs` (18), hold each behavior to its declaration's schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
 field with no value, `by` with a permission, `overridePermission`, a call
-held to `by`, `repeat` and `from`, and its config checks; Timers'
+held to `by`, `repeat` and `from`, a state `finished` names left and
+entered again (D113), and its config checks; Timers'
 starts, its `then`'s four outcomes, `until` in both forms, reset, snooze,
 the Workflow it reads (implied, named, several, none), a field start as a
 number and as text, a heard write the core applied changing nothing, a raw
 write of a field start arming it again, a raw insert arming a create
 deadline from its `at`, and a deadline reconciling its row before it fires;
-Reactions' when kinds firing and not, each `then` that leaves its target as
+Reactions' when kinds firing and not, `allTerminal` and `anyTerminal` over
+a state `finished` names (D113), each `then` that leaves its target as
 it is, a `forbidden` move refusing the command, each config message, the
 cycle check and `listens`; Constants' `oneWay` up and down for a boolean, a
 number and a date-time, no value below every value, the permission past it,
@@ -1239,7 +1242,7 @@ incidental to the Lease file, and the kit's `test.Gate` and `test.Signal`;
 `tests/workflow_principals_scenarios.rs` replays the hand-written
 `core-workflow-principals.json` (`runtime/engine/testdata/rules/scenarios`,
 D104) on Workflow and the test behavior `test.Gate`, whose guard vetoes
-every Workflow transition, with a floor of 122 steps, its opens and reads
+every Workflow transition, with a floor of 133 steps, its opens and reads
 among them, and `tests/freezes_and_sign_offs_scenarios.rs` the
 hand-written `core-freezes-and-sign-offs.json` (D104, step 2) with a floor
 of 138. A recorded type that lists Approvals and has no `createdBy` field

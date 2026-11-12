@@ -57,9 +57,11 @@
           "name": "Workflow",
           "field": "status",
           "config": {
+            "finished": {
+              "done": "success"
+            },
             "outcomes": {
               "cancelled": "neutral",
-              "done": "success",
               "failed": "failure"
             },
             "states": [
@@ -89,6 +91,10 @@
               {
                 "from": "active",
                 "to": "cancelled"
+              },
+              {
+                "from": "done",
+                "to": "active"
               }
             ]
           }
@@ -151,8 +157,10 @@
           "name": "Workflow",
           "field": "status",
           "config": {
+            "finished": {
+              "done": "success"
+            },
             "outcomes": {
-              "done": "success",
               "dropped": "neutral",
               "failed": "failure"
             },
@@ -183,6 +191,10 @@
               {
                 "from": "doing",
                 "to": "dropped"
+              },
+              {
+                "from": "done",
+                "to": "todo"
               }
             ]
           }

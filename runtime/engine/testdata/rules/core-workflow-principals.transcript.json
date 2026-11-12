@@ -6732,6 +6732,583 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         }
       ]
+    },
+    {
+      "name": "Workflow principals > finished: a state a transition leaves has an outcome, a row leaves it and enters it again, and define refuses a state the config lacks and a terminal state",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Task",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Task",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "todo",
+                      "done",
+                      "dropped"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "todo",
+                        "to": "done"
+                      },
+                      {
+                        "from": "todo",
+                        "to": "dropped"
+                      },
+                      {
+                        "from": "done",
+                        "to": "todo"
+                      }
+                    ],
+                    "outcomes": {
+                      "dropped": "neutral"
+                    },
+                    "finished": {
+                      "done": "success"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Task",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "todo",
+                    "done",
+                    "dropped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "done"
+                    },
+                    {
+                      "from": "todo",
+                      "to": "dropped"
+                    },
+                    {
+                      "from": "done",
+                      "to": "todo"
+                    }
+                  ],
+                  "outcomes": {
+                    "dropped": "neutral"
+                  },
+                  "finished": {
+                    "lost": "success"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Task: behavior Workflow config: finished names \"lost\", which is not one of its states (todo, done, dropped)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Task: behavior Workflow config: finished names \"lost\", which is not one of its states (todo, done, dropped)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Task",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "todo",
+                    "done",
+                    "dropped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "done"
+                    },
+                    {
+                      "from": "todo",
+                      "to": "dropped"
+                    },
+                    {
+                      "from": "done",
+                      "to": "todo"
+                    }
+                  ],
+                  "outcomes": {
+                    "dropped": "neutral"
+                  },
+                  "finished": {
+                    "dropped": "neutral"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Task: behavior Workflow config: finished names \"dropped\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Task: behavior Workflow config: finished names \"dropped\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Task",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "todo",
+                    "done",
+                    "dropped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "done"
+                    },
+                    {
+                      "from": "todo",
+                      "to": "dropped"
+                    },
+                    {
+                      "from": "done",
+                      "to": "todo"
+                    }
+                  ],
+                  "outcomes": {
+                    "dropped": "neutral"
+                  },
+                  "finished": {
+                    "done": "success"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Task",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "todo",
+                    "done",
+                    "dropped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "done"
+                    },
+                    {
+                      "from": "todo",
+                      "to": "dropped"
+                    },
+                    {
+                      "from": "done",
+                      "to": "todo"
+                    }
+                  ],
+                  "outcomes": {
+                    "dropped": "neutral"
+                  },
+                  "finished": {
+                    "done": "success"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "t1",
+              "own": {
+                "title": "Sweep"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "t1",
+            "row": {
+              "own": {
+                "title": "Sweep"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "t1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "todo",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "Sweep"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1010000,
+            "action": {
+              "kind": "operation",
+              "key": "t1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "todo"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "done",
+              "to": "todo"
+            },
+            "row": {
+              "own": {
+                "title": "Sweep"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1010000
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1015000,
+            "action": {
+              "kind": "operation",
+              "key": "t1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "from": "todo",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "Sweep"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1015000
+                }
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1020000,
+            "action": {
+              "kind": "operation",
+              "key": "t1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "dropped"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Task t1: no transition leads from done to dropped; from done it can move to todo",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "no transition leads from done to dropped; from done it can move to todo",
+                "vetoCode": "transition_not_allowed",
+                "vetoDetails": {
+                  "from": "done",
+                  "to": "dropped",
+                  "allowed": [
+                    "todo"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Sweep"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1015000
+                }
+              }
+            },
+            "version": 4
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 11,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
     }
   ]
 }

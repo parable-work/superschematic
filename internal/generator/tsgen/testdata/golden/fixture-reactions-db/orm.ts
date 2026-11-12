@@ -479,9 +479,11 @@ export const fixtureReactionsDbRules: RulesLayout = {
           {
             "behavior": "Workflow",
             "config": {
+              "finished": {
+                "done": "success"
+              },
               "outcomes": {
                 "cancelled": "neutral",
-                "done": "success",
                 "failed": "failure"
               },
               "states": [
@@ -511,6 +513,10 @@ export const fixtureReactionsDbRules: RulesLayout = {
                 {
                   "from": "active",
                   "to": "cancelled"
+                },
+                {
+                  "from": "done",
+                  "to": "active"
                 }
               ]
             },
@@ -633,8 +639,10 @@ export const fixtureReactionsDbRules: RulesLayout = {
           {
             "behavior": "Workflow",
             "config": {
+              "finished": {
+                "done": "success"
+              },
               "outcomes": {
-                "done": "success",
                 "dropped": "neutral",
                 "failed": "failure"
               },
@@ -665,6 +673,10 @@ export const fixtureReactionsDbRules: RulesLayout = {
                 {
                   "from": "doing",
                   "to": "dropped"
+                },
+                {
+                  "from": "done",
+                  "to": "todo"
                 }
               ]
             },

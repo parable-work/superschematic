@@ -615,12 +615,14 @@ for a client to branch on, and a state it does not name is 400
 
 Workflow's declaration also lists what only a DB table's Workflow takes
 (D104): a transition's `by`, the fields whose subject makes it, the
-config's `overridePermission` and `repeat`, and `transition`'s `from`
-([Who may move a Workflow field's row](/superschematic/guides/database-tables/#who-may-move-a-workflow-fields-row)).
-The engine refuses each rather than ignore it: a define that names `by`,
-`overridePermission` or `repeat` is refused with a reason that names the
-table form (`status: Workflow<{ ... }> on a DB table`), and a `from` is
-400 `invalid_argument` at `/from`. So do Constants', StateRules' and
+config's `overridePermission` and `repeat`, `transition`'s `from`
+([Who may move a Workflow field's row](/superschematic/guides/database-tables/#who-may-move-a-workflow-fields-row)),
+and the config's `finished`, the states a transition leaves that still
+count as finished (D113). The engine refuses each rather than ignore it:
+a define that names `by`, `overridePermission`, `repeat` or `finished` is
+refused with a reason that names the table form
+(`status: Workflow<{ ... }> on a DB table`), and a `from` is 400
+`invalid_argument` at `/from`. So do Constants', StateRules' and
 Approvals' declarations, with what only a table's takes
 ([Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
 Constants' `oneWay`, a StateRules state's `by` and its `status`, and an

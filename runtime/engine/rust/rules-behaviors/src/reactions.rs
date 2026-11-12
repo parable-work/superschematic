@@ -39,6 +39,12 @@
 //! - `then { transition, link? }`: move the row, or the row its to-one
 //!   relation `link` points at, to the state.
 //!
+//! For `allTerminal` and `anyTerminal`, a state the linking type's Workflow
+//! names in `finished` counts as a terminal state does, with the outcome
+//! `finished` names (D113): a task that is done and may be reopened closes
+//! its project. A row that leaves such a state moves nothing by itself, and
+//! one that enters it again is heard again.
+//!
 //! A rule acts only where it can: a target already in the state, with no
 //! transition to it from where it is, or whose guards veto the transition
 //! is left as it is, and so is a target that is gone, an enters rule on the
@@ -136,8 +142,9 @@ const OUTCOMES: [&str; 3] = ["success", "failure", "neutral"];
 pub struct ReactionsTerminal {
     pub schema: String,
     pub link: String,
-    /// The outcomes a terminal state must have to count; every outcome when
-    /// `None`, which only allTerminal allows.
+    /// The outcomes a terminal state, or a state its Workflow's finished
+    /// names (D113), must have to count; every outcome when `None`, which
+    /// only allTerminal allows.
     pub outcomes: Option<Vec<WorkflowOutcome>>,
 }
 
@@ -474,9 +481,9 @@ impl Linking {
 }
 
 // all_terminal reports whether every row of the rule's schema that points at
-// the row through its link is in a terminal state of its Workflow with an
-// outcome the rule counts, and there is at least one: read a page at a time
-// as the host has them.
+// the row through its link is in a terminal state of its Workflow, or one
+// its finished names (D113), with an outcome the rule counts, and there is
+// at least one: read a page at a time as the host has them.
 fn all_terminal(
     cx: &Cx<'_, ReactionsConfig>,
     linking: &Linking,
@@ -502,9 +509,10 @@ fn all_terminal(
 }
 
 // any_terminal reports whether a write of a row of the rule's schema that
-// points at the row now entered a terminal state whose outcome the rule
-// lists, or moved the link here while its status is one. A link's key is
-// read as a command names a row (key_of), so a number key matches its text.
+// points at the row now entered a terminal state, or one its Workflow's
+// finished names (D113), whose outcome the rule lists, or moved the link
+// here while its status is one. A link's key is read as a command names a
+// row (key_of), so a number key matches its text.
 fn any_terminal(
     cx: &Cx<'_, ReactionsConfig>,
     linking: &Linking,
@@ -536,8 +544,9 @@ fn any_terminal(
     counts(&linking.flow, status, outcomes)
 }
 
-// counts reports whether a status is a terminal state whose outcome the list
-// holds; every terminal state counts when there is no list.
+// counts reports whether a status is a terminal state, or a state finished
+// names (D113), whose outcome the list holds; every such state counts when
+// there is no list.
 fn counts(flow: &Value, status: Option<&str>, outcomes: Option<&[WorkflowOutcome]>) -> bool {
     status
         .and_then(|status| state_outcome(flow, status))

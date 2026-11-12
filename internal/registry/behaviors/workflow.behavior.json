@@ -49,6 +49,13 @@
         "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 },
         "additionalProperties": { "enum": ["success", "failure", "neutral"] }
       },
+      "finished": {
+        "description": "The outcome of each state it names that a transition leaves: success, failure or neutral. Such a state counts as finished for the rules that read an outcome, as a terminal state does, though a row may leave it: a task that is done and may be reopened. Each key is a state of states that a transition leaves; a terminal state's outcome is outcomes'. A table's alone: an engine type refuses it.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 },
+        "additionalProperties": { "enum": ["success", "failure", "neutral"] }
+      },
       "overridePermission": {
         "description": "The permission that lets a caller make a transition its by does not name them for; the transition's own permission is still needed. A table's alone: an engine type refuses it.",
         "type": "string",
