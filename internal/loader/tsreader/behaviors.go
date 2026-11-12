@@ -104,6 +104,11 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 	if err := ir.CanonicalizeBehaviors(refs); err != nil {
 		return fieldUse{}, true, errorAtNode(at, "type %s: %v", class, err)
 	}
+	// A Workflow's transitions that list states are written out (D109)
+	// before the config is held to its schema.
+	if err := refs[0].ExpandTransitions(); err != nil {
+		return fieldUse{}, true, errorAtNode(at, "%s: behavior %s config: %v", where, behavior.Name, err)
+	}
 	if err := behavior.ValidateConfig(refs[0].Config); err != nil {
 		return fieldUse{}, true, errorAtNode(at, "%s: %s", where, err)
 	}
@@ -175,6 +180,9 @@ func (w *walker) behaviorImplementsOf(class, t *astNode, behavior registry.Behav
 	refs := []ir.BehaviorRef{{Name: behavior.Name, Implements: true, Config: raw}}
 	if err := ir.CanonicalizeBehaviors(refs); err != nil {
 		return fieldUse{}, errorAtNode(at, "type %s: %v", name, err)
+	}
+	if err := refs[0].ExpandTransitions(); err != nil {
+		return fieldUse{}, errorAtNode(at, "%s: %v", where, err)
 	}
 	if err := behavior.ValidateConfig(refs[0].Config); err != nil {
 		return fieldUse{}, errorAtNode(at, "type %s: %s", name, err)

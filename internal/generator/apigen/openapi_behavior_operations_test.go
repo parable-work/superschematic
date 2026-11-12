@@ -115,7 +115,9 @@ func TestOpenAPIBehaviorOperations(t *testing.T) {
 
 // TestOpenAPIMarksAViewsOwnedFieldsReadOnly: fixture-workflow-view-api's
 // @source view of a table whose fields are behaviors carries readOnly on
-// the fields that project an owned field, by name, and on no other.
+// the fields that project an owned field, by name, and on no other. The
+// body of its create names the state the row starts in (D109), a member
+// the request sends, which stays writable.
 func TestOpenAPIMarksAViewsOwnedFieldsReadOnly(t *testing.T) {
 	load := func(name string) *ir.Schema {
 		schema, err := loader.LoadService(filepath.Join(fixturesDir, name))
@@ -149,6 +151,14 @@ func TestOpenAPIMarksAViewsOwnedFieldsReadOnly(t *testing.T) {
 		}
 		if got := jsonPath(doc.Components.Schemas["OrderView"], "properties", name, "readOnly") == true; got != want {
 			t.Errorf("OrderView.%s readOnly = %v, want %v", name, got, want)
+		}
+	}
+	for _, name := range []string{"title", "status"} {
+		if jsonPath(doc.Components.Schemas["PlaceOrderInput"], "properties", name) == nil {
+			t.Errorf("PlaceOrderInput has no property %s", name)
+		}
+		if jsonPath(doc.Components.Schemas["PlaceOrderInput"], "properties", name, "readOnly") == true {
+			t.Errorf("PlaceOrderInput.%s is readOnly, and the create's body sends it", name)
 		}
 	}
 }

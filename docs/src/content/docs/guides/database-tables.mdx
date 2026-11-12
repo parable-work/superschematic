@@ -1080,6 +1080,58 @@ transaction, which the API's `@behaviorWorker` hands to a method of the
 API's `Workers` that you write
 ([A behavior worker's event handlers](/superschematic/guides/queues/#a-behavior-workers-event-handlers)).
 
+### A Workflow field's transitions
+
+A transition is one move, `{ from: "draft"; to: "paid" }`. In a
+TypeScript schema a table's transition may also list states in `from`, in
+`to`, or in both, and stands for a transition from each of its `from`
+states to each of its `to` states, each with its permission and its `by`:
+
+```ts
+status: Workflow<{
+  states: ["backlog", "todo", "started", "done", "canceled"];
+  transitions: [
+    // Any open state to any other open state.
+    { from: ["backlog", "todo", "started"]; to: ["backlog", "todo", "started"] },
+    // Any open state to either closed one, for a caller who may close.
+    { from: ["backlog", "todo", "started"]; to: ["done", "canceled"]; permission: "issues.close" },
+    { from: "done"; to: "todo" },
+  ];
+}>;
+```
+
+Those three lines are thirteen transitions. A state both lists hold moves
+to the others and not to itself, so the same list in `from` and `to` is
+every move among its states. The loader writes the transitions out before
+anything else reads the config, so the checks, the generated repositories,
+the behavior operations and the core see plain ones, in the lists' order,
+and `status.transition` behaves as if each were written by hand.
+
+What only the short form gets wrong fails the load: a list with no state
+or with one twice, lists that leave no move, and a move two transitions
+make when one of them lists it:
+
+```
+type Issue: field status: behavior Workflow config: the transition from "todo" to "done" is listed twice: by the transition from "todo" to "done", and by the transition from ["backlog", "todo"] to "done"
+```
+
+A JSON or YAML schema file writes each transition out: its document
+schema is the engine's declaration of Workflow, which takes one state in
+each.
+
+The build also holds a table's Workflow to the rules the behaviors' core
+holds it to at a row's first command, in the core's words: the initial
+state is one of the states, each transition's `from` and `to` are states,
+no transition leads to its own state or is listed twice, and `outcomes`
+names states no transition leaves.
+
+```
+type Issue: field status: behavior Workflow config: the transition from "todo" to "closed" names "closed", which is not one of its states (backlog, todo, done)
+```
+
+A config that broke one of these used to build, and every create of the
+table then answered 422 `invalid_schema`.
+
 ### Who may move a Workflow field's row
 
 A Workflow field's transition may name who makes it, its config may name

@@ -230,6 +230,10 @@ type TableRoute struct {
 	// row.
 	By       []string
 	Override string
+	// Starts are the members of a create's body that name the state the
+	// row starts in (D109), which the handler reaches by the Workflow's
+	// transition and leaves out of the row it creates.
+	Starts []string
 }
 
 // Handler is the runtime's handler of the operation's kind: tableRead,
@@ -271,6 +275,9 @@ func (r *TableRoute) Literal() string {
 	}
 	if r.Search != "" {
 		fields = append(fields, "search: "+tsString(r.Search))
+	}
+	if len(r.Starts) > 0 {
+		fields = append(fields, "starts: "+tsStringList(r.Starts))
 	}
 	if len(r.By) > 0 {
 		fields = append(fields, "by: "+tsStringList(r.By))
@@ -1406,6 +1413,10 @@ func (b *builder) tableEndpoint(ep apigen.EndpointInfo, op *ir.TableOperation) (
 		Key:        op.Key,
 		By:         op.By,
 		Override:   op.OverridePermission,
+		Starts:     op.Starts,
+	}
+	if len(op.Starts) > 0 && op.Kind != ir.TableOperationCreate {
+		return refuse("whose %s names the state a row starts in", op.Kind)
 	}
 	if op.OverridePermission != "" && len(op.By) == 0 {
 		return refuse("whose overridePermission lifts a row rule it does not have")

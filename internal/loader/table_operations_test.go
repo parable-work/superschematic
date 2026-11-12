@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -313,5 +314,77 @@ func TestTableOperationsAreHeldToTheirTable(t *testing.T) {
 	res = verify.CheckTableOperations(copyOf(t, loaded), verify.Input{})
 	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0].Error(), "which the loader could not read") {
 		t.Errorf("a database the loader did not read: %v", res.Errors)
+	}
+}
+
+// TestACreateNamesTheStateItsRowStartsIn: a create's body may hold the
+// field of a Workflow of its table (D109), which the loader records as a
+// start, the state the handler moves the new row to by the Workflow's
+// transition; an update's body may not, and says where a row changes
+// state; and a list of states is refused.
+func TestACreateNamesTheStateItsRowStartsIn(t *testing.T) {
+	loaded, tracker := loadTracker(t)
+	// Issue's status as a Workflow's field, in a copy of the database.
+	db := copyOf(t, tracker)
+	issue := db.Types["Issue"]
+	issue.Behaviors = append(issue.Behaviors, ir.BehaviorRef{Name: "Workflow", Field: "status",
+		Config: json.RawMessage(`{"states":["open","started","done"],"transitions":[{"from":"open","to":"started"},{"from":"started","to":"done"}]}`)})
+	status := ir.TypeRef{Name: "IssueStatus"}
+	check := func(edit func(api *ir.Schema)) (*ir.Schema, []string) {
+		api := copyOf(t, loaded)
+		// The fixture's update sets status as a plain column's; without
+		// it the API is sound over the Workflow.
+		update := api.Types["UpdateIssueInput"]
+		update.Fields = slices.DeleteFunc(update.Fields, func(f *ir.FieldDef) bool { return f.Name == "status" })
+		if edit != nil {
+			edit(api)
+		}
+		var got []string
+		for _, d := range verify.CheckTableOperations(api, verify.Input{Database: db}).Errors {
+			got = append(got, d.Error())
+		}
+		return api, got
+	}
+
+	api, errs := check(func(api *ir.Schema) {
+		create := api.Types["CreateIssueInput"]
+		create.Fields = append(create.Fields, &ir.FieldDef{Name: "status", TypeRef: status})
+	})
+	if len(errs) != 0 {
+		t.Fatalf("a create whose body names the starting state: %q", errs)
+	}
+	if got := trackerOperation(t, api, "createIssue").TableOperation; !slices.Equal(got.Starts, []string{"status"}) || got.Kind != "create" {
+		t.Errorf("createIssue's tableOperation = %+v, want its start status", got)
+	}
+	for _, name := range []string{"updateIssue", "getIssue", "listIssues", "deleteIssue", "createTeam"} {
+		if got := trackerOperation(t, api, name).TableOperation; len(got.Starts) != 0 {
+			t.Errorf("%s names starts %v", name, got.Starts)
+		}
+	}
+
+	// Without the body's member a create starts in the initial state, and
+	// names no start.
+	api, errs = check(nil)
+	if len(errs) != 0 || len(trackerOperation(t, api, "createIssue").TableOperation.Starts) != 0 {
+		t.Errorf("a create that names no state: %q, %+v", errs, trackerOperation(t, api, "createIssue").TableOperation)
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(api *ir.Schema)
+		want []string
+	}{
+		{"an update that sets the state", func(api *ir.Schema) {
+			update := api.Types["UpdateIssueInput"]
+			update.Fields = append(update.Fields, &ir.FieldDef{Name: "status", TypeRef: status})
+		}, []string{"Issues.updateIssue: its body UpdateIssueInput sets status, the state of a Workflow, which a row changes through its transition (issue.status.transition); only a create's body names the state a row starts in; leave the field out of the view"}},
+		{"a create that lists states", func(api *ir.Schema) {
+			create := api.Types["CreateIssueInput"]
+			create.Fields = append(create.Fields, &ir.FieldDef{Name: "status", TypeRef: ir.TypeRef{Name: "IssueStatus", IsArray: true}})
+		}, []string{"Issues.createIssue: its body CreateIssueInput holds status as IssueStatus[]; the state a row starts in is one state of Issue.status"}},
+	} {
+		if _, got := check(tc.edit); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
 	}
 }

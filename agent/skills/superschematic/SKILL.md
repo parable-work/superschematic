@@ -163,7 +163,9 @@ path for when the store is unavailable.
   `@source` views of one table take `@tableOperation()` and no handler:
   a path parameter named for a relation's key (`teams/{teamId}/issues`)
   holds the row to its parent, a body view lists only the columns a
-  caller may set, and an update's members are all `Nullable`. Write the
+  caller may set, and an update's members are all `Nullable`. A create's
+  body may hold a `Workflow` field, the state the row starts in: the
+  handler creates the row and makes the transition, as the caller. Write the
   `@tableOperation({ by: ["ownerId"], overridePermission: "notes.admin"
   })` holds it to the rows a member names the caller in, a row of
   someone else's a 404, and sets those members on a create; a rule needs
@@ -262,6 +264,12 @@ Most are load errors; knowing them saves a build round-trip:
   class and the params and row types it names, and a type that composes
   a behavior with `@behavior` (an engine type) are not tables; one that
   implements a behavior or types a field as one stays a table.
+- A Workflow transition may list states in `from` and `to`, in a
+  TypeScript schema: `{ from: ["backlog", "todo"]; to: ["done",
+  "canceled"]; permission: "issues.close" }` is four transitions, and the
+  same list in both is every move among its states. The build holds the
+  config to the core's rules (states exist, no move to itself or listed
+  twice, outcomes only on states nothing leaves).
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read

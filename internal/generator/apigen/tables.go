@@ -459,6 +459,9 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 	if to.Projection {
 		return nil, unserved("its result %s reads the projection %s, and the Go server writes handlers over a table's repository alone so far", endpoint.OutputType, to.Type)
 	}
+	if len(to.Starts) > 0 {
+		return nil, unserved("its body names the state the row starts in, %s, and the Go server writes no create that makes a Workflow's transition so far (D109)", strings.Join(to.Starts, ", "))
+	}
 	result, err := b.viewOf(owner, "result", endpoint.OutputType, to)
 	if err != nil {
 		return nil, err

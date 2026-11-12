@@ -439,6 +439,15 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 			[]apigen.UnservedTableOperation{{Operation: "Issues.createIssue", Reason: owner}},
 			[]string{"CreateIssue", "SummarizeTeam"}, 18,
 		},
+		// A create that names the state its row starts in (D109) makes
+		// a Workflow's transition, which the Go handlers do not yet.
+		"a create that starts its row in a state": {
+			func(api, _ *ir.Schema) {
+				tableOperation(t, api, "createIssue").TableOperation.Starts = []string{"status"}
+			},
+			[]apigen.UnservedTableOperation{{Operation: "Issues.createIssue", Reason: "its body names the state the row starts in, status, and the Go server writes no create that makes a Workflow's transition so far (D109)"}},
+			[]string{"CreateIssue", "SummarizeTeam"}, 18,
+		},
 		"every operation": {
 			func(api, _ *ir.Schema) {
 				for _, set := range api.OperationSets {
