@@ -17997,3 +17997,165 @@ its user and by an administrator, and is then 401
 `TestGeneratedUserRoutesEndToEnd` on bun:sqlite,
 `TestRustSDKCallsTheUserModelRoutes` on SQLite and Postgres). The 401's
 documented meaning is now "no usable session or API key".
+
+## D116. A Rust API serves a SQLite file through repositories the build writes, answers a request with no transport under it, serves the MCP endpoint and runs behavior workers there, and an `embedded` target builds an environment as one binary that migrates its files as it starts (D27, D53, D57, D79, D81, D103, D106 amended)
+
+D104 held the behaviors to one application: an app that runs coding
+agents for the people of a workspace, a Rust server over one SQLite
+database, shipped as one binary a person installs. That entry counted its
+rules. This one counts the rest. Of some 93,000 lines of the server's
+Rust, about a fifth is what a build writes for a Go or a TypeScript API:
+102 versions of a schema migrated by hand, about a thousand reads of a
+column by its position, one match over some two hundred routes whose
+bodies are picked member by member out of untyped JSON, forty-six MCP
+tools whose schemas are JSON literals beside the routes that do the same
+work, and 380 view types. A new table there is an edit in about ten
+places that nothing holds to one another.
+
+None of it can be generated, because the app sits where each generator
+stops:
+- Stack resolution refuses a Go or Rust server, job or worker whose
+  database resolves to `sqlite`, "since the Go ORM and the Rust pool
+  reach Postgres alone" (section 18.6 of `docs/stack-model.md`).
+- A Rust server's `Deps` holds a pool and no ORM (D57), so a Rust API
+  keeps each `@tableOperation` a method of its trait and the build warns
+  (D106). No repository in any language runs on SQLite: a TypeScript API
+  on D1 writes its SQL through `prepare` and `bind`.
+- A Rust API with `outputs.api.mcp` on fails to load (D81).
+- A behavior worker claims on Postgres alone, so on a SQLite file a
+  hearing table's change queue grows and nothing claims it (D103's
+  status).
+- The generated Rust crate is an axum router, and its entrypoint a tokio
+  `main` that listens on every interface. D43 lets a caller in the
+  process run one operation by its route's rules; nothing takes a request
+  and answers it.
+- A plan is applied by `superschematic-migrate`, a Go binary a deploy or
+  `stack dev` runs beside the database. Nothing a person installs carries
+  its plans.
+- The targets are `local`, which is `stack dev`'s, gcp and cloudflare.
+  None builds an environment into something that runs with no stack
+  around it.
+
+What lies under those stops is built. `migrate plan --dialect sqlite`
+plans a SQLite file's rebuilds, and the runner applies them and adopts a
+database built by hand. The behaviors' core does no I/O, and its Rust
+adapter runs a command in the caller's rusqlite transaction
+(`superschematic-rules-adapter`, its `sqlite` feature). The Rust HTTP
+runtime claims a queue on a SQLite file (D53, amended) and keeps an
+identity store on one. D58 made the engine's HTTP layer neutral to its
+transport, and D103's step 6 makes a runtime project's handler free of
+I/O.
+
+This entry joins them. It adds no decorator and no behavior, and changes
+no schema: an API and a database declared as today build for one more
+language on one more dialect, and a stack places them on one more
+target. It records the design before any of it is built.
+
+### Repositories in Rust, and on SQLite
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlutil` writes a table's repository statements for SQLite beside Postgres's, as it writes a queue's (`SQLiteQueueStatements`), from the one table model both ORMs' statements come from (D79). A DB service that lists `sqlite` carries both sets. A table the SQLite DDL does not hold in full stays refused there, by name, and a declared query (D86) stays Postgres's, since its lock is a Postgres server's answer. | A SQL builder in each runtime, which D79 turned down for one source the languages are held to statement for statement. Postgres's statements rewritten as they run, the dialect layer D16 and D58 declined. |
+| The Rust types generator writes each table's repository into the DB's types crate, behind its `postgres` and `sqlite` features, as D65 has that crate carry a queue's descriptor: the table as data, a typed filter, a create and an update struct, and the TypeScript repositories' methods under Rust's names (`find_one`, `find_many`, `find_page`, `create_one`, `create_many`, `update_one`, `update_many`, `upsert_one`, `delete_one`, `hard_delete_one`). A module of the HTTP runtime fills and runs the statements in the order the Go ORM fills them. | Code per statement per table, as the Go ORM is: a second filling to hold equal. sqlx, Diesel or SeaORM, each a query language of its own beside `sqlutil`'s and a larger tree than the two clients the runtime already holds (D57). |
+| On SQLite a repository is synchronous, over a `rusqlite::Transaction` its caller opened. On Postgres it is asynchronous, over a tokio-postgres transaction. The rules adapter's two modules differ the same way, and one template writes both. A server on tokio calls the SQLite one through `spawn_blocking`, as D58's server calls the engine. | One asynchronous API with SQLite on tokio's blocking pool, as the queue's SQLite claims run, which puts tokio under a process that has none. A synchronous Postgres client, a second Postgres driver in a server. |
+| A repository does what TypeScript's does: it stamps the caller (D87), seals and opens an `Encrypted<T>` column, leaves soft-deleted rows out, fences a write on `_version` when asked, pages a column that may be null with its nulls last and negates a filter with a null kept (D112), and writes a table that composes behaviors through the core, by the rules adapter's module for its dialect. One test holds its results to the Go ORM's and the TypeScript repositories', statement for statement on Postgres and result for result on SQLite. | A thinner repository for Rust, which leaves a Rust API the one that restates audit and encryption by hand. |
+| A Rust API's `Deps` gains `orm` beside its pool (D57), and for a database on a SQLite file what opens the file in the pool's place. Resolution admits a Rust server, job or worker whose database resolves to `sqlite`. Go stays refused. | Holding Rust to Postgres until Go reaches SQLite too. |
+| rustrestgen writes the handlers of a `@tableOperation` (D106) with its row rule (D108), its start state (D109) and its filters (D110, D112), and the warning goes. An update's body is read into `Option<Option<T>>`, which keeps an absent member apart from a null one. | Leaving them to a Rust project to write, sixty-seven of the tracker's seventy-two operations. |
+
+### A request in, a response out
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A generated Rust API crate gains `Api::handle`, which takes the `http` crate's `Request<Bytes>` and answers its `Response<Bytes>`. It does what the router does for a request it holds whole: it finds the route, authenticates through the `Authenticator`, admits by the route's rule (D43's `admit`), decodes and checks each argument, runs the operation and writes the envelope or the problem (D15). The axum router and `handle` call one generated function per operation, so a request is decoded by one path however it arrived. | A second router written for the purpose, which would drift from the first, as D43 found of a direct caller's checks. A request as a method, a path and JSON, which leaves headers, ETags and preconditions to each host. |
+| What needs a socket, a clock or a store shared between requests stays the host's, as D58 divides it: the listener, TLS, the body's limit (`handle` takes a body already read), timeouts, rate limits, CORS, request ids and draining. An operation that streams a file up or down is the router's alone: `handle` does not route it, and the build names each one. | Limits inside `handle`, which would bring it a clock and a store of counts it otherwise needs none of. |
+| A host tells the API what it knows of a connection through the request's extensions, which `Authenticator::authenticate` already receives in the request's `Parts`: the peer's address, or the peer's credential on a local socket. The caller is still whoever the project's authenticator says it is. | A caller passed beside the request, a second way to establish one, which the route's own rule would not see. |
+| The runtime's axum, tokio and tower dependencies go behind a feature, `server`, on by default, and the generated crate's with them. A crate built without it links no executor and no HTTP server. An implementation's trait stays asynchronous, since an operation awaits Postgres and an SDK's call. A host with no runtime drives `handle` with the runtime's `block_on`, which polls on the calling thread: an API whose databases are all SQLite files, and that calls no other server, awaits nothing that needs a reactor. | A synchronous trait for an API on SQLite: two shapes of every implementation, scaffold and in-process caller. A tokio runtime inside `handle`, which is tokio again. |
+
+### The MCP endpoint
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Rust API with `outputs.api.mcp` on loads. The Rust HTTP runtime gains the transport TypeScript's has (D81), written from the engine's, which D58 wrote in Rust, and held to the same recorded exchanges. It does not depend on the engine, which an HTTP runtime may not. The tool table is generated from what `tools/schema.json` is written from. | The engine's crate under every Rust API. An MCP SDK crate: a dependency, and a second description of each tool. |
+| A tool's call is a request to its route through `handle`, as the caller the endpoint's own request authenticated, so its guards, its row rule and its validation are the route's. `POST /api/mcp` is a route of `handle` too: the transport is the stateless one, and its answer is bytes. | A tool that calls the implementation, around the route's rules. |
+| A tool that asks is confirmed as D93 and D98 have it, checked through its route first. One process keeps its confirmations in memory, and a server of several instances names the store they share, as a TypeScript server does. Go stays refused. | Tools that ask left out of a Rust endpoint, which D11's policy would then not hold on. |
+
+### Behavior workers on SQLite
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Rust behavior worker claims a table's deadline, change and event queues on a SQLite file through the runtime's `SqliteQueue` (D53, amended), and runs each message through the rules adapter's `sqlite` module, the message spent in the unit that applies its change set, as on Postgres. The refusal of a behavior worker over a database that lists `sqlite` first goes for Rust. The worker prunes each queue as `SqliteQueue` prunes any (D68), so a change queue no longer only grows. | A sweep of the tables on a timer, which D103 replaced with deadlines. |
+| The worker is a function a host calls, `drain`, with a connection, the time and a limit: it claims and runs what is due, and answers how many it ran and when the next falls due. The runtime's loop over it is tokio's, as now. A host with no runtime calls it on a thread of its own and sleeps until that time, or until a commit of its own process to a hearing table wakes it; a write another process made is heard at the next poll. | A loop the runtime owns in every process, which is tokio in a process without it. A notifier across processes, which a file has none of (D58). |
+
+### The embedded target
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An extension, `extensions/embedded`, registers the target `embedded` and its platforms: `embedded.process` runs a Rust server or worker, `embedded.sqlite` holds a database whose DB service lists `sqlite`, and `embedded.assets` serves a site. Resolution refuses the rest by name: a Go or TypeScript deployable, a database with no sqlite dialect, a bucket, a job, a memory store other than the runtime's in-process one, and more than one instance of anything. | A mode of `local`, which is `stack dev`'s: processes, a Postgres container and a file server of the provisioner's own, with the compiler beside them. A target in the core, which registers `local` alone (D30, amended). |
+| An environment on it is one binary: every server and worker of the environment in one process, and every database a file under one data directory, `databases/<database>.sqlite`, as `stack dev` lays them out. `stack build <environment>` writes the crate at `<output-root>/embedded/<stack>/<environment>/`, builds it with `cargo build --release --locked` in the output root's workspace (D57), and prints the binary's path. `stack deploy` refuses the environment and names `stack build`: what the target makes is a file a person installs, and it rolls nothing out. | An image, which needs a container runtime on the machine the app is installed on. A binary per deployable with a supervisor over them, several processes writing one file. |
+| The crate is a library with a short `main.rs` over it. The library opens the data directory (below), builds each API's `Deps` and calls its `create` (D57), and gives its host three things: `handle`, which sends a request under `/api/<service>` to that API's `handle` and answers any other path from a site, on one origin as D91 has every environment; `drain`, each worker's; and `close`. `main.rs` serves `handle` through the runtime's axum server and runs each worker's loop. A project whose process is its own links the library and none of `main.rs`. | A binary alone, which an app with a window or a supervisor of its own could run only as a child beside itself. |
+| `main.rs` listens on `127.0.0.1` at `$PORT`. `--listen` names another address, and it listens on every interface only when told to in those words. | The Rust entrypoint's listener, every interface, which is right behind a platform's proxy and wrong on a person's machine. |
+| A site's built files are compiled into the binary as data: each path, its content type and its digest, which is its ETag. `stack build` runs the site's build first, as every target does. | Files beside the binary, which an install then has to keep with it. |
+| A call from one API of the binary to another is the SDK's, over a transport that calls the callee's `handle` in the process, with the loopback credential of section 9.9 of `docs/stack-model.md`, so a service clause holds as it does between servers. | A socket to itself. A direct call, around the callee's service clause. |
+| Each file opens in WAL mode with one writing connection and a few reading ones. A write waits its turn, and one that waits past the busy timeout is `busy`, a 503 the caller may try again, as D58 has it. An API over the user model keeps its users, their sessions and their API keys (D114) in the runtime's identity store on SQLite, which exists and which no stack could place until now. | A connection per request, whose writers meet `SQLITE_BUSY` under any load. |
+
+### Migrations a binary carries
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A release records its plans. `stack build <environment> --release` plans each database from the model the last recorded plan ends at to the schema's model, and writes the plan into the Stack service's `plans/<environment>/<db>/`, numbered. The files are committed, as a project commits its lockfiles (D51, D57), and the generated CI's `check` refuses a recorded plan that git does not track or that a build changed, as D102 holds a projection's stamp. A release refuses a plan with a hazard no `--allow` names. A build that is no release plans the same step in memory and records nothing. | Planning as the binary starts, which needs the compiler in the binary. One plan from an empty database, which is `create.sql` and migrates nobody. Migration files a person numbers and writes, which is the 102 this entry starts from. |
+| The binary carries every recorded plan of each database, and the plan of its own build when it is no release. | Only the newest, which strands an install two releases behind. |
+| A second runner applies them in the process: `runtime/migrate/rust`, over rusqlite, reading the plan document and keeping the Go runner's two state tables (`runtime/migrate/README.md`), so either applies to a file the other migrated. It runs `sqlite` plans alone, each plan's expand and contract steps back to back, as `local` runs them, since no server of the previous version reads the file. The runner's test data holds it to the Go one, step for step. | The Go runner as a second binary in every install. A driver over cgo into the Go runner. |
+| Before any request is served, the library reads each file's applied model. One that is the last plan's `to` needs nothing. One that some carried plan starts from is taken forward plan by plan, each step in a transaction as the runner has it. An empty file starts from the first plan. Any other model stops the start, names both hashes and changes nothing: the file is a newer build's, or another app's. A step that fails stops the start with the step's name; the steps before it stay applied, and the next start goes on from there. | Opening a newer build's file and serving it, which corrupts it at the first write to a column that moved. Rolling a failed chain back, which a step that is not transactional cannot do. |
+| Before a chain with a contract step, the library copies the file through SQLite's backup to `<file>.before-<hash>`, and keeps the newest copy alone. | No copy, on a machine where nobody else has one. |
+| A file built by hand is adopted from what it holds. `superschematic migrate plan --from-database <file>` reads a SQLite file's tables, columns, indexes and foreign keys into a model, and plans from it; an object sqlgen writes none of, a trigger or a view, stops the plan until `--drop` names it. An embedded environment's settings may name one adoption per database: that model, and a statement that must answer one row holding 1, `PRAGMA user_version` at the app's last version, say. The library records the model as applied on a file with tables, no state and that answer, once, and then runs the chain. | Adopting `create.sql`'s model over such a file, which records as applied a schema the file does not hold. A rewrite of the app's old migrations as plans, which nobody will check. |
+| `stack dev` runs an embedded environment as one process too, and migrates its files as `local` does: it plans from the model each file recorded and applies with the runner, since the compiler is there. | The recorded chain in the local loop, where a schema changes many times between releases. |
+
+### What it amends
+
+D57: a Rust API's `Deps` holds repositories, and its database may be a
+SQLite file. D79: the repositories' statements are written for SQLite
+too, and Rust reads them. D106: the Rust server serves a
+`@tableOperation`. D81: a Rust API serves the MCP endpoint. D53 and
+D103: a behavior worker claims on SQLite, in Rust. D27: a plan may be
+applied by the process that serves the database, from plans a release
+recorded, by a second runner. D103's step 6 is not this entry's: its
+pure handler serves a runtime project's types, and `handle` serves a
+build-time API's operations and may do I/O through its repositories. The
+rule that a project defines its types at build time or at run time,
+never both, stands.
+
+### The order of the work
+
+1. `sqlutil`'s SQLite statements and the Rust repositories on SQLite,
+   over a fixture database both dialects build, with resolution admitting
+   a Rust server on a SQLite file under `local`.
+2. The Rust repositories on Postgres and rustrestgen's `@tableOperation`
+   handlers, with acme-shop's `shop-stock` on them.
+3. `Api::handle`, the `server` feature and `block_on`.
+4. The MCP endpoint in Rust, through `handle`.
+5. Behavior workers on SQLite, and `drain`.
+6. The Rust runner, recorded plans and `--from-database`.
+7. The `embedded` target, proved by an example that is one binary: a Rust
+   API with a table that composes behaviors, its MCP endpoint and a site,
+   started on a file an earlier release of it wrote.
+
+Each step stands without the ones after it. A project with a server of
+its own gains from steps 1 and 3 alone.
+
+Left, each of which the application also needs and none of which this
+entry designs: a table's changes as a feed a client follows, with a
+cursor, an event stream and MCP notifications (D103 leaves the event
+stream over HTTP for later); callers that are no user and hold no key
+of one (D114), a device or a session acting for a person, and
+authenticators that read the connection, shipped; an exhaustive exploration of a table's composed
+behaviors on the core, which reads no clock; an operation's idempotency
+key and a record moved between two databases, which D104 lists as the
+app's; a bucket on a local directory, without which the target refuses
+every bucket; jobs in the process; installing the binary as a service,
+signing it and updating it; TypeScript's repositories and behavior
+workers on SQLite and D1, which step 1's statements serve; Go on SQLite;
+and, on SQLite, a declared query, a `@versioned` table's history and
+full-text search (D62).
+
+Status: proposed, not built. Nothing here has been run. The counts of the
+application are of its source as read, and are estimates.
