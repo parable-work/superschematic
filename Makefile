@@ -280,7 +280,8 @@ rust:
 		&& cargo test --features postgres,otel \
 		&& cargo clippy --all-targets --features sqlite -- -D warnings && cargo test --features sqlite \
 		&& cargo clippy --all-targets --features postgres,sqlite,logging -- -D warnings \
-		&& cargo test --features postgres,sqlite,logging
+		&& cargo test --features postgres,sqlite,logging \
+		&& cargo clippy --all-targets --features sqlite,logging,otel -- -D warnings
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate

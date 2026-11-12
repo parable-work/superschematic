@@ -18157,5 +18157,61 @@ workers on SQLite and D1, which step 1's statements serve; Go on SQLite;
 and, on SQLite, a declared query, a `@versioned` table's history and
 full-text search (D62).
 
-Status: proposed, not built. Nothing here has been run. The counts of the
-application are of its source as read, and are estimates.
+Status: built in part. The counts of the application are of its source as
+read, and are estimates.
+
+Built, of steps 1 and 2. `sqlutil.SQLiteTableStatementsOf` and
+`SQLiteClauses`, with `SQLiteTableRefusal` for a table whose repository
+SQLite does not hold (`TestSQLiteTableStatementsOfALedger`,
+`TestSQLiteTableRefusal`). The HTTP runtime's `orm` module, which parses a
+database's definition and fills and runs its statements over either
+dialect's client, and `src/orm.rs` of a DB's Rust types, behind their
+`postgres` and `sqlite` features: `find_one`, `find_many`, `find_page`,
+`create_one`, `create_many`, `update_one`, `update_many`, `upsert_one`,
+`delete_one` and `hard_delete_one`, the caller's stamps, the soft delete,
+a write fenced on `_version`, a page's nulls last and a negated filter.
+On SQLite an upsert reads whether a row holds the key before its
+statement, a batch is inserted a row at a time, and an `@optimistic`
+table's write moves `_version` itself, since SQLite's trigger moves it
+after `RETURNING` has read the row. `TestRepositoriesOnSQLite` runs every
+method over fixture-ledger-db and a fenced write over
+fixture-optimistic-db, on the SQLite DDL the build writes;
+`TestTableParityOfGoAndRustOnPostgres` holds the Rust repositories to the
+Go ORM statement for statement, 33 statements over the 28 calls of the
+table parity script the Rust repositories have. Resolution places a Rust
+server's database by its DB service's first dialect
+(`TestARustAPIRunsOnItsDatabasesFirstDialect`), a Rust API's `Deps.db` is
+the runtime's SQLite file for a sqlite-first database
+(`orm::sqlite::Database`, `orm_sqlite_file.rs`), and its server's
+entrypoint opens the file (`TestRustTableOperationsServerGolden`,
+`TestRustTableOperationsServerBuilds`). rustrestgen writes `src/tables.rs`
+and the router's handlers of a `@tableOperation`, served by the runtime's
+`orm::routes`: `TestTableOperationsRustServerServesItsTables` runs the
+scenario the Go and TypeScript servers are held to, case for case,
+against the Rust server on Postgres, and
+`TestTableOperationsRustServerOnSQLite` its router over a SQLite file.
+
+Built, of step 4: the transport, `runtime/http/rust`'s `mcp`, with D93's
+and D98's confirmation and the helpers that make a tool's call a request
+to its route; `mcp_parity.rs` replays the 234 `/mcp` exchanges of the
+engine's corpus. Built, of step 6: the runner, `runtime/migrate/rust`,
+with the start a binary calls, the copy before a contract step and the
+adoption; its tests replay the compiler's SQLite vectors and, beside the
+Go runner's binary, every split of a chain between the two runners.
+
+Not built. Of steps 1 and 2: a repository's write of a table that composes
+behaviors, which is refused until the types crate binds the rules adapter
+(the runtime's `Rules` is the seam); the keys of an `Encrypted<T>` column
+in Rust (`FieldKeys` is the seam, and no keyring implements it); one test
+that holds SQLite's results to Postgres's call for call; acme-shop's
+`shop-stock` on the repositories; a `@tableOperation` over a projection,
+a create that names its start state (D109) and a view with a `@decrypted`
+member, each of which stays a method with a warning; a JSON column's
+`eq` on SQLite, which compares text; and, for a Rust API on a SQLite file,
+the identity store, behaviors, a worker's queue, an engine, and a Rust
+job, worker and app, each refused by name. Step 3, `Api::handle`, the
+`server` feature and `block_on`. Of step 4: the endpoint mounted on a
+generated router, which waits on `handle`, so `outputs.api.mcp` stays
+refused for a Rust API. Step 5, behavior workers on SQLite and `drain`.
+Of step 6: recorded plans and `stack build --release`. Step 7, the
+`embedded` target.

@@ -861,7 +861,7 @@ pub async fn job<T, E: fmt::Display>(
 /// It opens in the worker loop's span, whose `queue` its lines keep, and
 /// which the OpenTelemetry layer leaves out, so it is the root of a trace
 /// of its own.
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(crate) fn message_span(queue: &str, id: &str, attempt: u32) -> tracing::Span {
     if !enabled() {
         return tracing::Span::none();
@@ -877,7 +877,7 @@ pub(crate) fn message_span(queue: &str, id: &str, attempt: u32) -> tracing::Span
 }
 
 /// Records a message's failure on its span.
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(crate) fn message_failed(span: &tracing::Span, cause: &str) {
     if !span.is_none() {
         span.set_status(Status::error(cause.to_string()));

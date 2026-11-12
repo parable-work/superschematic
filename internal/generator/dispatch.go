@@ -577,31 +577,6 @@ func (r run) generateORM() error {
 	return nil
 }
 
-// warnTableOperationsUnserved warns, once per API, that a server of
-// language writes no handler for the API's @tableOperation operations
-// (D106): each stays a method of the implementation's interface and its
-// scaffold, to be written by hand, so a project that builds the API in two
-// languages still builds. The Go and TypeScript servers write the
-// handlers; the Rust server waits on a Rust ORM.
-func (r run) warnTableOperationsUnserved(language string) {
-	var names []string
-	for _, set := range r.Schema.OperationSets {
-		if set == nil {
-			continue
-		}
-		for _, op := range set.Operations {
-			if op != nil && op.TableOperation != nil {
-				names = append(names, set.Name+"."+op.Name)
-			}
-		}
-	}
-	if len(names) == 0 {
-		return
-	}
-	r.Warnf("%s: the %s server writes no handler for a @tableOperation yet (D106): %s %s of the implementation's interface, to be written by hand, with the same route and types",
-		r.Config.Name, language, strings.Join(names, ", "), map[bool]string{true: "stays a method", false: "stay methods"}[len(names) == 1])
-}
-
 // warnGoTableOperationsUnserved warns of each @tableOperation the Go
 // server writes no handler for yet (D106), with why: a projection, a view
 // that holds more than single values, a default it cannot write. Each
@@ -1651,6 +1626,17 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 	}
 	if db, _, ok := r.Schema.Database(); ok {
 		deps.Database = db
+		// A Rust API's Deps.db is the client of its database's first
+		// dialect (D116): a pool, or the SQLite file.
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(db); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, fmt.Errorf("generator: schema config for %s: %w", db, err)
+				}
+				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
+			}
+		}
 		if err := r.rustQueueTypes(db, apiDir, &deps); err != nil {
 			return deps, err
 		}
@@ -1770,9 +1756,6 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 			if !outputs.TypesEnabled(LangRust) {
 				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from the repositories of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D106, D116)", r.Config.Name, db, db, LangRust, db)
 			}
-			if first := outputs.SQLDialects()[0]; first != registry.SQLDialectPostgres {
-				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from %s, whose DB service lists %s first; its entrypoint opens a Postgres pool alone so far, so list postgres first in %s's outputs.sql.dialects (D116)", r.Config.Name, db, first, db)
-			}
 		}
 	}
 	path, err := naming.RelPath(apiDir, TypesDir(r.Options.OutputRoot, LangRust, db))
@@ -1796,6 +1779,13 @@ func (r run) generateRustAPI() error {
 	}
 	if output == nil {
 		return r.generateEnvConfig(LangRust)
+	}
+	// Each @tableOperation the Rust server writes no handler for yet
+	// (D106, D116) stays a method of the implementation's interface, and
+	// the API's other table operations are served.
+	for _, op := range output.UnservedTables {
+		r.Warnf("%s: the Rust server writes no handler for %s, a @tableOperation (D106): %s; it stays a method of the implementation's interface, to be written by hand, with the same route and types",
+			r.Config.Name, op.Operation, op.Reason)
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)

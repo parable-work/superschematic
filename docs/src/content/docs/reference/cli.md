@@ -541,9 +541,10 @@ out and `contract` after, each with its SQL and its hazards.
 the hazard classes, readers, renames and the runner.
 
 The previous version is another checkout of the service (`--from
-<service-dir>`), the model a database recorded (`--from <model.json>`), or
-the schemas root at a git ref (`--from-ref`); with none, the plan starts
-from an empty database. Each version loads with its dependencies resolved
+<service-dir>`), the model a database recorded (`--from <model.json>`),
+the schemas root at a git ref (`--from-ref`), or a SQLite file built by
+hand (`--from-database`); with none, the plan starts from an empty
+database. Each version loads with its dependencies resolved
 from its own schemas root, as `build --with-deps` resolves them, and with
 its own naming file when it has one: like `build-all`, it first writes a
 missing or stale sentinel there, since a config may import a sibling's.
@@ -563,6 +564,19 @@ rebuild where SQLite's `ALTER TABLE` falls short
 version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (`--from <model.json>`).
+
+`--from-database <file>`, with `--dialect sqlite`, plans from a SQLite file
+an app built by hand: `superschematic-migrate`, on `PATH` or where
+`$SUPERSCHEMATIC_MIGRATE` names it, opens the file to read it alone, and
+its tables, columns, indexes, foreign keys, checks and triggers become the
+model the plan starts from. What a table's definition holds that a model
+has no form of, such as a `UNIQUE` written in it, is dropped by a rebuild
+of the table. A view, a virtual table, a trigger that is not the schema's
+and an index of several keys with an expression among them stop the plan
+until `--drop` names each, and the plan then drops them first. With
+`--print-model` the file's model is printed, for `superschematic-migrate
+adopt` to record on the file before the plan is applied
+([A file built by hand](/superschematic/reference/migrations/#a-file-built-by-hand)).
 
 A Postgres plan of a service that declares queries (`@query`) prepares
 each of them on the new version's `create.sql` before it prints, as
@@ -588,12 +602,16 @@ superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --
 superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --rename order.total=order.amount --out plan.json
 superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
 superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
+superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --out plan.json
+superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --print-model > legacy-model.json
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--from` | none | the previous version: another checkout of the service directory, or a model JSON file as `superschematic-migrate status --model` prints it |
 | `--from-ref` | none | the previous version: the schemas root at this git ref, read with `git archive`; cannot be combined with `--from` |
+| `--from-database` | none | the previous version: a SQLite file built by hand, read into a model through `superschematic-migrate inspect`; needs `--dialect sqlite`, and cannot be combined with `--from` or `--from-ref` |
+| `--drop` | none | with `--from-database`: an object of the file that a model has no form of, for the plan to drop first, as `trigger:<name>`, `view:<name>`, `index:<name>` or `virtual-table:<name>`; repeatable |
 | `--rename` | none | a rename: `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column; repeatable |
 | `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database; repeatable |
 | `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` for a service whose `outputs.sql.dialects` lists it |
@@ -601,7 +619,7 @@ superschematic migrate plan ./schemas/services/shop-db --print-model > model.jso
 | `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
 | `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
-| `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags. With `--from-database` it prints the file's model, and takes the `--rename` and `--drop` the plan from the file is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 

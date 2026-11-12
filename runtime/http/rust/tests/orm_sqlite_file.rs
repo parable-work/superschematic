@@ -119,6 +119,18 @@ fn the_file_opens_in_wal_mode_and_holds_to_its_foreign_keys() {
 }
 
 #[test]
+fn a_stack_names_the_file_by_a_sqlite_url() {
+    use superschematic_http_runtime::orm::sqlite::connect;
+    use superschematic_http_runtime::stackconfig::Database as Field;
+    let (_dir, database) = file();
+    let url = format!("sqlite:{}", database.path().display());
+    let opened = connect(&Field::Url(url)).expect("open by its URL");
+    assert_eq!(opened.read(count).unwrap(), 0);
+    assert!(connect(&Field::Url("postgres://localhost/notes".to_owned())).is_err());
+    assert!(connect(&Field::Url("sqlite:".to_owned())).is_err());
+}
+
+#[test]
 fn work_runs_where_it_stands_without_a_runtime() {
     let (_dir, database) = file();
     let thread = std::thread::current().id();
