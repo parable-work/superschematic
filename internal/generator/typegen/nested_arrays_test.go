@@ -148,11 +148,12 @@ func TestDrawingListsOfLists(t *testing.T) {
 		})
 	}
 
-	// An enum element the enum lacks is refused by the decoder, which
-	// names the field.
+	// An enum element the enum lacks is refused by the enum's decoder,
+	// which names the enum and the value, and no field: encoding/json
+	// gives an UnmarshalJSON's error as it is (D115).
 	var bad Drawing
 	if err := json.Unmarshal([]byte(` + "`" + `{"labels":[["a"]],"shades":[["light"],["dark","purple"]],"polygons":[]}` + "`" + `), &bad); err == nil ||
-		!strings.Contains(err.Error(), ` + "`" + `string "purple"` + "`" + `) || !strings.Contains(err.Error(), "shades") {
+		!strings.Contains(err.Error(), ` + "`" + `string "purple"` + "`" + `) || !strings.Contains(err.Error(), "Shade") {
 		t.Fatalf("decode of an unknown shade = %v, want the enum's refusal", err)
 	}
 

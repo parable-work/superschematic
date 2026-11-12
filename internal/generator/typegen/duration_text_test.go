@@ -286,12 +286,14 @@ func TestADurationReportFollowsTheField(t *testing.T) {
 	}
 }
 
+// The refusal names the enum and the value, and no field: encoding/json
+// gives an UnmarshalJSON's error as it is (D115).
 func TestAnEnumRefusesAStringItLacks(t *testing.T) {
 	var timer Timer
 	err := json.Unmarshal([]byte(` + "`" + `{"wait": "1s", "stages": ["draft", "purple"]}` + "`" + `), &timer)
 	var typeErr *json.UnmarshalTypeError
-	if !errors.As(err, &typeErr) || typeErr.Type != reflect.TypeFor[Stage]() || typeErr.Value != ` + "`" + `string "purple"` + "`" + ` || !strings.Contains(typeErr.Field, "stages") {
-		t.Fatalf("decode of an unknown stage = %#v, want a *json.UnmarshalTypeError naming the field", err)
+	if !errors.As(err, &typeErr) || typeErr.Type != reflect.TypeFor[Stage]() || typeErr.Value != ` + "`" + `string "purple"` + "`" + ` {
+		t.Fatalf("decode of an unknown stage = %#v, want a *json.UnmarshalTypeError naming the enum and the value", err)
 	}
 	if err := json.Unmarshal([]byte(` + "`" + `{"wait": "1s", "stage": 3}` + "`" + `), &timer); !errors.As(err, &typeErr) || typeErr.Type != reflect.TypeFor[Stage]() || typeErr.Value != "number" {
 		t.Fatalf("decode of a number stage = %#v", err)

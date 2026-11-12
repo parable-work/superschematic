@@ -450,8 +450,10 @@ func decodeDurationField(decoded **durationDecode, name string, raw json.RawMess
 }
 
 // durationFieldError names the field name in err: a
-// *json.UnmarshalTypeError's Field, which encoding/json completes with the
-// path of the struct holding it, and any other error's message.
+// *json.UnmarshalTypeError's Field, ahead of any path err holds under it,
+// and any other error's message. The path starts at this type's field:
+// encoding/json gives an UnmarshalJSON's error as it is, and adds none of
+// the struct that holds the type.
 func durationFieldError(name string, err error) error {
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
