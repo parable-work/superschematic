@@ -35,7 +35,7 @@
 mod codec;
 mod duration;
 #[cfg(feature = "sqlite")]
-mod sqlite;
+pub(crate) mod sqlite;
 
 #[cfg(feature = "postgres")]
 use std::borrow::Cow;

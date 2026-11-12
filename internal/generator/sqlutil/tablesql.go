@@ -278,6 +278,25 @@ func PostgresClauses() Clauses {
 	}
 }
 
+// SQLiteClauses are the clauses on SQLite (D116), written from Postgres's:
+// a parameter is ?%d, which SQLite numbers as Postgres numbers $%d, where it
+// reads $1 as a name. SQLite has no ILIKE: its LIKE folds the case of ASCII
+// letters alone, and takes no escape character unless the pattern's
+// condition names one, where Postgres's is a backslash unless it names
+// another, so ILike and Search both name it. Default is empty: a VALUES list
+// on SQLite takes no DEFAULT, so a repository there inserts a batch a row at
+// a time, each row's statement listing the columns the row sets.
+func SQLiteClauses() Clauses {
+	c := PostgresClauses()
+	for _, clause := range []*string{&c.Eq, &c.Ne, &c.Gt, &c.Gte, &c.Lt, &c.Lte, &c.Set, &c.Placeholder} {
+		*clause = strings.Replace(*clause, "$%d", "?%d", 1)
+	}
+	c.ILike = `%s LIKE ?%d ESCAPE '\'`
+	c.Search = `%s LIKE ?%d ESCAPE '\'`
+	c.Default = ""
+	return c
+}
+
 // DefaultLimit is the rows FindMany and FindPage read unless told.
 const DefaultLimit = 100
 
@@ -296,8 +315,53 @@ func (c Clauses) AllClauses() []NamedStatement {
 	}
 }
 
-// TableStatementsOf writes the statements of table.
+// tableDialect is what a table's statements differ by between Postgres and
+// SQLite: the clauses, how a numbered parameter is written, and whether the
+// statements are SQLite's.
+type tableDialect struct {
+	clauses Clauses
+	sqlite  bool
+}
+
+// param is the parameter numbered n: $n on Postgres and ?n on SQLite.
+func (d tableDialect) param(n int) string {
+	return fmt.Sprintf(d.clauses.Placeholder, n)
+}
+
+// numbered is the format of a parameter whose number its caller fills, $%d
+// or ?%d.
+func (d tableDialect) numbered() string {
+	return d.clauses.Placeholder
+}
+
+// TableStatementsOf writes the statements of table on Postgres.
 func TableStatementsOf(table *TableModel) TableStatements {
+	return tableStatements(table, tableDialect{clauses: PostgresClauses()})
+}
+
+// SQLiteTableStatementsOf writes the statements of table on SQLite (D116),
+// from the one model Postgres's are written from, for a table
+// SQLiteTableRefusal does not refuse. They are Postgres's but for these:
+//
+//   - A parameter is ?n.
+//   - Upsert returns no UpsertInserted, since a row of SQLite holds no
+//     xmax: a repository reads whether a row holds the key before the
+//     statement, in the transaction that runs both, which on SQLite is the
+//     one writer.
+//   - On an @optimistic table, Update and Upsert's update set _version to
+//     the next one themselves. SQLite's bump is an AFTER UPDATE trigger,
+//     which runs after RETURNING has read the row, so the row a write
+//     returned would hold the version before it; the trigger leaves an
+//     update that moves _version as it is (sqlmigrate's sqliteBumpTrigger).
+//
+// InsertMany is as Postgres's and takes rows that set the same columns: a
+// VALUES list on SQLite has no DEFAULT (SQLiteClauses).
+func SQLiteTableStatementsOf(table *TableModel) TableStatements {
+	return tableStatements(table, tableDialect{clauses: SQLiteClauses(), sqlite: true})
+}
+
+// tableStatements writes the statements of table in the dialect d.
+func tableStatements(table *TableModel, d tableDialect) TableStatements {
 	t := table.Quoted
 	key := QuoteIdentifier(table.Key)
 	columns := make([]string, len(table.Columns))
@@ -307,12 +371,19 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		qualified[i] = `"` + table.Name + `"."` + c.Name + `"`
 	}
 	list := strings.Join(columns, ", ")
+	p, n := d.param, d.numbered()
+	// bump moves _version in the statement itself, on SQLite, where the
+	// trigger that moves it runs after RETURNING.
+	bump := ""
+	if d.sqlite && table.HasVersion {
+		bump = ", " + VersionColumn + " = " + VersionColumn + " + 1"
+	}
 	s := TableStatements{
 		Columns:          list,
 		QualifiedColumns: strings.Join(qualified, ", "),
 		SelectColumn:     `"` + table.Name + `"."%s"`,
-		GetOne:           "SELECT " + list + " FROM " + t + " WHERE " + key + " = $1",
-		GetOneFields:     "SELECT %s FROM " + t + " WHERE " + key + " = $1",
+		GetOne:           "SELECT " + list + " FROM " + t + " WHERE " + key + " = " + p(1),
+		GetOneFields:     "SELECT %s FROM " + t + " WHERE " + key + " = " + p(1),
 		GetMany:          "SELECT " + list + " FROM " + t + " WHERE " + key + " IN (%s)",
 		FindOne:          "SELECT %s FROM " + t + "%s%s LIMIT 1",
 		FindMany:         "SELECT %s FROM " + t + "%s%s%s",
@@ -324,16 +395,16 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		PageOrder:        " ORDER BY %s %s",
 		PageOrderNulls:   " ORDER BY %s %s NULLS LAST",
 		PageTiebreak:     ", " + t + "." + key + " %s",
-		PageKeyExists:    "SELECT EXISTS (SELECT 1 FROM " + t + " WHERE " + t + "." + key + " = $1)",
+		PageKeyExists:    "SELECT EXISTS (SELECT 1 FROM " + t + " WHERE " + t + "." + key + " = " + p(1) + ")",
 		Insert:           "INSERT INTO " + t + " (%s) VALUES (%s) RETURNING %s",
 		InsertMany:       "INSERT INTO " + t + " (%s) VALUES %s RETURNING %s",
-		Update:           "UPDATE " + t + " SET %s WHERE " + key + " = $%d",
-		VersionFence:     " AND " + VersionColumn + " = $%d",
+		Update:           "UPDATE " + t + " SET %s" + bump + " WHERE " + key + " = " + n,
+		VersionFence:     " AND " + VersionColumn + " = " + n,
 		Returning:        " RETURNING " + list,
 		UpdateMany:       "UPDATE " + t + " SET %s%s",
-		UpdatedAt:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedAt), 1),
-		UpdatedBy:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedBy), 1),
-		Version:          "SELECT " + VersionColumn + " FROM " + t + " WHERE " + key + " = $1",
+		UpdatedAt:        strings.Replace(d.clauses.Set, "%s", table.AuditQuoted(AuditUpdatedAt), 1),
+		UpdatedBy:        strings.Replace(d.clauses.Set, "%s", table.AuditQuoted(AuditUpdatedBy), 1),
+		Version:          "SELECT " + VersionColumn + " FROM " + t + " WHERE " + key + " = " + p(1),
 	}
 	if table.SoftDelete {
 		// The audit columns are the fields', as @column names them (D85).
@@ -343,38 +414,41 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		s.LiveCondition = t + "." + deletedAt + " IS NULL"
 		s.Version += s.Live
 		if table.DeletedBy {
-			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND " + deletedAt + " IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND _version = $4 AND " + deletedAt + " IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2%s"
+			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + " WHERE " + key + " = " + p(3) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + " WHERE " + key + " = " + p(3) + " AND _version = " + p(4) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + "%s"
 		} else {
-			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1 WHERE " + key + " = $2 AND " + deletedAt + " IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1 WHERE " + key + " = $2 AND _version = $3 AND " + deletedAt + " IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1%s"
+			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + " WHERE " + key + " = " + p(2) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + " WHERE " + key + " = " + p(2) + " AND _version = " + p(3) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + "%s"
 		}
 	}
-	// xmax is 0 in the row version an insert wrote, and holds the
-	// conflicting row's lock in the version an update wrote (D89).
-	s.Upsert = "INSERT INTO " + t + " (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING " + list + ", (xmax = 0) AS " + UpsertInserted
-	s.Stale, s.Reseal = resealStatements(table, t, key)
-	if len(table.VectorColumns()) > 0 {
+	s.Upsert = "INSERT INTO " + t + " (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s" + bump + "%s RETURNING " + list
+	if !d.sqlite {
+		// xmax is 0 in the row version an insert wrote, and holds the
+		// conflicting row's lock in the version an update wrote (D89).
+		s.Upsert += ", (xmax = 0) AS " + UpsertInserted
+	}
+	s.Stale, s.Reseal = resealStatements(table, t, key, d)
+	if len(table.VectorColumns()) > 0 && !d.sqlite {
 		s.Nearest = "SELECT %s, %s AS " + NearestDistance + " FROM " + t + "%s ORDER BY %s LIMIT %d"
 	}
-	if table.HistoryActor != "" {
+	if table.HistoryActor != "" && !d.sqlite {
 		s.Delete = "DELETE FROM " + t + " USING history_actor WHERE " + key + " = $2"
 		s.DeleteIfVersion = "DELETE FROM " + t + " USING history_actor WHERE " + key + " = $2 AND _version = $3"
 		s.DeleteMany = "DELETE FROM " + t + " USING history_actor%s"
 	} else {
-		s.Delete = "DELETE FROM " + t + " WHERE " + key + " = $1"
-		s.DeleteIfVersion = "DELETE FROM " + t + " WHERE " + key + " = $1 AND _version = $2"
+		s.Delete = "DELETE FROM " + t + " WHERE " + key + " = " + p(1)
+		s.DeleteIfVersion = "DELETE FROM " + t + " WHERE " + key + " = " + p(1) + " AND _version = " + p(2)
 		s.DeleteMany = "DELETE FROM " + t + "%s"
 	}
 	return s
 }
 
 // resealStatements are Stale and Reseal of table, whose name is t and key
-// column key, both quoted; empty for a table without an Encrypted<T>
-// column.
-func resealStatements(table *TableModel, t, key string) (stale, reseal string) {
+// column key, both quoted, in the dialect d; empty for a table without an
+// Encrypted<T> column.
+func resealStatements(table *TableModel, t, key string, d tableDialect) (stale, reseal string) {
 	encrypted := table.EncryptedColumns()
 	if len(encrypted) == 0 {
 		return "", ""
@@ -383,12 +457,12 @@ func resealStatements(table *TableModel, t, key string) (stale, reseal string) {
 	var older, sets, guards []string
 	for i, c := range encrypted {
 		selected = append(selected, c.Quoted)
-		older = append(older, c.Quoted+" NOT LIKE $1")
-		sets = append(sets, fmt.Sprintf("%s = $%d", c.Quoted, i+1))
-		guards = append(guards, fmt.Sprintf("%s IS NOT DISTINCT FROM $%d", c.Quoted, len(encrypted)+2+i))
+		older = append(older, c.Quoted+" NOT LIKE "+d.param(1))
+		sets = append(sets, c.Quoted+" = "+d.param(i+1))
+		guards = append(guards, c.Quoted+" IS NOT DISTINCT FROM "+d.param(len(encrypted)+2+i))
 	}
-	stale = "SELECT " + strings.Join(selected, ", ") + " FROM " + t + " WHERE " + strings.Join(older, " OR ") + " ORDER BY " + key + " LIMIT $2"
-	reseal = "UPDATE " + t + " SET " + strings.Join(sets, ", ") + fmt.Sprintf(" WHERE %s = $%d AND ", key, len(encrypted)+1) + strings.Join(guards, " AND ")
+	stale = "SELECT " + strings.Join(selected, ", ") + " FROM " + t + " WHERE " + strings.Join(older, " OR ") + " ORDER BY " + key + " LIMIT " + d.param(2)
+	reseal = "UPDATE " + t + " SET " + strings.Join(sets, ", ") + " WHERE " + key + " = " + d.param(len(encrypted)+1) + " AND " + strings.Join(guards, " AND ")
 	return stale, reseal
 }
 
@@ -509,4 +583,38 @@ func (s TableStatements) CheckFormats() error {
 		}
 	}
 	return nil
+}
+
+// sqliteReserved are the words SQLite reads as keywords wherever a name
+// may stand that QuoteIdentifier, which quotes for Postgres, leaves bare:
+// a table or a column named one has no statement SQLite parses.
+var sqliteReserved = map[string]bool{
+	"alter": true, "autoincrement": true, "delete": true, "drop": true,
+	"escape": true, "exists": true, "insert": true, "raise": true,
+}
+
+// SQLiteTableRefusal says why table has no repository on SQLite (D116), or
+// is "" when it has one. The SQLite DDL refuses, for the whole service, a
+// @versioned table, a projection, a vector and a column SQLite has no
+// storage for (sqlmigrate), so a table that reaches here is one its DDL
+// holds; what is left is a column of bytes, a BLOB there, which the
+// repositories' values have no one form for, as a queue's have none
+// (SQLiteQueueRefusal), and a name SQLite reserves and the statements
+// leave bare.
+func SQLiteTableRefusal(table *TableModel) string {
+	if sqliteReserved[strings.ToLower(table.Name)] && QuoteIdentifier(table.Name) == table.Name {
+		return fmt.Sprintf("its table is named %s, a word SQLite reserves, which the repository's statements leave unquoted", table.Name)
+	}
+	for _, c := range table.Columns {
+		if sqliteReserved[strings.ToLower(c.Name)] && QuoteIdentifier(c.Name) == c.Name {
+			return fmt.Sprintf("its column %s is named for a word SQLite reserves, which the repository's statements leave unquoted", c.Name)
+		}
+		if IsBinaryType(c.SQLType()) {
+			return fmt.Sprintf("its column %s is a BYTEA column, a BLOB on SQLite, which the SQLite repositories do not hold yet", c.Name)
+		}
+		if reason := SQLiteQueueRefusal(c.SQLType()); reason != "" {
+			return fmt.Sprintf("its column %s %s", c.Name, reason)
+		}
+	}
+	return ""
 }
