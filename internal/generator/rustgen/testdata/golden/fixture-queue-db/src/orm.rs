@@ -580,6 +580,93 @@ pub fn postgres_definition() -> Result<&'static orm::Definition, orm::Error> {
         .map_err(|err| orm::Error::Definition(err.clone()))
 }
 
+/// The repositories on Postgres.
+#[cfg(feature = "postgres")]
+pub mod postgres {
+    use super::*;
+
+    pub use orm::postgres::{deadpool_postgres, tokio_postgres};
+    use deadpool_postgres::GenericClient;
+
+    /// The repository of `Order` on a Postgres client.
+    pub type OrderRepository<'a, C> =
+        orm::postgres::Typed<'a, C, OrderRow, OrderCreate, OrderUpdate, OrderFilter, IdentityUUID>;
+
+    /// The repository of `OrderLine` on a Postgres client.
+    pub type OrderLineRepository<'a, C> =
+        orm::postgres::Typed<'a, C, OrderLineRow, OrderLineCreate, OrderLineUpdate, OrderLineFilter, IdentityUUID>;
+
+    /// The repository of `Product` on a Postgres client.
+    pub type ProductRepository<'a, C> =
+        orm::postgres::Typed<'a, C, ProductRow, ProductCreate, ProductUpdate, ProductFilter, IdentityUUID>;
+
+    /// The repositories of `fixture-queue-db` on a Postgres client, acting as a
+    /// user or as no one.
+    pub struct Repositories<'a, C>(orm::postgres::Repositories<'a, C>);
+
+    impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
+        /// The repositories over `client`, the caller's: a connection of
+        /// its pool, or a transaction on one. They act as no one until
+        /// `acting` names a user.
+        pub fn new(client: &'a C) -> Result<Self, orm::Error> {
+            orm::postgres::Repositories::new(client, postgres_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::postgres::Rules<C>) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::postgres::Repositories<'a, C> {
+            &self.0
+        }
+
+        /// The repository of `Order`.
+        pub fn order(&self) -> Result<OrderRepository<'_, C>, orm::Error> {
+            self.0.typed("Order")
+        }
+
+        /// The repository of `OrderLine`.
+        pub fn order_line(&self) -> Result<OrderLineRepository<'_, C>, orm::Error> {
+            self.0.typed("OrderLine")
+        }
+
+        /// The repository of `Product`.
+        pub fn product(&self) -> Result<ProductRepository<'_, C>, orm::Error> {
+            self.0.typed("Product")
+        }
+    }
+}
+
 /// The tables of `fixture-queue-db` and the clauses their statements are written
 /// with, on SQLite.
 #[cfg(feature = "sqlite")]
@@ -1010,6 +1097,13 @@ pub mod sqlite {
         #[must_use]
         pub fn with_rules(self, rules: &'a dyn orm::sqlite::Rules) -> Self {
             Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
         }
 
         /// The runtime's repositories these are, over JSON objects.

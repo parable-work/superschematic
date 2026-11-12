@@ -63,6 +63,7 @@ pub(crate) struct Statement {
 type Cell = Option<Bound>;
 
 /// The statements of one table, for a session.
+#[derive(Clone)]
 pub(crate) struct Plan<'a> {
     pub(crate) definition: &'a Definition,
     pub(crate) table: &'a Table,
@@ -97,6 +98,14 @@ pub(crate) struct UpsertPlan {
     /// which a second statement seals under the key of the row it updates
     /// (D89).
     pub(crate) sealing: Values,
+}
+
+/// A delete's statements.
+pub(crate) struct DeletePlan {
+    pub(crate) statement: Statement,
+    /// The statement that clears the history actor a hard delete of a
+    /// versioned table set for its transaction (D17, D32).
+    pub(crate) clear: Option<Statement>,
 }
 
 impl<'a> Plan<'a> {
@@ -1302,7 +1311,7 @@ impl<'a> Plan<'a> {
         &self,
         key: &Value,
         options: &WriteOptions,
-    ) -> Result<Statement, Error> {
+    ) -> Result<DeletePlan, Error> {
         if !self.table.soft_delete {
             return self.hard_delete_one(key, options);
         }
@@ -1324,24 +1333,51 @@ impl<'a> Plan<'a> {
             }
             None => s.soft_delete.clone(),
         };
-        Ok(Statement { sql, args })
+        Ok(DeletePlan {
+            statement: Statement { sql, args },
+            clear: None,
+        })
     }
 
+    /// A removal of the row whose key is `key`, deleted or not. A
+    /// versioned table with an actor column's follows the statement that
+    /// sets the transaction's history actor, whose parameter is the acting
+    /// user, which the history trigger reads the tombstone's actor from.
     pub(crate) fn hard_delete_one(
         &self,
         key: &Value,
         options: &WriteOptions,
-    ) -> Result<Statement, Error> {
+    ) -> Result<DeletePlan, Error> {
         let s = &self.table.statements;
-        let mut args = vec![self.key(key)?];
-        let sql = match self.version(options)? {
+        let mut args = Vec::new();
+        let mut prefix = "";
+        let mut clear = None;
+        if self.table.history_actor {
+            args.push(Bound {
+                value: self.user().map_or(Value::Null, Value::String),
+                marks: Marks::TEXT,
+            });
+            prefix = &self.definition.history_actor_cte;
+            clear = Some(Statement {
+                sql: self.definition.clear_history_actor.clone(),
+                args: Vec::new(),
+            });
+        }
+        args.push(self.key(key)?);
+        let delete = match self.version(options)? {
             Some(version) => {
                 args.push(version);
-                s.delete_if_version.clone()
+                &s.delete_if_version
             }
-            None => s.delete.clone(),
+            None => &s.delete,
         };
-        Ok(Statement { sql, args })
+        Ok(DeletePlan {
+            statement: Statement {
+                sql: format!("{prefix}{delete}"),
+                args,
+            },
+            clear,
+        })
     }
 
     /// The read of the live row whose key is `key`.

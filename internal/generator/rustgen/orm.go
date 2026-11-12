@@ -105,7 +105,11 @@ type ormDefinition struct {
 	DefaultLimit     int            `json:"defaultLimit"`
 	SystemActor      *ormActor      `json:"systemActor,omitempty"`
 	RequireUpdatedBy bool           `json:"requireUpdatedBy,omitempty"`
-	Tables           []ormTable     `json:"tables"`
+	// HistoryActorCTE and ClearHistoryActor are the statements a versioned
+	// table's hard delete runs around it, on Postgres (D17, D32).
+	HistoryActorCTE   string     `json:"historyActorCTE,omitempty"`
+	ClearHistoryActor string     `json:"clearHistoryActor,omitempty"`
+	Tables            []ormTable `json:"tables"`
 }
 
 type ormActor struct {
@@ -120,6 +124,7 @@ type ormTable struct {
 	Columns      []ormColumn             `json:"columns"`
 	Statements   orderedStrings          `json:"statements"`
 	SoftDelete   bool                    `json:"softDelete,omitempty"`
+	HistoryActor bool                    `json:"historyActor,omitempty"`
 	Search       string                  `json:"search,omitempty"`
 	UniqueKeys   map[string]ormUniqueKey `json:"uniqueKeys,omitempty"`
 	ReferencedBy []ormReference          `json:"referencedBy,omitempty"`
@@ -376,6 +381,11 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 
 		onPostgres, onSQLite := table, table
+		if t.HistoryActor != "" {
+			onPostgres.HistoryActor = true
+			postgres.HistoryActorCTE = sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting)
+			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
+		}
 		onPostgres.Statements = named(sqlutil.TableStatementsOf(t).AllStatements(), ormStatements)
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}

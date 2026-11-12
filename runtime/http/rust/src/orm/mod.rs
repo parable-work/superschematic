@@ -23,6 +23,9 @@
 //! [`Rules`] its caller passes runs (D103).
 
 mod plan;
+#[cfg(feature = "postgres")]
+pub mod postgres;
+mod run;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
@@ -82,6 +85,13 @@ pub struct Definition {
     /// create of a table with `createdBy` does (D87).
     #[serde(default)]
     pub require_updated_by: bool,
+    /// The statement a hard delete of a versioned table follows, which
+    /// sets the transaction's history actor to its first parameter, and
+    /// the statement that clears it (D17, D32); Postgres's alone.
+    #[serde(default, rename = "historyActorCTE")]
+    pub history_actor_cte: String,
+    #[serde(default)]
+    pub clear_history_actor: String,
     /// The tables, in the schema's order.
     pub tables: Vec<Table>,
 }
@@ -227,6 +237,9 @@ pub struct Table {
     /// A table with `deletedAt`, which a delete stamps.
     #[serde(default)]
     pub soft_delete: bool,
+    /// A @versioned table whose hard deletes set the history actor.
+    #[serde(default)]
+    pub history_actor: bool,
     /// The search column, qualified, of a table with search fields (D62).
     #[serde(default)]
     pub search: Option<String>,
@@ -1006,6 +1019,9 @@ pub struct Session<'a> {
     pub caller: Option<Caller>,
     /// The time a write stamps, the system's unless set: a test's clock.
     pub now: Option<SystemTime>,
+    /// What is told each statement's text as it runs: a test that holds
+    /// the repositories to the Go ORM's statements, or a log.
+    pub trace: Option<&'a (dyn Fn(&str) + Sync)>,
 }
 
 impl fmt::Debug for Session<'_> {
@@ -1019,6 +1035,12 @@ impl fmt::Debug for Session<'_> {
 }
 
 impl Session<'_> {
+    fn traced(&self, sql: &str) {
+        if let Some(trace) = self.trace {
+            trace(sql);
+        }
+    }
+
     fn now(&self) -> String {
         rfc3339_millis(self.now.unwrap_or_else(SystemTime::now))
     }

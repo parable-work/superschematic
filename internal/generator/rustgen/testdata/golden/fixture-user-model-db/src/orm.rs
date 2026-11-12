@@ -1510,3 +1510,117 @@ pub fn postgres_definition() -> Result<&'static orm::Definition, orm::Error> {
         .as_ref()
         .map_err(|err| orm::Error::Definition(err.clone()))
 }
+
+/// The repositories on Postgres.
+#[cfg(feature = "postgres")]
+pub mod postgres {
+    use super::*;
+
+    pub use orm::postgres::{deadpool_postgres, tokio_postgres};
+    use deadpool_postgres::GenericClient;
+
+    /// The repository of `Role` on a Postgres client.
+    pub type RoleRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RoleRow, RoleCreate, RoleUpdate, RoleFilter, IdentityUUID>;
+
+    /// The repository of `Session` on a Postgres client.
+    pub type SessionRepository<'a, C> =
+        orm::postgres::Typed<'a, C, SessionRow, SessionCreate, SessionUpdate, SessionFilter, IdentityUUID>;
+
+    /// The repository of `User` on a Postgres client.
+    pub type UserRepository<'a, C> =
+        orm::postgres::Typed<'a, C, UserRow, UserCreate, UserUpdate, UserFilter, IdentityUUID>;
+
+    /// The repository of `UserApiKey` on a Postgres client.
+    pub type UserApiKeyRepository<'a, C> =
+        orm::postgres::Typed<'a, C, UserApiKeyRow, UserApiKeyCreate, UserApiKeyUpdate, UserApiKeyFilter, IdentityUUID>;
+
+    /// The repository of `UserCredential` on a Postgres client.
+    pub type UserCredentialRepository<'a, C> =
+        orm::postgres::Typed<'a, C, UserCredentialRow, UserCredentialCreate, UserCredentialUpdate, UserCredentialFilter, IdentityUUID>;
+
+    /// The repository of `UserRoleGrant` on a Postgres client.
+    pub type UserRoleGrantRepository<'a, C> =
+        orm::postgres::Typed<'a, C, UserRoleGrantRow, UserRoleGrantCreate, UserRoleGrantUpdate, UserRoleGrantFilter, IdentityUUID>;
+
+    /// The repositories of `fixture-user-model-db` on a Postgres client, acting as a
+    /// user or as no one.
+    pub struct Repositories<'a, C>(orm::postgres::Repositories<'a, C>);
+
+    impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
+        /// The repositories over `client`, the caller's: a connection of
+        /// its pool, or a transaction on one. They act as no one until
+        /// `acting` names a user.
+        pub fn new(client: &'a C) -> Result<Self, orm::Error> {
+            orm::postgres::Repositories::new(client, postgres_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::postgres::Rules<C>) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::postgres::Repositories<'a, C> {
+            &self.0
+        }
+
+        /// The repository of `Role`.
+        pub fn role(&self) -> Result<RoleRepository<'_, C>, orm::Error> {
+            self.0.typed("Role")
+        }
+
+        /// The repository of `Session`.
+        pub fn session(&self) -> Result<SessionRepository<'_, C>, orm::Error> {
+            self.0.typed("Session")
+        }
+
+        /// The repository of `User`.
+        pub fn user(&self) -> Result<UserRepository<'_, C>, orm::Error> {
+            self.0.typed("User")
+        }
+
+        /// The repository of `UserApiKey`.
+        pub fn user_api_key(&self) -> Result<UserApiKeyRepository<'_, C>, orm::Error> {
+            self.0.typed("UserApiKey")
+        }
+
+        /// The repository of `UserCredential`.
+        pub fn user_credential(&self) -> Result<UserCredentialRepository<'_, C>, orm::Error> {
+            self.0.typed("UserCredential")
+        }
+
+        /// The repository of `UserRoleGrant`.
+        pub fn user_role_grant(&self) -> Result<UserRoleGrantRepository<'_, C>, orm::Error> {
+            self.0.typed("UserRoleGrant")
+        }
+    }
+}

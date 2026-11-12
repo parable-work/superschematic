@@ -29,10 +29,11 @@ use serde_json::Value;
 pub use rusqlite;
 
 use super::plan::{Plan, Statement};
+use super::run::{finish, Client, Runner};
 use super::{
     row, values, wire, Bound, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
     CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found, Marks, PageOptions,
-    RowPage, Session, Table, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::error::chain;
 use crate::queue::sqlite::{column_value, member_value, utc_timestamp};
@@ -104,6 +105,13 @@ impl<'a> Repositories<'a> {
         self
     }
 
+    /// The repositories telling `trace` each statement's text as it runs.
+    #[must_use]
+    pub fn with_trace(mut self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+        self.session.trace = Some(trace);
+        self
+    }
+
     /// The repositories with the keys of the database's `Encrypted<T>`
     /// fields (D85).
     #[must_use]
@@ -134,10 +142,12 @@ impl<'a> Repositories<'a> {
     pub fn table(&self, name: &str) -> Result<Repository<'_>, Error> {
         let table = self.definition.table(name)?;
         Ok(Repository {
+            client: SqliteClient {
+                connection: self.connection,
+                rules: self.rules,
+            },
             plan: Plan::new(self.definition, table, &self.session)?,
             table,
-            connection: self.connection,
-            rules: self.rules,
         })
     }
 }
@@ -307,18 +317,24 @@ where
 
 /// The repository of one table on a SQLite connection.
 pub struct Repository<'a> {
+    client: SqliteClient<'a>,
     plan: Plan<'a>,
     table: &'a Table,
-    connection: &'a Connection,
-    rules: Option<&'a dyn Rules>,
 }
 
 impl Repository<'_> {
+    fn runner(&self) -> Runner<'_, SqliteClient<'_>> {
+        Runner {
+            plan: self.plan.clone(),
+            table: self.table,
+            client: &self.client,
+        }
+    }
+
     /// The live row whose key is `key`; [`Error::NotFound`] when there is
     /// none.
     pub fn get_one(&self, key: &Value) -> Result<Values, Error> {
-        let rows = self.query(&self.plan.get_one(key)?)?;
-        rows.into_iter().next().ok_or_else(|| self.not_found(key))
+        finish(self.runner().get_one(key))
     }
 
     /// The first row `filter` finds, in the options' order, or none.
@@ -327,8 +343,7 @@ impl Repository<'_> {
         filter: Option<&Values>,
         options: &FindOptions,
     ) -> Result<Option<Values>, Error> {
-        let rows = self.query(&self.plan.find_one(filter, options)?)?;
-        Ok(rows.into_iter().next())
+        finish(self.runner().find_one(filter, options))
     }
 
     /// The rows `filter` finds, in the options' order, a limit of them at
@@ -339,15 +354,7 @@ impl Repository<'_> {
         filter: Option<&Values>,
         options: &FindOptions,
     ) -> Result<Found<Values>, Error> {
-        let (count, read) = self.plan.find_many(filter, options)?;
-        let total = match count {
-            Some(count) => Some(self.count(&count)?),
-            None => None,
-        };
-        Ok(Found {
-            rows: self.query(&read)?,
-            total,
-        })
+        finish(self.runner().find_many(filter, options))
     }
 
     /// A page of the rows `filter` finds, in the sort's order, after the
@@ -357,52 +364,20 @@ impl Repository<'_> {
         filter: Option<&Values>,
         options: &PageOptions,
     ) -> Result<RowPage<Values>, Error> {
-        let page = self.plan.find_page(filter, options)?;
-        let mut rows = self.query(&page.statement)?;
-        if rows.is_empty() {
-            if let Some(exists) = &page.key_exists {
-                if self.count(exists)? == 0 {
-                    return Err(Error::PageKey(format!(
-                        "no {} row has the key's {}",
-                        self.table.name, self.table.key
-                    )));
-                }
-            }
-        }
-        let more = rows.len() > page.limit;
-        rows.truncate(page.limit);
-        let next = match rows.last() {
-            Some(last) if more => last.get(&self.table.key).cloned(),
-            _ => None,
-        };
-        Ok(RowPage { rows, next })
+        finish(self.runner().find_page(filter, options))
     }
 
     /// Inserts a row; a member left unset takes its column's default, or
     /// the schema's.
     pub fn create_one(&self, input: &Values) -> Result<Values, Error> {
-        if self.table.behaviors.is_some() {
-            let key = self
-                .rules()?
-                .create(self.connection, self.plan.core_create(input)?)?;
-            return self.get_one(&Value::String(key));
-        }
-        self.returned(&self.plan.create_one(input)?)
+        finish(self.runner().create_one(input))
     }
 
-    /// Inserts the rows, in order.
+    /// Inserts the rows, in order, a statement a row: a VALUES list on
+    /// SQLite takes no DEFAULT for a column one row sets and another
+    /// leaves.
     pub fn create_many(&self, inputs: &[Values]) -> Result<Vec<Values>, Error> {
-        if self.table.behaviors.is_some() {
-            return inputs.iter().map(|input| self.create_one(input)).collect();
-        }
-        if inputs.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut rows = Vec::with_capacity(inputs.len());
-        for statement in self.plan.create_many(inputs)? {
-            rows.extend(self.query(&statement)?);
-        }
-        Ok(rows)
+        finish(self.runner().create_many(inputs))
     }
 
     /// Sets the members `update` sets, null setting a column NULL, on the
@@ -415,28 +390,13 @@ impl Repository<'_> {
         update: &Values,
         options: &WriteOptions,
     ) -> Result<Values, Error> {
-        if self.table.behaviors.is_some() {
-            self.rules()?
-                .update(
-                    self.connection,
-                    self.plan.core_update(key, update, options)?,
-                )
-                .map_err(|err| self.core_miss(err, key))?;
-            return self.get_one(key);
-        }
-        self.plan.refuse_preconditions(options)?;
-        let rows = self.query(&self.plan.update_one(key, update, options)?)?;
-        match rows.into_iter().next() {
-            Some(row) => Ok(row),
-            None => Err(self.miss(key, options)?),
-        }
+        finish(self.runner().update_one(key, update, options))
     }
 
     /// Sets the members `update` sets on the live rows `filter` finds, and
     /// answers how many.
     pub fn update_many(&self, filter: Option<&Values>, update: &Values) -> Result<u64, Error> {
-        self.refuse_behaviors("update_many")?;
-        self.execute(&self.plan.update_many(filter, update)?)
+        finish(self.runner().update_many(filter, update))
     }
 
     /// Inserts `input`, or, when a row already holds its value of the
@@ -450,208 +410,62 @@ impl Repository<'_> {
         update: &Values,
         options: UpsertOptions,
     ) -> Result<Upserted<Values>, Error> {
-        let plan = self
-            .plan
-            .upsert_one(input, on, update, options.only_if_changed)?;
-        // SQLite's upsert does not say whether it inserted: a row held the
-        // key before it, or none did, in the one writer's transaction.
-        let existed = match &plan.before {
-            Some(before) => !self.raw(before)?.is_empty(),
-            None => false,
-        };
-        let rows = self.query(&plan.statement)?;
-        let upserted = match rows.into_iter().next() {
-            Some(row) => Upserted {
-                row,
-                status: if existed {
-                    UpsertStatus::Updated
-                } else {
-                    UpsertStatus::Inserted
-                },
-            },
-            None if !options.only_if_changed && plan.sets => {
-                return Err(self.deleted(on));
-            }
-            None => {
-                let held = plan.held.as_ref().ok_or_else(|| self.deleted(on))?;
-                let row = self
-                    .raw(held)?
-                    .into_iter()
-                    .next()
-                    .filter(|row| self.live(row))
-                    .ok_or_else(|| self.deleted(on))?;
-                Upserted {
-                    row: self.plan.open(row)?,
-                    status: UpsertStatus::Unchanged,
-                }
-            }
-        };
-        self.resealed(upserted, update, &plan.sealing)
+        finish(self.runner().upsert_one(input, on, update, options))
     }
 
     /// Deletes the live row whose key is `key`, stamping it on a
     /// soft-deletable table; [`Error::NotFound`] when there is none.
     pub fn delete_one(&self, key: &Value, options: &WriteOptions) -> Result<(), Error> {
-        if self.table.behaviors.is_some() {
-            return self
-                .rules()?
-                .delete(self.connection, self.plan.core_delete(key, options)?)
-                .map_err(|err| self.core_miss(err, key));
-        }
-        self.plan.refuse_preconditions(options)?;
-        match self.execute(&self.plan.delete_one(key, options)?)? {
-            0 => Err(self.miss(key, options)?),
-            _ => Ok(()),
-        }
+        finish(self.runner().delete_one(key, options))
     }
 
     /// Removes the row whose key is `key`, deleted or not, whatever the
     /// table; [`Error::NotFound`] when there is none.
     pub fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
-        self.refuse_behaviors("hard_delete_one")?;
-        let options = WriteOptions::default();
-        match self.execute(&self.plan.hard_delete_one(key, &options)?)? {
-            0 => Err(self.not_found(key)),
-            _ => Ok(()),
-        }
+        finish(self.runner().hard_delete_one(key))
     }
+}
 
-    fn rules(&self) -> Result<&dyn Rules, Error> {
+/// A SQLite connection as a repository's runner drives it: each statement
+/// runs as it is called, so each future is ready when first polled.
+struct SqliteClient<'a> {
+    connection: &'a Connection,
+    rules: Option<&'a dyn Rules>,
+}
+
+impl SqliteClient<'_> {
+    fn rules(&self, table: &str) -> Result<&dyn Rules, Error> {
         self.rules.ok_or_else(|| {
             Error::Definition(format!(
-                "{} composes behaviors (D103), and the repositories were opened with nothing to run them: pass the types crate's rules",
-                self.table.name
+                "{table} composes behaviors (D103), and the repositories were opened with nothing to run them: pass the types crate's rules"
             ))
         })
     }
 
-    fn refuse_behaviors(&self, method: &str) -> Result<(), Error> {
-        if self.table.behaviors.is_none() {
-            return Ok(());
-        }
-        Err(Error::Invalid(format!(
-            "{method} of {}: a table that composes behaviors writes its rows through the core, a row at a time (D103)",
-            self.table.name
-        )))
-    }
-
-    fn not_found(&self, key: &Value) -> Error {
-        Error::NotFound(format!("{} {} not found", self.table.name, text_of(key)))
-    }
-
-    fn deleted(&self, on: &[&str]) -> Error {
-        Error::NotFound(format!(
-            "the {} row that holds the key {} is deleted",
-            self.table.name,
-            on.join(",")
-        ))
-    }
-
-    /// The core's not_found of the row as the repository's own.
-    fn core_miss(&self, err: Error, key: &Value) -> Error {
-        match err {
-            Error::Refused(refusal) if refusal.code == "not_found" => self.not_found(key),
-            other => other,
-        }
-    }
-
-    /// Why a write of one row changed none: the row is not there, or, for
-    /// a fenced write, it has moved from the version.
-    fn miss(&self, key: &Value, options: &WriteOptions) -> Result<Error, Error> {
-        let Some(expected) = options.expected_version else {
-            return Ok(self.not_found(key));
-        };
-        let statement = self.plan.version_of(key)?;
-        let held: Option<i64> = self.scalar(&statement)?;
-        Ok(match held {
-            None => self.not_found(key),
-            Some(version) => Error::VersionConflict(format!(
-                "{} {} is at version {version}, not {expected}",
-                self.table.name,
-                text_of(key)
-            )),
-        })
-    }
-
-    /// Whether a row a read by key returned is live.
-    fn live(&self, row: &Values) -> bool {
-        match self.table.audit("deletedAt") {
-            Some(deleted_at) => row.get(&deleted_at.name).is_none_or(Value::is_null),
-            None => true,
-        }
-    }
-
-    /// `upserted`, with each encrypted field of the update the row it
-    /// updated holds another value of set by a second statement, sealed
-    /// under the row's key (D89). A row the upsert inserted holds the
-    /// input's already.
-    fn resealed(
-        &self,
-        upserted: Upserted<Values>,
-        update: &Values,
-        sealing: &Values,
-    ) -> Result<Upserted<Values>, Error> {
-        if upserted.status == UpsertStatus::Inserted || sealing.is_empty() {
-            return Ok(upserted);
-        }
-        let mut change = Values::new();
-        for (member, wanted) in sealing {
-            let held = upserted.row.get(member).filter(|held| !held.is_null());
-            let same = match held {
-                None => wanted.is_null(),
-                Some(held) => held == wanted,
-            };
-            if !same {
-                change.insert(member.clone(), wanted.clone());
-            }
-        }
-        if change.is_empty() {
-            return Ok(upserted);
-        }
-        if let Some(updated_by) = self.table.audit("updatedBy") {
-            if let Some(by) = update.get(&updated_by.name) {
-                change.insert(updated_by.name.clone(), by.clone());
-            }
-        }
-        let key = upserted
-            .row
-            .get(&self.table.key)
-            .cloned()
-            .unwrap_or(Value::Null);
-        Ok(Upserted {
-            row: self.update_one(&key, &change, &WriteOptions::default())?,
-            status: UpsertStatus::Updated,
-        })
-    }
-
-    /// Runs a statement that returns rows of the table, and reads them
-    /// with their encrypted members opened.
-    fn query(&self, statement: &Statement) -> Result<Vec<Values>, Error> {
-        self.raw(statement)?
-            .into_iter()
-            .map(|row| self.plan.open(row))
+    fn params(table: &Table, statement: &Statement) -> Result<Vec<SqlValue>, Error> {
+        statement
+            .args
+            .iter()
+            .map(|bound| {
+                param(bound).map_err(|err| Error::Invalid(format!("{}: {err}", table.name)))
+            })
             .collect()
     }
+}
 
-    /// Runs a statement that returns one row, the one a write wrote.
-    fn returned(&self, statement: &Statement) -> Result<Values, Error> {
-        self.query(statement)?.into_iter().next().ok_or_else(|| {
-            Error::Database(format!(
-                "{}: the statement returned no row",
-                self.table.name
-            ))
-        })
-    }
-
-    /// Runs a statement that returns rows of the table, each column in
-    /// the table's order, and reads them as the database holds them.
-    fn raw(&self, statement: &Statement) -> Result<Vec<Values>, Error> {
-        let context = || format!("{}: {}", self.table.name, statement.sql);
+impl Client for SqliteClient<'_> {
+    async fn rows(
+        &self,
+        table: &Table,
+        statement: &Statement,
+        extra: usize,
+    ) -> Result<Vec<(Values, Vec<Value>)>, Error> {
+        let context = || format!("{}: {}", table.name, statement.sql);
         let mut prepared = self
             .connection
             .prepare_cached(&statement.sql)
             .map_err(|err| failure(&context(), &err))?;
-        let args = self.params(statement)?;
+        let args = Self::params(table, statement)?;
         let mut rows = prepared
             .query(params_from_iter(args))
             .map_err(|err| failure(&context(), &err))?;
@@ -663,22 +477,26 @@ impl Repository<'_> {
                 Err(err) => return Err(failure(&context(), &err)),
             };
             let mut members = Values::new();
-            for (i, column) in self.table.columns.iter().enumerate() {
+            for (i, column) in table.columns.iter().enumerate() {
                 let cell = row.get_ref(i).map_err(|err| failure(&context(), &err))?;
                 let value = member(cell, column).map_err(|err| {
-                    Error::Definition(format!("{}.{}: {err}", self.table.name, column.name))
+                    Error::Definition(format!("{}.{}: {err}", table.name, column.name))
                 })?;
                 members.insert(column.name.clone(), value);
             }
-            out.push(members);
+            let mut extras = Vec::with_capacity(extra);
+            for i in table.columns.len()..table.columns.len() + extra {
+                let cell = row.get_ref(i).map_err(|err| failure(&context(), &err))?;
+                extras.push(member(cell, &Column::default()).map_err(Error::Definition)?);
+            }
+            out.push((members, extras));
         }
         Ok(out)
     }
 
-    /// Runs a statement that changes rows, and answers how many.
-    fn execute(&self, statement: &Statement) -> Result<u64, Error> {
-        let context = || format!("{}: {}", self.table.name, statement.sql);
-        let args = self.params(statement)?;
+    async fn execute(&self, table: &Table, statement: &Statement) -> Result<u64, Error> {
+        let context = || format!("{}: {}", table.name, statement.sql);
+        let args = Self::params(table, statement)?;
         let changed = self
             .connection
             .prepare_cached(&statement.sql)
@@ -687,10 +505,9 @@ impl Repository<'_> {
         Ok(changed as u64)
     }
 
-    /// Runs a statement that reads one integer of one row, or none.
-    fn scalar(&self, statement: &Statement) -> Result<Option<i64>, Error> {
-        let context = || format!("{}: {}", self.table.name, statement.sql);
-        let args = self.params(statement)?;
+    async fn scalar(&self, table: &Table, statement: &Statement) -> Result<Option<i64>, Error> {
+        let context = || format!("{}: {}", table.name, statement.sql);
+        let args = Self::params(table, statement)?;
         let mut prepared = self
             .connection
             .prepare_cached(&statement.sql)
@@ -708,28 +525,16 @@ impl Repository<'_> {
         }
     }
 
-    /// Runs a statement that counts, or reads whether a row exists.
-    fn count(&self, statement: &Statement) -> Result<u64, Error> {
-        let n = self.scalar(statement)?.unwrap_or(0);
-        Ok(u64::try_from(n).unwrap_or(0))
+    async fn core_create(&self, create: CoreCreate<'_>) -> Result<String, Error> {
+        self.rules(create.table)?.create(self.connection, create)
     }
 
-    fn params(&self, statement: &Statement) -> Result<Vec<SqlValue>, Error> {
-        statement
-            .args
-            .iter()
-            .map(|bound| {
-                param(bound).map_err(|err| Error::Invalid(format!("{}: {err}", self.table.name)))
-            })
-            .collect()
+    async fn core_update(&self, update: CoreUpdate<'_>) -> Result<(), Error> {
+        self.rules(update.table)?.update(self.connection, update)
     }
-}
 
-/// A key as an error names it.
-fn text_of(key: &Value) -> String {
-    match key {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
+    async fn core_delete(&self, delete: CoreDelete<'_>) -> Result<(), Error> {
+        self.rules(delete.table)?.delete(self.connection, delete)
     }
 }
 
