@@ -12,20 +12,28 @@ export const IdentityErrorCode = {
   /** A login, or changePassword's current password, that does not verify, for whatever reason. 401. */
   INVALID_CREDENTIALS: 'invalid_credentials',
   /**
-   * A route that needs a caller, without a usable session: none, an
-   * unusable Authorization header, or a session that is unknown, expired,
-   * revoked or idle, or whose user is disabled. 401.
+   * A route that needs a caller, without a usable session or API key: none,
+   * an unusable Authorization header, a session that is unknown, expired,
+   * revoked or idle, an API key that is unknown, expired or revoked, or a
+   * user who is disabled. 401.
    */
   UNAUTHORIZED: ErrorCode.UNAUTHORIZED,
-  /** The caller lacks the route's permission, or grants what they do not hold. 403. */
+  /**
+   * The caller lacks the route's permission, grants what they do not hold,
+   * or is an API key on a route that acts on its own account. 403.
+   */
   FORBIDDEN: ErrorCode.FORBIDDEN,
   /** A cookie request, or a cookie login, the cross-origin check refuses. 403. */
   CROSS_ORIGIN: 'cross_origin',
-  /** No user or role has the id. 404. */
+  /** No user or role has the id, the user has no live API key with it, or the database holds no API key table. 404. */
   NOT_FOUND: ErrorCode.NOT_FOUND,
   /** The login or the role name is taken. 409. */
   CONFLICT: ErrorCode.CONFLICT,
-  /** A role's permission is not dotted segments of letters, digits, '_' and '-'. 422, with the permissions in details. */
+  /**
+   * A role's permission, or one an API key names, is not dotted segments of
+   * letters, digits, '_' and '-', or an API key names one twice. 422, with
+   * the permissions in details.
+   */
   INVALID_PERMISSION: 'invalid_permission',
   /** A login whose password verifies for a user who waits for an administrator's approval (D81). 403. */
   PENDING_APPROVAL: 'pending_approval',
@@ -62,6 +70,26 @@ export function identityForbidden(message: string, details?: unknown): HttpProbl
 /** A write to a user who holds permissions the caller does not, listing them. */
 export function notCovered(permissions: string[]): HttpProblem {
   return identityForbidden('No one administers a user holding a permission they do not hold', { permissions });
+}
+
+// The refusals of the API key operations (D114), the same text in every
+// runtime.
+
+/**
+ * The 403 of a caller an API key authenticated on a route that acts on its
+ * own account: the key routes of the session set, logout and
+ * changePassword.
+ */
+export const SESSION_ONLY_MESSAGE = 'An API key does not act on its own account: sign in with a session';
+
+/** The 403 of a createApiKey naming a permission the caller does not hold. */
+export const API_KEY_NOT_HELD_MESSAGE = 'An API key names only permissions its user holds';
+
+/** The 404 of an API key operation over a store whose descriptor names no API key table. */
+export const NO_API_KEYS_MESSAGE = "API keys are not available: this database's types hold no API key table";
+
+export function noApiKeys(cause?: unknown): HttpProblem {
+  return new HttpProblem(404, NO_API_KEYS_MESSAGE, { code: IdentityErrorCode.NOT_FOUND, cause });
 }
 
 export function crossOrigin(): HttpProblem {

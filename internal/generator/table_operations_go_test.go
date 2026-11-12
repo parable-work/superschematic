@@ -29,6 +29,7 @@ var tableOperationCases = []string{
 	"a parent that does not exist, or is another row's, is not found",
 	"a foreign key that names no row is refused at its member",
 	"a list pages by cursor in each sort",
+	"a list sorts by a field that may be null, its nulls last either way",
 	"a list searches its search fields",
 	"a list filters by a field of each kind",
 	"a cursor that names no row is refused",
@@ -685,6 +686,67 @@ func TestTableOperations(t *testing.T) {
 		}
 	})
 
+	t.Run("a list sorts by a field that may be null, its nulls last either way", func(t *testing.T) {
+		// The order a walk must read: the rows that hold a value by it,
+		// then the rows that hold none by id, each in the sort's
+		// direction (D112). The database says only which of two ids is
+		// the lower.
+		none := func(column string) []string {
+			rows, err := pool.Query(ctx, "SELECT title FROM issue WHERE team_id = $1 AND "+column+" IS NULL ORDER BY id", uuid(t, core["id"]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var titles []string
+			for rows.Next() {
+				var title string
+				if err := rows.Scan(&title); err != nil {
+					t.Fatal(err)
+				}
+				titles = append(titles, title)
+			}
+			if len(titles) != 2 {
+				t.Fatalf("issues with no %s = %v, want two", column, titles)
+			}
+			return titles
+		}
+		reversed := func(titles []string) []string {
+			out := slices.Clone(titles)
+			slices.Reverse(out)
+			return out
+		}
+		pages := func(titles []string, limit int) [][]string {
+			var out [][]string
+			for start := 0; start < len(titles); start += limit {
+				out = append(out, titles[start:min(start+limit, len(titles))])
+			}
+			return out
+		}
+		undated, unsized := none("due_on"), none("estimate")
+		for _, tc := range []struct {
+			sort string
+			want []string
+		}{
+			{"dueOn", append([]string{"Crash on save", "Slow_query in list"}, undated...)},
+			{"-dueOn", append([]string{"Slow_query in list", "Crash on save"}, reversed(undated)...)},
+			{"estimate", append([]string{"Crash on save", "Slowxquery at 50%"}, unsized...)},
+			{"-estimate", append([]string{"Slowxquery at 50%", "Crash on save"}, reversed(unsized)...)},
+		} {
+			// A page of one ends on each row in turn: on a value, on the
+			// last value before the nulls, on a null and on the last row.
+			for _, limit := range []int{1, 2, 3} {
+				query := url.Values{"sort": {tc.sort}, "limit": {fmt.Sprint(limit)}}
+				if got, want := walk(t, reader, coreIssues, query, "title"), pages(tc.want, limit); !reflect.DeepEqual(got, want) {
+					t.Errorf("sort=%s, limit=%d: pages = %v, want %v", tc.sort, limit, got, want)
+				}
+			}
+		}
+		// A filter holds beside the order.
+		if got, want := walk(t, reader, coreIssues, url.Values{"sort": {"-dueOn"}, "limit": {"1"}, "filter[dueOn][isNull]": {"true"}}, "title"), pages(reversed(undated), 1); !reflect.DeepEqual(got, want) {
+			t.Errorf("the undated issues, latest first: pages = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("a list searches its search fields", func(t *testing.T) {
 		for query, want := range map[string][]string{
 			"q=crash":      {"Crash on save"},
@@ -749,6 +811,28 @@ func TestTableOperations(t *testing.T) {
 			{"createdAt", "filter[createdAt]=" + at("Fix typo"), []string{"Fix typo"}},
 			{"createdAt range", "filter[createdAt][gt]=" + at("Crash on save") + "&filter[createdAt][lte]=" + at("Slow_query in list"), []string{"Fix typo", "Slow_query in list"}},
 			{"createdAt in", "filter[createdAt][in]=" + at("Crash on save") + "," + at("Slowxquery at 50%"), []string{"Crash on save", "Slowxquery at 50%"}},
+			// ne and notIn keep the rows eq and in leave out (D112), a row
+			// whose field is null among them.
+			{"status ne", "filter[status][ne]=done", created},
+			{"status ne its own", "filter[status][ne]=open", nil},
+			{"status notIn", "filter[status][notIn]=started,done", created},
+			{"priority ne", "filter[priority][ne]=2", []string{"Crash on save", "Fix typo", "Slow_query in list"}},
+			{"priority notIn", "filter[priority][notIn]=0,3", []string{"Slow_query in list", "Slowxquery at 50%"}},
+			{"title ne", "filter[title][ne]=Fix+typo", []string{"Crash on save", "Slow_query in list", "Slowxquery at 50%"}},
+			{"title notIn", "filter[title][notIn]=Fix+typo,Crash+on+save", []string{"Slow_query in list", "Slowxquery at 50%"}},
+			{"estimate ne keeps the nulls", "filter[estimate][ne]=2.5", []string{"Fix typo", "Slow_query in list", "Slowxquery at 50%"}},
+			{"estimate notIn keeps the nulls", "filter[estimate][notIn]=2.5,8", []string{"Fix typo", "Slow_query in list"}},
+			{"estimate ne, and not null", "filter[estimate][ne]=2.5&filter[estimate][isNull]=false", []string{"Slowxquery at 50%"}},
+			{"dueOn ne keeps the nulls", "filter[dueOn][ne]=2026-03-01", []string{"Fix typo", "Slow_query in list", "Slowxquery at 50%"}},
+			{"dueOn notIn keeps the nulls", "filter[dueOn][notIn]=2026-03-01,2026-04-15", []string{"Fix typo", "Slowxquery at 50%"}},
+			{"assigneeId ne keeps the unassigned", "filter[assigneeId][ne]=" + linID, []string{"Fix typo", "Slow_query in list", "Slowxquery at 50%"}},
+			{"assigneeId notIn keeps the unassigned", "filter[assigneeId][notIn]=" + linID + "," + maxID, []string{"Fix typo", "Slowxquery at 50%"}},
+			{"createdBy ne", "filter[createdBy][ne]=" + bob, created},
+			{"createdBy ne its own", "filter[createdBy][ne]=" + alice, nil},
+			{"createdBy notIn", "filter[createdBy][notIn]=" + bob + "," + alice, nil},
+			{"createdAt ne", "filter[createdAt][ne]=" + at("Fix typo"), []string{"Crash on save", "Slow_query in list", "Slowxquery at 50%"}},
+			{"createdAt notIn", "filter[createdAt][notIn]=" + at("Crash on save") + "," + at("Slowxquery at 50%"), []string{"Fix typo", "Slow_query in list"}},
+			{"ne beside a search", "filter[title][ne]=Slow_query+in+list&q=slow", []string{"Slowxquery at 50%"}},
 			// Members hold at once, beside a search and a sort.
 			{"combined", "filter[status]=open&filter[priority][gte]=1&filter[title][contains]=slow&filter[assigneeId][isNull]=true", []string{"Slowxquery at 50%"}},
 			{"combined with a search", "filter[priority][lte]=2&q=slow", []string{"Slow_query in list", "Slowxquery at 50%"}},

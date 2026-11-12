@@ -370,8 +370,8 @@ changes, and 12 checks); `core-constants.transcript.json`, 39 steps (20
 commands and 19 checks); `core-staterules.transcript.json`, 76 steps (43
 commands and 33 checks); `core-approvals.transcript.json`, 122 steps (93
 commands, 71 of them operations and 5 changes, and 29 checks); and the
-hand-written `core-workflow-principals.transcript.json` (D104), 92 steps
-(58 commands, each compared with its row's `expect.version`, and 34
+hand-written `core-workflow-principals.transcript.json` (D104, D113), 101
+steps (63 commands, each compared with its row's `expect.version`, and 38
 checks), and `core-freezes-and-sign-offs.transcript.json` (D104), 115 steps
 (75 commands, each compared with its row's `expect.version`, and 40
 checks); from the work queue's recordings of the behaviors D104 ports to

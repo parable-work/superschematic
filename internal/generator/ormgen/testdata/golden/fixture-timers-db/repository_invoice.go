@@ -502,12 +502,18 @@ var InvoiceQuotedFields = map[string]string{
 // invoiceSortColumns are the columns of Invoice's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var invoiceSortColumns = map[InvoiceSortField]struct{ sql, key string }{
-	InvoiceSortById:      {`invoice.id`, `page_key.id`},
-	InvoiceSortByNumber:  {`invoice.number`, `page_key.number`},
-	InvoiceSortByStatus:  {`invoice.status`, `page_key.status`},
-	InvoiceSortByPayment: {`invoice.payment`, `page_key.payment`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var invoiceSortColumns = map[InvoiceSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	InvoiceSortById:               {`invoice.id`, `page_key.id`, false},
+	InvoiceSortByNumber:           {`invoice.number`, `page_key.number`, false},
+	InvoiceSortByStatus:           {`invoice.status`, `page_key.status`, false},
+	InvoiceSortByStatusEnteredAt:  {`invoice.status_entered_at`, `page_key.status_entered_at`, true},
+	InvoiceSortByPayment:          {`invoice.payment`, `page_key.payment`, false},
+	InvoiceSortByPaymentEnteredAt: {`invoice.payment_entered_at`, `page_key.payment_entered_at`, true},
 }
 
 // buildInvoiceOrderByClause builds an ORDER BY clause for Invoice.
@@ -1206,7 +1212,7 @@ func (r *InvoiceRepository) FindPage(ctx context.Context, filter *InvoiceFilter,
 	}
 	column, ok := invoiceSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Invoice sorts by id, number, status and payment, not %q", string(field))
+		return nil, fmt.Errorf("orm: Invoice sorts by id, number, status, statusEnteredAt, payment and paymentEnteredAt, not %q", string(field))
 	}
 	byKey := field == InvoiceSortById
 
@@ -1236,14 +1242,23 @@ func (r *InvoiceRepository) FindPage(ctx context.Context, filter *InvoiceFilter,
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`invoice.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`invoice.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, invoice.id) %s ((SELECT %s FROM invoice AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, invoice.id) %s ((SELECT %s FROM invoice AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM invoice AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1251,6 +1266,9 @@ func (r *InvoiceRepository) FindPage(ctx context.Context, filter *InvoiceFilter,
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, invoice.id %s`, direction)
 	}

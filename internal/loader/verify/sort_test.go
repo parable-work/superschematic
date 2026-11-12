@@ -58,6 +58,12 @@ func TestSortVerifies(t *testing.T) {
 			s.Sort = []string{"number", "id"}
 			op.Page.DefaultSort = "-id"
 		},
+		// A page orders a field's nulls last in either direction (D112).
+		"by a field that may be null": func(op *ir.FieldDef, s *ir.ArgumentDef, item *ir.TypeDef) {
+			item.Fields = append(item.Fields, &ir.FieldDef{Name: "dueAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}})
+			s.Sort = []string{"placedAt", "dueAt"}
+			op.Page.DefaultSort = "-dueAt"
+		},
 		"an unsorted page": func(op *ir.FieldDef, _ *ir.ArgumentDef, _ *ir.TypeDef) {
 			op.Arguments = op.Arguments[:1]
 			op.Page.DefaultSort = ""
@@ -120,8 +126,6 @@ func TestSortsNeedAPagedList(t *testing.T) {
 			item.Fields = append(item.Fields, &ir.FieldDef{Name: "counts", TypeRef: ir.TypeRef{Name: "integer", IsMap: true}, Required: true})
 			s.Sort = []string{"placedAt", "counts"}
 		}, []string{"Orders.listOrders: sort argument sort names OrderView.counts, which holds a map of integer; a page is sorted by one text, number or time"}},
-		{"a nullable field", func(_ *ir.FieldDef, s *ir.ArgumentDef, _ *ir.TypeDef) { s.Sort = []string{"placedAt", "note"} },
-			[]string{"Orders.listOrders: sort argument sort names OrderView.note, which is Nullable; a page's order has no place for a null"}},
 		{"a secret field", func(_ *ir.FieldDef, s *ir.ArgumentDef, _ *ir.TypeDef) { s.Sort = []string{"placedAt", "code"} },
 			[]string{"Orders.listOrders: sort argument sort names OrderView.code, which is Secret; a page's order would show it"}},
 		{"an item without an id", func(_ *ir.FieldDef, _ *ir.ArgumentDef, item *ir.TypeDef) { item.Fields = item.Fields[1:] },

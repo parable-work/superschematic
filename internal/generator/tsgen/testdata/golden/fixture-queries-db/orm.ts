@@ -102,8 +102,8 @@ export const accountTable: TableDefinition = {
   table: "account",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "account.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "account.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"name\"",
@@ -121,7 +121,9 @@ export const accountTable: TableDefinition = {
     page: "SELECT %s FROM account%s%s LIMIT %d",
     pageAfterKey: "account.id %s %s",
     pageAfter: "(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", account.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM account WHERE account.id = $1)",
     insert: "INSERT INTO account (%s) VALUES (%s) RETURNING %s",
@@ -200,7 +202,7 @@ export interface CategoryFilter {
 export type CategoryOrderField = "id" | "name" | "budget" | "budgetSince";
 
 /** The members findPage orders rows of Category by (D60, amended); ties break by id. */
-export type CategorySortField = "id" | "name";
+export type CategorySortField = "id" | "name" | "budget" | "budgetSince";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type CategoryUniqueKey = readonly ["id"];
@@ -237,11 +239,11 @@ export const categoryTable: TableDefinition = {
   table: "category",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "category.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "category.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "parentId", column: "parent_id", field: "parent", qualified: "category.parent_id", uuid: true, relation: "Category", filter: ["eq", "in", "isNull"] },
-    { name: "budget", column: "budget", field: "budget", qualified: "category.budget", numeric: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "budgetSince", column: "budget_since", field: "budgetSince", qualified: "category.budget_since", date: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "category.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "category.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "parentId", column: "parent_id", field: "parent", qualified: "category.parent_id", uuid: true, relation: "Category", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "budget", column: "budget", field: "budget", qualified: "category.budget", numeric: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "budgetSince", column: "budget_since", field: "budgetSince", qualified: "category.budget_since", date: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"name\", \"parent_id\", \"budget\", \"budget_since\"",
@@ -259,7 +261,9 @@ export const categoryTable: TableDefinition = {
     page: "SELECT %s FROM category%s%s LIMIT %d",
     pageAfterKey: "category.id %s %s",
     pageAfter: "(%s, category.id) %s ((SELECT %s FROM category AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM category AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", category.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM category WHERE category.id = $1)",
     insert: "INSERT INTO category (%s) VALUES (%s) RETURNING %s",
@@ -387,13 +391,13 @@ export const lineItemTable: TableDefinition = {
   table: "line_item",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "line_item.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "date", column: "\"date\"", field: "date", qualified: "line_item.\"date\"", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "line_item.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "amount", column: "amount", field: "amount", qualified: "line_item.amount", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "accountId", column: "account_id", field: "account", qualified: "line_item.account_id", uuid: true, required: true, relation: "Account", filter: ["eq", "in", "isNull"] },
-    { name: "categoryId", column: "category_id", field: "category", qualified: "line_item.category_id", uuid: true, relation: "Category", filter: ["eq", "in", "isNull"] },
-    { name: "transferGroupId", column: "transfer_group_id", field: "transferGroup", qualified: "line_item.transfer_group_id", uuid: true, relation: "TransferGroup", filter: ["eq", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "line_item.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "date", column: "\"date\"", field: "date", qualified: "line_item.\"date\"", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "line_item.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "amount", column: "amount", field: "amount", qualified: "line_item.amount", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "accountId", column: "account_id", field: "account", qualified: "line_item.account_id", uuid: true, required: true, relation: "Account", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "categoryId", column: "category_id", field: "category", qualified: "line_item.category_id", uuid: true, relation: "Category", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "transferGroupId", column: "transfer_group_id", field: "transferGroup", qualified: "line_item.transfer_group_id", uuid: true, relation: "TransferGroup", filter: ["eq", "ne", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"date\", \"name\", \"amount\", \"account_id\", \"category_id\", \"transfer_group_id\"",
@@ -411,7 +415,9 @@ export const lineItemTable: TableDefinition = {
     page: "SELECT %s FROM line_item%s%s LIMIT %d",
     pageAfterKey: "line_item.id %s %s",
     pageAfter: "(%s, line_item.id) %s ((SELECT %s FROM line_item AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM line_item AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", line_item.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM line_item WHERE line_item.id = $1)",
     insert: "INSERT INTO line_item (%s) VALUES (%s) RETURNING %s",
@@ -473,7 +479,7 @@ export interface TransferGroupFilter {
 export type TransferGroupOrderField = "id" | "note";
 
 /** The members findPage orders rows of TransferGroup by (D60, amended); ties break by id. */
-export type TransferGroupSortField = "id";
+export type TransferGroupSortField = "id" | "note";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TransferGroupUniqueKey = readonly ["id"];
@@ -508,8 +514,8 @@ export const transferGroupTable: TableDefinition = {
   table: "transfer_group",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "transfer_group.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "note", column: "note", field: "note", qualified: "transfer_group.note", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "transfer_group.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "note", column: "note", field: "note", qualified: "transfer_group.note", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"note\"",
@@ -527,7 +533,9 @@ export const transferGroupTable: TableDefinition = {
     page: "SELECT %s FROM transfer_group%s%s LIMIT %d",
     pageAfterKey: "transfer_group.id %s %s",
     pageAfter: "(%s, transfer_group.id) %s ((SELECT %s FROM transfer_group AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM transfer_group AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", transfer_group.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM transfer_group WHERE transfer_group.id = $1)",
     insert: "INSERT INTO transfer_group (%s) VALUES (%s) RETURNING %s",
@@ -588,7 +596,7 @@ export interface LineListEntryFilter {
 export type LineListEntryOrderField = "id" | "date" | "name" | "accountId" | "accountName" | "categoryId" | "categoryName";
 
 /** The members findPage orders rows of LineListEntry by; ties break by id. */
-export type LineListEntrySortField = "id" | "date" | "name" | "accountId" | "accountName";
+export type LineListEntrySortField = "id" | "date" | "name" | "accountId" | "accountName" | "categoryId" | "categoryName";
 
 /** The position of a row of LineListEntry in a findPage order: its id. */
 export interface LineListEntryPageKey {
@@ -604,13 +612,13 @@ export const lineListEntryView: TableDefinition = {
   table: "line_list",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "line_list.id", uuid: true, key: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "date", column: "\"date\"", field: "date", qualified: "line_list.\"date\"", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "line_list.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "accountId", column: "account_id", field: "accountId", qualified: "line_list.account_id", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "accountName", column: "account_name", field: "accountName", qualified: "line_list.account_name", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "categoryId", column: "category_id", field: "categoryId", qualified: "line_list.category_id", uuid: true, filter: ["eq", "in", "isNull"] },
-    { name: "categoryName", column: "category_name", field: "categoryName", qualified: "line_list.category_name", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "line_list.id", uuid: true, key: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "date", column: "\"date\"", field: "date", qualified: "line_list.\"date\"", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "line_list.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "accountId", column: "account_id", field: "accountId", qualified: "line_list.account_id", uuid: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "accountName", column: "account_name", field: "accountName", qualified: "line_list.account_name", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "categoryId", column: "category_id", field: "categoryId", qualified: "line_list.category_id", uuid: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "categoryName", column: "category_name", field: "categoryName", qualified: "line_list.category_name", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"date\", \"name\", \"account_id\", \"account_name\", \"category_id\", \"category_name\"",
@@ -628,7 +636,9 @@ export const lineListEntryView: TableDefinition = {
     page: "SELECT %s FROM line_list%s%s LIMIT %d",
     pageAfterKey: "line_list.id %s %s",
     pageAfter: "(%s, line_list.id) %s ((SELECT %s FROM line_list AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM line_list AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", line_list.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM line_list WHERE line_list.id = $1)",
     insert: "INSERT INTO line_list (%s) VALUES (%s) RETURNING %s",
@@ -880,12 +890,14 @@ export type FixtureQueriesDbTx = OrmTx<FixtureQueriesDbRepositories>;
 export const fixtureQueriesDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

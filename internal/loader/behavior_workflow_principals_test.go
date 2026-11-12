@@ -273,13 +273,13 @@ func TestWorkflowByIsHeldToTheTable(t *testing.T) {
 	}
 }
 
-// TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes (D104): an engine
+// TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes (D104, D113): an engine
 // type's @behavior("Workflow", ...) naming a transition's by, an
-// overridePermission or repeat, which the shared declaration's
+// overridePermission, repeat or finished, which the shared declaration's
 // configSchema accepts, is refused, one problem per member, naming the
 // table form, as the engine refuses each.
 func TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes(t *testing.T) {
-	const member = "type Note: @behavior Workflow names %s, which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission and repeat, so leave it out"
+	const member = "type Note: @behavior Workflow names %s, which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission, repeat and finished, so leave it out"
 	engineType := func(config map[string]any) func(doc, _ map[string]any) {
 		return func(doc, _ map[string]any) {
 			doc["types"].(map[string]any)["Note"] = map[string]any{"name": "Note", "role": "DBTable", "behaviors": []any{
@@ -312,8 +312,10 @@ func TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes(t *testing.T) {
 			[]string{"overridePermission"}},
 		{"repeat", map[string]any{"states": states, "transitions": transitions(nil), "repeat": "unchanged"},
 			[]string{"repeat"}},
-		{"all three", map[string]any{"states": states, "transitions": transitions([]any{"author"}), "overridePermission": "notes.moderate", "repeat": "unchanged"},
-			[]string{`by on the transition from "draft" to "sent"`, "overridePermission", "repeat"}},
+		{"finished", map[string]any{"states": states, "transitions": transitions(nil, nil), "finished": map[string]any{"sent": "success"}},
+			[]string{"finished"}},
+		{"all four", map[string]any{"states": states, "transitions": transitions([]any{"author"}, nil), "overridePermission": "notes.moderate", "repeat": "unchanged", "finished": map[string]any{"sent": "success"}},
+			[]string{`by on the transition from "draft" to "sent"`, "overridePermission", "repeat", "finished"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadQuestions(t, engineType(tc.config))

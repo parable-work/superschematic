@@ -147,14 +147,19 @@ var StepQuotedFields = map[string]string{
 // stepSortColumns are the columns of Step's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var stepSortColumns = map[StepSortField]struct{ sql, key string }{
-	StepSortById:          {`step.id`, `page_key.id`},
-	StepSortByPosition:    {`step.position`, `page_key.position`},
-	StepSortByInstruction: {`step.instruction`, `page_key.instruction`},
-	StepSortByCreatedAt:   {`step.created_at`, `page_key.created_at`},
-	StepSortByUpdatedAt:   {`step.updated_at`, `page_key.updated_at`},
-	StepSortByEntityKey:   {`step.entity_key`, `page_key.entity_key`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var stepSortColumns = map[StepSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	StepSortById:          {`step.id`, `page_key.id`, false},
+	StepSortByPosition:    {`step.position`, `page_key.position`, false},
+	StepSortByInstruction: {`step.instruction`, `page_key.instruction`, false},
+	StepSortByScratch:     {`step.scratch`, `page_key.scratch`, true},
+	StepSortByCreatedAt:   {`step.created_at`, `page_key.created_at`, false},
+	StepSortByUpdatedAt:   {`step.updated_at`, `page_key.updated_at`, false},
+	StepSortByEntityKey:   {`step.entity_key`, `page_key.entity_key`, false},
 }
 
 // buildStepOrderByClause builds an ORDER BY clause for Step.
@@ -1639,7 +1644,7 @@ func (r *StepRepository) FindPage(ctx context.Context, filter *StepFilter, opts 
 	}
 	column, ok := stepSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Step sorts by id, position, instruction, createdAt, updatedAt and entityKey, not %q", string(field))
+		return nil, fmt.Errorf("orm: Step sorts by id, position, instruction, scratch, createdAt, updatedAt and entityKey, not %q", string(field))
 	}
 	byKey := field == StepSortById
 
@@ -1669,14 +1674,23 @@ func (r *StepRepository) FindPage(ctx context.Context, filter *StepFilter, opts 
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`step.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`step.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, step.id) %s ((SELECT %s FROM step AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, step.id) %s ((SELECT %s FROM step AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM step AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1684,6 +1698,9 @@ func (r *StepRepository) FindPage(ctx context.Context, filter *StepFilter, opts 
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, step.id %s`, direction)
 	}

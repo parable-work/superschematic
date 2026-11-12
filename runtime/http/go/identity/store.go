@@ -8,7 +8,8 @@ import (
 
 // The errors a Store returns, which the service turns into problems.
 var (
-	// ErrNotFound: no row has the id, token hash or login.
+	// ErrNotFound: no row has the id, token hash or login, or the user has
+	// no live API key with the id.
 	ErrNotFound = errors.New("identity: not found")
 	// ErrLoginTaken: another user has the login, in the login column's
 	// case rule.
@@ -17,6 +18,8 @@ var (
 	ErrRoleNameTaken = errors.New("identity: the role name is taken")
 	// ErrNoRoles: the schema has no UserRole table.
 	ErrNoRoles = errors.New("identity: the schema has no roles")
+	// ErrNoAPIKeys: the descriptor names no API key table (D114).
+	ErrNoAPIKeys = errors.New("identity: the schema has no API keys")
 	// ErrGrantExists: Bootstrap found a role grant, so someone holds a
 	// role already and the database is past its first administrator.
 	ErrGrantExists = errors.New("identity: a role grant exists")
@@ -88,6 +91,27 @@ type SessionRecord struct {
 	User    User
 }
 
+// APIKey is an API key row (D114).
+type APIKey struct {
+	ID     string
+	UserID string
+	Name   string
+	// Permissions are the permissions the key was made with. Nil means
+	// every permission its user holds; a list, empty included, means the
+	// ones it names.
+	Permissions []string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	LastUsedAt  *time.Time
+	RevokedAt   *time.Time
+}
+
+// APIKeyRecord is an API key and its user.
+type APIKeyRecord struct {
+	APIKey APIKey
+	User   User
+}
+
 // Role is a role row.
 type Role struct {
 	ID          string
@@ -144,12 +168,25 @@ type NewSession struct {
 	ExpiresAt time.Time
 }
 
+// NewAPIKeyRow is an API key the store creates (D114). NewAPIKey makes the
+// key's text, whose HashToken is TokenHash.
+type NewAPIKeyRow struct {
+	UserID    string
+	Name      string
+	TokenHash string
+	// Permissions are the permissions the key names, written as a role's
+	// are. Nil writes null: every permission its user holds.
+	Permissions []string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}
+
 // Store is the identity runtime's storage over the tables the core owns
 // and the project's user and role tables. Mutations the user model ties
 // together run in one transaction: SetPassword with its revocations,
-// SetDisabled with the revocations of a disable, CreateUser with the
-// credential, DeleteRole with the role's grants, and Bootstrap's role, user
-// and grant.
+// SetDisabled with the revocations of a disable, of sessions and API keys
+// alike, CreateUser with the credential, DeleteRole with the role's grants,
+// and Bootstrap's role, user and grant.
 type Store interface {
 	// FindLogin finds the user whose login equals login once the login
 	// scalar parses it, with their password hash. A login the scalar
@@ -178,7 +215,8 @@ type Store interface {
 	// oldHash, keeping passwordChangedAt: the same password at a new cost.
 	RehashPassword(ctx context.Context, userID, oldHash, newHash string) error
 	// SetDisabled sets the credential's disabledAt to at, or clears it.
-	// Disabling also revokes the user's sessions.
+	// Disabling also revokes the user's sessions and their live API keys,
+	// which enabling does not bring back.
 	SetDisabled(ctx context.Context, userID string, disabled bool, at time.Time) error
 
 	// CreateSession creates a session. The database generates its key.
@@ -194,6 +232,27 @@ type Store interface {
 	// RevokeUserSessions revokes every live session of the user but
 	// exceptSession (none when empty).
 	RevokeUserSessions(ctx context.Context, userID, exceptSession string, at time.Time) error
+
+	// HasAPIKeys reports whether the descriptor names an API key table
+	// (D114). Without one, FindAPIKey answers ErrNotFound and the other API
+	// key methods ErrNoAPIKeys.
+	HasAPIKeys() bool
+	// CreateAPIKey creates an API key. The database generates its key.
+	CreateAPIKey(ctx context.Context, k NewAPIKeyRow) (APIKey, error)
+	// FindAPIKey returns the API key whose token hash is tokenHash, and its
+	// user.
+	FindAPIKey(ctx context.Context, tokenHash string) (APIKeyRecord, error)
+	// TouchAPIKey sets lastUsedAt to at when it is null or before
+	// staleBefore, so concurrent requests write it once.
+	TouchAPIKey(ctx context.Context, keyID string, at, staleBefore time.Time) error
+	// ListAPIKeys returns the user's API keys that are not revoked, expired
+	// ones included, newest first: by createdAt descending, then by the
+	// database's key descending.
+	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)
+	// RevokeAPIKey sets revokedAt on the user's API key with keyID when it
+	// is null. A key that does not exist, is another user's or is revoked
+	// already is ErrNotFound.
+	RevokeAPIKey(ctx context.Context, userID, keyID string, at time.Time) error
 
 	// HasRoles reports whether the schema has a UserRole table. Without
 	// one, UserRoles answers none and the other role methods ErrNoRoles.

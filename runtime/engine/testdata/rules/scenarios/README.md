@@ -11,7 +11,10 @@ writes them, and `test/corpus.test.ts` does not list them.
 - `core-workflow-principals.json` (D104, step 1): who makes a Workflow
   transition (`by`, and the `overridePermission` past it), a move to the
   state a row is in answered as no change (`repeat: "unchanged"`), and the
-  state a caller read (`from`), which an engine type refuses.
+  state a caller read (`from`), which an engine type refuses; and a state
+  a transition leaves that has an outcome (`finished`, D113), a row
+  leaving it and entering it again, with its define refusals, which an
+  engine type refuses too.
 - `core-freezes-and-sign-offs.json` (D104, step 2): Constants' fields that
   move one way (`oneWay`: booleans, numbers and date-times, up and down,
   the permission past it, a value cleared and a create), who may change a

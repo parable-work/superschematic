@@ -1,6 +1,6 @@
 {
   "name": "core-workflow-principals",
-  "description": "Workflow's transitions on a table name who makes them (by, the overridePermission past it), a move to the state a row is in may answer as no change (repeat), and a caller may name the state it read (from), D104: cases written by hand in the recorded format, since the engine, which refuses all four, recorded none. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, an event's kind and change, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out. The test behavior test.Gate, which vetoes every Workflow transition of its row, is the reference host's fixture.",
+  "description": "Workflow's transitions on a table name who makes them (by, the overridePermission past it), a move to the state a row is in may answer as no change (repeat), and a caller may name the state it read (from), D104, and a state a transition leaves may count as finished (finished), D113: cases written by hand in the recorded format, since the engine, which refuses all five, recorded none. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, an event's kind and change, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out. The test behavior test.Gate, which vetoes every Workflow transition of its row, is the reference host's fixture.",
   "source": "written by hand (D104): runtime/engine/testdata/rules/scenarios/core-workflow-principals.json",
   "shared": {},
   "scenarios": [
@@ -4697,6 +4697,390 @@
             "name": "Question",
             "version": 1,
             "published": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > finished: a state a transition leaves has an outcome, a row leaves it and enters it again, and define refuses a state the config lacks and a terminal state",
+      "behaviors": [
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Task",
+              "types": {
+                "Task": {
+                  "name": "Task",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "todo",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "todo",
+                            "to": "done"
+                          },
+                          {
+                            "from": "todo",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "done",
+                            "to": "todo"
+                          }
+                        ],
+                        "outcomes": {
+                          "dropped": "neutral"
+                        },
+                        "finished": {
+                          "lost": "success"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Task/behaviors/0/config: type Task: behavior Workflow config: finished names \"lost\", which is not one of its states (todo, done, dropped)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Task/behaviors/0/config",
+                  "message": "type Task: behavior Workflow config: finished names \"lost\", which is not one of its states (todo, done, dropped)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Task",
+              "types": {
+                "Task": {
+                  "name": "Task",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "todo",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "todo",
+                            "to": "done"
+                          },
+                          {
+                            "from": "todo",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "done",
+                            "to": "todo"
+                          }
+                        ],
+                        "outcomes": {
+                          "dropped": "neutral"
+                        },
+                        "finished": {
+                          "dropped": "neutral"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Task/behaviors/0/config: type Task: behavior Workflow config: finished names \"dropped\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Task/behaviors/0/config",
+                  "message": "type Task: behavior Workflow config: finished names \"dropped\", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Task",
+              "types": {
+                "Task": {
+                  "name": "Task",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "config": {
+                        "states": [
+                          "todo",
+                          "done",
+                          "dropped"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "todo",
+                            "to": "done"
+                          },
+                          {
+                            "from": "todo",
+                            "to": "dropped"
+                          },
+                          {
+                            "from": "done",
+                            "to": "todo"
+                          }
+                        ],
+                        "outcomes": {
+                          "dropped": "neutral"
+                        },
+                        "finished": {
+                          "done": "success"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Task",
+            "version": null,
+            "instanceType": "Task"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Task"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Task",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Task",
+            {
+              "title": "Sweep"
+            },
+            {
+              "id": "t1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Task",
+            "id": "t1",
+            "data": {
+              "title": "Sweep"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "todo",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Task",
+            "t1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "now": 1005000,
+          "expect": {
+            "from": "todo",
+            "to": "done"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Task",
+            "t1",
+            "transition",
+            {
+              "to": "todo"
+            }
+          ],
+          "now": 1010000,
+          "expect": {
+            "from": "done",
+            "to": "todo"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Task",
+            "t1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "now": 1015000,
+          "expect": {
+            "from": "todo",
+            "to": "done"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Task",
+            "t1",
+            "transition",
+            {
+              "to": "dropped"
+            }
+          ],
+          "now": 1020000,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Task t1: no transition leads from done to dropped; from done it can move to todo",
+            "details": {
+              "behavior": "Workflow",
+              "action": "transition",
+              "reason": "no transition leads from done to dropped; from done it can move to todo",
+              "vetoCode": "transition_not_allowed",
+              "vetoDetails": {
+                "from": "done",
+                "to": "dropped",
+                "allowed": [
+                  "todo"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Task",
+            "t1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Task",
+            "id": "t1",
+            "data": {
+              "title": "Sweep"
+            },
+            "behaviors": {
+              "Workflow": {
+                "status": "done",
+                "enteredAt": 1015000
+              }
+            }
           }
         }
       ]

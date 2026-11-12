@@ -149,6 +149,22 @@ adds the Session and UserCredential tables beside it, and both APIs sign
 users in and out with the identity runtime. The trait is imported as
 UserTrait, since the table is named User too.';
 
+CREATE TABLE user_api_key (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  user_id UUID NOT NULL,
+  "name" TEXT NOT NULL,
+  token_hash VARCHAR(64) NOT NULL,
+  permissions TEXT[],
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  expires_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  last_used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  UNIQUE (token_hash),
+  CONSTRAINT ck_user_api_key_name CHECK (length("name") >= 1 AND length("name") <= 100)
+);
+
+COMMENT ON TABLE user_api_key IS 'An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.';
+
 CREATE TABLE user_credential (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   user_id UUID NOT NULL,
@@ -258,6 +274,12 @@ ALTER TABLE "session"
   REFERENCES "user"(id)
   ON DELETE CASCADE;
 
+ALTER TABLE user_api_key
+  ADD CONSTRAINT fk_user_api_key_user_id
+  FOREIGN KEY (user_id)
+  REFERENCES "user"(id)
+  ON DELETE CASCADE;
+
 ALTER TABLE user_credential
   ADD CONSTRAINT fk_user_credential_user_id
   FOREIGN KEY (user_id)
@@ -289,6 +311,8 @@ CREATE UNIQUE INDEX uq_review_one_per_author ON review USING BTREE (product_id, 
 CREATE INDEX idx_review_search_trgm ON review USING GIN (search_text gin_trgm_ops);
 
 CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
+
+CREATE INDEX idx_user_api_key_user ON user_api_key USING BTREE (user_id);
 
 CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);
 

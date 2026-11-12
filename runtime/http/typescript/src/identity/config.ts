@@ -3,17 +3,19 @@ import { parseGoURL } from './url.js';
 /*
 The identity config, the JSON the Go, TypeScript and Rust identity runtimes
 read the same way (D50): the session's lifetime, idle timeout and touch
-interval, the session cookie, the origins a cookie request may come from,
-and the password hash's cost. Every member is optional and null takes its
-default; parseIdentityConfig refuses unknown members at every level, a
-number that is not an integer, and anything the rules below refuse, and
-returns the config the runtime runs with, every member present.
+interval, the longest an API key lives (D114), the session cookie, the
+origins a cookie request may come from, and the password hash's cost.
+Every member is optional and null takes its default; parseIdentityConfig
+refuses unknown members at every level, a number that is not an integer,
+and anything the rules below refuse, and returns the config the runtime
+runs with, every member present.
 runtime/http/testdata/README.md states the rules the parity vectors pin.
 */
 
 /** The config's defaults. */
 export const DEFAULT_SESSION_TTL_SECONDS = 14 * 24 * 60 * 60;
 export const DEFAULT_TOUCH_INTERVAL_SECONDS = 60;
+export const DEFAULT_API_KEY_MAX_TTL_SECONDS = 365 * 24 * 60 * 60;
 export const DEFAULT_SAME_SITE = 'Lax';
 export const DEFAULT_ARGON2_MEMORY_KIB = 19456;
 export const DEFAULT_ARGON2_ITERATIONS = 2;
@@ -49,8 +51,10 @@ export interface IdentityConfig {
   readonly sessionTtlSeconds: number;
   /** A session not seen for this long ends; 0 is no idle timeout. */
   readonly idleTimeoutSeconds: number;
-  /** How often a request writes a session's lastSeenAt, at most; 0 writes it on every request. */
+  /** How often a request writes a session's lastSeenAt, or an API key's lastUsedAt, at most; 0 writes it on every request. */
   readonly touchIntervalSeconds: number;
+  /** The longest an API key lasts (D114), and how long one lasts when its create names no lifetime. */
+  readonly apiKeyMaxTtlSeconds: number;
   readonly cookie: {
     readonly name: string;
     /** The cookie's Domain attribute, so APIs on sibling hosts share the session; empty for none. */
@@ -68,6 +72,7 @@ export interface IdentityConfigInput {
   sessionTtlSeconds?: number | null;
   idleTimeoutSeconds?: number | null;
   touchIntervalSeconds?: number | null;
+  apiKeyMaxTtlSeconds?: number | null;
   cookie?: {
     name?: string | null;
     domain?: string | null;
@@ -107,7 +112,7 @@ export function parseIdentityConfigJSON(text: string): IdentityConfig {
 }
 
 /** Whether JSON text holds a number written with a fraction or an exponent. */
-function hasNonIntegerLexeme(text: string): boolean {
+export function hasNonIntegerLexeme(text: string): boolean {
   let inString = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
@@ -166,10 +171,11 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
     return value;
   };
 
-  checkMembers(root, '', ['sessionTtlSeconds', 'idleTimeoutSeconds', 'touchIntervalSeconds', 'cookie', 'trustedOrigins', 'password'], add);
+  checkMembers(root, '', ['sessionTtlSeconds', 'idleTimeoutSeconds', 'touchIntervalSeconds', 'apiKeyMaxTtlSeconds', 'cookie', 'trustedOrigins', 'password'], add);
   const ttl = integer(root, '', 'sessionTtlSeconds');
   const idle = integer(root, '', 'idleTimeoutSeconds');
   const touch = integer(root, '', 'touchIntervalSeconds');
+  const keyTtl = integer(root, '', 'apiKeyMaxTtlSeconds');
 
   const cookieInput = root?.cookie === null || root?.cookie === undefined ? undefined : objectOf(root.cookie, 'cookie', add);
   checkMembers(cookieInput, 'cookie.', ['name', 'domain', 'secure', 'sameSite'], add);
@@ -216,6 +222,7 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
       `touchIntervalSeconds (${touchSeconds}) must be less than idleTimeoutSeconds (${idleSeconds}), or a session idles out between two writes of lastSeenAt`
     );
   }
+  if (keyTtl !== undefined && keyTtl <= 0) add(`apiKeyMaxTtlSeconds must be positive, not ${keyTtl}`);
 
   let sameSite: SameSite = DEFAULT_SAME_SITE;
   switch (sameSiteInput) {
@@ -263,6 +270,7 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
     sessionTtlSeconds: ttl ?? DEFAULT_SESSION_TTL_SECONDS,
     idleTimeoutSeconds: idleSeconds,
     touchIntervalSeconds: touchSeconds,
+    apiKeyMaxTtlSeconds: keyTtl ?? DEFAULT_API_KEY_MAX_TTL_SECONDS,
     cookie: { name: cookieNameOf(cookieName, domain, secure), domain, secure, sameSite },
     trustedOrigins,
     password: { argon2 },

@@ -15,15 +15,18 @@ import (
 const DescriptorVersion = 1
 
 // Descriptor is a schema's identity descriptor: the tables that hold its
-// users, sessions, credentials, roles and role grants, and which column of
-// each plays which part. The DB build writes it as identity/<schema>.json
-// and as the Go types' IdentityDescriptor constant;
+// users, sessions, credentials, API keys, roles and role grants, and which
+// column of each plays which part. The DB build writes it as
+// identity/<schema>.json and as the Go types' IdentityDescriptor constant;
 // internal/generator/identitydesc/README.md is its contract.
 type Descriptor struct {
 	Version    int                  `json:"version"`
 	User       DescriptorUser       `json:"user"`
 	Session    DescriptorSession    `json:"session"`
 	Credential DescriptorCredential `json:"credential"`
+	// APIKey is nil in a descriptor written before the UserApiKey table
+	// (D114): its store has no API keys.
+	APIKey *DescriptorAPIKey `json:"apiKey,omitempty"`
 	// Role and RoleGrant are nil when the schema has no UserRole table.
 	Role      *DescriptorRole      `json:"role,omitempty"`
 	RoleGrant *DescriptorRoleGrant `json:"roleGrant,omitempty"`
@@ -70,6 +73,22 @@ type DescriptorCredential struct {
 	} `json:"columns"`
 }
 
+// DescriptorAPIKey is the UserApiKey table the loader adds (D114).
+type DescriptorAPIKey struct {
+	Table   string `json:"table"`
+	Columns struct {
+		ID          string `json:"id"`
+		User        string `json:"user"`
+		Name        string `json:"name"`
+		TokenHash   string `json:"tokenHash"`
+		Permissions string `json:"permissions"`
+		CreatedAt   string `json:"createdAt"`
+		ExpiresAt   string `json:"expiresAt"`
+		LastUsedAt  string `json:"lastUsedAt"`
+		RevokedAt   string `json:"revokedAt"`
+	} `json:"columns"`
+}
+
 // DescriptorRole is the table with the UserRole trait.
 type DescriptorRole struct {
 	Type    string `json:"type"`
@@ -97,7 +116,8 @@ type DescriptorRoleGrant struct {
 // ParseDescriptor reads an identity descriptor. It refuses any version but
 // DescriptorVersion, unknown members, an empty name, a role table without
 // its grant table or the other way round, and a name holding a NUL, which
-// no quoting can carry.
+// no quoting can carry. A descriptor without apiKey is one written before
+// D114, and is read as it was.
 func ParseDescriptor(data []byte) (Descriptor, error) {
 	var d Descriptor
 	if err := checkMemberNames(data, reflect.TypeOf(d)); err != nil {
@@ -126,6 +146,12 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 		"credential.columns.user": d.Credential.Columns.User, "credential.columns.passwordHash": d.Credential.Columns.PasswordHash,
 		"credential.columns.passwordChangedAt": d.Credential.Columns.PasswordChangedAt, "credential.columns.disabledAt": d.Credential.Columns.DisabledAt,
 		"credential.columns.pendingAt": d.Credential.Columns.PendingAt,
+	}
+	if k := d.APIKey; k != nil {
+		names["apiKey.table"], names["apiKey.columns.id"], names["apiKey.columns.user"] = k.Table, k.Columns.ID, k.Columns.User
+		names["apiKey.columns.name"], names["apiKey.columns.tokenHash"], names["apiKey.columns.permissions"] = k.Columns.Name, k.Columns.TokenHash, k.Columns.Permissions
+		names["apiKey.columns.createdAt"], names["apiKey.columns.expiresAt"] = k.Columns.CreatedAt, k.Columns.ExpiresAt
+		names["apiKey.columns.lastUsedAt"], names["apiKey.columns.revokedAt"] = k.Columns.LastUsedAt, k.Columns.RevokedAt
 	}
 	if r := d.Role; r != nil {
 		names["role.type"], names["role.table"], names["role.keyScalar"] = r.Type, r.Table, r.KeyScalar

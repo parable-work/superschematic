@@ -417,9 +417,10 @@ function likeText(text: string): string {
 
 /**
  * A request's filter (FilterBy) as the repository's filter (orm.ts): each
- * field's member the row's member of the same name, eq, in, gt, gte, lt,
- * lte and isNull as they are, and contains the repository's ilike, the
- * text it holds in any case, with what a pattern reads otherwise escaped.
+ * field's member the row's member of the same name, eq, ne, in, notIn, gt,
+ * gte, lt, lte and isNull as they are, and contains the repository's
+ * ilike, the text it holds in any case, with what a pattern reads
+ * otherwise escaped.
  */
 export function tableFilter(filter: RequestFilter): Record<string, Record<string, unknown>> {
   const out: [string, Record<string, unknown>][] = [];

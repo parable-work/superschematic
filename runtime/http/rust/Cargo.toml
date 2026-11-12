@@ -94,8 +94,8 @@ rustls = { version = "0.23.45", default-features = false, features = ["ring", "s
 # default metadata client of GoogleIdTokenSource. Without it, a service
 # passes its own KeyFetcher or HttpGetter.
 http-client = ["dep:reqwest"]
-# The user model's runtime (D50): passwords, sessions, roles and the
-# session and administration routes, over an identity store. The store runs
+# The user model's runtime (D50): passwords, sessions, API keys (D114),
+# roles and the session and administration routes, over an identity store. The store runs
 # its SQL through a client the service binds; the two features below add
 # the default bindings. A password hash runs on tokio's blocking pool.
 identity = ["dep:argon2", "tokio/rt"]

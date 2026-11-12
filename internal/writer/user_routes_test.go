@@ -13,8 +13,8 @@ import (
 
 // TestRoundTripsUserRoutes: fixture-user-routes-api written in each format
 // and read back over its authDb is the same expanded IR. Every format writes
-// the route sets' decorators or keys, and none writes the operations, types
-// or enum the loader fills them with.
+// the route sets' decorators or keys, apiKeys on both (D114), and none
+// writes the operations, types or enum the loader fills them with.
 func TestRoundTripsUserRoutes(t *testing.T) {
 	schema, err := loader.LoadService(tsFixtures + "/fixture-user-routes-api")
 	if err != nil {
@@ -28,12 +28,14 @@ func TestRoundTripsUserRoutes(t *testing.T) {
 	contains := map[Format][]string{
 		FormatTS: {
 			`import { Authenticated, HttpMethod, rest, userAdministration, userSessions } from "@superschematic/api";`,
-			"// administrator (D81).\n@userSessions({ register: true, registration: \"approval\", defaultRoles: [\"member\"], firstUser: { role: \"admin\", permissions: [\"identity\"] } })\nexport class Account {}\n",
-			"@userAdministration()\nexport class AccountAdmin {}\n",
+			"// administrator (D81). A signed-in user makes API keys (D114).\n@userSessions({ register: true, registration: \"approval\", defaultRoles: [\"member\"], firstUser: { role: \"admin\", permissions: [\"identity\"] }, apiKeys: true })\nexport class Account {}\n",
+			"// any user's API keys.\n@userAdministration({ apiKeys: true })\nexport class AccountAdmin {}\n",
 		},
-		FormatJSON: {`"userSessions": {`, `"register": true`, `"registration": "approval"`, `"defaultRoles": [`, `"firstUser": {`, `"userAdministration": {}`, `"operations": []`},
-		FormatYAML: {"userSessions:\n", "register: true", "registration: approval", "defaultRoles:", "firstUser:", "userAdministration: {}", "operations: []"},
+		FormatJSON: {`"userSessions": {`, `"register": true`, `"registration": "approval"`, `"defaultRoles": [`, `"firstUser": {`, `"userAdministration": {`, `"apiKeys": true`, `"operations": []`},
+		FormatYAML: {"userSessions:\n", "register: true", "registration: approval", "defaultRoles:", "firstUser:", "userAdministration:\n", "apiKeys: true", "operations: []"},
 	}
+	// Each set writes its own apiKeys, once.
+	apiKeys := map[Format]string{FormatTS: "apiKeys: true", FormatJSON: `"apiKeys": true`, FormatYAML: "apiKeys: true"}
 	for _, format := range []Format{FormatTS, FormatJSON, FormatYAML} {
 		t.Run(string(format), func(t *testing.T) {
 			dir := t.TempDir()
@@ -53,7 +55,11 @@ func TestRoundTripsUserRoutes(t *testing.T) {
 					t.Errorf("written %s lacks %q:\n%s", format, want, source)
 				}
 			}
-			for _, added := range []string{ir.IdentityLoginInputType, ir.IdentitySessionTransportEnum, "changePassword", "auth/login", "identity.users"} {
+			if got := strings.Count(source, apiKeys[format]); got != 2 {
+				t.Errorf("written %s has %q %d times, want once for each route set", format, apiKeys[format], got)
+			}
+			added := []string{ir.IdentityLoginInputType, ir.IdentitySessionTransportEnum, "changePassword", "auth/login", "identity.users", "createApiKey", "listUserApiKeys", "auth/keys"}
+			for _, added := range append(added, ir.IdentityAPIKeyTypes...) {
 				if strings.Contains(source, added) {
 					t.Errorf("written %s carries the loader's %s:\n%s", format, added, source)
 				}
@@ -110,5 +116,83 @@ func TestTSWriterWritesRouteConfigs(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Errorf("written TypeScript lacks %q:\n%s", want, source)
 		}
+	}
+}
+
+// TestTSWriterWritesAPIKeys: the TypeScript writer writes apiKeys: true
+// (D114) on the decorator of the set that has it, after its other keys,
+// and nothing for a set without it.
+func TestTSWriterWritesAPIKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		sessions ir.UserSessionsConfig
+		admin    ir.UserAdministrationConfig
+		want     []string
+	}{
+		{
+			name:     "both sets",
+			sessions: ir.UserSessionsConfig{APIKeys: true},
+			admin:    ir.UserAdministrationConfig{APIKeys: true},
+			want: []string{
+				"@userSessions({ apiKeys: true })\nexport class Account {}\n",
+				"@userAdministration({ apiKeys: true })\nexport class Staff {}\n",
+			},
+		},
+		{
+			name:     "after the other keys",
+			sessions: ir.UserSessionsConfig{Path: "account", Register: true, APIKeys: true},
+			admin:    ir.UserAdministrationConfig{Path: "staff/admin", APIKeys: true},
+			want: []string{
+				"@userSessions({ path: \"account\", register: true, apiKeys: true })\nexport class Account {}\n",
+				"@userAdministration({ path: \"staff/admin\", apiKeys: true })\nexport class Staff {}\n",
+			},
+		},
+		{
+			name:     "the sessions alone",
+			sessions: ir.UserSessionsConfig{APIKeys: true},
+			want: []string{
+				"@userSessions({ apiKeys: true })\nexport class Account {}\n",
+				"@userAdministration()\nexport class Staff {}\n",
+			},
+		},
+		{
+			name:  "the administration alone",
+			admin: ir.UserAdministrationConfig{APIKeys: true},
+			want: []string{
+				"@userSessions()\nexport class Account {}\n",
+				"@userAdministration({ apiKeys: true })\nexport class Staff {}\n",
+			},
+		},
+		{
+			name: "neither",
+			want: []string{
+				"@userSessions()\nexport class Account {}\n",
+				"@userAdministration()\nexport class Staff {}\n",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := ir.NewSchema("api", ir.SchemaKindAPI)
+			schema.OperationSets = []*ir.OperationSet{
+				{Name: "Account", Operations: []*ir.FieldDef{}, UserSessions: &tc.sessions},
+				{Name: "Staff", Operations: []*ir.FieldDef{}, UserAdministration: &tc.admin},
+			}
+			source := writtenSource(t, schema, FormatTS)
+			for _, want := range tc.want {
+				if !strings.Contains(source, want) {
+					t.Errorf("written TypeScript lacks %q:\n%s", want, source)
+				}
+			}
+			wantCount := 0
+			if tc.sessions.APIKeys {
+				wantCount++
+			}
+			if tc.admin.APIKeys {
+				wantCount++
+			}
+			if got := strings.Count(source, "apiKeys"); got != wantCount {
+				t.Errorf("written TypeScript mentions apiKeys %d times, want %d:\n%s", got, wantCount, source)
+			}
+		})
 	}
 }

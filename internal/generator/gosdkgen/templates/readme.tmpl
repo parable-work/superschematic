@@ -27,15 +27,16 @@ Generated Go SDK for the `{{.SchemaName}}` API. Auto-generated from GraphQL sche
 ## Filters
 
 A filtered method takes its filter in its query parameters. Each member
-is a field's filter, nil for none: `Eq` and `In` on every field, `Gt`,
-`Gte`, `Lt` and `Lte` on a number, a date and a time, `Contains` on text,
-and `IsNull` on a field that may be null. The list keeps the rows every
-member holds for, and the route refuses a field, an operator or a value
-it does not take. Before the request the method refuses, with a
-`*namespaces.ValidationError`, what the route would not read as it was
-given: an `In` of more than {{$.FilterMaxInValues}} values, or of a value that is blank or
-holds a comma or surrounding space, a `Contains` of no text, and more
-than {{$.FilterMaxFilters}} filters. A cursor holds no filter, so ask for each next page
+is a field's filter, nil for none: `Eq` and `In` on every field, and `Ne`
+and `NotIn`, which keep the rows those two leave out, a row whose field
+is null among them; `Gt`, `Gte`, `Lt` and `Lte` on a number, a date and a
+time, `Contains` on text, and `IsNull` on a field that may be null. The
+list keeps the rows every member holds for, and the route refuses a
+field, an operator or a value it does not take. Before the request the
+method refuses, with a `*namespaces.ValidationError`, what the route
+would not read as it was given: an `In` or a `NotIn` of more than {{$.FilterMaxInValues}}
+values, or of a value that is blank or holds a comma or surrounding
+space, a `Contains` of no text, and more than {{$.FilterMaxFilters}} filters. A cursor holds no filter, so ask for each next page
 with the same one.
 
 ```go

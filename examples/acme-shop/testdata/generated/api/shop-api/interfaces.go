@@ -52,7 +52,7 @@ type ProductImplementation interface {
 // not filter by, each operator the request sent set on it. Every member set
 // holds at once.
 type ProductListProductsFilter struct {
-	// InStock filters by inStock: eq, in.
+	// InStock filters by inStock: eq, ne, in, notIn.
 	InStock *filterparse.Equals[bool]
 }
 

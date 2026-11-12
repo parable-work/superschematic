@@ -38,11 +38,11 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 	if len(output.Endpoints) != 1 || output.Endpoints[0].Name != "greet" || !slices.Equal(output.Namespaces, []string{"greeting"}) {
 		t.Errorf("endpoints %+v, namespaces %v; want greet alone", output.Endpoints, output.Namespaces)
 	}
-	if len(output.IdentityEndpoints) != 19 || output.Identity == nil || output.Identity.AuthDB != "fixture-user-model-db" {
-		t.Fatalf("%d identity endpoints, identity %+v; want the 19 of the user model's routes over fixture-user-model-db", len(output.IdentityEndpoints), output.Identity)
+	if len(output.IdentityEndpoints) != 24 || output.Identity == nil || output.Identity.AuthDB != "fixture-user-model-db" {
+		t.Fatalf("%d identity endpoints, identity %+v; want the 24 of the user model's routes over fixture-user-model-db", len(output.IdentityEndpoints), output.Identity)
 	}
 	generated := writeGoldenAPI(t, userRoutesAPI, output)
-	for _, absent := range []string{"login", "change_password", "account", "Login"} {
+	for _, absent := range []string{"login", "change_password", "account", "Login", "api_key", "ApiKey"} {
 		if strings.Contains(generated["src/interfaces.rs"], absent) {
 			t.Errorf("src/interfaces.rs mentions %s, which the identity runtime serves", absent)
 		}
@@ -58,9 +58,30 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 			".rate_limiter(limits.of(&crate::operations::ACCOUNT_LOGIN))\n        .apply(identity_handler(&identity_service, identity::OP_LOGIN));\n    router = router.route(\"/api/auth/login\", route);",
 			`router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);`,
 			".layer(identity_service.cors())",
+			// The API key routes (D114): createApiKey behind its rate limit
+			// and a caller, the others behind a caller.
+			"let route = RouteControls::new()\n        .rate_limiter(limits.of(&crate::operations::ACCOUNT_CREATE_API_KEY))\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_CREATE_API_KEY));\n    router = router.route(\"/api/auth/keys\", route);",
+			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_LIST_API_KEYS));\n    router = router.route(\"/api/auth/keys\", route);",
+			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_REVOKE_API_KEY));\n    router = router.route(\"/api/auth/keys/{id}\", route);",
+			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_LIST_USER_API_KEYS));\n    router = router.route(\"/api/auth/admin/users/{id}/keys\", route);",
+			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_REVOKE_USER_API_KEY));\n    router = router.route(\"/api/auth/admin/users/{id}/keys/{keyId}\", route);",
 		},
-		"src/operations.rs": {"pub const ACCOUNT_ADMIN_GRANT_ROLE: OperationInfo", `permissions: &["identity.roles.write"],`},
-		"src/identity.rs":   {`Route::of("AccountLoginHandler", &operations::ACCOUNT_LOGIN),`, `Route::of("GreetingGreetHandler", &operations::GREETING_GREET),`},
+		"src/operations.rs": {
+			"pub const ACCOUNT_ADMIN_GRANT_ROLE: OperationInfo", `permissions: &["identity.roles.write"],`,
+			"pub const ACCOUNT_CREATE_API_KEY: OperationInfo = OperationInfo {\n    namespace: \"account\",\n    name: \"createApiKey\",\n    method: \"POST\",\n    path: \"/api/auth/keys\",\n    requires_auth: true,\n    permissions: &[],\n    require_ownership: false,\n    manual: false,\n    rate_limit: Some(10),\n",
+			"pub const ACCOUNT_LIST_API_KEYS: OperationInfo = OperationInfo {\n    namespace: \"account\",\n    name: \"listApiKeys\",\n    method: \"GET\",\n    path: \"/api/auth/keys\",\n    requires_auth: true,\n    permissions: &[],\n    require_ownership: false,\n    manual: false,\n    rate_limit: None,\n",
+			"pub const ACCOUNT_REVOKE_API_KEY: OperationInfo = OperationInfo {\n    namespace: \"account\",\n    name: \"revokeApiKey\",\n    method: \"DELETE\",\n    path: \"/api/auth/keys/{id}\",\n    requires_auth: true,\n    permissions: &[],\n    require_ownership: false,\n    manual: false,\n    rate_limit: None,\n",
+			"pub const ACCOUNT_ADMIN_LIST_USER_API_KEYS: OperationInfo = OperationInfo {\n    namespace: \"account-admin\",\n    name: \"listUserApiKeys\",\n    method: \"GET\",\n    path: \"/api/auth/admin/users/{id}/keys\",\n    requires_auth: true,\n    permissions: &[\"identity.users.read\"],\n",
+			"pub const ACCOUNT_ADMIN_REVOKE_USER_API_KEY: OperationInfo = OperationInfo {\n    namespace: \"account-admin\",\n    name: \"revokeUserApiKey\",\n    method: \"DELETE\",\n    path: \"/api/auth/admin/users/{id}/keys/{keyId}\",\n    requires_auth: true,\n    permissions: &[\"identity.users.write\"],\n",
+		},
+		"src/identity.rs": {
+			`Route::of("AccountLoginHandler", &operations::ACCOUNT_LOGIN),`, `Route::of("GreetingGreetHandler", &operations::GREETING_GREET),`,
+			`Route::of("AccountCreateApiKeyHandler", &operations::ACCOUNT_CREATE_API_KEY),`,
+			`Route::of("AccountListApiKeysHandler", &operations::ACCOUNT_LIST_API_KEYS),`,
+			`Route::of("AccountRevokeApiKeyHandler", &operations::ACCOUNT_REVOKE_API_KEY),`,
+			`Route::of("AccountAdminListUserApiKeysHandler", &operations::ACCOUNT_ADMIN_LIST_USER_API_KEYS),`,
+			`Route::of("AccountAdminRevokeUserApiKeyHandler", &operations::ACCOUNT_ADMIN_REVOKE_USER_API_KEY),`,
+		},
 	} {
 		for _, text := range want {
 			if !strings.Contains(generated[file], text) {
@@ -73,8 +94,10 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 	if strings.Contains(generated["src/router.rs"], `"identity.`) {
 		t.Error("src/router.rs checks an administration route's permission, which the identity runtime's handler checks")
 	}
-	if !strings.Contains(generated["openapi.json"], "/api/auth/login") {
-		t.Error("openapi.json does not describe the user model's routes")
+	for _, path := range []string{`"/api/auth/login"`, `"/api/auth/keys"`, `"/api/auth/keys/{id}"`, `"/api/auth/admin/users/{id}/keys"`, `"/api/auth/admin/users/{id}/keys/{keyId}"`} {
+		if !strings.Contains(generated["openapi.json"], path) {
+			t.Errorf("openapi.json does not describe the user model's route %s", path)
+		}
 	}
 	if !strings.Contains(output.PermissionCatalogJSON, `"identity.roles.write"`) {
 		t.Error("the crate carries no permissions.json with the administration routes' permissions")
@@ -86,7 +109,7 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 	}
 
 	alone := generateRustAPI(t, userRoutesAPI, false, "", nil, routesOnly)
-	if len(alone.Endpoints) != 0 || len(alone.Namespaces) != 0 || len(alone.IdentityEndpoints) != 19 || !alone.HasAuth || alone.Identity == nil {
+	if len(alone.Endpoints) != 0 || len(alone.Namespaces) != 0 || len(alone.IdentityEndpoints) != 24 || !alone.HasAuth || alone.Identity == nil {
 		t.Errorf("the route sets alone: endpoints %+v, namespaces %v, %d identity endpoints, HasAuth %v, identity %+v", alone.Endpoints, alone.Namespaces, len(alone.IdentityEndpoints), alone.HasAuth, alone.Identity)
 	}
 }
@@ -168,7 +191,8 @@ const identityTestDatabaseEnv = "SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL"
 // session cookie a browser holds (identityRoundtripTest): register, login,
 // me, capabilities, the project's own route, changePassword and logout; an
 // administrator who writes and grants a role within their own permissions
-// and no further; a cookie login, a cross-origin refusal, a trusted
+// and no further; an API key (D114) from the session that makes it to its
+// revocation; a cookie login, a cross-origin refusal, a trusted
 // origin's CORS, a refused cookie cleared; and login's rate limit. Each
 // runs on SQLite, and on the Postgres database identityTestDatabaseEnv
 // names when it is set.
@@ -451,6 +475,102 @@ async fn bearer_session(implementations: Implementations) {
     assert!(ada.account.logout(None).await.unwrap());
     let err = ada.account.me(None).await.unwrap_err();
     assert_eq!(err.status_code(), Some(401), "{err}");
+}
+
+#[tokio::test]
+async fn an_api_key_calls_as_its_user() {
+    for database in databases().await {
+        api_keys(implementations(&database).await).await;
+        database.close().await;
+    }
+}
+
+fn key(name: &str, permissions: Option<&[&str]>) -> types::CreateApiKeyInput {
+    types::CreateApiKeyInput {
+        name: name.to_string(),
+        expires_in_seconds: None,
+        permissions: permissions.map(|list| list.iter().map(|permission| permission.to_string()).collect()),
+    }
+}
+
+/// A session makes an API key (D114) with a subset of its user's
+/// permissions, and one with none. The key calls as its user, holding what
+/// it names, and acts on no account of its own; its user and an
+/// administrator revoke it, and a revoked key is the 401 of any unknown
+/// token.
+async fn api_keys(implementations: Implementations) {
+    let base_url = serve(implementations).await;
+    let anonymous = sdk(&base_url, None);
+    let admin = sdk(&base_url, anonymous.account.login(login(ADMIN, ADMIN_PASSWORD), None).await.unwrap().token);
+    let admin_id = admin.account.me(None).await.unwrap().user.id;
+
+    // A key names only what its user holds: the administrator holds
+    // identity, and not orders.write.
+    let err = admin.account.create_api_key(key("seller", Some(&["orders.write"])), None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+    assert_eq!(err.problem().unwrap().details, Some(json!({"permissions": ["orders.write"]})));
+    let err = admin.account.create_api_key(key("bad", Some(&["not a permission"])), None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(422), Some("invalid_permission")), "{err}");
+    let mut input = key("  triage agent ", Some(&["identity.users.read"]));
+    input.expires_in_seconds = Some(3600);
+    let made = admin.account.create_api_key(input, None).await.unwrap();
+    assert!(made.token.starts_with("key_") && made.token.len() == 47, "{made:?}");
+    assert_eq!(made.name, "triage agent");
+    assert_eq!(made.permissions, Some(vec!["identity.users.read".to_string()]));
+    let whole = admin.account.create_api_key(key("everything", None), None).await.unwrap();
+    assert!(whole.permissions.is_none(), "{whole:?}");
+
+    // The key calls as its user, holding the permissions it names.
+    let agent = sdk(&base_url, Some(made.token.clone()));
+    assert_eq!(agent.greeting.greet(None).await.unwrap().message, "Hello, Admin");
+    let me = agent.account.me(None).await.unwrap();
+    assert_eq!(me.user.login, ADMIN);
+    assert_eq!(me.permissions, ["identity.users.read"], "{me:?}");
+    let users = agent.account_admin.list_users(ListUsersInput { pending: None }, None).await.unwrap();
+    assert_eq!(users.len(), 1, "{users:?}");
+    let viewer = types::RoleInput { name: "viewer".to_string(), permissions: vec!["identity.users.read".to_string()] };
+    let err = agent.account_admin.create_role(viewer, None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+    let capabilities = agent.account.capabilities(None).await.unwrap().operations;
+    assert_eq!(capabilities.get("AccountAdminListUserApiKeysHandler"), Some(&true), "{capabilities:?}");
+    assert_eq!(capabilities.get("AccountAdminRevokeUserApiKeyHandler"), Some(&false), "{capabilities:?}");
+    let everything = sdk(&base_url, Some(whole.token.clone()));
+    assert_eq!(everything.account.me(None).await.unwrap().permissions, ["identity"]);
+
+    // A key does not act on its own account, so a leaked one makes no key,
+    // revokes none, signs no one out and changes no password.
+    let err = agent.account.create_api_key(key("another", None), None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+    let err = agent.account.list_api_keys(None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+    let err = agent.account.revoke_api_key(whole.id, None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+    let err = agent.account.logout(None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+    let change = types::ChangePasswordInput { current: ADMIN_PASSWORD.to_string(), password: "battery staple".to_string() };
+    let err = everything.account.change_password(change, None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
+
+    // The list holds both keys, each used; its type has no token.
+    let listed = admin.account.list_api_keys(None).await.unwrap();
+    let mut names: Vec<&str> = listed.iter().map(|key| key.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["everything", "triage agent"]);
+    assert!(listed.iter().all(|key| key.last_used_at.is_some()), "{listed:?}");
+    assert_eq!(admin.account_admin.list_user_api_keys(admin_id, None).await.unwrap().len(), 2);
+
+    // An administrator revokes a user's key and the user their own.
+    assert!(admin.account_admin.revoke_user_api_key(admin_id, whole.id, None).await.unwrap());
+    let err = everything.greeting.greet(None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(401), Some("unauthorized")), "{err}");
+    assert!(admin.account.revoke_api_key(made.id, None).await.unwrap());
+    let err = agent.greeting.greet(None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(401), Some("unauthorized")), "{err}");
+    let err = admin.account.revoke_api_key(made.id, None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(404), Some("not_found")), "{err}");
+    assert!(admin.account.list_api_keys(None).await.unwrap().is_empty());
+    // The session that made them lives on.
+    assert_eq!(admin.account.me(None).await.unwrap().user.login, ADMIN);
 }
 
 #[tokio::test]

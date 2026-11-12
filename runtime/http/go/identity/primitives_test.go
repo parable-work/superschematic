@@ -17,16 +17,22 @@ import (
 // TestConfigAccessors: the durations and the cookie name follow the
 // members, defaults included, and ParseConfig refuses trailing data.
 func TestConfigAccessors(t *testing.T) {
-	cfg, err := identity.ParseConfig([]byte(`{"sessionTtlSeconds": 60, "idleTimeoutSeconds": 30, "touchIntervalSeconds": 10}`))
+	cfg, err := identity.ParseConfig([]byte(`{"sessionTtlSeconds": 60, "idleTimeoutSeconds": 30, "touchIntervalSeconds": 10, "apiKeyMaxTtlSeconds": 7200}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SessionTTL() != time.Minute || cfg.IdleTimeout() != 30*time.Second || cfg.TouchInterval() != 10*time.Second {
-		t.Errorf("durations = %v, %v, %v", cfg.SessionTTL(), cfg.IdleTimeout(), cfg.TouchInterval())
+	if cfg.SessionTTL() != time.Minute || cfg.IdleTimeout() != 30*time.Second || cfg.TouchInterval() != 10*time.Second || cfg.APIKeyMaxTTL() != 2*time.Hour {
+		t.Errorf("durations = %v, %v, %v, %v", cfg.SessionTTL(), cfg.IdleTimeout(), cfg.TouchInterval(), cfg.APIKeyMaxTTL())
 	}
 	var zero identity.Config
 	if zero.SessionTTL() != 14*24*time.Hour || zero.IdleTimeout() != 0 || zero.TouchInterval() != time.Minute || zero.CookieName() != identity.HostCookieName {
 		t.Errorf("a zero config's defaults: %v, %v, %v, %s", zero.SessionTTL(), zero.IdleTimeout(), zero.TouchInterval(), zero.CookieName())
+	}
+	if zero.APIKeyMaxTTL() != 365*24*time.Hour || *zero.WithDefaults().APIKeyMaxTTLSeconds != identity.DefaultAPIKeyMaxTTLSeconds {
+		t.Errorf("a zero config's API key lifetime: %v", zero.APIKeyMaxTTL())
+	}
+	if err := (identity.Config{APIKeyMaxTTLSeconds: new(int64)}).Validate(); err == nil || !strings.Contains(err.Error(), "apiKeyMaxTtlSeconds must be positive, not 0") {
+		t.Errorf("Validate of an API key lifetime of 0: %v", err)
 	}
 	if _, err := identity.ParseConfig([]byte(`{} {}`)); err == nil {
 		t.Error("ParseConfig took trailing data")

@@ -500,7 +500,7 @@
               "properties": {
                 "discontinued": {
                   "additionalProperties": false,
-                  "description": "Filters by discontinued: `filter[discontinued]=value` is equality, and `filter[discontinued][operator]=value` names one of eq, in.",
+                  "description": "Filters by discontinued: `filter[discontinued]=value` is equality, and `filter[discontinued][operator]=value` names one of eq, ne, in, notIn.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -514,13 +514,26 @@
                       "maxItems": 100,
                       "minItems": 1,
                       "type": "array"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "type": "boolean"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "type": "boolean"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "id": {
                   "additionalProperties": false,
-                  "description": "Filters by id: `filter[id]=value` is equality, and `filter[id][operator]=value` names one of eq, in.",
+                  "description": "Filters by id: `filter[id]=value` is equality, and `filter[id][operator]=value` names one of eq, ne, in, notIn.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -537,13 +550,29 @@
                       "maxItems": 100,
                       "minItems": 1,
                       "type": "array"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                      "type": "string"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                        "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "kind": {
                   "additionalProperties": false,
-                  "description": "Filters by kind: `filter[kind]=value` is equality, and `filter[kind][operator]=value` names one of eq, in.",
+                  "description": "Filters by kind: `filter[kind]=value` is equality, and `filter[kind][operator]=value` names one of eq, ne, in, notIn.",
                   "properties": {
                     "eq": {
                       "allOf": [
@@ -561,13 +590,30 @@
                       "maxItems": 100,
                       "minItems": 1,
                       "type": "array"
+                    },
+                    "ne": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/PartKind"
+                        }
+                      ],
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them."
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "$ref": "#/components/schemas/PartKind"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "madeAt": {
                   "additionalProperties": false,
-                  "description": "Filters by madeAt: `filter[madeAt]=value` is equality, and `filter[madeAt][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "description": "Filters by madeAt: `filter[madeAt]=value` is equality, and `filter[madeAt][operator]=value` names one of eq, ne, in, notIn, gt, gte, lt, lte.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -604,13 +650,29 @@
                       "description": "The field is the value or less.",
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "name": {
                   "additionalProperties": false,
-                  "description": "Filters by name: `filter[name]=value` is equality, and `filter[name][operator]=value` names one of eq, in, contains.",
+                  "description": "Filters by name: `filter[name]=value` is equality, and `filter[name][operator]=value` names one of eq, ne, in, notIn, contains.",
                   "properties": {
                     "contains": {
                       "description": "The field's text holds the value, in any case.",
@@ -629,13 +691,26 @@
                       "maxItems": 100,
                       "minItems": 1,
                       "type": "array"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "type": "string"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "price": {
                   "additionalProperties": false,
-                  "description": "Filters by price: `filter[price]=value` is equality, and `filter[price][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "description": "Filters by price: `filter[price]=value` is equality, and `filter[price][operator]=value` names one of eq, ne, in, notIn, gt, gte, lt, lte.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -672,13 +747,29 @@
                       "description": "The field is the value or less.",
                       "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
                       "type": "string"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                      "type": "string"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "description": "Exact decimal number in plain notation, carried as a string",
+                        "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "quantity": {
                   "additionalProperties": false,
-                  "description": "Filters by quantity: `filter[quantity]=value` is equality, and `filter[quantity][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "description": "Filters by quantity: `filter[quantity]=value` is equality, and `filter[quantity][operator]=value` names one of eq, ne, in, notIn, gt, gte, lt, lte.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -727,13 +818,33 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                        "format": "int64",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "retiredOn": {
                   "additionalProperties": false,
-                  "description": "Filters by retiredOn: `filter[retiredOn]=value` is equality, and `filter[retiredOn][operator]=value` names one of eq, in, gt, gte, lt, lte, isNull.",
+                  "description": "Filters by retiredOn: `filter[retiredOn]=value` is equality, and `filter[retiredOn][operator]=value` names one of eq, ne, in, notIn, gt, gte, lt, lte, isNull.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -780,13 +891,31 @@
                       "format": "date",
                       "maxLength": 40,
                       "type": "string"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "format": "date",
+                      "maxLength": 40,
+                      "type": "string"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "description": "Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+                        "format": "date",
+                        "maxLength": 40,
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "supplierId": {
                   "additionalProperties": false,
-                  "description": "Filters by supplierId: `filter[supplierId]=value` is equality, and `filter[supplierId][operator]=value` names one of eq, in, isNull.",
+                  "description": "Filters by supplierId: `filter[supplierId]=value` is equality, and `filter[supplierId][operator]=value` names one of eq, ne, in, notIn, isNull.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -807,13 +936,29 @@
                     "isNull": {
                       "description": "true keeps the items whose field is null, false the others.",
                       "type": "boolean"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                      "type": "string"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                        "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"
                 },
                 "weight": {
                   "additionalProperties": false,
-                  "description": "Filters by weight: `filter[weight]=value` is equality, and `filter[weight][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "description": "Filters by weight: `filter[weight]=value` is equality, and `filter[weight][operator]=value` names one of eq, ne, in, notIn, gt, gte, lt, lte.",
                   "properties": {
                     "eq": {
                       "description": "The field equals the value.",
@@ -849,6 +994,21 @@
                       "description": "The field is the value or less.",
                       "format": "double",
                       "type": "number"
+                    },
+                    "ne": {
+                      "description": "The field is not the value: every item eq leaves out, one whose field is null among them.",
+                      "format": "double",
+                      "type": "number"
+                    },
+                    "notIn": {
+                      "description": "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them. The query string separates them with commas.",
+                      "items": {
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
                     }
                   },
                   "type": "object"

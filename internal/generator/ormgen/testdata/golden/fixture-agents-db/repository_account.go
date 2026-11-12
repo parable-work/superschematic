@@ -725,11 +725,16 @@ var AccountQuotedFields = map[string]string{
 // accountSortColumns are the columns of Account's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var accountSortColumns = map[AccountSortField]struct{ sql, key string }{
-	AccountSortById:     {`account.id`, `page_key.id`},
-	AccountSortByName:   {`account."name"`, `page_key."name"`},
-	AccountSortByStatus: {`account.status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var accountSortColumns = map[AccountSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	AccountSortById:              {`account.id`, `page_key.id`, false},
+	AccountSortByName:            {`account."name"`, `page_key."name"`, false},
+	AccountSortByStatus:          {`account.status`, `page_key.status`, false},
+	AccountSortByStatusEnteredAt: {`account.status_entered_at`, `page_key.status_entered_at`, true},
 }
 
 // buildAccountOrderByClause builds an ORDER BY clause for Account.
@@ -1567,7 +1572,7 @@ func (r *AccountRepository) FindPage(ctx context.Context, filter *AccountFilter,
 	}
 	column, ok := accountSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Account sorts by id, name and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Account sorts by id, name, status and statusEnteredAt, not %q", string(field))
 	}
 	byKey := field == AccountSortById
 
@@ -1597,14 +1602,23 @@ func (r *AccountRepository) FindPage(ctx context.Context, filter *AccountFilter,
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`account.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`account.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1612,6 +1626,9 @@ func (r *AccountRepository) FindPage(ctx context.Context, filter *AccountFilter,
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, account.id %s`, direction)
 	}

@@ -14,7 +14,8 @@ import (
 
 // TestBuildCommand_FillsTheUserRouteSets: a build of an API with
 // @userSessions and @userAdministration reads its authDb beside it and
-// emits the filled sets (D50).
+// emits the filled sets (D50), each with the API key routes its apiKeys
+// adds (D114).
 func TestBuildCommand_FillsTheUserRouteSets(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
@@ -32,14 +33,27 @@ func TestBuildCommand_FillsTheUserRouteSets(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &schema))
 	counts := map[string]int{}
+	operations := map[string][]string{}
 	for _, set := range schema.OperationSets {
 		for _, op := range set.Operations {
 			if op.IdentityOperation != "" {
 				counts[set.Name]++
+				operations[set.Name] = append(operations[set.Name], op.IdentityOperation)
 			}
 		}
 	}
-	assert.Equal(t, map[string]int{"Account": 6, "AccountAdmin": 13}, counts)
+	assert.Equal(t, map[string]int{"Account": 9, "AccountAdmin": 15}, counts)
+	assert.Equal(t, map[string][]string{
+		"Account": {
+			"login", "logout", "me", "capabilities", "changePassword", "register",
+			"createApiKey", "listApiKeys", "revokeApiKey",
+		},
+		"AccountAdmin": {
+			"createUser", "listUsers", "getUser", "disableUser", "enableUser", "approveUser", "setUserPassword",
+			"listRoles", "createRole", "updateRole", "deleteRole", "grantRole", "revokeRole",
+			"listUserApiKeys", "revokeUserApiKey",
+		},
+	}, operations)
 }
 
 // TestBuildCommand_WithDepsBuildsTheUserRoutes: build --with-deps reads the
@@ -64,12 +78,19 @@ func TestBuildCommand_WithDepsBuildsTheUserRoutes(t *testing.T) {
 	openapi, err := os.ReadFile(filepath.Join(apiDir, "openapi.json"))
 	require.NoError(t, err)
 	assert.Contains(t, string(openapi), `"/api/auth/login"`)
+	for _, path := range []string{"/api/auth/keys", "/api/auth/keys/{id}", "/api/auth/admin/users/{id}/keys", "/api/auth/admin/users/{id}/keys/{keyId}"} {
+		assert.Contains(t, string(openapi), `"`+path+`"`, "the OpenAPI document describes the API key route")
+	}
 	catalog, err := os.ReadFile(filepath.Join(apiDir, "permissions.json"))
 	require.NoError(t, err)
 	assert.Contains(t, string(catalog), `"authDb": "fixture-user-model-db"`)
 	assert.Contains(t, string(catalog), `"name": "identity.users.write"`)
+	assert.Contains(t, string(catalog), `"AccountAdminListUserApiKeysHandler"`)
+	assert.Contains(t, string(catalog), `"AccountAdminRevokeUserApiKeyHandler"`)
+	assert.NotContains(t, string(catalog), `"AccountCreateApiKeyHandler"`, "a user's own API key routes need no permission")
 	interfaces, err := os.ReadFile(filepath.Join(apiDir, "interfaces.go"))
 	require.NoError(t, err)
 	assert.Contains(t, string(interfaces), "Greet(ctx context.Context)")
 	assert.False(t, strings.Contains(string(interfaces), "Login("), "the implementation interfaces have a method for login")
+	assert.False(t, strings.Contains(string(interfaces), "ApiKey"), "the implementation interfaces have a method for an API key route")
 }

@@ -191,7 +191,7 @@ var names = []string{"anvil", "bucket", "crate", "drum", "easel"}
 var partNames = []string{"axle", "bracket", "clamp", "dowel", "eyelet"}
 
 var (
-	equalsOps  = []filterparse.Operator{filterparse.OperatorEq, filterparse.OperatorIn}
+	equalsOps  = []filterparse.Operator{filterparse.OperatorEq, filterparse.OperatorNe, filterparse.OperatorIn, filterparse.OperatorNotIn}
 	orderedOps = append(slices.Clone(equalsOps), filterparse.OperatorGT, filterparse.OperatorGTE, filterparse.OperatorLT, filterparse.OperatorLTE)
 	textOps    = append(slices.Clone(equalsOps), filterparse.OperatorContains)
 )
@@ -729,14 +729,14 @@ func everyFilter() *namespaces.CatalogListPartsFilter {
 	return &namespaces.CatalogListPartsFilter{
 		Id:           &filterparse.Equals[types.IdentityUUID]{Eq: ptr(partUUID), In: []types.IdentityUUID{partUUID, supplierUUID}},
 		Name:         &filterparse.Text[string]{Eq: ptr("axle"), In: []string{"axle", "bracket"}, Contains: ptr("X l")},
-		Kind:         &filterparse.Equals[types.PartKind]{In: []types.PartKind{types.PartKind_Bolt, types.PartKind_Nut}},
-		Quantity:     &filterparse.Ordered[int64]{Eq: ptr(int64(1)), In: []int64{1, 2}, Gt: ptr(int64(0)), Gte: ptr(int64(1)), Lt: ptr(int64(9)), Lte: ptr(int64(8))},
+		Kind:         &filterparse.Equals[types.PartKind]{In: []types.PartKind{types.PartKind_Bolt, types.PartKind_Nut}, Ne: ptr(types.PartKind_Washer)},
+		Quantity:     &filterparse.Ordered[int64]{Eq: ptr(int64(1)), Ne: ptr(int64(7)), In: []int64{1, 2}, NotIn: []int64{5, 6}, Gt: ptr(int64(0)), Gte: ptr(int64(1)), Lt: ptr(int64(9)), Lte: ptr(int64(8))},
 		Weight:       &filterparse.Ordered[float64]{Lt: ptr(2.5), Gte: ptr(0.5)},
 		Price:        &filterparse.Ordered[types.GenericDecimal]{Gte: ptr(types.GenericDecimal("1.00")), Lte: ptr(types.GenericDecimal("9.99"))},
 		Discontinued: &filterparse.Equals[bool]{Eq: ptr(false), In: []bool{true, false}},
 		MadeAt:       &filterparse.Ordered[types.TemporalDateTime]{Gt: ptr(at(2025, 12, 31))},
 		RetiredOn:    &filterparse.Ordered[types.TemporalDate]{Lte: ptr(types.TemporalDate("2026-06-01")), IsNull: ptr(false)},
-		SupplierId:   &filterparse.Equals[types.IdentityUUID]{IsNull: ptr(true)},
+		SupplierId:   &filterparse.Equals[types.IdentityUUID]{NotIn: []types.IdentityUUID{supplierUUID}, IsNull: ptr(true)},
 	}
 }
 
@@ -756,9 +756,12 @@ func TestListPartsWritesTheFilterForEachKindAndOperator(t *testing.T) {
 		"filter[name]":               {"axle"},
 		"filter[name][in]":           {"axle,bracket"},
 		"filter[name][contains]":     {"X l"},
+		"filter[kind][ne]":           {"washer"},
 		"filter[kind][in]":           {"bolt,nut"},
 		"filter[quantity]":           {"1"},
+		"filter[quantity][ne]":       {"7"},
 		"filter[quantity][in]":       {"1,2"},
+		"filter[quantity][notIn]":    {"5,6"},
 		"filter[quantity][gt]":       {"0"},
 		"filter[quantity][gte]":      {"1"},
 		"filter[quantity][lt]":       {"9"},
@@ -772,6 +775,7 @@ func TestListPartsWritesTheFilterForEachKindAndOperator(t *testing.T) {
 		"filter[madeAt][gt]":         {"2025-12-31T00:00:00Z"},
 		"filter[retiredOn][lte]":     {"2026-06-01"},
 		"filter[retiredOn][isNull]":  {"false"},
+		"filter[supplierId][notIn]":  {supplierUUID.String()},
 		"filter[supplierId][isNull]": {"true"},
 	}
 	if got := pages.requests(); len(got) != 1 || !reflect.DeepEqual(got[0], want) {
@@ -940,6 +944,12 @@ func TestAFilterTheRouteWouldNotReadBackIsRefusedBeforeTheRequest(t *testing.T) 
 			"filter[retiredOn][in][0]", "required", "is required"},
 		{"an in of more values than it may list", namespaces.CatalogListPartsFilter{Quantity: &filterparse.Ordered[int64]{In: many(101)}},
 			"filter[quantity][in]", "max", "must hold at most 100 values"},
+		{"a notIn's value with a comma", namespaces.CatalogListPartsFilter{Name: &filterparse.Text[string]{NotIn: []string{"axle", "a,b"}}},
+			"filter[name][notIn][1]", "pattern", noComma},
+		{"a notIn's blank value", namespaces.CatalogListPartsFilter{Kind: &filterparse.Equals[types.PartKind]{NotIn: []types.PartKind{" "}}},
+			"filter[kind][notIn][0]", "required", "is required"},
+		{"a notIn of more values than it may list", namespaces.CatalogListPartsFilter{Quantity: &filterparse.Ordered[int64]{NotIn: many(101)}},
+			"filter[quantity][notIn]", "max", "must hold at most 100 values"},
 		{"a contains of no text", namespaces.CatalogListPartsFilter{Name: &filterparse.Text[string]{Eq: ptr("axle"), Contains: ptr("")}},
 			"filter[name][contains]", "minLength", "needs text"},
 	} {
@@ -995,10 +1005,11 @@ func TestAFilterOfMoreFiltersThanARequestHoldsIsRefused(t *testing.T) {
 	client, pages := serve(t)
 	ctx := context.Background()
 	ordered := func() *filterparse.Ordered[int64] {
-		return &filterparse.Ordered[int64]{Eq: ptr(int64(1)), In: []int64{1}, Gt: ptr(int64(0)), Gte: ptr(int64(1)), Lt: ptr(int64(9)), Lte: ptr(int64(8))}
+		return &filterparse.Ordered[int64]{Eq: ptr(int64(1)), In: []int64{1}, Gt: ptr(int64(0))}
 	}
-	// Every operator of listParts's fields is 43 filters, quantityB's six
-	// make 49, and weightB's one 50, the most a request holds.
+	// The operators set here of listParts's fields are 46 filters, a ne and
+	// a notIn among them, quantityB's three make 49, and weightB's one 50,
+	// the most a request holds.
 	every := everyFilter()
 	every.Kind.Eq = ptr(types.PartKind_Bolt)
 	every.Weight = &filterparse.Ordered[float64]{Eq: ptr(0.5), In: []float64{0.5}, Gt: ptr(0.0), Gte: ptr(0.5), Lt: ptr(9.0), Lte: ptr(8.0)}
@@ -1151,12 +1162,12 @@ func TestTheFilterWriterSendsTheParityQueries(t *testing.T) {
 					members[field] = map[string]any{}
 				}
 				switch filter.Operator {
-				case "in":
+				case "in", "notIn":
 					values := make([]any, len(filter.Values))
 					for i, text := range filter.Values {
 						values[i] = value(text)
 					}
-					members[field]["in"] = values
+					members[field][filter.Operator] = values
 				case "isNull":
 					members[field]["isNull"] = filter.Values[0] == "true"
 				case "contains":

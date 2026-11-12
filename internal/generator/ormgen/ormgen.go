@@ -501,14 +501,16 @@ type Field struct {
 
 	// Sortable is true when FindPage can order the table's rows by the
 	// field's column (D60, amended), as sqlutil's column says
-	// (sqlutil.ColumnModel.Sortable): the primary key, or a required column
-	// of one value of text, times and UUIDs among it, or a number, as
-	// ir.SortValue says of an API's sort field. A column that may be null,
-	// or is an enum, a boolean, JSON, a map, a list, a union or a point, is
-	// not, and neither is internal metadata or an audit field other than
-	// createdAt and updatedAt. A @secret column is not either: a page's
-	// order would show it.
-	Sortable bool
+	// (sqlutil.ColumnModel.Sortable): the primary key, or a column of one
+	// value of text, times and UUIDs among it, or a number, as ir.SortValue
+	// says of an API's sort field. A column that is an enum, a boolean,
+	// JSON, a map, a list, a union or a point is not, and neither is
+	// internal metadata or an audit field other than createdAt and
+	// updatedAt. A @secret column is not either: a page's order would show
+	// it. SortNulls is a sortable column that may be null (D112), whose
+	// nulls FindPage orders last in either direction.
+	Sortable  bool
+	SortNulls bool
 
 	// PreservesExplicitJSONNull is true only for a direct Generic.JSON scalar.
 	// Its four-byte JSON `null` token is a value, distinct from SQL NULL.
@@ -604,6 +606,11 @@ func filterConditions(field string, kind sqlutil.FilterKind, sql sqlutil.FilterC
 			if uuid {
 				c.Value = field + ".Eq.ToUUID()"
 			}
+		case sqlutil.FilterNe:
+			c.Member, c.SQL, c.Value = "Ne", sql.Ne, "*"+field+".Ne"
+			if uuid {
+				c.Value = field + ".Ne.ToUUID()"
+			}
 		case sqlutil.FilterGt:
 			c.Member, c.SQL, c.Value = "Gt", sql.Gt, "*"+field+".Gt"
 		case sqlutil.FilterGte:
@@ -616,6 +623,12 @@ func filterConditions(field string, kind sqlutil.FilterKind, sql sqlutil.FilterC
 			c.Member, c.SQL, c.Value = "ILike", sql.ILike, `"%"+*`+field+`.ILike+"%"`
 		case sqlutil.FilterIn:
 			c.Member, c.SQL, c.Loop, c.Value = "In", sql.In, "value", "value"
+			if uuid {
+				c.Loop, c.Value = "id", "id.ToUUID()"
+			}
+		case sqlutil.FilterNotIn:
+			// The template's list form, over NotIn.
+			c.Op, c.Member, c.SQL, c.Loop, c.Value = sqlutil.FilterIn, "NotIn", sql.NotIn, "value", "value"
 			if uuid {
 				c.Loop, c.Value = "id", "id.ToUUID()"
 			}
@@ -1808,6 +1821,7 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 		}
 		field.SQL = sqlutil.ColumnStatementsOf(column)
 		field.Sortable = column.Sortable
+		field.SortNulls = column.Sortable && !column.Required
 	}
 	for i := range repo.Relationships {
 		if rel := &repo.Relationships[i]; !rel.IsArray {

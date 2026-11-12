@@ -13,22 +13,25 @@ use super::store::StoreError;
 /// A login, or `changePassword`'s current password, that does not verify,
 /// for whatever reason. 401.
 pub const CODE_INVALID_CREDENTIALS: &str = "invalid_credentials";
-/// A route that needs a caller, without a usable session: none, an
-/// unusable `Authorization` header, or a session that is unknown, expired,
-/// revoked or idle, or whose user is disabled. 401.
+/// A route that needs a caller, without a usable session or API key: none,
+/// an unusable `Authorization` header, a session that is unknown, expired,
+/// revoked or idle, an API key that is unknown, expired or revoked, or a
+/// user who is disabled. 401.
 pub const CODE_UNAUTHORIZED: &str = "unauthorized";
-/// The caller lacks the route's permission, or grants what they do not
-/// hold. 403.
+/// The caller lacks the route's permission, grants what they do not hold,
+/// or is an API key on a route that acts on its own account. 403.
 pub const CODE_FORBIDDEN: &str = "forbidden";
 /// A cookie request, or a cookie login, the cross-origin check refuses.
 /// 403.
 pub const CODE_CROSS_ORIGIN: &str = "cross_origin";
-/// No user or role has the id. 404.
+/// No user or role has the id, the user has no live API key with it, or
+/// the database holds no API key table. 404.
 pub const CODE_NOT_FOUND: &str = "not_found";
 /// The login or the role name is taken. 409.
 pub const CODE_CONFLICT: &str = "conflict";
-/// A role's permission is not dotted segments of letters, digits, `_` and
-/// `-`. 422, with the permissions in `details`.
+/// A role's permission, or one an API key names, is not dotted segments of
+/// letters, digits, `_` and `-`, or an API key names one twice. 422, with
+/// the permissions in `details`.
 pub const CODE_INVALID_PERMISSION: &str = "invalid_permission";
 /// A login whose password verifies for a user who waits for an
 /// administrator's approval (D81). 403.
@@ -81,6 +84,32 @@ pub(crate) fn not_covered(permissions: Vec<String>) -> ApiError {
         .with_details(json!({ "permissions": permissions }))
 }
 
+/// The refusals of the API key operations (D114), the same text in every
+/// runtime: the 403 of a caller an API key authenticated on a route that
+/// acts on its own account (the key routes of the session set, `logout`
+/// and `changePassword`), the 403 of a `createApiKey` naming a permission
+/// the caller does not hold, and the 404 of an API key operation over a
+/// store whose descriptor names no API key table.
+const SESSION_ONLY_MESSAGE: &str =
+    "An API key does not act on its own account: sign in with a session";
+const API_KEY_NOT_HELD_MESSAGE: &str = "An API key names only permissions its user holds";
+const NO_API_KEYS_MESSAGE: &str =
+    "API keys are not available: this database's types hold no API key table";
+
+pub(crate) fn session_only() -> ApiError {
+    ApiError::forbidden(SESSION_ONLY_MESSAGE)
+}
+
+/// An API key naming permissions its user does not hold, listing them.
+pub(crate) fn api_key_not_held(permissions: Vec<String>) -> ApiError {
+    ApiError::forbidden(API_KEY_NOT_HELD_MESSAGE)
+        .with_details(json!({ "permissions": permissions }))
+}
+
+pub(crate) fn no_api_keys() -> ApiError {
+    ApiError::not_found(NO_API_KEYS_MESSAGE)
+}
+
 pub(crate) fn cross_origin() -> ApiError {
     ApiError::new(
         StatusCode::FORBIDDEN,
@@ -110,12 +139,13 @@ pub(crate) fn internal(cause: &dyn std::fmt::Display) -> ApiError {
 }
 
 /// A store's error as the problem the routes answer: a missing row is 404
-/// naming `what`, a schema without roles 404, a taken role name 409, and
-/// anything else a 500.
+/// naming `what`, a schema without roles or without API keys 404, a taken
+/// role name 409, and anything else a 500.
 pub(crate) fn store_error(err: StoreError, what: &str) -> ApiError {
     match err {
         StoreError::NotFound => not_found(what),
         StoreError::NoRoles => ApiError::not_found("The schema has no roles"),
+        StoreError::NoApiKeys => no_api_keys(),
         StoreError::RoleNameTaken => ApiError::conflict("The role name is taken"),
         StoreError::LoginTaken => ApiError::conflict("The login is taken"),
         StoreError::NotPending => not_pending(),

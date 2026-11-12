@@ -15,6 +15,7 @@ import (
 const (
 	DefaultSessionTTLSeconds    int64 = 14 * 24 * 60 * 60
 	DefaultTouchIntervalSeconds int64 = 60
+	DefaultAPIKeyMaxTTLSeconds  int64 = 365 * 24 * 60 * 60
 	DefaultSameSite                   = "Lax"
 
 	DefaultArgon2MemoryKiB   uint32 = 19456
@@ -46,8 +47,13 @@ type Config struct {
 	// means no idle timeout.
 	IdleTimeoutSeconds *int64 `json:"idleTimeoutSeconds,omitempty"`
 	// TouchIntervalSeconds is how often a request writes the session's
-	// lastSeenAt, at most. Nil means 60; 0 writes it on every request.
+	// lastSeenAt, or an API key's lastUsedAt, at most. Nil means 60; 0
+	// writes it on every request.
 	TouchIntervalSeconds *int64 `json:"touchIntervalSeconds,omitempty"`
+	// APIKeyMaxTTLSeconds is the longest an API key lasts (D114), and how
+	// long one lasts when its create names no lifetime. Nil means 31536000
+	// (365 days).
+	APIKeyMaxTTLSeconds *int64 `json:"apiKeyMaxTtlSeconds,omitempty"`
 	// Cookie configures the session cookie a cookie login sets.
 	Cookie CookieConfig `json:"cookie"`
 	// TrustedOrigins are the origins (scheme://host[:port]) a cookie
@@ -113,10 +119,10 @@ func ParseConfig(data []byte) (Config, error) {
 	return cfg.WithDefaults(), nil
 }
 
-// Validate refuses a config no deployment means: a session that never
-// lasts, an idle timeout the touch interval outlasts, a cookie name or
-// SameSite a browser would refuse, an origin that is not scheme://host, and
-// an argon2 cost the algorithm does not take.
+// Validate refuses a config no deployment means: a session or an API key
+// that never lasts, an idle timeout the touch interval outlasts, a cookie
+// name or SameSite a browser would refuse, an origin that is not
+// scheme://host, and an argon2 cost the algorithm does not take.
 func (c Config) Validate() error {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
@@ -132,6 +138,9 @@ func (c Config) Validate() error {
 	}
 	if idle, touch := c.idleTimeoutSeconds(), c.touchIntervalSeconds(); idle > 0 && touch >= idle {
 		add("touchIntervalSeconds (%d) must be less than idleTimeoutSeconds (%d), or a session idles out between two writes of lastSeenAt", touch, idle)
+	}
+	if c.APIKeyMaxTTLSeconds != nil && *c.APIKeyMaxTTLSeconds <= 0 {
+		add("apiKeyMaxTtlSeconds must be positive, not %d", *c.APIKeyMaxTTLSeconds)
 	}
 
 	secure := c.cookieSecure()
@@ -191,6 +200,8 @@ func (c Config) WithDefaults() Config {
 	out := c
 	ttl, idle, touch := c.sessionTTLSeconds(), c.idleTimeoutSeconds(), c.touchIntervalSeconds()
 	out.SessionTTLSeconds, out.IdleTimeoutSeconds, out.TouchIntervalSeconds = &ttl, &idle, &touch
+	keyTTL := c.apiKeyMaxTTLSeconds()
+	out.APIKeyMaxTTLSeconds = &keyTTL
 	secure := c.cookieSecure()
 	out.Cookie = CookieConfig{Name: c.CookieName(), Domain: c.Cookie.Domain, Secure: &secure, SameSite: c.cookieSameSite()}
 	out.TrustedOrigins = append([]string{}, c.TrustedOrigins...)
@@ -209,10 +220,16 @@ func (c Config) IdleTimeout() time.Duration {
 	return time.Duration(c.idleTimeoutSeconds()) * time.Second
 }
 
-// TouchInterval is how often a request writes a session's lastSeenAt, at
-// most.
+// TouchInterval is how often a request writes a session's lastSeenAt, or
+// an API key's lastUsedAt, at most.
 func (c Config) TouchInterval() time.Duration {
 	return time.Duration(c.touchIntervalSeconds()) * time.Second
+}
+
+// APIKeyMaxTTL is the longest an API key lasts, and how long one lasts
+// when its create names no lifetime.
+func (c Config) APIKeyMaxTTL() time.Duration {
+	return time.Duration(c.apiKeyMaxTTLSeconds()) * time.Second
 }
 
 // CookieName is the session cookie's name: cookie.name when set, otherwise
@@ -255,6 +272,13 @@ func (c Config) touchIntervalSeconds() int64 {
 		return *c.TouchIntervalSeconds
 	}
 	return DefaultTouchIntervalSeconds
+}
+
+func (c Config) apiKeyMaxTTLSeconds() int64 {
+	if c.APIKeyMaxTTLSeconds != nil {
+		return *c.APIKeyMaxTTLSeconds
+	}
+	return DefaultAPIKeyMaxTTLSeconds
 }
 
 func (c Config) cookieSecure() bool {

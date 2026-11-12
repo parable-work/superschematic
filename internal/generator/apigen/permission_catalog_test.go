@@ -51,8 +51,9 @@ func checkPermissionCatalog(t *testing.T, output *apigen.APIOutput, golden strin
 
 // TestPermissionCatalogUserRoutesGolden pins the catalog of
 // fixture-user-routes-api: the four administration permissions, each with
-// the identity routes that need it, and nothing for the session routes or
-// the project's greet, which name none. Regenerate with
+// the identity routes that need it, an administrator's API key routes
+// (D114) among them, and nothing for the session routes, a user's own API
+// key routes or the project's greet, which name none. Regenerate with
 // go test ./internal/generator/apigen -run TestPermissionCatalog -update
 func TestPermissionCatalogUserRoutesGolden(t *testing.T) {
 	catalog := checkPermissionCatalog(t, generateUserRoutesAPI(t, loadUserRoutesAPI(t)), userRoutesAPI)
@@ -68,11 +69,21 @@ func TestPermissionCatalogUserRoutesGolden(t *testing.T) {
 			t.Errorf("%s is not marked as the identity routes' own", p.Name)
 		}
 	}
-	if ops := catalog.Permissions[1].Operations; !slices.Equal(ops, []string{
-		"AccountAdminCreateRoleHandler", "AccountAdminDeleteRoleHandler", "AccountAdminGrantRoleHandler",
-		"AccountAdminRevokeRoleHandler", "AccountAdminUpdateRoleHandler",
-	}) {
-		t.Errorf("identity.roles.write is needed by %v", ops)
+	for i, wantOps := range [][]string{
+		{"AccountAdminListRolesHandler"},
+		{
+			"AccountAdminCreateRoleHandler", "AccountAdminDeleteRoleHandler", "AccountAdminGrantRoleHandler",
+			"AccountAdminRevokeRoleHandler", "AccountAdminUpdateRoleHandler",
+		},
+		{"AccountAdminGetUserHandler", "AccountAdminListUserApiKeysHandler", "AccountAdminListUsersHandler"},
+		{
+			"AccountAdminApproveUserHandler", "AccountAdminCreateUserHandler", "AccountAdminDisableUserHandler",
+			"AccountAdminEnableUserHandler", "AccountAdminRevokeUserApiKeyHandler", "AccountAdminSetUserPasswordHandler",
+		},
+	} {
+		if ops := catalog.Permissions[i].Operations; !slices.Equal(ops, wantOps) {
+			t.Errorf("%s is needed by %v, want %v", want[i], ops, wantOps)
+		}
 	}
 }
 

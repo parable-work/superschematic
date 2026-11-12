@@ -1109,28 +1109,33 @@ function isWireValue(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
-/** The most values a filter's in may list, the routes' reader's limit (MAX_FILTER_IN_VALUES). */
+/** The most values a filter's in or notIn may list, the routes' reader's limit (MAX_FILTER_IN_VALUES). */
 const MAX_FILTER_IN = 100;
 
 /** The space the routes' reader trims an in's values of, at either end of one. */
 const OUTER_SPACE = /^[\s\u0085]|[\s\u0085]$/u;
+
+/** Whether an operator takes a list, joined by commas on the wire: in and notIn (D112). */
+function isListOperator(operator: string): boolean {
+  return operator === 'in' || operator === 'notIn';
+}
 
 /**
  * Writes a tool's filter argument (FilterBy, D106) into the query of its
  * route's request as the bracket form the route's reader reads, under
  * name, the parameter the brackets follow: a member that holds a value is
  * equality, name[field]=value, and one that holds an object of operators
- * is name[field][op]=value for each, an in's list joined by commas, as the
- * wire lists it. A field or an operator the operation does not take goes
+ * is name[field][op]=value for each, an in's and a notIn's list joined by
+ * commas, as the wire lists it. A field or an operator the operation does not take goes
  * to the route as it is, whose reader refuses it with the 400 it answers
  * any caller. It returns what is wrong with a filter that has no bracket
  * form, after the argument's name: a filter that is no object, a member
  * that is null or a list, an operand that is null, an object, or a list
- * for any operator but in, and what the form would read as another filter
- * than the caller sent, as the SDKs refuse it before a request: an in of
- * more than 100 values, an in's value that is blank or holds a comma or a
- * space at either end, which the route would split, drop or trim, and a
- * contains of no text.
+ * for any operator but in and notIn, and what the form would read as
+ * another filter than the caller sent, as the SDKs refuse it before a
+ * request: an in or a notIn of more than 100 values, a value of one that
+ * is blank or holds a comma or a space at either end, which the route
+ * would split, drop or trim, and a contains of no text.
  */
 function filterQuery(query: URLSearchParams, name: string, filter: unknown): string | undefined {
   if (!isObject(filter)) return ' is an object with a member per field';
@@ -1143,7 +1148,7 @@ function filterQuery(query: URLSearchParams, name: string, filter: unknown): str
     for (const [operator, operand] of Object.entries(member)) {
       const key = `${name}[${field}][${operator}]`;
       const at = `.${field}.${operator}`;
-      if (operator === 'in' && (isWireValue(operand) || (Array.isArray(operand) && operand.every(isWireValue)))) {
+      if (isListOperator(operator) && (isWireValue(operand) || (Array.isArray(operand) && operand.every(isWireValue)))) {
         const items = (Array.isArray(operand) ? operand : [operand]).map(wireText);
         if (items.length > MAX_FILTER_IN) return `${at} holds more than ${MAX_FILTER_IN} values`;
         const unsendable = items.findIndex(item => item === '' || item.includes(',') || OUTER_SPACE.test(item));
@@ -1151,10 +1156,10 @@ function filterQuery(query: URLSearchParams, name: string, filter: unknown): str
         query.append(key, items.join(','));
       } else if (operator === 'contains' && operand === '') {
         return `${at} must not be empty`;
-      } else if (operator !== 'in' && isWireValue(operand)) {
+      } else if (!isListOperator(operator) && isWireValue(operand)) {
         query.append(key, wireText(operand));
       } else {
-        return `${at} is ${operator === 'in' ? 'a list of values' : 'a value'}`;
+        return `${at} is ${isListOperator(operator) ? 'a list of values' : 'a value'}`;
       }
     }
   }

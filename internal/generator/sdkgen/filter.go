@@ -57,14 +57,15 @@ func filterValueTSType(field apigen.FilterFieldInfo) string {
 
 // filterMemberType is the type of a filter's member: a value of the
 // field's type, or an object with a member per operator the field takes,
-// in's a list of values, contains's text and isNull's a boolean.
+// in's and notIn's a list of values, contains's text and isNull's a
+// boolean.
 func filterMemberType(field apigen.FilterFieldInfo) string {
 	value := filterValueTSType(field)
 	operators := make([]string, len(field.Operators))
 	for i, op := range field.Operators {
 		operand := value
 		switch op {
-		case ir.FilterOpIn:
+		case ir.FilterOpIn, ir.FilterOpNotIn:
 			operand = value + "[]"
 		case ir.FilterOpContains:
 			operand = "string"
@@ -145,8 +146,8 @@ func (n NamespaceInfo) FilteredEndpoints() []EndpointInfo {
 	return out
 }
 
-// FilterMaxInValues is the most values a filter's in may list, which each
-// filter's type documents.
+// FilterMaxInValues is the most values a filter's in or notIn may list,
+// which each filter's type documents.
 func (NamespaceTemplateData) FilterMaxInValues() int {
 	return ir.FilterMaxInValues
 }
@@ -211,8 +212,8 @@ func (e EndpointInfo) FilterExample() string {
 }
 
 // FilterMaxInValues and FilterMaxFilters are the most values a filter's
-// in may list and the most filters a request may hold, which client.ts's
-// filterParams refuses a filter beyond before the request.
+// in or notIn may list and the most filters a request may hold, which
+// client.ts's filterParams refuses a filter beyond before the request.
 func (*SDKOutput) FilterMaxInValues() int { return ir.FilterMaxInValues }
 
 func (*SDKOutput) FilterMaxFilters() int { return ir.FilterMaxFilters }

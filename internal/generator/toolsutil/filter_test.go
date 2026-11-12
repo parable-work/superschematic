@@ -77,38 +77,46 @@ func TestFilterToolParameter(t *testing.T) {
 		}
 		operators[name] = strings.Join(slices.Sorted(maps.Keys(field.OneOf[1].Properties)), " ")
 	}
-	ordered := "eq gt gte in lt lte"
+	ordered := "eq gt gte in lt lte ne notIn"
 	wantOperators := map[string]string{
-		"id": "eq in", "name": "contains eq in", "kind": "eq in", "quantity": ordered, "weight": ordered, "price": ordered,
-		"discontinued": "eq in", "madeAt": ordered, "retiredOn": "eq gt gte in isNull lt lte", "supplierId": "eq in isNull",
+		"id": "eq in ne notIn", "name": "contains eq in ne notIn", "kind": "eq in ne notIn", "quantity": ordered, "weight": ordered, "price": ordered,
+		"discontinued": "eq in ne notIn", "madeAt": ordered, "retiredOn": "eq gt gte in isNull lt lte ne notIn", "supplierId": "eq in isNull ne notIn",
 	}
 	if !maps.Equal(operators, wantOperators) {
 		t.Errorf("operators = %v, want %v", operators, wantOperators)
 	}
 
 	in := "The field is one of the values, at most 100."
+	ne := "The field is not the value: every item eq leaves out, one whose field is null among them."
+	notIn := "The field is none of the values, at most 100: every item in leaves out, one whose field is null among them."
 	for name, want := range map[string]string{
 		// An enum lists its values, alone, as eq and as each of an in.
-		"kind": `{"description":"Filters by kind: a value it equals, or its operators (eq, in).","oneOf":[` +
+		"kind": `{"description":"Filters by kind: a value it equals, or its operators (eq, ne, in, notIn).","oneOf":[` +
 			`{"type":"string","enum":["bolt","nut","washer"]},` +
 			`{"additionalProperties":false,"type":"object","properties":{` +
 			`"eq":{"type":"string","description":"The field equals the value.","enum":["bolt","nut","washer"]},` +
-			`"in":{"type":"array","description":"` + in + `","minItems":1,"maxItems":100,"items":{"type":"string","enum":["bolt","nut","washer"]}}}}]}`,
+			`"in":{"type":"array","description":"` + in + `","minItems":1,"maxItems":100,"items":{"type":"string","enum":["bolt","nut","washer"]}},` +
+			`"ne":{"type":"string","description":"` + ne + `","enum":["bolt","nut","washer"]},` +
+			`"notIn":{"type":"array","description":"` + notIn + `","minItems":1,"maxItems":100,"items":{"type":"string","enum":["bolt","nut","washer"]}}}}]}`,
 		// Text adds contains, whose value is text of its own.
-		"name": `{"description":"Filters by name: a value it equals, or its operators (eq, in, contains).","oneOf":[` +
+		"name": `{"description":"Filters by name: a value it equals, or its operators (eq, ne, in, notIn, contains).","oneOf":[` +
 			`{"type":"string"},` +
 			`{"additionalProperties":false,"type":"object","properties":{` +
 			`"contains":{"type":"string","description":"The field's text holds the value, in any case.","minLength":1},` +
 			`"eq":{"type":"string","description":"The field equals the value."},` +
-			`"in":{"type":"array","description":"` + in + `","minItems":1,"maxItems":100,"items":{"type":"string"}}}}]}`,
+			`"in":{"type":"array","description":"` + in + `","minItems":1,"maxItems":100,"items":{"type":"string"}},` +
+			`"ne":{"type":"string","description":"` + ne + `"},` +
+			`"notIn":{"type":"array","description":"` + notIn + `","minItems":1,"maxItems":100,"items":{"type":"string"}}}}]}`,
 		// A scalar keeps its key and its constraints on every value, and a
 		// field that may be null adds isNull.
-		"supplierId": `{"description":"Filters by supplierId: a value it equals, or its operators (eq, in, isNull).","oneOf":[` +
+		"supplierId": `{"description":"Filters by supplierId: a value it equals, or its operators (eq, ne, in, notIn, isNull).","oneOf":[` +
 			`{"x-superschematic-scalar":"Identity.UUID","type":"string","pattern":"` + uuidPattern + `"},` +
 			`{"additionalProperties":false,"type":"object","properties":{` +
 			`"eq":{"x-superschematic-scalar":"Identity.UUID","type":"string","description":"The field equals the value.","pattern":"` + uuidPattern + `"},` +
 			`"in":{"type":"array","description":"` + in + `","minItems":1,"maxItems":100,"items":{"x-superschematic-scalar":"Identity.UUID","type":"string","pattern":"` + uuidPattern + `"}},` +
-			`"isNull":{"type":"boolean","description":"true keeps the items whose field is null, false the others."}}}]}`,
+			`"isNull":{"type":"boolean","description":"true keeps the items whose field is null, false the others."},` +
+			`"ne":{"x-superschematic-scalar":"Identity.UUID","type":"string","description":"` + ne + `","pattern":"` + uuidPattern + `"},` +
+			`"notIn":{"type":"array","description":"` + notIn + `","minItems":1,"maxItems":100,"items":{"x-superschematic-scalar":"Identity.UUID","type":"string","pattern":"` + uuidPattern + `"}}}}]}`,
 	} {
 		if got := encode(t, filter.Properties[name]); got != want {
 			t.Errorf("%s =\n%s\nwant\n%s", name, got, want)

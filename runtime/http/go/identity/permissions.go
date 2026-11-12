@@ -82,6 +82,44 @@ func UncoveredUser(held []string, roles []session.Role) []string {
 	return Uncovered(held, EffectivePermissions(roles))
 }
 
+// NarrowPermissions are the permissions of named that some permission of
+// held covers (session.Covers), in named's order and without repeats. They
+// are what an API key made with named holds of a role carrying held
+// (D114): each permission it names while the role holds it, and never a
+// part of one it names more broadly than the role does.
+func NarrowPermissions(held, named []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, p := range named {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		for _, h := range held {
+			if session.Covers(h, p) {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// NarrowRoles are roles as an API key made with named holds them (D114):
+// each role with its permissions narrowed (NarrowPermissions), in the
+// order given, and a role left with no permission dropped. A key whose
+// permissions are null names none and holds its user's roles as they are,
+// so its roles are not narrowed.
+func NarrowRoles(roles []session.Role, named []string) []session.Role {
+	out := []session.Role{}
+	for _, role := range roles {
+		if permissions := NarrowPermissions(role.Permissions, named); len(permissions) > 0 {
+			out = append(out, session.Role{ID: role.ID, Name: role.Name, Permissions: permissions})
+		}
+	}
+	return out
+}
+
 // Route is what capabilities needs to know of one operation of the API,
 // the route requirements the generated server passes.
 type Route struct {

@@ -13,9 +13,9 @@ import (
 
 // TestToolSchemasGoldenUserRoutes pins the tool schemas of
 // fixture-user-routes-api, whose @userSessions and @userAdministration sets
-// the loader fills from its authDb (D50): password and enum input fields,
-// path-only PUT and DELETE routes, and boolean results, built as any other
-// operation's. Regenerate with:
+// the loader fills from its authDb (D50), the API key routes among them
+// (D114): password and enum input fields, path-only PUT and DELETE routes,
+// and boolean results, built as any other operation's. Regenerate with:
 // go test ./internal/generator/toolsutil -run TestToolSchemasGoldenUserRoutes -update
 func TestToolSchemasGoldenUserRoutes(t *testing.T) {
 	const fixture = "fixture-user-routes-api"
@@ -32,8 +32,8 @@ func TestToolSchemasGoldenUserRoutes(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	tools := buildToolSchemas(t, output)
-	if len(tools) != 20 {
-		t.Fatalf("got %d tools, want the 19 operations of the two sets and greet", len(tools))
+	if len(tools) != 25 {
+		t.Fatalf("got %d tools, want the 24 operations of the two sets and greet", len(tools))
 	}
 	compareToolSchemasGolden(t, fixture, tools)
 }

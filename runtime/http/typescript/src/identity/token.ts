@@ -1,17 +1,27 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 /*
-Session tokens and the credential a request carries (D50). A token is 32
-random bytes in base64url without padding; the database keeps the
-lowercase hexadecimal SHA-256 of its text. A request's credential is its
-Authorization header when it has one, which must then be a usable bearer
-token, and the session cookie only without one: an Authorization that
-fails is refused, with no fallback to the cookie.
+Session tokens, API keys and the credential a request carries (D50, D114).
+A token is 32 random bytes in base64url without padding, and an API key the
+prefix key_ and as many; the database keeps the lowercase hexadecimal
+SHA-256 of the whole text. A request's credential is its Authorization
+header when it has one, which must then be a usable bearer token or API
+key, and the session cookie only without one: an Authorization that fails
+is refused, with no fallback to the cookie. The cookie carries session
+tokens only.
 */
 
 /** The size of a session token's random value. Its text is TOKEN_LENGTH characters of base64url without padding. */
 export const TOKEN_BYTES = 32;
 export const TOKEN_LENGTH = 43;
+
+/**
+ * What starts an API key's text (D114), and the text's length: the prefix,
+ * then TOKEN_BYTES random bytes as TOKEN_LENGTH characters of base64url
+ * without padding.
+ */
+export const API_KEY_PREFIX = 'key_';
+export const API_KEY_LENGTH = API_KEY_PREFIX.length + TOKEN_LENGTH;
 
 /** How a session travels: the Authorization header or the cookie. It is also LoginInput's session member. */
 export type Transport = 'bearer' | 'cookie';
@@ -23,7 +33,16 @@ export function newToken(random: (size: number) => Uint8Array = randomBytes): st
   return Buffer.from(bytes).toString('base64url');
 }
 
-/** The hash a session's row keeps of its token: the lowercase hexadecimal SHA-256 of the token's text, a Crypto.SHA256. */
+/** Returns a new API key (D114): API_KEY_PREFIX, then TOKEN_BYTES random bytes from random (node:crypto's when absent) in base64url without padding. */
+export function newApiKey(random: (size: number) => Uint8Array = randomBytes): string {
+  return API_KEY_PREFIX + newToken(random);
+}
+
+/**
+ * The hash a session's row keeps of its token, and an API key's row of its
+ * key: the lowercase hexadecimal SHA-256 of the whole text, an API key's
+ * prefix included, a Crypto.SHA256.
+ */
 export function hashToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
@@ -33,18 +52,27 @@ export function isToken(s: string): boolean {
   return s.length === TOKEN_LENGTH && /^[A-Za-z0-9_-]*$/u.test(s);
 }
 
-/** What extractCredential found on a request. */
+/** Whether s has an API key's shape: API_KEY_PREFIX, exactly, and a token's TOKEN_LENGTH characters of the base64url alphabet. */
+export function isApiKey(s: string): boolean {
+  return s.length === API_KEY_LENGTH && s.startsWith(API_KEY_PREFIX) && isToken(s.slice(API_KEY_PREFIX.length));
+}
+
+/**
+ * What extractCredential found on a request. apiKey says a usable
+ * credential is an API key (D114), which only the Authorization header
+ * carries; it is false for every other outcome.
+ */
 export type CredentialOutcome =
-  /** A token in the Authorization header or the cookie. */
-  | { readonly outcome: 'usable'; readonly transport: Transport; readonly token: string }
+  /** A session token in the Authorization header or the cookie, or an API key in the Authorization header. */
+  | { readonly outcome: 'usable'; readonly transport: Transport; readonly token: string; readonly apiKey: boolean }
   /**
-   * An Authorization header that is not a usable bearer token, or, without
-   * one, a session cookie whose value is not a token: 401, with no fallback
-   * to the cookie.
+   * An Authorization header that is not a usable bearer token or API key,
+   * or, without one, a session cookie whose value is not a session token:
+   * 401, with no fallback to the cookie.
    */
-  | { readonly outcome: 'invalid'; readonly transport: Transport; readonly token: null }
+  | { readonly outcome: 'invalid'; readonly transport: Transport; readonly token: null; readonly apiKey: false }
   /** No Authorization header and no session cookie. */
-  | { readonly outcome: 'none'; readonly transport: null; readonly token: null };
+  | { readonly outcome: 'none'; readonly transport: null; readonly token: null; readonly apiKey: false };
 
 /**
  * A request's headers, in order, a name repeated when the request repeats
@@ -63,32 +91,34 @@ function headerValues(headers: HeaderSource, name: string): string[] {
 }
 
 /**
- * Reads a request's session credential. Authorization comes first: when the
- * request has one it is the credential, and the cookie is not read. It is
- * usable when it appears once and is the scheme Bearer in any case, one or
- * more spaces, and a token; anything else is invalid. Without Authorization
- * the first cookie named cookieName (compared exactly) across every Cookie
- * header is the credential, usable when its value is a token.
+ * Reads a request's credential. Authorization comes first: when the request
+ * has one it is the credential, and the cookie is not read. It is usable
+ * when it appears once and is the scheme Bearer in any case, one or more
+ * spaces, and either a session token or an API key (API_KEY_PREFIX and as
+ * many characters); anything else is invalid. Without Authorization the
+ * first cookie named cookieName (compared exactly) across every Cookie
+ * header is the credential, usable when its value is a session token: the
+ * cookie carries no API key.
  */
 export function extractCredential(headers: HeaderSource, cookieName: string): CredentialOutcome {
   const authorization = headerValues(headers, 'authorization');
   if (authorization.length > 0) {
     const token = bearerToken(authorization[0]!);
-    if (token === undefined || authorization.length !== 1) return { outcome: 'invalid', transport: 'bearer', token: null };
-    return { outcome: 'usable', transport: 'bearer', token };
+    if (token === undefined || authorization.length !== 1) return { outcome: 'invalid', transport: 'bearer', token: null, apiKey: false };
+    return { outcome: 'usable', transport: 'bearer', token, apiKey: isApiKey(token) };
   }
   const value = readCookie(headerValues(headers, 'cookie'), cookieName);
-  if (value === undefined) return { outcome: 'none', transport: null, token: null };
-  if (!isToken(value)) return { outcome: 'invalid', transport: 'cookie', token: null };
-  return { outcome: 'usable', transport: 'cookie', token: value };
+  if (value === undefined) return { outcome: 'none', transport: null, token: null, apiKey: false };
+  if (!isToken(value)) return { outcome: 'invalid', transport: 'cookie', token: null, apiKey: false };
+  return { outcome: 'usable', transport: 'cookie', token: value, apiKey: false };
 }
 
-/** Reads "Bearer <token>": the scheme in any case, one or more spaces, and a token. */
+/** Reads "Bearer <token>": the scheme in any case, one or more spaces, and a session token or an API key. */
 function bearerToken(value: string): string | undefined {
   const space = value.indexOf(' ');
   if (space < 0 || value.slice(0, space).toLowerCase() !== 'bearer') return undefined;
   const token = value.slice(space + 1).replace(/^ +/u, '');
-  return isToken(token) ? token : undefined;
+  return isToken(token) || isApiKey(token) ? token : undefined;
 }
 
 // What Go's net/http reads of Cookie headers: each header is split on ';',

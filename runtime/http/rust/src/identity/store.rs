@@ -10,7 +10,8 @@ use async_trait::async_trait;
 /// problems and answers a database failure with a 500.
 #[derive(Debug)]
 pub enum StoreError {
-    /// No row has the id, token hash or login.
+    /// No row has the id, token hash or login, or the user has no live API
+    /// key with the id.
     NotFound,
     /// Another user has the login, in the login column's case rule.
     LoginTaken,
@@ -18,6 +19,8 @@ pub enum StoreError {
     RoleNameTaken,
     /// The schema has no `UserRole` table.
     NoRoles,
+    /// The descriptor names no API key table (D114).
+    NoApiKeys,
     /// `approve_user` found the user not waiting for approval (D81).
     NotPending,
     /// A login the login scalar does not parse, with the scalar's reason.
@@ -43,6 +46,7 @@ impl fmt::Display for StoreError {
             StoreError::LoginTaken => f.write_str("identity: the login is taken"),
             StoreError::RoleNameTaken => f.write_str("identity: the role name is taken"),
             StoreError::NoRoles => f.write_str("identity: the schema has no roles"),
+            StoreError::NoApiKeys => f.write_str("identity: the schema has no API keys"),
             StoreError::NotPending => f.write_str("identity: the user is not pending"),
             StoreError::InvalidLogin { scalar, reason } => {
                 write!(f, "identity: the login is not a {scalar}: {reason}")
@@ -109,6 +113,29 @@ pub struct SessionRecord {
     pub user: User,
 }
 
+/// An API key row (D114).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiKey {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    /// The permissions the key was made with. `None` means every
+    /// permission its user holds; a list, empty included, means the ones
+    /// it names.
+    pub permissions: Option<Vec<String>>,
+    pub created_at: SystemTime,
+    pub expires_at: SystemTime,
+    pub last_used_at: Option<SystemTime>,
+    pub revoked_at: Option<SystemTime>,
+}
+
+/// An API key and its user.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiKeyRecord {
+    pub api_key: ApiKey,
+    pub user: User,
+}
+
 /// A role row.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Role {
@@ -165,10 +192,25 @@ pub struct NewSession {
     pub expires_at: SystemTime,
 }
 
+/// An API key the store creates (D114). `new_api_key` makes the key's
+/// text, whose `hash_token` is `token_hash`.
+#[derive(Clone, Debug)]
+pub struct NewApiKey {
+    pub user_id: String,
+    pub name: String,
+    pub token_hash: String,
+    /// The permissions the key names, written as a role's are. `None`
+    /// writes null: every permission its user holds.
+    pub permissions: Option<Vec<String>>,
+    pub created_at: SystemTime,
+    pub expires_at: SystemTime,
+}
+
 /// The identity runtime's storage. Mutations the user model ties together
 /// run in one transaction: `set_password` with its revocations,
-/// `set_disabled` with a disable's revocations, `create_user` with the
-/// credential, and `delete_role` with the role's grants.
+/// `set_disabled` with a disable's revocations, of sessions and API keys
+/// alike, `create_user` with the credential, and `delete_role` with the
+/// role's grants.
 #[async_trait]
 pub trait Store: Send + Sync + 'static {
     /// The user whose login equals `login` once the login scalar parses it,
@@ -217,7 +259,8 @@ pub trait Store: Send + Sync + 'static {
         new_hash: &str,
     ) -> Result<(), StoreError>;
     /// Sets the credential's `disabledAt` to `at`, or clears it. Disabling
-    /// also revokes the user's sessions.
+    /// also revokes the user's sessions and their live API keys, which
+    /// enabling does not bring back.
     async fn set_disabled(
         &self,
         user_id: &str,
@@ -244,6 +287,36 @@ pub trait Store: Send + Sync + 'static {
         &self,
         user_id: &str,
         except_session: Option<&str>,
+        at: SystemTime,
+    ) -> Result<(), StoreError>;
+
+    /// Whether the descriptor names an API key table (D114). Without one,
+    /// `find_api_key` answers [`StoreError::NotFound`] and the other API
+    /// key methods [`StoreError::NoApiKeys`].
+    fn has_api_keys(&self) -> bool;
+    /// Creates an API key; the database generates its key.
+    async fn create_api_key(&self, key: NewApiKey) -> Result<ApiKey, StoreError>;
+    /// The API key whose token hash is `token_hash`, and its user.
+    async fn find_api_key(&self, token_hash: &str) -> Result<ApiKeyRecord, StoreError>;
+    /// Sets `lastUsedAt` to `at` when it is null or before `stale_before`,
+    /// so concurrent requests write it once.
+    async fn touch_api_key(
+        &self,
+        key_id: &str,
+        at: SystemTime,
+        stale_before: SystemTime,
+    ) -> Result<(), StoreError>;
+    /// The user's API keys that are not revoked, expired ones included,
+    /// newest first: by `createdAt` descending, then by the database's key
+    /// descending.
+    async fn list_api_keys(&self, user_id: &str) -> Result<Vec<ApiKey>, StoreError>;
+    /// Sets `revokedAt` on the user's API key with `key_id` when it is
+    /// null. A key that does not exist, is another user's or is revoked
+    /// already is [`StoreError::NotFound`].
+    async fn revoke_api_key(
+        &self,
+        user_id: &str,
+        key_id: &str,
         at: SystemTime,
     ) -> Result<(), StoreError>;
 

@@ -144,14 +144,16 @@ func (n *CatalogNamespace) ListItemsAll(
 
 // CatalogListPartsFilter is the filter of ListParts (FilterBy, D106): the rows
 // the list keeps. Each member is a field's filter, nil for none: Eq, and
-// In, one of the values, on every field; Gt, Gte, Lt and Lte on a number,
-// a date and a time; Contains, the text a value holds in any case, on
-// text; and IsNull, true for the rows whose field is null and false for
-// the others, on a field that may be null. A row is kept when every
-// member holds. The method sends the filter as filter[field]=value and
-// filter[field][op]=value, and refuses, before the request, an In of more
-// than 100 values or of one that is blank or holds a comma or surrounding
-// space, a Contains of no text, and more than 50 filters.
+// In, one of the values, on every field, with Ne and NotIn, which keep the
+// rows those two leave out, a row whose field is null among them; Gt, Gte,
+// Lt and Lte on a number, a date and a time; Contains, the text a value
+// holds in any case, on text; and IsNull, true for the rows whose field is
+// null and false for the others, on a field that may be null. A row is
+// kept when every member holds. The method sends the filter as
+// filter[field]=value and filter[field][op]=value, and refuses, before the
+// request, an In or a NotIn of more than 100 values or of one that is
+// blank or holds a comma or surrounding space, a Contains of no text, and
+// more than 50 filters.
 type CatalogListPartsFilter struct {
 	Id           *filterparse.Equals[types.IdentityUUID]      `json:"id,omitempty"`
 	Name         *filterparse.Text[string]                    `json:"name,omitempty"`

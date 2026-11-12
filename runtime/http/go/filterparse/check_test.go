@@ -45,6 +45,23 @@ func TestCheckRefusesWhatTheReaderWouldNotReadBack(t *testing.T) {
 			filters: []Filter{{Field: "stateId", Operator: OperatorIn, Values: many(MaxInValues + 1)}},
 			want:    &CheckError{"filter[stateId][in]", "max", "must hold at most 100 values"},
 		},
+		{name: "an empty notIn is left out", filters: []Filter{{Field: "stateId", Operator: OperatorNotIn}}},
+		{name: "a ne that holds a comma and a space", filters: []Filter{{Field: "title", Operator: OperatorNe, Values: []string{" a, b "}}}},
+		{
+			name:    "a notIn of too many values",
+			filters: []Filter{{Field: "stateId", Operator: OperatorNotIn, Values: many(MaxInValues + 1)}},
+			want:    &CheckError{"filter[stateId][notIn]", "max", "must hold at most 100 values"},
+		},
+		{
+			name:    "a notIn's value with a comma",
+			filters: []Filter{{Field: "title", Operator: OperatorNotIn, Values: []string{"a", "b,c"}}},
+			want:    &CheckError{"filter[title][notIn][1]", "pattern", "must not contain a comma or surrounding space"},
+		},
+		{
+			name:    "a notIn's blank value",
+			filters: []Filter{{Field: "title", Operator: OperatorNotIn, Values: []string{"  "}}},
+			want:    &CheckError{"filter[title][notIn][0]", "required", "is required"},
+		},
 		{
 			name:    "an in's value with a comma",
 			filters: []Filter{{Field: "title", Operator: OperatorIn, Values: []string{"a", "b,c"}}},

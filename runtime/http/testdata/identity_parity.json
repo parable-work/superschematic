@@ -8,6 +8,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -30,6 +31,7 @@
         "sessionTtlSeconds": 3600,
         "idleTimeoutSeconds": 900,
         "touchIntervalSeconds": 30,
+        "apiKeyMaxTtlSeconds": 7776000,
         "cookie": {
           "name": "sid",
           "domain": "example.com",
@@ -52,6 +54,7 @@
         "sessionTtlSeconds": 3600,
         "idleTimeoutSeconds": 900,
         "touchIntervalSeconds": 30,
+        "apiKeyMaxTtlSeconds": 7776000,
         "cookie": {
           "name": "sid",
           "domain": "example.com",
@@ -82,6 +85,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Secure-session",
           "domain": "example.com",
@@ -109,6 +113,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "session",
           "domain": "",
@@ -137,6 +142,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "session",
           "domain": "localhost",
@@ -164,6 +170,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-app",
           "domain": "",
@@ -191,6 +198,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -216,6 +224,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 0,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -241,6 +250,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 61,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -267,6 +277,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 600,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -292,6 +303,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -323,6 +335,7 @@
         "sessionTtlSeconds": 1209600,
         "idleTimeoutSeconds": 0,
         "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
         "cookie": {
           "name": "__Host-session",
           "domain": "",
@@ -334,6 +347,111 @@
           "argon2": {
             "memoryKiB": 8,
             "iterations": 1,
+            "parallelism": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "an API key lifetime left out is 365 days, whatever a session's is",
+      "input": {
+        "sessionTtlSeconds": 3600
+      },
+      "want": {
+        "sessionTtlSeconds": 3600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "an API key lifetime set",
+      "input": {
+        "apiKeyMaxTtlSeconds": 86400
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 86400,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "an API key lifetime of one second",
+      "input": {
+        "apiKeyMaxTtlSeconds": 1
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 1,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "an API key lifetime shorter than a session's",
+      "input": {
+        "sessionTtlSeconds": 86400,
+        "apiKeyMaxTtlSeconds": 3600
+      },
+      "want": {
+        "sessionTtlSeconds": 86400,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 3600,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
             "parallelism": 1
           }
         }
@@ -364,6 +482,41 @@
       "name": "a negative touch interval is refused",
       "input": {
         "touchIntervalSeconds": -1
+      },
+      "want": null
+    },
+    {
+      "name": "an API key lifetime of 0 is refused",
+      "input": {
+        "apiKeyMaxTtlSeconds": 0
+      },
+      "want": null
+    },
+    {
+      "name": "a negative API key lifetime is refused",
+      "input": {
+        "apiKeyMaxTtlSeconds": -1
+      },
+      "want": null
+    },
+    {
+      "name": "a fractional API key lifetime is refused",
+      "input": {
+        "apiKeyMaxTtlSeconds": 1.5
+      },
+      "want": null
+    },
+    {
+      "name": "an API key lifetime as a string is refused",
+      "input": {
+        "apiKeyMaxTtlSeconds": "86400"
+      },
+      "want": null
+    },
+    {
+      "name": "the API key lifetime named in another case is refused",
+      "input": {
+        "apiKeyMaxTTLSeconds": 86400
       },
       "want": null
     },
@@ -1483,6 +1636,32 @@
       "hash": "225f7e75329dd45aa354975d73987319309393af3a4c6733bc13601a4f1b8796"
     }
   ],
+  "apiKeys": [
+    {
+      "name": "zero bytes",
+      "bytes": "0000000000000000000000000000000000000000000000000000000000000000",
+      "token": "key_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "hash": "a32bb9ceca784652808991e818b700ea1a09f47845a6968eba4371d703e575d5"
+    },
+    {
+      "name": "counting bytes",
+      "bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "token": "key_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "hash": "17750e05c7919d8ecedcf9565eb345a5d910bec4f4dd0a415bc43180633a528b"
+    },
+    {
+      "name": "high bytes use - and _",
+      "bytes": "fbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbff",
+      "token": "key_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_8",
+      "hash": "2232212dd1acfd381110427769977e5bdcde47c08b3b1a9a07fb384e9ab8482e"
+    },
+    {
+      "name": "all ones",
+      "bytes": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "token": "key___________________________________________8",
+      "hash": "b0f481e7c4955c6b3a5ef279da9f908715747dbf56b8110b9698270c2a3bda13"
+    }
+  ],
   "cookies": [
     {
       "name": "the default cookie",
@@ -1598,7 +1777,8 @@
       "want": {
         "outcome": "none",
         "transport": null,
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1613,7 +1793,8 @@
       "want": {
         "outcome": "usable",
         "transport": "bearer",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1628,7 +1809,8 @@
       "want": {
         "outcome": "usable",
         "transport": "bearer",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1643,7 +1825,8 @@
       "want": {
         "outcome": "usable",
         "transport": "bearer",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1658,7 +1841,8 @@
       "want": {
         "outcome": "usable",
         "transport": "bearer",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1673,7 +1857,8 @@
       "want": {
         "outcome": "usable",
         "transport": "bearer",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1688,7 +1873,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1703,7 +1889,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1718,7 +1905,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1733,7 +1921,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1748,7 +1937,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1763,7 +1953,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1778,7 +1969,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1793,7 +1985,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1808,7 +2001,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1827,7 +2021,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1846,7 +2041,8 @@
       "want": {
         "outcome": "usable",
         "transport": "bearer",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1865,7 +2061,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1884,7 +2081,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "bearer",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1899,7 +2097,8 @@
       "want": {
         "outcome": "usable",
         "transport": "cookie",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1914,7 +2113,8 @@
       "want": {
         "outcome": "usable",
         "transport": "cookie",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1933,7 +2133,8 @@
       "want": {
         "outcome": "usable",
         "transport": "cookie",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1948,7 +2149,8 @@
       "want": {
         "outcome": "usable",
         "transport": "cookie",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -1963,7 +2165,8 @@
       "want": {
         "outcome": "none",
         "transport": null,
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1978,7 +2181,8 @@
       "want": {
         "outcome": "none",
         "transport": null,
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -1993,7 +2197,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "cookie",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -2008,7 +2213,8 @@
       "want": {
         "outcome": "invalid",
         "transport": "cookie",
-        "token": null
+        "token": null,
+        "apiKey": false
       }
     },
     {
@@ -2023,7 +2229,8 @@
       "want": {
         "outcome": "usable",
         "transport": "cookie",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
       }
     },
     {
@@ -2038,7 +2245,208 @@
       "want": {
         "outcome": "usable",
         "transport": "cookie",
-        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
+      }
+    },
+    {
+      "name": "a bearer API key",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ]
+      ],
+      "want": {
+        "outcome": "usable",
+        "transport": "bearer",
+        "token": "key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc",
+        "apiKey": true
+      }
+    },
+    {
+      "name": "a bearer API key after the scheme in lower case and several spaces",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "bearer   key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ]
+      ],
+      "want": {
+        "outcome": "usable",
+        "transport": "bearer",
+        "token": "key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc",
+        "apiKey": true
+      }
+    },
+    {
+      "name": "an API key with 42 characters after its prefix",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5u"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key with 44 characters after its prefix",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5ucA"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key's prefix in upper case",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer KEY_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key's prefix alone",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key without its prefix's underscore",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer keyyMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key with a character outside base64url",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5u+"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "a session token that starts with an API key's prefix",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxw"
+        ]
+      ],
+      "want": {
+        "outcome": "usable",
+        "transport": "bearer",
+        "token": "key_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxw",
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key in the session cookie",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Cookie",
+          "__Host-session=key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "cookie",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an API key in the cookie beside a bearer session token",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        ],
+        [
+          "Cookie",
+          "__Host-session=key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ]
+      ],
+      "want": {
+        "outcome": "usable",
+        "transport": "bearer",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "apiKey": false
+      }
+    },
+    {
+      "name": "a bearer API key wins over the session cookie",
+      "cookieName": "__Host-session",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc"
+        ],
+        [
+          "Cookie",
+          "__Host-session=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        ]
+      ],
+      "want": {
+        "outcome": "usable",
+        "transport": "bearer",
+        "token": "key_yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc",
+        "apiKey": true
       }
     }
   ],
@@ -2950,6 +3358,155 @@
           "orders.read"
         ]
       }
+    }
+  ],
+  "keyPermissions": [
+    {
+      "name": "an exact match",
+      "held": [
+        "issues.read"
+      ],
+      "named": [
+        "issues.read"
+      ],
+      "want": [
+        "issues.read"
+      ]
+    },
+    {
+      "name": "a named permission under a held one",
+      "held": [
+        "issues"
+      ],
+      "named": [
+        "issues.read",
+        "issues.comment.write"
+      ],
+      "want": [
+        "issues.read",
+        "issues.comment.write"
+      ]
+    },
+    {
+      "name": "a named permission broader than what is held is dropped",
+      "held": [
+        "issues.read"
+      ],
+      "named": [
+        "issues"
+      ],
+      "want": []
+    },
+    {
+      "name": "a sibling of what is held is dropped",
+      "held": [
+        "issues.read"
+      ],
+      "named": [
+        "issues.write",
+        "issues.read"
+      ],
+      "want": [
+        "issues.read"
+      ]
+    },
+    {
+      "name": "a repeat in named is kept once",
+      "held": [
+        "issues"
+      ],
+      "named": [
+        "issues.read",
+        "issues.read",
+        "issues"
+      ],
+      "want": [
+        "issues.read",
+        "issues"
+      ]
+    },
+    {
+      "name": "the order is named's",
+      "held": [
+        "a",
+        "b",
+        "c"
+      ],
+      "named": [
+        "c.x",
+        "a.x",
+        "b"
+      ],
+      "want": [
+        "c.x",
+        "a.x",
+        "b"
+      ]
+    },
+    {
+      "name": "nothing held",
+      "held": [],
+      "named": [
+        "issues.read"
+      ],
+      "want": []
+    },
+    {
+      "name": "nothing named",
+      "held": [
+        "issues"
+      ],
+      "named": [],
+      "want": []
+    },
+    {
+      "name": "a held prefix covers only at a dot",
+      "held": [
+        "issue"
+      ],
+      "named": [
+        "issues.read"
+      ],
+      "want": []
+    },
+    {
+      "name": "two held permissions covering one named keep it once",
+      "held": [
+        "issues",
+        "issues.read"
+      ],
+      "named": [
+        "issues.read"
+      ],
+      "want": [
+        "issues.read"
+      ]
+    },
+    {
+      "name": "comparison is exact in case",
+      "held": [
+        "Issues"
+      ],
+      "named": [
+        "issues.read",
+        "Issues.read"
+      ],
+      "want": [
+        "Issues.read"
+      ]
+    },
+    {
+      "name": "what is held and not named is not kept",
+      "held": [
+        "issues",
+        "orders"
+      ],
+      "named": [
+        "orders.read"
+      ],
+      "want": [
+        "orders.read"
+      ]
     }
   ],
   "capabilities": {

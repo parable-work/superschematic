@@ -327,12 +327,18 @@ var ShipmentQuotedFields = map[string]string{
 // shipmentSortColumns are the columns of Shipment's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var shipmentSortColumns = map[ShipmentSortField]struct{ sql, key string }{
-	ShipmentSortById:            {`shipment.id`, `page_key.id`},
-	ShipmentSortByReference:     {`shipment.reference`, `page_key.reference`},
-	ShipmentSortByStatus:        {`shipment.status`, `page_key.status`},
-	ShipmentSortByPaymentStatus: {`shipment.payment_status`, `page_key.payment_status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var shipmentSortColumns = map[ShipmentSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	ShipmentSortById:                     {`shipment.id`, `page_key.id`, false},
+	ShipmentSortByReference:              {`shipment.reference`, `page_key.reference`, false},
+	ShipmentSortByStatus:                 {`shipment.status`, `page_key.status`, false},
+	ShipmentSortByStatusEnteredAt:        {`shipment.status_entered_at`, `page_key.status_entered_at`, true},
+	ShipmentSortByPaymentStatus:          {`shipment.payment_status`, `page_key.payment_status`, false},
+	ShipmentSortByPaymentStatusEnteredAt: {`shipment.payment_status_entered_at`, `page_key.payment_status_entered_at`, true},
 }
 
 // buildShipmentOrderByClause builds an ORDER BY clause for Shipment.
@@ -1031,7 +1037,7 @@ func (r *ShipmentRepository) FindPage(ctx context.Context, filter *ShipmentFilte
 	}
 	column, ok := shipmentSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Shipment sorts by id, reference, status and paymentStatus, not %q", string(field))
+		return nil, fmt.Errorf("orm: Shipment sorts by id, reference, status, statusEnteredAt, paymentStatus and paymentStatusEnteredAt, not %q", string(field))
 	}
 	byKey := field == ShipmentSortById
 
@@ -1061,14 +1067,23 @@ func (r *ShipmentRepository) FindPage(ctx context.Context, filter *ShipmentFilte
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`shipment.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`shipment.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, shipment.id) %s ((SELECT %s FROM shipment AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, shipment.id) %s ((SELECT %s FROM shipment AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM shipment AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1076,6 +1091,9 @@ func (r *ShipmentRepository) FindPage(ctx context.Context, filter *ShipmentFilte
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, shipment.id %s`, direction)
 	}

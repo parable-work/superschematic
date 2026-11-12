@@ -697,6 +697,277 @@ class User(BaseModel):
         return self.model_copy(update={
         })
 
+class UserApiKey(BaseModel):
+    """
+    An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    # The user the key calls as.
+    user: Optional[User] = Field(default=None, alias="user", serialization_alias="user")
+
+    # What its user calls the key.
+    name: str = Field(..., alias="name", serialization_alias="name")
+
+    # The SHA-256 of the key's token, which only its holder has.
+    token_hash: CryptoSHA256 = Field(..., alias="tokenHash", serialization_alias="tokenHash")
+
+    # The permissions the key was made with, each held while its user holds it; null for every permission its user holds.
+    permissions: Optional[List[str]] = Field(default=None, alias="permissions", serialization_alias="permissions")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    # When the key ends.
+    expires_at: TemporalDateTime = Field(..., alias="expiresAt", serialization_alias="expiresAt")
+
+    # When the key last authenticated a request, written at most once a minute.
+    last_used_at: Optional[TemporalDateTime] = Field(default=None, alias="lastUsedAt", serialization_alias="lastUsedAt")
+
+    # When the key was revoked, by its user, by an administrator, or when its user was disabled.
+    revoked_at: Optional[TemporalDateTime] = Field(default=None, alias="revokedAt", serialization_alias="revokedAt")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate user
+        if self.user is not None:
+            try:
+                TypeAdapter(User).validate_python(self.user)
+            except PydanticValidationError as e:
+                errors.add_field_error("user", "invalid", str(e))
+
+        _add_model_errors(errors, "user", self.user, by_alias)
+
+        # Validate name
+        if self.name is None:
+            errors.add_field_error("name", "required", "required field")
+        else:
+
+            if len(str(self.name)) > 100:
+                errors.add_field_error("name", "maxLength", "must be at most 100 characters")
+            if len(str(self.name)) < 1:
+                errors.add_field_error("name", "minLength", "must be at least 1 characters")
+
+        # Validate tokenHash
+        if self.token_hash is None:
+            errors.add_field_error("token_hash", "required", "required field")
+        else:
+
+            if len(str(self.token_hash)) > 64:
+                errors.add_field_error("token_hash", "maxLength", "must be at most 64 characters")
+            if len(str(self.token_hash)) < 64:
+                errors.add_field_error("token_hash", "minLength", "must be at least 64 characters")
+            if re.search(r"^[0-9a-f]{64}$", str(self.token_hash), re.ASCII) is None:
+                errors.add_field_error("token_hash", "pattern", "invalid format")
+
+        # Validate permissions
+        if self.permissions is not None:
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.permissions, list) and None in self.permissions):
+                try:
+                    TypeAdapter(List[str]).validate_python(self.permissions)
+                except PydanticValidationError as e:
+                    errors.add_field_error("permissions", "invalid", str(e))
+
+            if isinstance(self.permissions, list):
+                for index, item in enumerate(self.permissions):
+                    if item is None:
+                        errors.add_field_error(f"permissions[{index}]", "required", "required field")
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate expiresAt
+        if self.expires_at is None:
+            errors.add_field_error("expires_at", "required", "required field")
+
+        # Validate lastUsedAt
+        if self.last_used_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.last_used_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("last_used_at", "invalid", str(e))
+
+        # Validate revokedAt
+        if self.revoked_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.revoked_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("revoked_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "token_hash": "tokenHash",
+                "created_at": "createdAt",
+                "expires_at": "expiresAt",
+                "last_used_at": "lastUsedAt",
+                "revoked_at": "revokedAt",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "UserApiKey":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "UserApiKey":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "UserApiKey":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "UserApiKey":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "UserApiKey":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "UserApiKey":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "UserApiKey":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "user": self.user.mask_secrets() if self.user is not None else None,
+        })
+
 class UserCredential(BaseModel):
     """
     A user's password hash, kept apart from the user row.

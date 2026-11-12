@@ -109,10 +109,10 @@ export const categoryTable: TableDefinition = {
   table: "\"budgetCategory\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"budgetCategory\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"displayName\"", field: "name", qualified: "\"budgetCategory\".\"displayName\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "kind", column: "kind", field: "kind", qualified: "\"budgetCategory\".kind", required: true, filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"budgetCategory\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "\"budgetCategory\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"displayName\"", field: "name", qualified: "\"budgetCategory\".\"displayName\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "kind", column: "kind", field: "kind", qualified: "\"budgetCategory\".kind", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"budgetCategory\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"displayName\", \"kind\", \"createdAt\"",
@@ -130,7 +130,9 @@ export const categoryTable: TableDefinition = {
     page: "SELECT %s FROM \"budgetCategory\"%s%s LIMIT %d",
     pageAfterKey: "\"budgetCategory\".id %s %s",
     pageAfter: "(%s, \"budgetCategory\".id) %s ((SELECT %s FROM \"budgetCategory\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"budgetCategory\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"budgetCategory\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"budgetCategory\" WHERE \"budgetCategory\".id = $1)",
     insert: "INSERT INTO \"budgetCategory\" (%s) VALUES (%s) RETURNING %s",
@@ -221,7 +223,7 @@ export interface LineItemFilter {
 export type LineItemOrderField = "id" | "amountCents" | "postedOn" | "memo" | "externalId" | "createdAt" | "updatedAt" | "deletedAt";
 
 /** The members findPage orders rows of LineItem by (D60, amended); ties break by id. */
-export type LineItemSortField = "id" | "amountCents" | "postedOn" | "createdAt" | "updatedAt";
+export type LineItemSortField = "id" | "amountCents" | "postedOn" | "memo" | "externalId" | "createdAt" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type LineItemUniqueKey = readonly ["id"] | readonly ["category", "externalId"];
@@ -256,14 +258,14 @@ export const lineItemTable: TableDefinition = {
   table: "\"lineItem\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"lineItem\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "amountCents", column: "\"amountCents\"", field: "amountCents", qualified: "\"lineItem\".\"amountCents\"", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, auto: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "memo", column: "memo", field: "memo", qualified: "\"lineItem\".memo", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "externalId", column: "\"externalId\"", field: "externalId", qualified: "\"lineItem\".\"externalId\"", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "categoryId", column: "\"categoryId\"", field: "category", qualified: "\"lineItem\".\"categoryId\"", uuid: true, relation: "Category", filter: ["eq", "in", "isNull"] },
-    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"lineItem\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"lineItem\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "\"lineItem\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "amountCents", column: "\"amountCents\"", field: "amountCents", qualified: "\"lineItem\".\"amountCents\"", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, auto: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "memo", column: "memo", field: "memo", qualified: "\"lineItem\".memo", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "externalId", column: "\"externalId\"", field: "externalId", qualified: "\"lineItem\".\"externalId\"", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "categoryId", column: "\"categoryId\"", field: "category", qualified: "\"lineItem\".\"categoryId\"", uuid: true, relation: "Category", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"lineItem\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"lineItem\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "deletedAt", column: "\"deletedAt\"", field: "deletedAt", qualified: "\"lineItem\".\"deletedAt\"", timestamp: true, audit: "deletedAt" },
   ],
   statements: {
@@ -282,7 +284,9 @@ export const lineItemTable: TableDefinition = {
     page: "SELECT %s FROM \"lineItem\"%s%s LIMIT %d",
     pageAfterKey: "\"lineItem\".id %s %s",
     pageAfter: "(%s, \"lineItem\".id) %s ((SELECT %s FROM \"lineItem\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"lineItem\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"lineItem\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"lineItem\" WHERE \"lineItem\".id = $1)",
     insert: "INSERT INTO \"lineItem\" (%s) VALUES (%s) RETURNING %s",
@@ -385,11 +389,11 @@ export const noteTable: TableDefinition = {
   table: "\"ledgerNote\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"ledgerNote\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "body", column: "\"bodyText\"", field: "body", qualified: "\"ledgerNote\".\"bodyText\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"ledgerNote\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "\"updatedBy\"", field: "updatedBy", qualified: "\"ledgerNote\".\"updatedBy\"", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "\"ledgerNote\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "\"ledgerNote\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "body", column: "\"bodyText\"", field: "body", qualified: "\"ledgerNote\".\"bodyText\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"ledgerNote\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedBy", column: "\"updatedBy\"", field: "updatedBy", qualified: "\"ledgerNote\".\"updatedBy\"", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "_version", column: "_version", field: "_version", qualified: "\"ledgerNote\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\"",
@@ -407,7 +411,9 @@ export const noteTable: TableDefinition = {
     page: "SELECT %s FROM \"ledgerNote\"%s%s LIMIT %d",
     pageAfterKey: "\"ledgerNote\".id %s %s",
     pageAfter: "(%s, \"ledgerNote\".id) %s ((SELECT %s FROM \"ledgerNote\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"ledgerNote\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"ledgerNote\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"ledgerNote\" WHERE \"ledgerNote\".id = $1)",
     insert: "INSERT INTO \"ledgerNote\" (%s) VALUES (%s) RETURNING %s",
@@ -446,12 +452,14 @@ export type FixtureNamingDbTx = OrmTx<FixtureNamingDbRepositories>;
 export const fixtureNamingDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

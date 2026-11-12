@@ -186,17 +186,21 @@ var TastingQuotedFields = map[string]string{
 // tastingSortColumns are the columns of Tasting's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var tastingSortColumns = map[TastingSortField]struct{ sql, key string }{
-	TastingSortById:        {`tasting.id`, `page_key.id`},
-	TastingSortByTaster:    {`tasting.taster`, `page_key.taster`},
-	TastingSortByScore:     {`tasting.score`, `page_key.score`},
-	TastingSortByServings:  {`tasting.servings`, `page_key.servings`},
-	TastingSortByTastedOn:  {`tasting.tasted_on`, `page_key.tasted_on`},
-	TastingSortByTastedAt:  {`tasting.tasted_at`, `page_key.tasted_at`},
-	TastingSortByServedAt:  {`tasting.served_at`, `page_key.served_at`},
-	TastingSortByRested:    {`tasting.rested`, `page_key.rested`},
-	TastingSortByEntityKey: {`tasting.entity_key`, `page_key.entity_key`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var tastingSortColumns = map[TastingSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	TastingSortById:        {`tasting.id`, `page_key.id`, false},
+	TastingSortByTaster:    {`tasting.taster`, `page_key.taster`, false},
+	TastingSortByScore:     {`tasting.score`, `page_key.score`, false},
+	TastingSortByServings:  {`tasting.servings`, `page_key.servings`, false},
+	TastingSortByTastedOn:  {`tasting.tasted_on`, `page_key.tasted_on`, false},
+	TastingSortByTastedAt:  {`tasting.tasted_at`, `page_key.tasted_at`, false},
+	TastingSortByServedAt:  {`tasting.served_at`, `page_key.served_at`, false},
+	TastingSortByRested:    {`tasting.rested`, `page_key.rested`, false},
+	TastingSortByEntityKey: {`tasting.entity_key`, `page_key.entity_key`, false},
 }
 
 // buildTastingOrderByClause builds an ORDER BY clause for Tasting.
@@ -1849,14 +1853,23 @@ func (r *TastingRepository) FindPage(ctx context.Context, filter *TastingFilter,
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`tasting.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`tasting.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, tasting.id) %s ((SELECT %s FROM tasting AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, tasting.id) %s ((SELECT %s FROM tasting AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM tasting AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1864,6 +1877,9 @@ func (r *TastingRepository) FindPage(ctx context.Context, filter *TastingFilter,
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, tasting.id %s`, direction)
 	}

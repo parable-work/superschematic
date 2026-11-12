@@ -5,11 +5,14 @@ import { compareCodePoints } from './permissions.js';
 import { isHyphenatedUUID, uuidFromDb, uuidToDb, uuidValue } from '../uuid.js';
 import {
   IdentityStoreError,
+  type ApiKeyRecord,
   type IdentityStore,
   type LoginRecord,
+  type NewApiKeyRow,
   type NewSession,
   type NewUser,
   type SessionRecord,
+  type StoredApiKey,
   type StoredRole,
   type StoredSession,
   type StoredUser,
@@ -33,7 +36,8 @@ runs a statement inside it, and the Postgres runner one awaited statement
 at a time, a transaction on a connection of its own. On SQLite a timestamp
 is text in UTC to the millisecond (YYYY-MM-DDTHH:MM:SS.sssZ, the DDL's
 strftime default) and a role's permissions a JSON array; on Postgres
-permissions are TEXT[], read and written as JSON.
+permissions are TEXT[], read and written as JSON. An API key's permissions
+are kept as a role's are, and null for every permission its user holds.
 */
 
 export type SqlDialect = 'postgres' | 'sqlite';
@@ -129,7 +133,7 @@ export function postgresPlaceholders(sql: string): string {
 
 const UUID_KEY_SCALARS = new Set(['Identity.UUID', 'Identity.UserID']);
 
-/** The key of every table the loader adds, AutoGenerate<Identity.UUID>. */
+/** The key of every table the loader adds, the API key table among them, AutoGenerate<Identity.UUID>. */
 const SESSION_KEY_SCALAR = 'Identity.UUID';
 
 class KeyCodec {
@@ -220,6 +224,16 @@ interface Names {
   grantUser: string;
   grantRole: string;
   grantedAt: string;
+  apiKey: string;
+  apiKeyId: string;
+  apiKeyUser: string;
+  apiKeyName: string;
+  apiKeyTokenHash: string;
+  apiKeyPermissions: string;
+  apiKeyCreatedAt: string;
+  apiKeyExpiresAt: string;
+  apiKeyLastUsedAt: string;
+  apiKeyRevokedAt: string;
 }
 
 /** A role read with the database key of a user who holds it. */
@@ -235,6 +249,7 @@ export class SqlIdentityStore implements IdentityStore {
   private readonly userKey: KeyCodec;
   private readonly roleKey: KeyCodec;
   private readonly sessionKey = new KeyCodec(SESSION_KEY_SCALAR);
+  private readonly apiKeyKey = new KeyCodec(SESSION_KEY_SCALAR);
   private readonly loginScalar: string;
   private readonly nameScalar: string;
   private readonly nameIsLogin: boolean;
@@ -255,7 +270,7 @@ export class SqlIdentityStore implements IdentityStore {
     this.loginScalar = d.user.loginScalar;
     this.nameScalar = d.user.nameScalar;
     this.nameIsLogin = d.user.columns.name === d.user.columns.login;
-    const { user: u, session: s, credential: c, role: r, roleGrant: g } = d;
+    const { user: u, session: s, credential: c, apiKey: k, role: r, roleGrant: g } = d;
     this.t = {
       user: quote(u.table),
       userKey: quote(u.columns.key),
@@ -283,6 +298,16 @@ export class SqlIdentityStore implements IdentityStore {
       grantUser: g ? quote(g.columns.user) : '',
       grantRole: g ? quote(g.columns.role) : '',
       grantedAt: g ? quote(g.columns.grantedAt) : '',
+      apiKey: k ? quote(k.table) : '',
+      apiKeyId: k ? quote(k.columns.id) : '',
+      apiKeyUser: k ? quote(k.columns.user) : '',
+      apiKeyName: k ? quote(k.columns.name) : '',
+      apiKeyTokenHash: k ? quote(k.columns.tokenHash) : '',
+      apiKeyPermissions: k ? quote(k.columns.permissions) : '',
+      apiKeyCreatedAt: k ? quote(k.columns.createdAt) : '',
+      apiKeyExpiresAt: k ? quote(k.columns.expiresAt) : '',
+      apiKeyLastUsedAt: k ? quote(k.columns.lastUsedAt) : '',
+      apiKeyRevokedAt: k ? quote(k.columns.revokedAt) : '',
     };
   }
 
@@ -311,13 +336,22 @@ export class SqlIdentityStore implements IdentityStore {
     return new IdentityStoreError('no_roles', 'the schema has no roles');
   }
 
+  private noApiKeys(): IdentityStoreError {
+    return new IdentityStoreError('no_api_keys', 'the schema has no API keys');
+  }
+
   /** The expression that reads a role's permissions as a JSON array. */
   private permissionsRead(alias: string): string {
-    const column = `${alias}.${this.t.rolePermissions}`;
+    return this.listRead(alias, this.t.rolePermissions);
+  }
+
+  /** The expression that reads a column of permissions as a JSON array, and as null when the column is. */
+  private listRead(alias: string, name: string): string {
+    const column = `${alias}.${name}`;
     return this.dialect === 'postgres' ? `array_to_json(${column})::text` : column;
   }
 
-  /** The expression that writes a role's permissions from a JSON array. */
+  /** The expression that writes a role's permissions, or an API key's, from a JSON array. */
   private permissionsWrite(): string {
     return this.dialect === 'postgres' ? 'ARRAY(SELECT e FROM json_array_elements_text(CAST(? AS json)) WITH ORDINALITY AS p(e, n) ORDER BY n)' : '?';
   }
@@ -566,6 +600,7 @@ export class SqlIdentityStore implements IdentityStore {
         [key, timeParam(at), timeParam(at)]
       );
       yield* store.revokeSessionsOf(key, '', at);
+      yield* store.revokeApiKeysOf(key, at);
     }, true);
   }
 
@@ -674,6 +709,171 @@ export class SqlIdentityStore implements IdentityStore {
       params.push(keep);
     }
     yield* exec(sql, params);
+  }
+
+  hasApiKeys(): boolean {
+    return this.descriptor.apiKey !== undefined;
+  }
+
+  /**
+   * An API key's columns as apiKeyOf reads them, of the table aliased k: its
+   * id, user, name, permissions as a JSON array or null, createdAt,
+   * expiresAt, lastUsedAt and revokedAt.
+   */
+  private apiKeyColumns(): string {
+    const t = this.t;
+    return (
+      `k.${t.apiKeyId} AS "key_id", k.${t.apiKeyUser} AS "user_key", k.${t.apiKeyName} AS "key_name", ${this.listRead('k', t.apiKeyPermissions)} AS "key_permissions", ` +
+      `k.${t.apiKeyCreatedAt} AS "created_at", k.${t.apiKeyExpiresAt} AS "expires_at", k.${t.apiKeyLastUsedAt} AS "last_used_at", k.${t.apiKeyRevokedAt} AS "revoked_at"`
+    );
+  }
+
+  /** The API key a row of apiKeyColumns holds. Null permissions stay null, every permission its user holds; anything else is the list the key names. */
+  private apiKeyOf(row: SqlRow): StoredApiKey {
+    const id = this.apiKeyKey.toWire(row.key_id);
+    let permissions: string[] | null = null;
+    const raw = row.key_permissions;
+    if (raw !== null && raw !== undefined) {
+      permissions = [];
+      if (raw !== '') {
+        let parsed: unknown;
+        try {
+          parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch (error) {
+          throw new Error(`identity: read API key ${id}'s permissions: ${(error as Error).message}`, { cause: error });
+        }
+        if (parsed !== null) {
+          if (!Array.isArray(parsed) || parsed.some(p => typeof p !== 'string')) {
+            throw new Error(`identity: read API key ${id}'s permissions: they are not a list of strings`);
+          }
+          permissions = parsed as string[];
+        }
+      }
+    }
+    return {
+      id,
+      userId: this.userKey.toWire(row.user_key),
+      name: textOf(row.key_name),
+      permissions,
+      createdAt: timeOf(row.created_at)!,
+      expiresAt: timeOf(row.expires_at)!,
+      lastUsedAt: timeOf(row.last_used_at),
+      revokedAt: timeOf(row.revoked_at),
+    };
+  }
+
+  createApiKey(key: NewApiKeyRow): Promise<StoredApiKey> {
+    if (!this.hasApiKeys()) return Promise.reject(this.noApiKeys());
+    const user = this.userKey.toDB(key.userId);
+    if (user === undefined) return Promise.reject(this.notFound('user'));
+    const store = this;
+    const t = this.t;
+    // Null permissions are written as null, which no placeholder of the
+    // array's expression carries.
+    const permissions = key.permissions === null ? null : [...key.permissions];
+    const params: SqlParam[] = [user, key.name, key.tokenHash];
+    if (permissions !== null) params.push(JSON.stringify(permissions));
+    params.push(timeParam(key.createdAt), timeParam(key.expiresAt));
+    return this.run(function* () {
+      const inserted = yield* rows(
+        `INSERT INTO ${t.apiKey} (${t.apiKeyUser}, ${t.apiKeyName}, ${t.apiKeyTokenHash}, ${t.apiKeyPermissions}, ${t.apiKeyCreatedAt}, ${t.apiKeyExpiresAt}) ` +
+          `VALUES (?, ?, ?, ${permissions === null ? 'NULL' : store.permissionsWrite()}, ?, ?) RETURNING ${t.apiKeyId} AS "key_id"`,
+        params
+      );
+      return {
+        id: store.apiKeyKey.toWire(inserted[0]!.key_id),
+        userId: store.userKey.toWire(user),
+        name: key.name,
+        permissions,
+        createdAt: key.createdAt,
+        expiresAt: key.expiresAt,
+        lastUsedAt: null,
+        revokedAt: null,
+      };
+    });
+  }
+
+  findApiKey(tokenHash: string): Promise<ApiKeyRecord> {
+    if (!this.hasApiKeys()) return Promise.reject(this.notFound('API key'));
+    const store = this;
+    const t = this.t;
+    return this.run(function* () {
+      const found = yield* rows(
+        `SELECT ${store.apiKeyColumns()}, u.${t.userLogin} AS "user_login", u.${t.userName} AS "user_name", ` +
+          `c.${t.disabledAt} AS "disabled_at", c.${t.pendingAt} AS "pending_at" ` +
+          `FROM ${t.apiKey} k JOIN ${t.user} u ON u.${t.userKey} = k.${t.apiKeyUser} ` +
+          `LEFT JOIN ${t.credential} c ON c.${t.credentialUser} = k.${t.apiKeyUser} ` +
+          `WHERE k.${t.apiKeyTokenHash} = ?`,
+        [tokenHash]
+      );
+      if (found.length === 0) throw store.notFound('API key');
+      const row = found[0]!;
+      const apiKey = store.apiKeyOf(row);
+      return {
+        apiKey,
+        user: {
+          id: apiKey.userId,
+          login: textOf(row.user_login),
+          name: textOf(row.user_name),
+          disabled: row.disabled_at !== null && row.disabled_at !== undefined,
+          pending: row.pending_at !== null && row.pending_at !== undefined,
+          roles: [],
+        },
+      };
+    });
+  }
+
+  touchApiKey(keyId: string, at: Date, staleBefore: Date): Promise<void> {
+    if (!this.hasApiKeys()) return Promise.reject(this.noApiKeys());
+    const id = this.apiKeyKey.toDB(keyId);
+    if (id === undefined) return Promise.reject(this.notFound('API key'));
+    const t = this.t;
+    return this.run(function* () {
+      yield* exec(
+        `UPDATE ${t.apiKey} SET ${t.apiKeyLastUsedAt} = ? WHERE ${t.apiKeyId} = ? AND (${t.apiKeyLastUsedAt} IS NULL OR ${t.apiKeyLastUsedAt} < ?)`,
+        [timeParam(at), id, timeParam(staleBefore)]
+      );
+    });
+  }
+
+  listApiKeys(userId: string): Promise<StoredApiKey[]> {
+    if (!this.hasApiKeys()) return Promise.reject(this.noApiKeys());
+    const user = this.userKey.toDB(userId);
+    if (user === undefined) return Promise.reject(this.notFound('user'));
+    const store = this;
+    const t = this.t;
+    return this.run(function* () {
+      const found = yield* rows(
+        `SELECT ${store.apiKeyColumns()} FROM ${t.apiKey} k WHERE k.${t.apiKeyUser} = ? AND k.${t.apiKeyRevokedAt} IS NULL ` +
+          `ORDER BY k.${t.apiKeyCreatedAt} DESC, k.${t.apiKeyId} DESC`,
+        [user]
+      );
+      return found.map(row => store.apiKeyOf(row));
+    });
+  }
+
+  revokeApiKey(userId: string, keyId: string, at: Date): Promise<void> {
+    if (!this.hasApiKeys()) return Promise.reject(this.noApiKeys());
+    const user = this.userKey.toDB(userId);
+    if (user === undefined) return Promise.reject(this.notFound('user'));
+    const id = this.apiKeyKey.toDB(keyId);
+    if (id === undefined) return Promise.reject(this.notFound('API key'));
+    const store = this;
+    const t = this.t;
+    return this.run(function* () {
+      const changed = yield* exec(
+        `UPDATE ${t.apiKey} SET ${t.apiKeyRevokedAt} = ? WHERE ${t.apiKeyId} = ? AND ${t.apiKeyUser} = ? AND ${t.apiKeyRevokedAt} IS NULL`,
+        [timeParam(at), id, user]
+      );
+      if (changed === 0) throw store.notFound('API key');
+    });
+  }
+
+  /** Revokes the live API keys of the user with the database key key, when the descriptor names their table. */
+  private *revokeApiKeysOf(key: string, at: Date): SqlWork<void> {
+    if (!this.hasApiKeys()) return;
+    const t = this.t;
+    yield* exec(`UPDATE ${t.apiKey} SET ${t.apiKeyRevokedAt} = ? WHERE ${t.apiKeyUser} = ? AND ${t.apiKeyRevokedAt} IS NULL`, [timeParam(at), key]);
   }
 
   hasRoles(): boolean {

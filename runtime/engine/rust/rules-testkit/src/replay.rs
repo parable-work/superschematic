@@ -74,7 +74,9 @@
 //!   owned fields the core holds no value of, where the engine's readers
 //!   gave their defaults. A define the engine refused because it was opened
 //!   without the package that implements a behavior the core runs is not
-//!   compared.
+//!   compared, and neither is one it refused for a member that is a table's
+//!   behavior's alone ([`TABLE_FORM`]: Workflow's `finished`, D113), which
+//!   the core takes and the hand-written scenarios hold.
 //! - `schemas.list`, `schemas.live` and `schemas.behaviors` are compared
 //!   by the types defined, the live version's behavior configs, and each
 //!   behavior's declared fields, operations and veto codes.
@@ -188,6 +190,15 @@ const LIMIT_FIELD_SET_LIMIT: &str = "setLimit of a meter with limitField writes 
 /// Why a scenario stops at a define the engine refused for another
 /// schema's state.
 const OTHER_SCHEMA_DEFINE: &str = "a define check that reads another schema, which the core's define check cannot make: the build holds a table's releaseLeases to its database (D104)";
+
+/// How the engine's refusal of a member that is a table's behavior's alone
+/// ends its name of the table form (`status: Workflow<{ ... }> on a DB
+/// table, D104`), whichever behavior's it is.
+pub const TABLE_FORM: &str = " on a DB table, D104)";
+
+/// Why a define the engine refused for a member that is a table's
+/// behavior's alone is not compared.
+const TABLE_MEMBER_REFUSAL: &str = "the engine refuses a member that is a table's behavior's alone, which the core takes: the hand-written scenarios hold its cases (D104, D113)";
 
 /// Why a define the engine refused for the behavior's package it was
 /// opened without is not compared.
@@ -1354,6 +1365,9 @@ impl<'r> Run<'r> {
             }
             if message.contains("no implementation registered") {
                 return Done::Skipped(NO_IMPLEMENTATION.to_owned());
+            }
+            if message.contains(TABLE_FORM) {
+                return Done::Skipped(TABLE_MEMBER_REFUSAL.to_owned());
             }
             if self.recording
                 && (message.contains("releaseLeases: schema ")

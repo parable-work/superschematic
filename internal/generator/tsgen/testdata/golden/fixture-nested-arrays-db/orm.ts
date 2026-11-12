@@ -107,7 +107,7 @@ export const boardTable: TableDefinition = {
   table: "board",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "board.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "board.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
     { name: "labels", column: "labels", field: "labels", qualified: "board.labels", json: true, required: true },
     { name: "states", column: "states", field: "states", qualified: "board.states", json: true, required: true },
     { name: "walls", column: "walls", field: "walls", qualified: "board.walls", json: true, required: true },
@@ -129,7 +129,9 @@ export const boardTable: TableDefinition = {
     page: "SELECT %s FROM board%s%s LIMIT %d",
     pageAfterKey: "board.id %s %s",
     pageAfter: "(%s, board.id) %s ((SELECT %s FROM board AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM board AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", board.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM board WHERE board.id = $1)",
     insert: "INSERT INTO board (%s) VALUES (%s) RETURNING %s",
@@ -165,12 +167,14 @@ export type FixtureNestedArraysDbTx = OrmTx<FixtureNestedArraysDbRepositories>;
 export const fixtureNestedArraysDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

@@ -521,9 +521,9 @@ func (f FilterFieldInfo) Type() string {
 }
 
 // FieldSpecLiteral is one field of the operation table's filter, a
-// FilterFieldSpec: { name: 'kind', kind: 'enum', operators: ['eq', 'in'],
-// value: { name: 'filter[kind]', kind: 'enum', required: false,
-// enumValues: [...] } }.
+// FilterFieldSpec: { name: 'kind', kind: 'enum', operators: ['eq', 'ne',
+// 'in', 'notIn'], value: { name: 'filter[kind]', kind: 'enum', required:
+// false, enumValues: [...] } }.
 func (f FilterFieldInfo) FieldSpecLiteral() string {
 	return fmt.Sprintf("{ name: %s, kind: %s, operators: %s, value: %s }", tsString(f.Name), tsString(f.Kind), tsStringList(f.Operators), f.SpecLiteral)
 }

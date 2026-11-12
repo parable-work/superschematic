@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/parable-work/superschematic/runtime/http/go/apperror"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
@@ -25,9 +27,16 @@ const (
 // DefaultPermissionPrefix is identity_permission_prefix's default.
 const DefaultPermissionPrefix = "identity"
 
+// The bounds of createApiKey's input (D114): the most characters a key's
+// name holds, and the most permissions a key names.
+const (
+	APIKeyNameMaxLength  = 100
+	APIKeyMaxPermissions = 100
+)
+
 // Service is the user model's logic over a Store, a Config and a clock:
-// signing users in and out, resolving a request's session to a principal,
-// and managing users, roles and grants. Its methods return
+// signing users in and out, resolving a request's session or API key to a
+// principal, and managing users, roles, grants and API keys. Its methods return
 // *apperror.AppError problems (and validation errors for a refused input),
 // which WriteError renders.
 type Service struct {
@@ -43,6 +52,8 @@ type Service struct {
 	dummy   string
 
 	registration Registration
+
+	apiKeys, apiKeyAdministration bool
 }
 
 // Registration is how Register admits a user (D81), as the API's
@@ -69,8 +80,8 @@ func WithClock(now func() time.Time) Option {
 	return func(s *Service) { s.now = now }
 }
 
-// WithRandom sets where session tokens' random bytes come from
-// (crypto/rand by default), for tests.
+// WithRandom sets where the random bytes of session tokens and API keys
+// come from (crypto/rand by default), for tests.
 func WithRandom(r io.Reader) Option {
 	return func(s *Service) { s.random = r }
 }
@@ -98,8 +109,26 @@ func WithRegistration(r Registration) Option {
 	}
 }
 
+// WithAPIKeys turns on the session set's API key operations (D114), as the
+// API's @userSessions({ apiKeys: true }) declares them: createApiKey,
+// listApiKeys and revokeApiKey, which Routes leaves out without it. A
+// request authenticates with an API key whether they are on or not,
+// whenever the store has the table.
+func WithAPIKeys() Option {
+	return func(s *Service) { s.apiKeys = true }
+}
+
+// WithAPIKeyAdministration turns on the administration set's API key
+// operations (D114), as the API's @userAdministration({ apiKeys: true })
+// declares them: listUserApiKeys and revokeUserApiKey, which Routes leaves
+// out without it.
+func WithAPIKeyAdministration() Option {
+	return func(s *Service) { s.apiKeyAdministration = true }
+}
+
 // WithRoutes sets the route requirements of every operation of the API,
-// which capabilities answers for.
+// which capabilities answers for. A server lists the API key operations
+// among them only when its API declares them.
 func WithRoutes(routes []Route) Option {
 	return func(s *Service) { s.routes = append([]Route(nil), routes...) }
 }
@@ -166,6 +195,14 @@ func (r Registration) check() error {
 // Registration is how the service's Register admits users.
 func (s *Service) Registration() Registration { return s.registration }
 
+// APIKeys reports whether the session set's API key operations are turned
+// on (WithAPIKeys).
+func (s *Service) APIKeys() bool { return s.apiKeys }
+
+// APIKeyAdministration reports whether the administration set's API key
+// operations are turned on (WithAPIKeyAdministration).
+func (s *Service) APIKeyAdministration() bool { return s.apiKeyAdministration }
+
 // Config is the config the service runs with, its defaults filled in.
 func (s *Service) Config() Config { return s.cfg }
 
@@ -174,17 +211,22 @@ func (s *Service) Config() Config { return s.cfg }
 func (s *Service) Permission(name string) string { return s.prefix + "." + name }
 
 // Principal is an authenticated caller: the user and their roles, and the
-// session the request carried.
+// session or the API key the request carried.
 type Principal struct {
 	ID    string
 	Login string
 	Name  string
-	// Roles are the user's roles, by name, as session.Role.
+	// Roles are the user's roles, by name, as session.Role. An API key
+	// made with permissions holds them narrowed to those (NarrowRoles).
 	Roles []session.Role
 	// Permissions are the roles' own, without repeats (EffectivePermissions).
 	Permissions []string
-	SessionID   string
-	Transport   Transport
+	// SessionID is the session's id, and empty for an API key's principal.
+	SessionID string
+	// APIKeyID is the API key's id (D114), and empty for a session's
+	// principal.
+	APIKeyID  string
+	Transport Transport
 }
 
 // The operations' inputs and results, by the contract's field names
@@ -260,6 +302,41 @@ type (
 		ID          string   `json:"id"`
 		Name        string   `json:"name"`
 		Permissions []string `json:"permissions"`
+	}
+	// CreateAPIKeyInput is the contract's CreateApiKeyInput (D114).
+	CreateAPIKeyInput struct {
+		Name string `json:"name"`
+		// ExpiresInSeconds is how long the key lasts. Absent means the
+		// config's apiKeyMaxTtlSeconds, which also bounds it.
+		ExpiresInSeconds *int64 `json:"expiresInSeconds,omitempty"`
+		// Permissions are the permissions the key names. Absent, or null,
+		// means every permission its user holds.
+		Permissions []string `json:"permissions,omitempty"`
+	}
+	// IdentityAPIKey is the contract's ApiKey (D114): an API key as the
+	// lists show one, never its token or its hash.
+	IdentityAPIKey struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		// Permissions is absent, never null, for a key that holds every
+		// permission its user does: nil is left out, and a list is written,
+		// an empty one included.
+		Permissions []string  `json:"permissions,omitzero"`
+		CreatedAt   time.Time `json:"createdAt"`
+		ExpiresAt   time.Time `json:"expiresAt"`
+		// LastUsedAt is absent until the key's first request.
+		LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	}
+	// CreatedAPIKey is the contract's CreatedApiKey (D114): createApiKey's
+	// answer, the one time the key's token is shown.
+	CreatedAPIKey struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		// Permissions is absent as IdentityAPIKey's is.
+		Permissions []string  `json:"permissions,omitzero"`
+		CreatedAt   time.Time `json:"createdAt"`
+		ExpiresAt   time.Time `json:"expiresAt"`
+		Token       string    `json:"token"`
 	}
 )
 
@@ -449,14 +526,16 @@ func (s *Service) issue(ctx context.Context, user User, transport Transport) (Is
 	return IssuedSession{Result: result, Token: token, Transport: transport, SessionID: sess.ID, ExpiresAt: expires}, nil
 }
 
-// Authenticate resolves a request's session to its principal. The
-// credential is the Authorization bearer token, or the session cookie
-// without an Authorization header (ExtractCredential). A cookie request
-// with a method other than GET, HEAD or OPTIONS passes the cross-origin
-// check first (403 cross_origin). Then the session must exist, be neither
-// revoked, expired nor idle, and belong to a user who is not disabled;
-// every other outcome is 401 unauthorized. The session's lastSeenAt is
-// written when it is older than the touch interval.
+// Authenticate resolves a request's session or API key to its principal.
+// The credential is the Authorization bearer token, a session's or an API
+// key, or the session cookie without an Authorization header
+// (ExtractCredential). A cookie request with a method other than GET, HEAD
+// or OPTIONS passes the cross-origin check first (403 cross_origin). Then
+// the session must exist, be neither revoked, expired nor idle, and belong
+// to a user who is not disabled; every other outcome is 401 unauthorized.
+// The session's lastSeenAt is written when it is older than the touch
+// interval. An API key is held to the same rules but the idle one, and
+// its lastUsedAt is written as lastSeenAt is (D114).
 func (s *Service) Authenticate(r *http.Request) (Principal, error) {
 	p, _, err := s.authenticate(r)
 	return p, err
@@ -470,7 +549,7 @@ func (s *Service) authenticate(r *http.Request) (Principal, Transport, error) {
 	case NoCredential:
 		return Principal{}, "", unauthenticated(errors.New("the request carries no session"))
 	case InvalidCredential:
-		return Principal{}, cred.Transport, unauthenticated(fmt.Errorf("the %s credential is not a session token", cred.Transport))
+		return Principal{}, cred.Transport, unauthenticated(fmt.Errorf("the %s credential is not a token the transport carries", cred.Transport))
 	}
 	if cred.Transport == TransportCookie {
 		if err := s.cop.Check(r); err != nil {
@@ -482,8 +561,13 @@ func (s *Service) authenticate(r *http.Request) (Principal, Transport, error) {
 }
 
 // AuthenticateToken resolves a session token to its principal, as
-// Authenticate does once it has read the token from a request.
+// Authenticate does once it has read the token from a request. A token
+// that is an API key is resolved as one with the bearer transport, the
+// only one that carries it (D114).
 func (s *Service) AuthenticateToken(ctx context.Context, token string, transport Transport) (Principal, error) {
+	if transport == TransportBearer && isAPIKey(token) {
+		return s.authenticateAPIKey(ctx, token)
+	}
 	rec, err := s.store.FindSession(ctx, HashToken(token))
 	if errors.Is(err, ErrNotFound) {
 		return Principal{}, unauthenticated(errors.New("no session has the token"))
@@ -527,6 +611,54 @@ func (s *Service) AuthenticateToken(ctx context.Context, token string, transport
 	}, nil
 }
 
+// authenticateAPIKey resolves an API key to its principal (D114). In this
+// order, the key must exist, be neither revoked nor expired, and belong to
+// a user who is neither disabled nor pending; every other outcome is the
+// 401 unauthorized a session's is. No idle timeout ends a key. Its
+// lastUsedAt is written when it is null or older than the touch interval,
+// as a session's lastSeenAt is. A key made with permissions holds its
+// user's roles narrowed to them (NarrowRoles); one made with none holds
+// them whole, as a session does.
+func (s *Service) authenticateAPIKey(ctx context.Context, token string) (Principal, error) {
+	rec, err := s.store.FindAPIKey(ctx, HashToken(token))
+	if errors.Is(err, ErrNotFound) {
+		return Principal{}, unauthenticated(errors.New("no API key has the token"))
+	}
+	if err != nil {
+		return Principal{}, err
+	}
+	now := s.now().UTC()
+	key := rec.APIKey
+	switch {
+	case key.RevokedAt != nil:
+		return Principal{}, unauthenticated(errors.New("the API key is revoked"))
+	case !now.Before(key.ExpiresAt):
+		return Principal{}, unauthenticated(errors.New("the API key is expired"))
+	case rec.User.Disabled:
+		return Principal{}, unauthenticated(errors.New("the user is disabled"))
+	case rec.User.Pending:
+		return Principal{}, unauthenticated(errors.New("the user waits for approval"))
+	}
+	if interval := s.cfg.TouchInterval(); key.LastUsedAt == nil || now.Sub(*key.LastUsedAt) >= interval {
+		if err := s.store.TouchAPIKey(ctx, key.ID, now, now.Add(-interval)); err != nil {
+			return Principal{}, err
+		}
+	}
+	roles, err := s.store.UserRoles(ctx, rec.User.ID)
+	if err != nil {
+		return Principal{}, err
+	}
+	sessionRoles := toSessionRoles(roles)
+	if key.Permissions != nil {
+		sessionRoles = NarrowRoles(sessionRoles, key.Permissions)
+	}
+	return Principal{
+		ID: rec.User.ID, Login: rec.User.Login, Name: rec.User.Name,
+		Roles: sessionRoles, Permissions: EffectivePermissions(sessionRoles),
+		APIKeyID: key.ID, Transport: TransportBearer,
+	}, nil
+}
+
 func toSessionRoles(roles []Role) []session.Role {
 	out := make([]session.Role, len(roles))
 	for i, r := range roles {
@@ -535,8 +667,23 @@ func toSessionRoles(roles []Role) []session.Role {
 	return out
 }
 
-// Logout revokes the caller's session.
+// sessionOnly refuses a caller an API key authenticated, with 403
+// forbidden (D114). A key does not act on its own account: it neither
+// makes, lists nor revokes keys, signs out nor changes the password, so a
+// leaked one does none of them.
+func sessionOnly(p Principal) error {
+	if p.APIKeyID != "" {
+		return forbidden(sessionOnlyMessage, nil)
+	}
+	return nil
+}
+
+// Logout revokes the caller's session. An API key's principal has none to
+// revoke and is 403 forbidden.
 func (s *Service) Logout(ctx context.Context, p Principal) error {
+	if err := sessionOnly(p); err != nil {
+		return err
+	}
 	if p.SessionID == "" {
 		return unauthenticated(errors.New("the caller has no session"))
 	}
@@ -565,7 +712,11 @@ func (s *Service) Capabilities(p Principal) Capabilities {
 
 // ChangePassword sets the caller's password once current verifies (401
 // invalid_credentials otherwise), and revokes the user's other sessions.
+// The user's API keys live on. An API key's principal is 403 forbidden.
 func (s *Service) ChangePassword(ctx context.Context, p Principal, in ChangePasswordInput) error {
+	if err := sessionOnly(p); err != nil {
+		return err
+	}
 	var f fieldErrors
 	checkPasswordField(&f, "current", in.Current)
 	checkPasswordField(&f, "password", in.Password)
@@ -606,13 +757,16 @@ func (s *Service) require(p Principal, name string) error {
 	return nil
 }
 
-// storeError turns a store's not-found and no-roles errors into problems.
+// storeError turns a store's not-found, no-roles and no-API-keys errors
+// into problems.
 func storeError(err error, what string) error {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return notFound(what)
 	case errors.Is(err, ErrNoRoles):
 		return problem(apperror.ErrCodeNotFound, CodeNotFound, "The schema has no roles", err)
+	case errors.Is(err, ErrNoAPIKeys):
+		return noAPIKeys()
 	case errors.Is(err, ErrRoleNameTaken):
 		return conflict("The role name is taken")
 	}
@@ -691,13 +845,15 @@ func (s *Service) getUser(ctx context.Context, id string) (IdentityUser, error) 
 	return identityUser(user), nil
 }
 
-// DisableUser disables a user and revokes their sessions (users.write).
-// The caller's permissions must cover each of the user's.
+// DisableUser disables a user and revokes their sessions and their API
+// keys (users.write). The caller's permissions must cover each of the
+// user's.
 func (s *Service) DisableUser(ctx context.Context, p Principal, id string) (IdentityUser, error) {
 	return s.setDisabled(ctx, p, id, true)
 }
 
-// EnableUser enables a disabled user (users.write). The caller's
+// EnableUser enables a disabled user (users.write), which brings back
+// neither a session nor an API key the disable revoked. The caller's
 // permissions must cover each of the user's.
 func (s *Service) EnableUser(ctx context.Context, p Principal, id string) (IdentityUser, error) {
 	return s.setDisabled(ctx, p, id, false)
@@ -737,7 +893,8 @@ func (s *Service) ApproveUser(ctx context.Context, p Principal, id string) (Iden
 }
 
 // SetUserPassword sets a user's password and revokes their sessions
-// (users.write). The caller's permissions must cover each of the user's.
+// (users.write). The user's API keys live on. The caller's permissions
+// must cover each of the user's.
 func (s *Service) SetUserPassword(ctx context.Context, p Principal, id string, in SetPasswordInput) error {
 	if err := s.require(p, PermissionUsersWrite); err != nil {
 		return err
@@ -894,4 +1051,167 @@ func (s *Service) RevokeRole(ctx context.Context, p Principal, userID, roleID st
 		return IdentityUser{}, storeError(err, "User or role")
 	}
 	return s.getUser(ctx, userID)
+}
+
+// ownAPIKeys admits the caller of an API key operation of the session set
+// (D114): an authenticated one (401) signed in with a session, not an API
+// key (403), over a store that has API keys (404).
+func (s *Service) ownAPIKeys(p Principal) error {
+	if p.ID == "" {
+		return unauthenticated(errors.New("the caller is not authenticated"))
+	}
+	if err := sessionOnly(p); err != nil {
+		return err
+	}
+	return s.haveAPIKeys()
+}
+
+// haveAPIKeys is the 404 of an API key operation over a store whose
+// descriptor names no API key table, and nil over one that has it.
+func (s *Service) haveAPIKeys() error {
+	if !s.store.HasAPIKeys() {
+		return noAPIKeys()
+	}
+	return nil
+}
+
+func identityAPIKey(k APIKey) IdentityAPIKey {
+	return IdentityAPIKey{ID: k.ID, Name: k.Name, Permissions: k.Permissions, CreatedAt: k.CreatedAt, ExpiresAt: k.ExpiresAt, LastUsedAt: k.LastUsedAt}
+}
+
+// CreateAPIKey makes the caller an API key (D114) and answers its token,
+// this once. The caller is signed in with a session. The name, trimmed of
+// surrounding white space, is 1 to APIKeyNameMaxLength characters;
+// expiresInSeconds, when present, is 1 to the config's apiKeyMaxTtlSeconds,
+// which is also the lifetime without it; permissions, when present, are 1
+// to APIKeyMaxPermissions of them (400). Each has a permission's form and
+// is named once (422), and the caller holds a permission covering it (403,
+// a key names only what its user holds).
+func (s *Service) CreateAPIKey(ctx context.Context, p Principal, in CreateAPIKeyInput) (CreatedAPIKey, error) {
+	if err := s.ownAPIKeys(p); err != nil {
+		return CreatedAPIKey{}, err
+	}
+	var f fieldErrors
+	name := strings.TrimSpace(in.Name)
+	switch n := utf8.RuneCountInString(name); {
+	case n == 0:
+		f.add("name", "required", "name is required")
+	case n > APIKeyNameMaxLength:
+		f.add("name", "maxLength", fmt.Sprintf("name must be at most %d characters", APIKeyNameMaxLength))
+	}
+	seconds := s.cfg.apiKeyMaxTTLSeconds()
+	if in.ExpiresInSeconds != nil {
+		switch given := *in.ExpiresInSeconds; {
+		case given < 1:
+			f.add("expiresInSeconds", "min", "expiresInSeconds must be at least 1")
+		case given > seconds:
+			f.add("expiresInSeconds", "max", fmt.Sprintf("expiresInSeconds must be at most %d", seconds))
+		default:
+			seconds = given
+		}
+	}
+	if in.Permissions != nil {
+		switch n := len(in.Permissions); {
+		case n == 0:
+			f.add("permissions", "listMin", "permissions must contain at least 1 items")
+		case n > APIKeyMaxPermissions:
+			f.add("permissions", "listMax", fmt.Sprintf("permissions must contain at most %d items", APIKeyMaxPermissions))
+		}
+	}
+	if err := f.err(); err != nil {
+		return CreatedAPIKey{}, err
+	}
+	// A permission that has not a permission's form, and each one that
+	// repeats an earlier one, in the order given.
+	var refused []string
+	seen := map[string]bool{}
+	for _, perm := range in.Permissions {
+		if !ValidPermission(perm) || seen[perm] {
+			refused = append(refused, perm)
+		}
+		seen[perm] = true
+	}
+	if len(refused) > 0 {
+		return CreatedAPIKey{}, invalidPermissions(refused)
+	}
+	if uncovered := Uncovered(p.Permissions, in.Permissions); len(uncovered) > 0 {
+		return CreatedAPIKey{}, forbidden(apiKeyNotHeldMessage, map[string]any{"permissions": uncovered})
+	}
+	token, err := NewAPIKey(s.random)
+	if err != nil {
+		return CreatedAPIKey{}, err
+	}
+	// To the millisecond, as a session's times are.
+	now := s.now().UTC().Truncate(time.Millisecond)
+	key, err := s.store.CreateAPIKey(ctx, NewAPIKeyRow{
+		UserID: p.ID, Name: name, TokenHash: HashToken(token), Permissions: in.Permissions,
+		CreatedAt: now, ExpiresAt: now.Add(time.Duration(seconds) * time.Second),
+	})
+	if errors.Is(err, ErrNotFound) {
+		return CreatedAPIKey{}, unauthenticated(err)
+	}
+	if err != nil {
+		return CreatedAPIKey{}, storeError(err, "User")
+	}
+	return CreatedAPIKey{ID: key.ID, Name: key.Name, Permissions: key.Permissions, CreatedAt: key.CreatedAt, ExpiresAt: key.ExpiresAt, Token: token}, nil
+}
+
+// ListAPIKeys lists the caller's API keys that are not revoked, expired
+// ones included, newest first (D114). The caller is signed in with a
+// session.
+func (s *Service) ListAPIKeys(ctx context.Context, p Principal) ([]IdentityAPIKey, error) {
+	if err := s.ownAPIKeys(p); err != nil {
+		return nil, err
+	}
+	return s.listAPIKeys(ctx, p.ID)
+}
+
+func (s *Service) listAPIKeys(ctx context.Context, userID string) ([]IdentityAPIKey, error) {
+	keys, err := s.store.ListAPIKeys(ctx, userID)
+	if err != nil {
+		return nil, storeError(err, "User")
+	}
+	out := make([]IdentityAPIKey, len(keys))
+	for i, k := range keys {
+		out[i] = identityAPIKey(k)
+	}
+	return out, nil
+}
+
+// RevokeAPIKey revokes the caller's API key with keyID (D114). A key that
+// does not exist, is another user's or is revoked already is 404. The
+// caller is signed in with a session.
+func (s *Service) RevokeAPIKey(ctx context.Context, p Principal, keyID string) error {
+	if err := s.ownAPIKeys(p); err != nil {
+		return err
+	}
+	return storeError(s.store.RevokeAPIKey(ctx, p.ID, keyID, s.now()), "API key")
+}
+
+// ListUserAPIKeys lists a user's API keys as ListAPIKeys lists the
+// caller's (users.read, D114). A user that does not exist is 404.
+func (s *Service) ListUserAPIKeys(ctx context.Context, p Principal, userID string) ([]IdentityAPIKey, error) {
+	if err := s.require(p, PermissionUsersRead); err != nil {
+		return nil, err
+	}
+	if err := s.haveAPIKeys(); err != nil {
+		return nil, err
+	}
+	if _, err := s.store.GetUser(ctx, userID); err != nil {
+		return nil, storeError(err, "User")
+	}
+	return s.listAPIKeys(ctx, userID)
+}
+
+// RevokeUserAPIKey revokes a user's API key with keyID (users.write,
+// D114). A key that does not exist, is another user's or is revoked
+// already is 404.
+func (s *Service) RevokeUserAPIKey(ctx context.Context, p Principal, userID, keyID string) error {
+	if err := s.require(p, PermissionUsersWrite); err != nil {
+		return err
+	}
+	if err := s.haveAPIKeys(); err != nil {
+		return err
+	}
+	return storeError(s.store.RevokeAPIKey(ctx, userID, keyID, s.now()), "API key")
 }

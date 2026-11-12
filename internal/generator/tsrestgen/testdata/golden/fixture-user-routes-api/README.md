@@ -52,10 +52,15 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `POST` | `/api/auth/admin/users/{id}/approve` | `account-admin.approveUser` (identity) | identity.users.write |
 | `POST` | `/api/auth/admin/users/{id}/disable` | `account-admin.disableUser` (identity) | identity.users.write |
 | `POST` | `/api/auth/admin/users/{id}/enable` | `account-admin.enableUser` (identity) | identity.users.write |
+| `GET` | `/api/auth/admin/users/{id}/keys` | `account-admin.listUserApiKeys` (identity) | identity.users.read |
+| `DELETE` | `/api/auth/admin/users/{id}/keys/{keyId}` | `account-admin.revokeUserApiKey` (identity) | identity.users.write |
 | `PUT` | `/api/auth/admin/users/{id}/password` | `account-admin.setUserPassword` (identity) | identity.users.write |
 | `DELETE` | `/api/auth/admin/users/{id}/roles/{roleId}` | `account-admin.revokeRole` (identity) | identity.roles.write |
 | `PUT` | `/api/auth/admin/users/{id}/roles/{roleId}` | `account-admin.grantRole` (identity) | identity.roles.write |
 | `GET` | `/api/auth/capabilities` | `account.capabilities` (identity) | authenticated |
+| `GET` | `/api/auth/keys` | `account.listApiKeys` (identity) | authenticated |
+| `POST` | `/api/auth/keys` | `account.createApiKey` (identity) | authenticated |
+| `DELETE` | `/api/auth/keys/{id}` | `account.revokeApiKey` (identity) | authenticated |
 | `POST` | `/api/auth/login` | `account.login` (identity) | public |
 | `POST` | `/api/auth/logout` | `account.logout` (identity) | authenticated |
 | `GET` | `/api/auth/me` | `account.me` (identity) | authenticated |

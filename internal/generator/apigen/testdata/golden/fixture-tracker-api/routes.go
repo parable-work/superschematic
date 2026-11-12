@@ -269,7 +269,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Handler: createTeamsSummarizeTeamHandler(cfg.Implementations.Teams),
 		},
 		// A team's issues, newest first unless the caller sorts them, searched
-		// by their text and filtered by their fields.
+		// by their text and filtered by their fields. An issue with no due date
+		// or no estimate comes last in a sort by either, in either direction.
 		{
 			Method:  "GET",
 			Path:    "/teams/{teamId}/issues",
@@ -804,7 +805,7 @@ func createNotesListNotesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
 		// whose refusal is the 400 every server answers at filter[field].
 		// Each value is then decoded as an item of a query list of its
 		// field's type.
-		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "issueId", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "owner", Operators: []filterparse.Operator{"eq", "in"}}}})
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "issueId", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}, {Name: "owner", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}}})
 		if !ok {
 			return
 		}
@@ -1236,7 +1237,8 @@ func createTeamsSummarizeTeamHandler(impl TeamsImplementation) gohttp.HandlerFun
 // createIssuesListIssuesHandler creates a handler for GET /api/teams/{teamId}/issues
 //
 // A team's issues, newest first unless the caller sorts them, searched
-// by their text and filtered by their fields.
+// by their text and filtered by their fields. An issue with no due date
+// or no estimate comes last in a sort by either, in either direction.
 //
 // It serves the list of Issue, a table of fixture-tracker-db, from its
 // repository in one transaction (D106): no implementation method serves
@@ -1281,7 +1283,7 @@ func createIssuesListIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc 
 		// whose refusal is the 400 every server answers at filter[field].
 		// Each value is then decoded as an item of a query list of its
 		// field's type.
-		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "in"}}, {Name: "priority", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "title", Operators: []filterparse.Operator{"eq", "in", "contains"}}, {Name: "estimate", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "dueOn", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "assigneeId", Operators: []filterparse.Operator{"eq", "in", "isNull"}}, {Name: "createdAt", Operators: []filterparse.Operator{"eq", "in", "gt", "gte", "lt", "lte"}}, {Name: "createdBy", Operators: []filterparse.Operator{"eq", "in"}}}})
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}, {Name: "priority", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte"}}, {Name: "title", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "contains"}}, {Name: "estimate", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "dueOn", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "isNull"}}, {Name: "assigneeId", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "isNull"}}, {Name: "createdAt", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte"}}, {Name: "createdBy", Operators: []filterparse.Operator{"eq", "ne", "in", "notIn"}}}})
 		if !ok {
 			return
 		}
@@ -1306,7 +1308,7 @@ func createIssuesListIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc 
 		// It also reads sort, the page's sort (D60, amended), after the limit,
 		// and unbinds the cursor from the sort it was returned under, so the
 		// implementation reads its own key.
-		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"createdAt", "priority", "title"}, Default: paging.Sort{Field: "createdAt", Desc: true}}})
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"createdAt", "priority", "title", "dueOn", "estimate"}, Default: paging.Sort{Field: "createdAt", Desc: true}}})
 		if !ok {
 			return
 		}

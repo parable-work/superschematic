@@ -15,8 +15,12 @@ import (
 
 // UUIDFilter provides filtering operations for UUID fields
 type UUIDFilter struct {
-	Eq     *types.IdentityUUID
-	In     []types.IdentityUUID
+	Eq *types.IdentityUUID
+	In []types.IdentityUUID
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne     *types.IdentityUUID
+	NotIn  []types.IdentityUUID
 	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
@@ -32,7 +36,11 @@ type StringFilter struct {
 	// An empty or nil slice adds no condition, so a caller narrowing a result
 	// set must treat "no allowed values" as its own case rather than passing
 	// the empty slice and getting every row back.
-	In    []string
+	In []string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *string
+	NotIn []string
 	ILike *string // Case-insensitive LIKE
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
@@ -40,7 +48,11 @@ type StringFilter struct {
 
 // Int64Filter provides filtering operations for integer fields
 type Int64Filter struct {
-	Eq      *int64
+	Eq *int64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *int64
+	NotIn   []int64
 	Gt      *int64
 	Gte     *int64
 	Lt      *int64
@@ -61,7 +73,11 @@ type Int64Range struct {
 
 // FloatFilter provides filtering operations for float fields
 type FloatFilter struct {
-	Eq      *float64
+	Eq *float64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *float64
+	NotIn   []float64
 	Gt      *float64
 	Gte     *float64
 	Lt      *float64
@@ -83,6 +99,10 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *bool
+	NotIn []bool
 	// In matches any value in the set; an empty or nil slice adds no
 	// condition (D89).
 	In []bool
@@ -92,7 +112,11 @@ type BoolFilter struct {
 
 // DateTimeFilter provides filtering operations for DateTime fields
 type DateTimeFilter struct {
-	Eq      *time.Time
+	Eq *time.Time
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *time.Time
+	NotIn   []time.Time
 	Gt      *time.Time
 	Gte     *time.Time
 	Lt      *time.Time
@@ -112,7 +136,11 @@ type DateTimeRange struct {
 
 // DateFilter provides filtering operations for Date fields
 type DateFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -135,7 +163,11 @@ type DateRange struct {
 // NUMERIC (D84). Each value is a decimal's text, bound as it is, and
 // Postgres compares them as numbers: "1.50" equals "1.5".
 type DecimalFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -159,7 +191,10 @@ type DecimalRange struct {
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
 type DurationFilter struct {
-	Eq      *time.Duration
+	Eq *time.Duration
+	// Ne keeps the rows Eq leaves out (D112), a row whose column is NULL
+	// among them.
+	Ne      *time.Duration
 	Gt      *time.Duration
 	Gte     *time.Duration
 	Lt      *time.Duration
@@ -537,11 +572,13 @@ type LedgerLineFindOptions struct {
 type LedgerLineSortField string
 
 const (
-	LedgerLineSortById       LedgerLineSortField = "id"
-	LedgerLineSortByAmount   LedgerLineSortField = "amount"
-	LedgerLineSortByCurrency LedgerLineSortField = "currency"
-	LedgerLineSortByRate     LedgerLineSortField = "rate"
-	LedgerLineSortByBookedAt LedgerLineSortField = "bookedAt"
+	LedgerLineSortById         LedgerLineSortField = "id"
+	LedgerLineSortByAmount     LedgerLineSortField = "amount"
+	LedgerLineSortByCurrency   LedgerLineSortField = "currency"
+	LedgerLineSortByRate       LedgerLineSortField = "rate"
+	LedgerLineSortByConfidence LedgerLineSortField = "confidence"
+	LedgerLineSortByQuantity   LedgerLineSortField = "quantity"
+	LedgerLineSortByBookedAt   LedgerLineSortField = "bookedAt"
 )
 
 // LedgerLineSort is the order FindPage reads LedgerLine rows in: Field,
@@ -557,10 +594,10 @@ type LedgerLineSort struct {
 func ParseLedgerLineSort(text string) (LedgerLineSort, error) {
 	parsed := LedgerLineSort{Field: LedgerLineSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case LedgerLineSortById, LedgerLineSortByAmount, LedgerLineSortByCurrency, LedgerLineSortByRate, LedgerLineSortByBookedAt:
+	case LedgerLineSortById, LedgerLineSortByAmount, LedgerLineSortByCurrency, LedgerLineSortByRate, LedgerLineSortByConfidence, LedgerLineSortByQuantity, LedgerLineSortByBookedAt:
 		return parsed, nil
 	}
-	return LedgerLineSort{}, fmt.Errorf("orm: LedgerLine sorts by id, amount, currency, rate and bookedAt, not %q", text)
+	return LedgerLineSort{}, fmt.Errorf("orm: LedgerLine sorts by id, amount, currency, rate, confidence, quantity and bookedAt, not %q", text)
 }
 
 // LedgerLineUniqueKey names a unique key of LedgerLine that UpsertOne and
@@ -750,6 +787,7 @@ type PassageSortField string
 const (
 	PassageSortById    PassageSortField = "id"
 	PassageSortByTitle PassageSortField = "title"
+	PassageSortByTopic PassageSortField = "topic"
 )
 
 // PassageSort is the order FindPage reads Passage rows in: Field,
@@ -765,10 +803,10 @@ type PassageSort struct {
 func ParsePassageSort(text string) (PassageSort, error) {
 	parsed := PassageSort{Field: PassageSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case PassageSortById, PassageSortByTitle:
+	case PassageSortById, PassageSortByTitle, PassageSortByTopic:
 		return parsed, nil
 	}
-	return PassageSort{}, fmt.Errorf("orm: Passage sorts by id and title, not %q", text)
+	return PassageSort{}, fmt.Errorf("orm: Passage sorts by id, title and topic, not %q", text)
 }
 
 // PassageUniqueKey names a unique key of Passage that UpsertOne and
@@ -1117,6 +1155,11 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`"NoteChunk".id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk".id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1125,6 +1168,15 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`"NoteChunk".id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`("NoteChunk".id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1140,6 +1192,11 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`"NoteChunk"."chunkText" = $%d`, paramNum))
 			*args = append(*args, *f.Text.Eq)
 		}
+		if f.Text.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk"."chunkText" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Text.Ne)
+		}
 		if len(f.Text.In) > 0 {
 			placeholders := make([]string, len(f.Text.In))
 			for i, value := range f.Text.In {
@@ -1148,6 +1205,15 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`"NoteChunk"."chunkText" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Text.NotIn) > 0 {
+			placeholders := make([]string, len(f.Text.NotIn))
+			for i, value := range f.Text.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("NoteChunk"."chunkText" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Text.ILike != nil {
 			paramNum++
@@ -1322,6 +1388,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1330,6 +1401,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1344,6 +1424,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.amount = $%d`, paramNum))
 			*args = append(*args, *f.Amount.Eq)
+		}
+		if f.Amount.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.amount IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Amount.Ne)
 		}
 		if f.Amount.Gt != nil {
 			paramNum++
@@ -1382,6 +1467,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.amount IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Amount.NotIn) > 0 {
+			placeholders := make([]string, len(f.Amount.NotIn))
+			for i, value := range f.Amount.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.amount IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Amount.IsNull != nil {
 			if *f.Amount.IsNull {
 				conditions = append(conditions, `ledger_line.amount IS NULL`)
@@ -1396,6 +1490,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.currency = $%d`, paramNum))
 			*args = append(*args, *f.Currency.Eq)
 		}
+		if f.Currency.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.currency IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Currency.Ne)
+		}
 		if len(f.Currency.In) > 0 {
 			placeholders := make([]string, len(f.Currency.In))
 			for i, value := range f.Currency.In {
@@ -1404,6 +1503,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.currency IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Currency.NotIn) > 0 {
+			placeholders := make([]string, len(f.Currency.NotIn))
+			for i, value := range f.Currency.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.currency IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Currency.ILike != nil {
 			paramNum++
@@ -1423,6 +1531,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.rate = $%d`, paramNum))
 			*args = append(*args, *f.Rate.Eq)
+		}
+		if f.Rate.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.rate IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Rate.Ne)
 		}
 		if f.Rate.Gt != nil {
 			paramNum++
@@ -1461,6 +1574,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.rate IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Rate.NotIn) > 0 {
+			placeholders := make([]string, len(f.Rate.NotIn))
+			for i, value := range f.Rate.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.rate IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Rate.IsNull != nil {
 			if *f.Rate.IsNull {
 				conditions = append(conditions, `ledger_line.rate IS NULL`)
@@ -1474,6 +1596,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.confidence = $%d`, paramNum))
 			*args = append(*args, *f.Confidence.Eq)
+		}
+		if f.Confidence.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.confidence IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Confidence.Ne)
 		}
 		if f.Confidence.Gt != nil {
 			paramNum++
@@ -1512,6 +1639,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.confidence IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Confidence.NotIn) > 0 {
+			placeholders := make([]string, len(f.Confidence.NotIn))
+			for i, value := range f.Confidence.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.confidence IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Confidence.IsNull != nil {
 			if *f.Confidence.IsNull {
 				conditions = append(conditions, `ledger_line.confidence IS NULL`)
@@ -1525,6 +1661,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.quantity = $%d`, paramNum))
 			*args = append(*args, *f.Quantity.Eq)
+		}
+		if f.Quantity.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.quantity IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Ne)
 		}
 		if f.Quantity.Gt != nil {
 			paramNum++
@@ -1563,6 +1704,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.quantity IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Quantity.NotIn) > 0 {
+			placeholders := make([]string, len(f.Quantity.NotIn))
+			for i, value := range f.Quantity.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.quantity IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Quantity.IsNull != nil {
 			if *f.Quantity.IsNull {
 				conditions = append(conditions, `ledger_line.quantity IS NULL`)
@@ -1576,6 +1726,11 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at = $%d`, paramNum))
 			*args = append(*args, *f.BookedAt.Eq)
+		}
+		if f.BookedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.BookedAt.Ne)
 		}
 		if f.BookedAt.Gt != nil {
 			paramNum++
@@ -1613,6 +1768,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.BookedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.BookedAt.NotIn))
+			for i, value := range f.BookedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ledger_line.booked_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.BookedAt.IsNull != nil {
 			if *f.BookedAt.IsNull {
@@ -1786,6 +1950,11 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`passage.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`passage.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1794,6 +1963,15 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`passage.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(passage.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1809,6 +1987,11 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`passage.title = $%d`, paramNum))
 			*args = append(*args, *f.Title.Eq)
 		}
+		if f.Title.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`passage.title IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Title.Ne)
+		}
 		if len(f.Title.In) > 0 {
 			placeholders := make([]string, len(f.Title.In))
 			for i, value := range f.Title.In {
@@ -1817,6 +2000,15 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`passage.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Title.NotIn) > 0 {
+			placeholders := make([]string, len(f.Title.NotIn))
+			for i, value := range f.Title.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(passage.title IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Title.ILike != nil {
 			paramNum++
@@ -1837,6 +2029,11 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`passage.topic = $%d`, paramNum))
 			*args = append(*args, *f.Topic.Eq)
 		}
+		if f.Topic.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`passage.topic IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Topic.Ne)
+		}
 		if len(f.Topic.In) > 0 {
 			placeholders := make([]string, len(f.Topic.In))
 			for i, value := range f.Topic.In {
@@ -1845,6 +2042,15 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`passage.topic IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Topic.NotIn) > 0 {
+			placeholders := make([]string, len(f.Topic.NotIn))
+			for i, value := range f.Topic.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(passage.topic IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Topic.ILike != nil {
 			paramNum++
@@ -1980,6 +2186,11 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`text_embedding.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`text_embedding.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1988,6 +2199,15 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`text_embedding.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(text_embedding.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -2003,6 +2223,11 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`text_embedding.text = $%d`, paramNum))
 			*args = append(*args, *f.Text.Eq)
 		}
+		if f.Text.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`text_embedding.text IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Text.Ne)
+		}
 		if len(f.Text.In) > 0 {
 			placeholders := make([]string, len(f.Text.In))
 			for i, value := range f.Text.In {
@@ -2011,6 +2236,15 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`text_embedding.text IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Text.NotIn) > 0 {
+			placeholders := make([]string, len(f.Text.NotIn))
+			for i, value := range f.Text.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(text_embedding.text IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Text.ILike != nil {
 			paramNum++

@@ -310,15 +310,20 @@ var NoteQuotedFields = map[string]string{
 // noteSortColumns are the columns of Note's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var noteSortColumns = map[NoteSortField]struct{ sql, key string }{
-	NoteSortById:     {`note.id`, `page_key.id`},
-	NoteSortBySlug:   {`note.slug`, `page_key.slug`},
-	NoteSortByTitle:  {`note.title`, `page_key.title`},
-	NoteSortByBody:   {`note.body`, `page_key.body`},
-	NoteSortByAuthor: {`note.author`, `page_key.author`},
-	NoteSortByViews:  {`note.views`, `page_key.views`},
-	NoteSortByStatus: {`note.status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var noteSortColumns = map[NoteSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	NoteSortById:              {`note.id`, `page_key.id`, false},
+	NoteSortBySlug:            {`note.slug`, `page_key.slug`, false},
+	NoteSortByTitle:           {`note.title`, `page_key.title`, false},
+	NoteSortByBody:            {`note.body`, `page_key.body`, false},
+	NoteSortByAuthor:          {`note.author`, `page_key.author`, false},
+	NoteSortByViews:           {`note.views`, `page_key.views`, false},
+	NoteSortByStatus:          {`note.status`, `page_key.status`, false},
+	NoteSortByStatusEnteredAt: {`note.status_entered_at`, `page_key.status_entered_at`, true},
 }
 
 // buildNoteOrderByClause builds an ORDER BY clause for Note.
@@ -1114,7 +1119,7 @@ func (r *NoteRepository) FindPage(ctx context.Context, filter *NoteFilter, opts 
 	}
 	column, ok := noteSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Note sorts by id, slug, title, body, author, views and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Note sorts by id, slug, title, body, author, views, status and statusEnteredAt, not %q", string(field))
 	}
 	byKey := field == NoteSortById
 
@@ -1147,14 +1152,23 @@ func (r *NoteRepository) FindPage(ctx context.Context, filter *NoteFilter, opts 
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`note.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`note.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM note AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1162,6 +1176,9 @@ func (r *NoteRepository) FindPage(ctx context.Context, filter *NoteFilter, opts 
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, note.id %s`, direction)
 	}

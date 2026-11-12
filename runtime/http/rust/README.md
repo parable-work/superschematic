@@ -40,13 +40,16 @@ This crate provides:
 - `filter`: the filters of a list operation (`FilterBy`, D106), the twin
   of Go's `filterparse` and TypeScript's `filter.ts`. An operation's spec
   is `FilterSpec::new(&[FieldSpec::new("stateId", &[Operator::Eq,
-  Operator::In])])`, and `FilterSpec::query` reads the bracket form,
+  Operator::Ne, Operator::In, Operator::NotIn])])`, and
+  `FilterSpec::query` reads the bracket form,
   `filter[field]=value` and `filter[field][op]=value`, into `Filter`s in
   the spec's field order, with the 400 every runtime answers at
   `filter[field]`. An implementation takes a field's filter typed,
   `filter::Equals<T>`, `filter::Ordered<T>` or `filter::Text<T>` by its
-  operators (`eq`, `in_`, `gt`, `gte`, `lt`, `lte`, `contains`,
-  `is_null`), which `filter::decode_equals`, `decode_ordered` and
+  operators (`eq`, `ne`, `in_`, `not_in`, `gt`, `gte`, `lt`, `lte`,
+  `contains`, `is_null`; `ne` and `not_in` keep the items `eq` and `in_`
+  leave out, an item whose field is null among them, D112), which
+  `filter::decode_equals`, `decode_ordered` and
   `decode_text` read from the request's filters, each value as
   `ParamSpec::query_item` reads an item of a query list of the field's
   type, refused at `filter[field]`; each type's `check` holds a filter an
@@ -376,16 +379,19 @@ of the core user model. It does what the Go runtime's
 `runtime/http/testdata/README.md` states):
 
 - `identity::Config`: the identity config's JSON, read strictly, with its
-  defaults and rules
+  defaults and rules, `apiKeyMaxTtlSeconds` among them
 - argon2id passwords as PHC strings (`hash_password`, `verify_password` and
   its rehash decision, `check_password` for `Auth.Password`), session tokens
-  (`new_token`, `hash_token`), the credential on a request
-  (`extract_credential`), the session cookie (`Config::session_cookie`,
+  (`new_token`, `hash_token`), API keys (`new_api_key`: `key_` and a
+  token's 43 characters, kept as the hash of the whole text), the credential
+  on a request (`extract_credential`: a bearer session token or API key, or
+  the session cookie), the session cookie (`Config::session_cookie`,
   `Config::clear_cookie`), the cross-origin check (`check_cross_origin`,
   Go's `net/http.CrossOriginProtection`) and the credentialed `CorsLayer`
-- permission names, a principal's permissions, the grant rule and
-  capabilities over the router's operation table (`Route::of` an
-  `OperationInfo`)
+- permission names, a principal's permissions, the grant rule, what an API
+  key made with permissions holds of its user's roles (`narrow_permissions`,
+  `narrow_roles`) and capabilities over the router's operation table
+  (`Route::of` an `OperationInfo`)
 - `Store` and `SqlStore`, built from the schema's identity descriptor (the
   generated types' `IDENTITY_DESCRIPTOR`), which runs its SQL through a
   `Client`: `TokioPostgres` with `identity-postgres`, `Rusqlite` with
@@ -398,6 +404,19 @@ of the core user model. It does what the Go runtime's
   `Service::routes`, the axum handlers of `ir/identity_routes.go`; and
   `IdentityAuthenticator`, the router's `Authenticator`, so `admit`,
   `RouteControls` and `OperationInfo::admit` work unchanged
+- API keys (D114), over the `UserApiKey` table a descriptor's `apiKey`
+  names: a bearer key authenticates as its user whenever the store has the
+  table, with the user's roles narrowed to the permissions the key names,
+  and ends at its expiry, a revocation or its user's disabling, never by
+  the idle timeout. `createApiKey`, `listApiKeys` and `revokeApiKey` are a
+  caller's who is signed in with a session, and `listUserApiKeys` and
+  `revokeUserApiKey` an administrator's; a key's principal
+  (`IdentityPrincipal::api_key_id`) is refused the first three, `logout`
+  and `changePassword`. `Service::handler` serves each of the five whatever
+  the service's options; `Service::routes` lists them only with
+  `Service::with_api_keys` and `Service::with_api_key_administration`. A
+  store built from a descriptor without `apiKey` has none
+  (`Store::has_api_keys`), and each key operation answers 404
 
 A password hash runs on tokio's blocking pool, so the service needs a tokio
 runtime. The store and route tests run on SQLite, and on Postgres too with

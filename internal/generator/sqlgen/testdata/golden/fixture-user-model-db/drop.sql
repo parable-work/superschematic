@@ -4,6 +4,7 @@
 
 -- Drop indexes
 DROP INDEX IF EXISTS uq_user_role_grant_user_role CASCADE;
+DROP INDEX IF EXISTS idx_user_api_key_user CASCADE;
 DROP INDEX IF EXISTS idx_session_user CASCADE;
 
 -- Drop join tables first
@@ -11,6 +12,7 @@ DROP INDEX IF EXISTS idx_session_user CASCADE;
 -- Drop tables in reverse order (to handle foreign key dependencies)
 DROP TABLE IF EXISTS user_role_grant CASCADE;
 DROP TABLE IF EXISTS user_credential CASCADE;
+DROP TABLE IF EXISTS user_api_key CASCADE;
 DROP TABLE IF EXISTS "user" CASCADE;
 DROP TABLE IF EXISTS "session" CASCADE;
 DROP TABLE IF EXISTS role CASCADE;

@@ -14,6 +14,7 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_role.go` -- Role repository
 - `repository_session.go` -- Session repository
 - `repository_user.go` -- User repository
+- `repository_user_api_key.go` -- UserApiKey repository
 - `repository_user_credential.go` -- UserCredential repository
 - `repository_user_role_grant.go` -- UserRoleGrant repository
 

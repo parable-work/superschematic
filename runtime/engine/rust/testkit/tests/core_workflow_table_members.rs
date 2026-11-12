@@ -1,6 +1,7 @@
 //! What only a table's Workflow takes (D104), on an engine type: a
 //! transition's `by`, its seat entries (`seat:<name>`) among them, the
-//! config's `overridePermission` and `repeat`, and `transition`'s `from`. The engine shares Workflow's declaration with the
+//! config's `overridePermission`, `repeat` and `finished` (D113), and
+//! `transition`'s `from`. The engine shares Workflow's declaration with the
 //! core, so its describe advertises them; it refuses each, naming the table
 //! form, rather than ignoring a rule of who may move an instance. On SQLite
 //! and, with the variable set, on Postgres.
@@ -59,15 +60,25 @@ fn an_engine_type_refuses_what_only_a_tables_workflow_takes() {
         let mut both = by.clone();
         both["overridePermission"] = json!("orders.moderate");
         both["repeat"] = json!("unchanged");
+        both["finished"] = json!({"open": "failure"});
         let mut override_permission = order_flow();
         override_permission["overridePermission"] = json!("orders.moderate");
         let mut repeat = order_flow();
         repeat["repeat"] = json!("unchanged");
+        // finished names a state a transition leaves, as a table's does
+        // (D113); with repeat beside it, repeat is named first.
+        let mut finished = order_flow();
+        finished["finished"] = json!({"open": "failure"});
+        let mut repeat_and_finished = repeat.clone();
+        repeat_and_finished["finished"] = json!({"open": "failure"});
         // A by that names a seat of Seats, which no engine implements, is
         // a by as any other (D104, step 3).
         let mut seat = order_flow();
         seat["transitions"][2]["by"] = json!(["seat:owners"]);
         let table_form = "status: Workflow<{ ... }> on a DB table, D104";
+        let repeat_reason = format!(
+            "repeat is a table's Workflow's ({table_form}): on an engine type a transition to the state an instance is in stays the veto already_in_state"
+        );
         let by_reason = format!(
             "the transition from \"open\" to \"shipped\" names by, which a table's Workflow takes ({table_form}): an engine type's transition names who may make it by its permission alone"
         );
@@ -80,9 +91,11 @@ fn an_engine_type_refuses_what_only_a_tables_workflow_takes() {
                 override_permission,
                 format!("overridePermission is a table's Workflow's ({table_form}): an engine type's transitions name no by for it to move a caller past"),
             ),
+            (repeat, repeat_reason.clone()),
+            (repeat_and_finished, repeat_reason),
             (
-                repeat,
-                format!("repeat is a table's Workflow's ({table_form}): on an engine type a transition to the state an instance is in stays the veto already_in_state"),
+                finished,
+                format!("finished is a table's Workflow's ({table_form}): on an engine type a state a transition leaves has no outcome"),
             ),
         ];
         for (config, reason) in cases {

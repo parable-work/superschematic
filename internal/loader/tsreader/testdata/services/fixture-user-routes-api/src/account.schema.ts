@@ -2,17 +2,19 @@ import { HttpMethod, auth, rest, userAdministration, userSessions } from "@super
 
 // Signs users in and out, and lets anyone register: a new user waits for
 // an administrator's approval as a member, and the first is the
-// administrator (D81).
+// administrator (D81). A signed-in user makes API keys (D114).
 @userSessions({
   register: true,
   registration: "approval",
   defaultRoles: ["member"],
   firstUser: { role: "admin", permissions: ["identity"] },
+  apiKeys: true,
 })
 export class Account {}
 
-// Manages users, roles and the grants between them.
-@userAdministration()
+// Manages users, roles and the grants between them, and lists and revokes
+// any user's API keys.
+@userAdministration({ apiKeys: true })
 export class AccountAdmin {}
 
 // A greeting for the signed-in user.

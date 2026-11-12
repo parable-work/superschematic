@@ -26,7 +26,9 @@ type principalKey struct{}
 
 // WithPrincipal returns a context carrying p, and p's id, name, session id
 // and roles through the session package's helpers, so RequireAuth,
-// RequirePermissions and every handler that reads them see the caller.
+// RequirePermissions and every handler that reads them see the caller. An
+// API key's principal has no session id, and its roles are the narrowed
+// ones.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	ctx = context.WithValue(ctx, principalKey{}, p)
 	ctx = session.ContextWithPrincipalID(ctx, p.ID)
@@ -106,21 +108,46 @@ func (s *Service) principal(w http.ResponseWriter, r *http.Request) (Principal, 
 	return p, true
 }
 
+// The API key operations' names (D114), each the operation's name in its
+// set as the ir IdentityOp constants are the others'.
+const (
+	// OpCreateAPIKey is POST <path>/keys, CreateApiKeyInput to
+	// CreatedApiKey: a caller signed in with a session.
+	OpCreateAPIKey = "createApiKey"
+	// OpListAPIKeys is GET <path>/keys, to ApiKey[]: a caller signed in
+	// with a session.
+	OpListAPIKeys = "listApiKeys"
+	// OpRevokeAPIKey is DELETE <path>/keys/{id}, to true: a caller signed
+	// in with a session.
+	OpRevokeAPIKey = "revokeApiKey"
+	// OpListUserAPIKeys is GET <path>/users/{id}/keys, to ApiKey[]
+	// (users.read).
+	OpListUserAPIKeys = "listUserApiKeys"
+	// OpRevokeUserAPIKey is DELETE <path>/users/{id}/keys/{keyId}, to true
+	// (users.write).
+	OpRevokeUserAPIKey = "revokeUserApiKey"
+)
+
 // Operation is one of the user model's routes: its name (an ir IdentityOp
-// constant), the set it belongs to, its method and its path under the
-// set's path, with {id} and {roleId} for its path parameters.
+// constant, or an Op constant of this package), the set it belongs to, its
+// method and its path under the set's path, with {id}, {roleId} and
+// {keyId} for its path parameters.
 type Operation struct {
 	Name string
 	// Administration: the route is @userAdministration's, under its path
 	// (ir.DefaultUserAdministrationPath by default); otherwise
 	// @userSessions', under ir.DefaultUserSessionsPath.
 	Administration bool
-	Method         string
-	Path           string
+	// APIKeys: the route is one of the API key operations (D114), which its
+	// set has only when they are turned on for it (WithAPIKeys,
+	// WithAPIKeyAdministration).
+	APIKeys bool
+	Method  string
+	Path    string
 }
 
 // Operations are every route of the user model, in ir/identity_routes.go's
-// order.
+// order, each set's API key operations after its others.
 var Operations = []Operation{
 	{Name: ir.IdentityOpLogin, Method: http.MethodPost, Path: "login"},
 	{Name: ir.IdentityOpLogout, Method: http.MethodPost, Path: "logout"},
@@ -128,6 +155,9 @@ var Operations = []Operation{
 	{Name: ir.IdentityOpCapabilities, Method: http.MethodGet, Path: "capabilities"},
 	{Name: ir.IdentityOpChangePassword, Method: http.MethodPost, Path: "password"},
 	{Name: ir.IdentityOpRegister, Method: http.MethodPost, Path: "register"},
+	{Name: OpCreateAPIKey, APIKeys: true, Method: http.MethodPost, Path: "keys"},
+	{Name: OpListAPIKeys, APIKeys: true, Method: http.MethodGet, Path: "keys"},
+	{Name: OpRevokeAPIKey, APIKeys: true, Method: http.MethodDelete, Path: "keys/{id}"},
 	{Name: ir.IdentityOpCreateUser, Administration: true, Method: http.MethodPost, Path: "users"},
 	{Name: ir.IdentityOpListUsers, Administration: true, Method: http.MethodGet, Path: "users"},
 	{Name: ir.IdentityOpGetUser, Administration: true, Method: http.MethodGet, Path: "users/{id}"},
@@ -141,16 +171,20 @@ var Operations = []Operation{
 	{Name: ir.IdentityOpDeleteRole, Administration: true, Method: http.MethodDelete, Path: "roles/{id}"},
 	{Name: ir.IdentityOpGrantRole, Administration: true, Method: http.MethodPut, Path: "users/{id}/roles/{roleId}"},
 	{Name: ir.IdentityOpRevokeRole, Administration: true, Method: http.MethodDelete, Path: "users/{id}/roles/{roleId}"},
+	{Name: OpListUserAPIKeys, Administration: true, APIKeys: true, Method: http.MethodGet, Path: "users/{id}/keys"},
+	{Name: OpRevokeUserAPIKey, Administration: true, APIKeys: true, Method: http.MethodDelete, Path: "users/{id}/keys/{keyId}"},
 }
 
-// Handler returns the handler of the operation named op (an ir
-// IdentityOp constant), and false for a name that is none. A handler of a
-// route that needs a caller reads the principal Middleware put on the
-// request, or authenticates the request itself when there is none.
-// Success is the generated servers' envelope ({"data": ..., "meta":
-// {"requestId": ...}}) with 200; logout, changePassword, setUserPassword
-// and deleteRole, which the contract types as the boolean true, answer
-// {"data": true, ...}. A refusal is the problem WriteError writes.
+// Handler returns the handler of the operation named op (an Operation's
+// name), and false for a name that is none. A handler of a route that
+// needs a caller reads the principal Middleware put on the request, or
+// authenticates the request itself when there is none. Success is the
+// generated servers' envelope ({"data": ..., "meta": {"requestId": ...}})
+// with 200; logout, changePassword, setUserPassword, deleteRole,
+// revokeApiKey and revokeUserApiKey, which the contract types as the
+// boolean true, answer {"data": true, ...}. A refusal is the problem
+// WriteError writes. An API key operation has its handler whether the
+// operations are turned on or not; Routes is what leaves it out.
 func (s *Service) Handler(op string) (http.Handler, bool) {
 	var h http.HandlerFunc
 	switch op {
@@ -262,6 +296,36 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 			out, err := change(r.Context(), p, id, roleID)
 			respond(w, r, out, err)
 		})
+	case OpCreateAPIKey:
+		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) {
+			var in CreateAPIKeyInput
+			if decode(w, r, &in) {
+				out, err := s.CreateAPIKey(r.Context(), p, in)
+				respond(w, r, out, err)
+			}
+		})
+	case OpListAPIKeys:
+		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) {
+			out, err := s.ListAPIKeys(r.Context(), p)
+			respondList(w, r, out, err)
+		})
+	case OpRevokeAPIKey:
+		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
+			respondTrue(w, r, s.RevokeAPIKey(r.Context(), p, id))
+		})
+	case OpListUserAPIKeys:
+		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
+			out, err := s.ListUserAPIKeys(r.Context(), p, id)
+			respondList(w, r, out, err)
+		})
+	case OpRevokeUserAPIKey:
+		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
+			keyID, ok := pathParam(w, r, "keyId")
+			if !ok {
+				return
+			}
+			respondTrue(w, r, s.RevokeUserAPIKey(r.Context(), p, id, keyID))
+		})
 	default:
 		return nil, false
 	}
@@ -272,22 +336,27 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 // the session routes when sessions is not nil, under its path (without
 // login, logout and changePassword when NoLogin, and with register only
 // when Register), and the administration routes when admin is not nil,
-// under its path. Paths start with "/"; the caller adds its server's own
-// prefix.
+// under its path. A set has its API key routes only when the service
+// turns them on for it (WithAPIKeys, WithAPIKeyAdministration). Paths
+// start with "/"; the caller adds its server's own prefix.
 func (s *Service) Routes(sessions *ir.UserSessionsConfig, admin *ir.UserAdministrationConfig) []routing.Route {
 	var routes []routing.Route
 	for _, op := range Operations {
 		var base string
 		switch {
-		case op.Administration && admin != nil:
-			base = admin.UserAdministrationPath()
-		case op.Administration:
+		case op.Administration && admin == nil:
 			continue
+		case op.Administration && op.APIKeys && !s.apiKeyAdministration:
+			continue
+		case op.Administration:
+			base = admin.UserAdministrationPath()
 		case sessions == nil:
 			continue
 		case sessions.NoLogin && (op.Name == ir.IdentityOpLogin || op.Name == ir.IdentityOpLogout || op.Name == ir.IdentityOpChangePassword || op.Name == ir.IdentityOpRegister):
 			continue
 		case !sessions.Register && op.Name == ir.IdentityOpRegister:
+			continue
+		case op.APIKeys && !s.apiKeys:
 			continue
 		default:
 			base = sessions.UserSessionsPath()

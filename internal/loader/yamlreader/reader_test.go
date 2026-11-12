@@ -159,7 +159,8 @@ types:
 }
 
 // TestReadUserRoutes: the YAML form carries the user model's route sets
-// (D50) as the JSON form does, an empty config as an empty mapping.
+// (D50) as the JSON form does, an empty config as an empty mapping, and
+// apiKeys (D114) on the config that has it.
 func TestReadUserRoutes(t *testing.T) {
 	src := `kind: API
 operationSets:
@@ -172,14 +173,30 @@ operationSets:
   - name: Me
     operations: []
     userSessions: {}
+  - name: Keyed
+    operations: []
+    userSessions: { register: true, apiKeys: true }
+  - name: KeyedAdmin
+    operations: []
+    userAdministration:
+      apiKeys: true
 `
 	doc, err := Read([]byte(src), "account.schema.yaml")
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
 	sets := doc.OperationSets
-	if len(sets) != 3 {
+	if len(sets) != 5 {
 		t.Fatalf("operation sets = %+v", sets)
+	}
+	if sets[0].UserSessions.APIKeys || sets[1].UserAdministration.APIKeys || sets[2].UserSessions.APIKeys {
+		t.Errorf("a config without apiKeys has it: %+v, %+v, %+v", sets[0].UserSessions, sets[1].UserAdministration, sets[2].UserSessions)
+	}
+	if cfg := sets[3].UserSessions; cfg == nil || !cfg.APIKeys || !cfg.Register || cfg.NoLogin {
+		t.Errorf("Keyed.UserSessions = %+v", cfg)
+	}
+	if cfg := sets[4].UserAdministration; cfg == nil || !cfg.APIKeys || cfg.Path != "" {
+		t.Errorf("KeyedAdmin.UserAdministration = %+v", cfg)
 	}
 	if cfg := sets[0].UserSessions; cfg == nil || !cfg.Register || cfg.NoLogin || cfg.Path != "" {
 		t.Errorf("Account.UserSessions = %+v", cfg)
@@ -193,5 +210,8 @@ operationSets:
 
 	if _, err := Read([]byte("kind: OperationSet\nname: Account\noperations: []\nuserSessions: { roles: true }\n"), "account.schema.yaml"); err == nil {
 		t.Error("Read accepted a userSessions key the config does not take")
+	}
+	if _, err := Read([]byte("kind: OperationSet\nname: Admin\noperations: []\nuserAdministration: { apiKeys: 1 }\n"), "account.schema.yaml"); err == nil {
+		t.Error("Read accepted an apiKeys that is not a boolean")
 	}
 }

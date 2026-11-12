@@ -168,7 +168,12 @@ impl CatalogImplementation for Catalog {
         let Some(kind) = args.filter.kind else {
             return Ok(parts);
         };
-        let kept = |part: &types::PartView| kind.eq.is_none_or(|eq| eq == part.kind) && (kind.in_.is_empty() || kind.in_.contains(&part.kind));
+        let kept = |part: &types::PartView| {
+            kind.eq.is_none_or(|eq| eq == part.kind)
+                && kind.ne.is_none_or(|ne| ne != part.kind)
+                && (kind.in_.is_empty() || kind.in_.contains(&part.kind))
+                && !kind.not_in.contains(&part.kind)
+        };
         Ok(parts.into_iter().filter(kept).collect())
     }
 }
@@ -192,6 +197,10 @@ async fn a_list_that_does_not_page_keeps_what_its_filter_finds() {
         ("", vec!["Anchor bolt", "Hex nut"]),
         ("?filter[kind]=nut", vec!["Hex nut"]),
         ("?filter[kind][in]=bolt,nut", vec!["Anchor bolt", "Hex nut"]),
+        // ne and notIn keep what eq and in leave out (D112).
+        ("?filter[kind][ne]=nut", vec!["Anchor bolt"]),
+        ("?filter[kind][notIn]=bolt,+washer", vec!["Hex nut"]),
+        ("?filter[kind][notIn]=bolt,nut", vec![]),
         ("?filter[kind]=washer", vec![]),
         // A page's parameters are no arguments of a list that does not page.
         ("?limit=1&cursor=e30&sort=-name&filter[kind]=bolt", vec!["Anchor bolt"]),
@@ -206,7 +215,10 @@ async fn a_list_that_does_not_page_keeps_what_its_filter_finds() {
 async fn a_refused_filter_is_the_400_at_its_field() {
     for (query, parameter, reason) in [
         ("filter[kind]=gear", "filter[kind]", "expected one of bolt, nut, washer"),
-        ("filter[kind][lt]=nut", "filter[kind]", "takes no operator lt; expected one of eq, in"),
+        ("filter[kind][lt]=nut", "filter[kind]", "takes no operator lt; expected one of eq, ne, in, notIn"),
+        ("filter[kind][ne]=gear", "filter[kind]", "expected one of bolt, nut, washer"),
+        ("filter[kind][notIn]=nut,gear", "filter[kind]", "expected one of bolt, nut, washer"),
+        ("filter[kind][notIn]=", "filter[kind]", "notIn names no value"),
         ("filter[quantity]=many", "filter[quantity]", "expected an integer"),
         ("filter[madeAt]=yesterday", "filter[madeAt]", "expected an RFC 3339 timestamp"),
         ("filter[id]=not-a-uuid", "filter[id]", "expected a UUID"),

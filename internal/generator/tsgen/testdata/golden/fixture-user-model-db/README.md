@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { ContactEmail, CryptoSHA256, IdentityName, IdentityUUID, TemporalDateTime, Role, Session, User, UserCredential, UserRoleGrant,  } from '@schemas/fixture-user-model-db-types/types';
+import type { ContactEmail, CryptoSHA256, IdentityName, IdentityUUID, TemporalDateTime, Role, Session, User, UserApiKey, UserCredential, UserRoleGrant,  } from '@schemas/fixture-user-model-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-user-model-db-types';
@@ -113,7 +113,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (5)
+### Types (6)
 
 
 - **Role** - A named set of permissions users are granted.
@@ -121,6 +121,8 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Session** - A signed-in session: the user it signs in, the SHA-256 of its token, and when it ends.
 
 - **User** - A person who signs in with their email.
+
+- **UserApiKey** - An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.
 
 - **UserCredential** - A user's password hash, kept apart from the user row.
 

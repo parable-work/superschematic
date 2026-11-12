@@ -1042,8 +1042,8 @@ func (b *tableBuilder) list(owner string, endpoint EndpointInfo, h *TableHandler
 
 // filterMember are the statements that turn one member of the request's
 // filter into the repository's: each operator the request sent as the
-// repository's of the same name, contains as its ilike of the value with
-// its \, % and _ escaped. A member the path's parent holds too, parent,
+// repository's of the same name, ne and notIn among them (D112), contains
+// as its ilike of the value with its \, % and _ escaped. A member the path's parent holds too, parent,
 // is ANDed with it.
 func (b *tableBuilder) filterMember(owner string, view *tableView, field FilterFieldInfo, parent bool) ([]string, error) {
 	column := view.column(field.Name)
@@ -1117,17 +1117,18 @@ func (b *tableBuilder) filterMember(owner string, view *tableView, field FilterF
 	var members []string
 	for _, op := range field.Operators {
 		switch op {
-		case ir.FilterOpEq, ir.FilterOpGt, ir.FilterOpGte, ir.FilterOpLt, ir.FilterOpLte:
+		case ir.FilterOpEq, ir.FilterOpNe, ir.FilterOpGt, ir.FilterOpGte, ir.FilterOpLt, ir.FilterOpLte:
 			if !held[op] {
 				return nil, b.unfiltered(owner, view, field, column)
 			}
 			name := codegen.ToPascalCase(op)
 			members = append(members, name+": "+convert("filter."+name, false))
-		case ir.FilterOpIn:
-			if !held[sqlutil.FilterIn] {
+		case ir.FilterOpIn, ir.FilterOpNotIn:
+			if !held[op] {
 				return nil, b.unfiltered(owner, view, field, column)
 			}
-			members = append(members, "In: "+convert("filter.In", true))
+			name := codegen.ToPascalCase(op)
+			members = append(members, name+": "+convert("filter."+name, true))
 		case ir.FilterOpContains:
 			if !held[sqlutil.FilterILike] || goType != "string" {
 				return nil, b.unfiltered(owner, view, field, column)

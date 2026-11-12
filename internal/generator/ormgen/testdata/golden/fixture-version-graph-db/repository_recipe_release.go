@@ -103,11 +103,15 @@ var RecipeReleaseQuotedFields = map[string]string{
 // recipeReleaseSortColumns are the columns of RecipeRelease's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var recipeReleaseSortColumns = map[RecipeReleaseSortField]struct{ sql, key string }{
-	RecipeReleaseSortById:        {`recipe_release.id`, `page_key.id`},
-	RecipeReleaseSortByCreatedAt: {`recipe_release.created_at`, `page_key.created_at`},
-	RecipeReleaseSortByUpdatedAt: {`recipe_release.updated_at`, `page_key.updated_at`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var recipeReleaseSortColumns = map[RecipeReleaseSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	RecipeReleaseSortById:        {`recipe_release.id`, `page_key.id`, false},
+	RecipeReleaseSortByCreatedAt: {`recipe_release.created_at`, `page_key.created_at`, false},
+	RecipeReleaseSortByUpdatedAt: {`recipe_release.updated_at`, `page_key.updated_at`, false},
 }
 
 // buildRecipeReleaseOrderByClause builds an ORDER BY clause for RecipeRelease.
@@ -1377,14 +1381,23 @@ func (r *RecipeReleaseRepository) FindPage(ctx context.Context, filter *RecipeRe
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`recipe_release.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`recipe_release.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, recipe_release.id) %s ((SELECT %s FROM recipe_release AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, recipe_release.id) %s ((SELECT %s FROM recipe_release AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM recipe_release AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1392,6 +1405,9 @@ func (r *RecipeReleaseRepository) FindPage(ctx context.Context, filter *RecipeRe
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, recipe_release.id %s`, direction)
 	}

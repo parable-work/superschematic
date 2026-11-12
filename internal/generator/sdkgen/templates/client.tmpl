@@ -83,9 +83,12 @@ export async function* pageItems<T>(
 {{ end -}}
 {{ if .HasFilteredEndpoints -}}
 /** The operators of a filter, in the order the routes read them (D106). */
-const filterOperators = ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull'];
+const filterOperators = ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull'];
 
-/** The most values a filter's in may list, and the most filters of a request. */
+/** The operators that take a list of values, which the query joins by commas. */
+const filterListOperators = ['in', 'notIn'];
+
+/** The most values an in or a notIn may list, and the most filters of a request. */
 const filterMaxInValues = {{.FilterMaxInValues}};
 const filterMaxFilters = {{.FilterMaxFilters}};
 
@@ -99,16 +102,18 @@ function filterText(value: unknown): string {
  * parameters, field by field in the filter's order and each field's
  * operators in the routes' order: filter[field]=value for a value alone
  * or under eq, and filter[field][op]=value for any other operator, an
- * in's values joined by commas and isNull true or false. A member that
- * is undefined or null, and an in of no value, is left out. An operator
- * the SDK does not know is sent as it is, for the route to refuse.
+ * in's and a notIn's values joined by commas and isNull true or false. A
+ * member that is undefined or null, and an in or a notIn of no value, is
+ * left out. An operator the SDK does not know is sent as it is, for the
+ * route to refuse.
  *
  * What the route's reader would refuse or read as something else is
- * refused before the request, in one ValidationError: an in of more than
- * {{.FilterMaxInValues}} values, at filter[field][in]; an in's value that is blank, or
- * holds a comma or surrounding space, which the comma-separated value
- * cannot carry as it is, at filter[field][in][i]; a contains of no text,
- * at filter[field][contains]; and more than {{.FilterMaxFilters}} filters, at filter.
+ * refused before the request, in one ValidationError: an in or a notIn
+ * of more than {{.FilterMaxInValues}} values, at filter[field][in] or filter[field][notIn];
+ * a value of either that is blank, or holds a comma or surrounding
+ * space, which the comma-separated value cannot carry as it is, at
+ * filter[field][in][i] or filter[field][notIn][i]; a contains of no
+ * text, at filter[field][contains]; and more than {{.FilterMaxFilters}} filters, at filter.
  */
 export function filterParams(filter: unknown): Record<string, string> {
   const out: Record<string, string> = {};
@@ -137,7 +142,7 @@ export function filterParams(filter: unknown): Record<string, string> {
         continue;
       }
       const name = op === 'eq' ? `filter[${field}]` : `filter[${field}][${op}]`;
-      if (op === 'in' && Array.isArray(value)) {
+      if (filterListOperators.includes(op) && Array.isArray(value)) {
         if (value.length > filterMaxInValues) {
           refuse(name, 'listMax', `must contain at most ${filterMaxInValues} items`);
           continue;

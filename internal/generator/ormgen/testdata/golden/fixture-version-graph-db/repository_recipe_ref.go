@@ -149,12 +149,17 @@ var RecipeRefQuotedFields = map[string]string{
 // recipeRefSortColumns are the columns of RecipeRef's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var recipeRefSortColumns = map[RecipeRefSortField]struct{ sql, key string }{
-	RecipeRefSortById:        {`recipe_ref.id`, `page_key.id`},
-	RecipeRefSortByName:      {`recipe_ref."name"`, `page_key."name"`},
-	RecipeRefSortByCreatedAt: {`recipe_ref.created_at`, `page_key.created_at`},
-	RecipeRefSortByUpdatedAt: {`recipe_ref.updated_at`, `page_key.updated_at`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var recipeRefSortColumns = map[RecipeRefSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	RecipeRefSortById:        {`recipe_ref.id`, `page_key.id`, false},
+	RecipeRefSortByName:      {`recipe_ref."name"`, `page_key."name"`, false},
+	RecipeRefSortBySealedAt:  {`recipe_ref.sealed_at`, `page_key.sealed_at`, true},
+	RecipeRefSortByCreatedAt: {`recipe_ref.created_at`, `page_key.created_at`, false},
+	RecipeRefSortByUpdatedAt: {`recipe_ref.updated_at`, `page_key.updated_at`, false},
 }
 
 // buildRecipeRefOrderByClause builds an ORDER BY clause for RecipeRef.
@@ -2118,7 +2123,7 @@ func (r *RecipeRefRepository) FindPage(ctx context.Context, filter *RecipeRefFil
 	}
 	column, ok := recipeRefSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: RecipeRef sorts by id, name, createdAt and updatedAt, not %q", string(field))
+		return nil, fmt.Errorf("orm: RecipeRef sorts by id, name, sealedAt, createdAt and updatedAt, not %q", string(field))
 	}
 	byKey := field == RecipeRefSortById
 
@@ -2151,14 +2156,23 @@ func (r *RecipeRefRepository) FindPage(ctx context.Context, filter *RecipeRefFil
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`recipe_ref.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`recipe_ref.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, recipe_ref.id) %s ((SELECT %s FROM recipe_ref AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, recipe_ref.id) %s ((SELECT %s FROM recipe_ref AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM recipe_ref AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -2166,6 +2180,9 @@ func (r *RecipeRefRepository) FindPage(ctx context.Context, filter *RecipeRefFil
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, recipe_ref.id %s`, direction)
 	}

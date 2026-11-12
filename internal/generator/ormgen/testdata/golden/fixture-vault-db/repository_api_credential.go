@@ -39,10 +39,15 @@ var ApiCredentialQuotedFields = map[string]string{
 // apiCredentialSortColumns are the columns of ApiCredential's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var apiCredentialSortColumns = map[ApiCredentialSortField]struct{ sql, key string }{
-	ApiCredentialSortById:      {`api_credential.id`, `page_key.id`},
-	ApiCredentialSortByService: {`api_credential.service`, `page_key.service`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var apiCredentialSortColumns = map[ApiCredentialSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	ApiCredentialSortById:        {`api_credential.id`, `page_key.id`, false},
+	ApiCredentialSortByService:   {`api_credential.service`, `page_key.service`, false},
+	ApiCredentialSortByRotatedAt: {`api_credential.rotated_at`, `page_key.rotated_at`, true},
 }
 
 // buildApiCredentialOrderByClause builds an ORDER BY clause for ApiCredential.
@@ -676,7 +681,7 @@ func (r *ApiCredentialRepository) FindPage(ctx context.Context, filter *ApiCrede
 	}
 	column, ok := apiCredentialSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: ApiCredential sorts by id and service, not %q", string(field))
+		return nil, fmt.Errorf("orm: ApiCredential sorts by id, service and rotatedAt, not %q", string(field))
 	}
 	byKey := field == ApiCredentialSortById
 
@@ -706,14 +711,23 @@ func (r *ApiCredentialRepository) FindPage(ctx context.Context, filter *ApiCrede
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`api_credential.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`api_credential.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, api_credential.id) %s ((SELECT %s FROM api_credential AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, api_credential.id) %s ((SELECT %s FROM api_credential AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM api_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -721,6 +735,9 @@ func (r *ApiCredentialRepository) FindPage(ctx context.Context, filter *ApiCrede
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, api_credential.id %s`, direction)
 	}

@@ -1,6 +1,6 @@
 //! The identity descriptor a store is built from: the tables that hold a
-//! schema's users, sessions, credentials, roles and grants, and which
-//! column plays which part. `internal/generator/identitydesc/README.md` is
+//! schema's users, sessions, credentials, API keys, roles and grants, and
+//! which column plays which part. `internal/generator/identitydesc/README.md` is
 //! its contract; the generated Rust types hold it as `IDENTITY_DESCRIPTOR`.
 
 use serde::Deserialize;
@@ -18,6 +18,10 @@ pub struct Descriptor {
     pub user: DescriptorUser,
     pub session: DescriptorSession,
     pub credential: DescriptorCredential,
+    /// Absent in a descriptor written before the `UserApiKey` table
+    /// (D114): its store has no API keys.
+    #[serde(default, rename = "apiKey")]
+    pub api_key: Option<DescriptorApiKey>,
     /// Absent when the schema has no `UserRole` table, and `role_grant`
     /// with it.
     #[serde(default)]
@@ -91,6 +95,30 @@ pub struct CredentialColumns {
     pub pending_at: String,
 }
 
+/// The `UserApiKey` table the loader adds (D114).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DescriptorApiKey {
+    pub table: String,
+    pub columns: ApiKeyColumns,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApiKeyColumns {
+    pub id: String,
+    pub user: String,
+    pub name: String,
+    pub token_hash: String,
+    /// Null for a key that holds every permission of its user, and the
+    /// list a key names otherwise, stored as a role's are.
+    pub permissions: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub last_used_at: String,
+    pub revoked_at: String,
+}
+
 /// The table with the `UserRole` trait.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -133,6 +161,8 @@ impl Descriptor {
     /// Reads an identity descriptor. It refuses any version but 1, unknown
     /// members, an empty name, a role table without its grant table or the
     /// other way round, and a name holding a NUL, which no quoting carries.
+    /// A descriptor without `apiKey` is one written before D114, and is
+    /// read as it was.
     pub fn parse(json: &str) -> Result<Descriptor, StoreError> {
         let descriptor: Descriptor =
             serde_json::from_str(json).map_err(|err| StoreError::Descriptor(err.to_string()))?;
@@ -190,6 +220,20 @@ impl Descriptor {
             ("credential.columns.disabledAt", &c.columns.disabled_at),
             ("credential.columns.pendingAt", &c.columns.pending_at),
         ];
+        if let Some(k) = &self.api_key {
+            names.extend([
+                ("apiKey.table", k.table.as_str()),
+                ("apiKey.columns.id", &k.columns.id),
+                ("apiKey.columns.user", &k.columns.user),
+                ("apiKey.columns.name", &k.columns.name),
+                ("apiKey.columns.tokenHash", &k.columns.token_hash),
+                ("apiKey.columns.permissions", &k.columns.permissions),
+                ("apiKey.columns.createdAt", &k.columns.created_at),
+                ("apiKey.columns.expiresAt", &k.columns.expires_at),
+                ("apiKey.columns.lastUsedAt", &k.columns.last_used_at),
+                ("apiKey.columns.revokedAt", &k.columns.revoked_at),
+            ]);
+        }
         if let (Some(r), Some(g)) = (&self.role, &self.role_grant) {
             names.extend([
                 ("role.type", r.type_name.as_str()),

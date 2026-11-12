@@ -67,6 +67,10 @@ const (
 	// IdentityRoleGrantTable links a user to each role they hold. The
 	// loader adds it only when the schema has a UserRole table.
 	IdentityRoleGrantTable = "UserRoleGrant"
+
+	// IdentityAPIKeyTable holds one row per API key (D114): a named,
+	// long-lived token a user makes for a program that calls as them.
+	IdentityAPIKeyTable = "UserApiKey"
 )
 
 // The fields of the tables the loader adds. Every table's key is "id", an
@@ -102,6 +106,25 @@ const (
 	IdentityRoleGrantUserField      = "user"
 	IdentityRoleGrantRoleField      = "role"
 	IdentityRoleGrantGrantedAtField = "grantedAt"
+
+	// UserApiKey (D114): id; user, the User table; name, what its user
+	// calls it; tokenHash, a @unique Crypto.SHA256 of the key's token;
+	// permissions, a nullable list of strings, the subset of its user's
+	// permissions the key was made with, null for all of them; createdAt
+	// and expiresAt, Temporal.DateTime; lastUsedAt and revokedAt, nullable
+	// Temporal.DateTime; an index on user. Revocation is revokedAt, as a
+	// session's is.
+	IdentityAPIKeyUserField        = "user"
+	IdentityAPIKeyNameField        = "name"
+	IdentityAPIKeyTokenHashField   = "tokenHash"
+	IdentityAPIKeyPermissionsField = "permissions"
+	IdentityAPIKeyCreatedAtField   = "createdAt"
+	IdentityAPIKeyExpiresAtField   = "expiresAt"
+	IdentityAPIKeyLastUsedAtField  = "lastUsedAt"
+	IdentityAPIKeyRevokedAtField   = "revokedAt"
+
+	// IdentityAPIKeyNameMaxLength is the most characters a key's name holds.
+	IdentityAPIKeyNameMaxLength = 100
 )
 
 // UserTable returns the schema's User table, or nil when it has none. A

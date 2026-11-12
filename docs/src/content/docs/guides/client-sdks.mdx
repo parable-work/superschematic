@@ -142,17 +142,18 @@ A list whose operation takes a `FilterBy` argument
 ([Filters](/superschematic/guides/api-routes/#filters)) takes its filter
 typed, a member per field a caller may filter by, under the name of the
 schema's argument (D106). A member holds the field's operators: `eq` and
-`in` on every field, `gt`, `gte`, `lt` and `lte` on a number, a date and a
-time, `contains` on text, and `isNull` on a field that may be null. Every
-member set holds at once. The SDK writes the filter into the query as
+`in` on every field, with `ne` and `notIn`, which keep the items those
+two leave out, an item whose field is null among them (D112); `gt`,
+`gte`, `lt` and `lte` on a number, a date and a time, `contains` on text,
+and `isNull` on a field that may be null. Every member set holds at once. The SDK writes the filter into the query as
 `filter[field]=value` and `filter[field][op]=value`:
 
 | Language | The filter | A field's member |
 | --- | --- | --- |
-| Go | `Filter *OrderListOrdersFilter` on the query struct (`<Namespace><Operation>Filter`) | a `*filterparse.Equals[T]`, `Ordered[T]` or `Text[T]` of the HTTP runtime, as the field's operators say: `Eq`, `In`, `Gt`, `Gte`, `Lt`, `Lte`, `Contains`, `IsNull` |
+| Go | `Filter *OrderListOrdersFilter` on the query struct (`<Namespace><Operation>Filter`) | a `*filterparse.Equals[T]`, `Ordered[T]` or `Text[T]` of the HTTP runtime, as the field's operators say: `Eq`, `Ne`, `In`, `NotIn`, `Gt`, `Gte`, `Lt`, `Lte`, `Contains`, `IsNull` |
 | TypeScript | `params.filter`, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`), which the package exports | a value, for equality, or an object of the field's operators, `{ gte: 5000, lt: 10000 }` |
-| Python | the keyword `filter=`, a `ListOrdersFilter` (`<Operation>Filter`), a `TypedDict` of the namespace's module with its fields in snake_case | a value, for equality, or a mapping of the field's operators, `is_null` for `isNull` |
-| Rust | `filter: Option<ListOrdersFilter>` on the query struct (`<Operation>Filter`) | an `Option` of the crate's `Equals<T>`, `Ordered<T>` or `Text<T>`: `eq`, `one_of` for `in`, `gt`, `gte`, `lt`, `lte`, `contains`, `is_null` |
+| Python | the keyword `filter=`, a `ListOrdersFilter` (`<Operation>Filter`), a `TypedDict` of the namespace's module with its fields in snake_case | a value, for equality, or a mapping of the field's operators, `not_in` for `notIn` and `is_null` for `isNull` |
+| Rust | `filter: Option<ListOrdersFilter>` on the query struct (`<Operation>Filter`) | an `Option` of the crate's `Equals<T>`, `Ordered<T>` or `Text<T>`: `eq`, `ne`, `one_of` for `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, `contains`, `is_null` |
 
 A value is of the type the SDK gives a query argument of the field's type:
 a number, a boolean, an enum's value, and text for any other, a UUID, a
@@ -189,13 +190,13 @@ filters, and `<operation>All` sends the filter it was given with every
 page. A member that is not set, and an `in` of no value, is left out.
 
 Each SDK refuses, before it sends, a filter the route would refuse or
-would read as another one, since the route splits an `in` at its commas,
-trims each value and drops an empty one:
+would read as another one, since the route splits an `in` and a `notIn`
+at their commas, trims each value and drops an empty one:
 
 | Refused | Named at |
 | --- | --- |
-| an `in` of more than 100 values | `filter[field][in]` |
-| an `in`'s value that is blank, or holds a comma or a space at either end | `filter[field][in][i]` |
+| an `in` or a `notIn` of more than 100 values | `filter[field][in]`, `filter[field][notIn]` |
+| a value of one that is blank, or holds a comma or a space at either end | `filter[field][in][i]`, `filter[field][notIn][i]` |
 | a `contains` of no text | `filter[field][contains]` |
 | more than 50 filters in one request | `filter` |
 
@@ -211,7 +212,7 @@ The error is the one the SDK fails with before any request
 
 Python's `TypedDict` is not checked when the program runs, so its SDK
 also refuses a member that is no field of the filter, an operator its
-field does not take, an `in` that is no list, an `is_null` that is no
+field does not take, an `in` or a `not_in` that is no list, an `is_null` that is no
 `bool` and, with the types package installed, a value of another type.
 Rust refuses `is_null` on a field that is never null. The TypeScript SDK
 sends an operator it does not know as it is. Whatever an SDK lets through,

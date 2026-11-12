@@ -17,7 +17,8 @@ import (
 //     element of its result, found as ir.LookupScopes finds a type so that
 //     a dependency's item works (D66);
 //   - each field holds one text, number or time (ir.SortValue), and is
-//     neither Nullable nor Secret;
+//     not Secret. A Nullable field is one (D112): a page orders its nulls
+//     last in either direction, as the repositories' findPage does;
 //   - the item declares an id of one required value, which breaks ties;
 //   - @paginated's defaultSort is said exactly when a sort argument is,
 //     and is one of its values (ir.SortValues).
@@ -136,8 +137,6 @@ func checkSortFields(schema *ir.Schema, owner string, sort *ir.ArgumentDef, item
 			continue
 		case !ir.SortValue(itemSchema, field.TypeRef) && !ir.SortValue(schema, field.TypeRef):
 			r.errorf("", "%s: sort argument %s names %s.%s, which holds %s; a page is sorted by one text, number or time", owner, sort.Name, item.Name, field.Name, typeLabel(field.TypeRef))
-		case !field.Required:
-			r.errorf("", "%s: sort argument %s names %s.%s, which is Nullable; a page's order has no place for a null", owner, sort.Name, item.Name, field.Name)
 		case field.Secret:
 			r.errorf("", "%s: sort argument %s names %s.%s, which is Secret; a page's order would show it", owner, sort.Name, item.Name, field.Name)
 		case unboundedText(schema, itemSchema, field):

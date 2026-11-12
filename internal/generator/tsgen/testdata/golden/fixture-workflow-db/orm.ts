@@ -97,7 +97,7 @@ export interface OrderFilter {
 export type OrderOrderField = "id" | "title" | "placedAt" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Order by (D60, amended); ties break by id. */
-export type OrderSortField = "id" | "title" | "status";
+export type OrderSortField = "id" | "title" | "placedAt" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderUniqueKey = readonly ["id"];
@@ -150,12 +150,12 @@ export const orderTable: TableDefinition = {
   table: "\"order\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "title", column: "title", field: "title", qualified: "\"order\".title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "status", column: "status", field: "status", qualified: "\"order\".status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "\"order\".status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "\"order\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "\"order\".title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "\"order\".status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "\"order\".status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "\"order\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"title\", \"placed_at\", \"status\", \"status_entered_at\", \"_version\"",
@@ -173,7 +173,9 @@ export const orderTable: TableDefinition = {
     page: "SELECT %s FROM \"order\"%s%s LIMIT %d",
     pageAfterKey: "\"order\".id %s %s",
     pageAfter: "(%s, \"order\".id) %s ((SELECT %s FROM \"order\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"order\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"order\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"order\" WHERE \"order\".id = $1)",
     insert: "INSERT INTO \"order\" (%s) VALUES (%s) RETURNING %s",
@@ -238,7 +240,7 @@ export interface ShipmentFilter {
 export type ShipmentOrderField = "id" | "reference" | "status" | "statusEnteredAt" | "paymentStatus" | "paymentStatusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Shipment by (D60, amended); ties break by id. */
-export type ShipmentSortField = "id" | "reference" | "status" | "paymentStatus";
+export type ShipmentSortField = "id" | "reference" | "status" | "statusEnteredAt" | "paymentStatus" | "paymentStatusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ShipmentUniqueKey = readonly ["id"] | readonly ["reference"];
@@ -306,13 +308,13 @@ export const shipmentTable: TableDefinition = {
   table: "shipment",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "shipment.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "reference", column: "reference", field: "reference", qualified: "shipment.reference", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "status", column: "status", field: "status", qualified: "shipment.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "shipment.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "paymentStatus", column: "payment_status", field: "paymentStatus", qualified: "shipment.payment_status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "paymentStatusEnteredAt", column: "payment_status_entered_at", field: "paymentStatusEnteredAt", qualified: "shipment.payment_status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "shipment._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "shipment.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "reference", column: "reference", field: "reference", qualified: "shipment.reference", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "shipment.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "shipment.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentStatus", column: "payment_status", field: "paymentStatus", qualified: "shipment.payment_status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "paymentStatusEnteredAt", column: "payment_status_entered_at", field: "paymentStatusEnteredAt", qualified: "shipment.payment_status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "shipment._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"reference\", \"status\", \"status_entered_at\", \"payment_status\", \"payment_status_entered_at\", \"_version\"",
@@ -330,7 +332,9 @@ export const shipmentTable: TableDefinition = {
     page: "SELECT %s FROM shipment%s%s LIMIT %d",
     pageAfterKey: "shipment.id %s %s",
     pageAfter: "(%s, shipment.id) %s ((SELECT %s FROM shipment AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM shipment AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", shipment.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM shipment WHERE shipment.id = $1)",
     insert: "INSERT INTO shipment (%s) VALUES (%s) RETURNING %s",
@@ -604,12 +608,14 @@ export const fixtureWorkflowDbRules: RulesLayout = {
 export const fixtureWorkflowDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

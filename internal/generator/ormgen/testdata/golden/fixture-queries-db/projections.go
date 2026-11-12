@@ -69,6 +69,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -77,6 +82,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -91,6 +105,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`line_list."date" = $%d`, paramNum))
 			*args = append(*args, *f.Date.Eq)
+		}
+		if f.Date.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list."date" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Date.Ne)
 		}
 		if f.Date.Gt != nil {
 			paramNum++
@@ -129,6 +148,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list."date" IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.Date.NotIn) > 0 {
+			placeholders := make([]string, len(f.Date.NotIn))
+			for i, value := range f.Date.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list."date" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.Date.IsNull != nil {
 			if *f.Date.IsNull {
 				conditions = append(conditions, `line_list."date" IS NULL`)
@@ -143,6 +171,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list."name" = $%d`, paramNum))
 			*args = append(*args, *f.Name.Eq)
 		}
+		if f.Name.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list."name" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Name.Ne)
+		}
 		if len(f.Name.In) > 0 {
 			placeholders := make([]string, len(f.Name.In))
 			for i, value := range f.Name.In {
@@ -151,6 +184,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Name.NotIn) > 0 {
+			placeholders := make([]string, len(f.Name.NotIn))
+			for i, value := range f.Name.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list."name" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Name.ILike != nil {
 			paramNum++
@@ -171,6 +213,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_id = $%d`, paramNum))
 			*args = append(*args, f.AccountId.Eq.ToUUID())
 		}
+		if f.AccountId.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.account_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.AccountId.Ne.ToUUID())
+		}
 		if len(f.AccountId.In) > 0 {
 			placeholders := make([]string, len(f.AccountId.In))
 			for i, id := range f.AccountId.In {
@@ -179,6 +226,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.AccountId.NotIn) > 0 {
+			placeholders := make([]string, len(f.AccountId.NotIn))
+			for i, id := range f.AccountId.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.account_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.AccountId.IsNull != nil {
 			if *f.AccountId.IsNull {
@@ -194,6 +250,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_name = $%d`, paramNum))
 			*args = append(*args, *f.AccountName.Eq)
 		}
+		if f.AccountName.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.account_name IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.AccountName.Ne)
+		}
 		if len(f.AccountName.In) > 0 {
 			placeholders := make([]string, len(f.AccountName.In))
 			for i, value := range f.AccountName.In {
@@ -202,6 +263,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.account_name IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.AccountName.NotIn) > 0 {
+			placeholders := make([]string, len(f.AccountName.NotIn))
+			for i, value := range f.AccountName.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.account_name IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.AccountName.ILike != nil {
 			paramNum++
@@ -222,6 +292,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_id = $%d`, paramNum))
 			*args = append(*args, f.CategoryId.Eq.ToUUID())
 		}
+		if f.CategoryId.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.category_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.CategoryId.Ne.ToUUID())
+		}
 		if len(f.CategoryId.In) > 0 {
 			placeholders := make([]string, len(f.CategoryId.In))
 			for i, id := range f.CategoryId.In {
@@ -230,6 +305,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CategoryId.NotIn) > 0 {
+			placeholders := make([]string, len(f.CategoryId.NotIn))
+			for i, id := range f.CategoryId.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.category_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.CategoryId.IsNull != nil {
 			if *f.CategoryId.IsNull {
@@ -245,6 +329,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_name = $%d`, paramNum))
 			*args = append(*args, *f.CategoryName.Eq)
 		}
+		if f.CategoryName.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`line_list.category_name IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CategoryName.Ne)
+		}
 		if len(f.CategoryName.In) > 0 {
 			placeholders := make([]string, len(f.CategoryName.In))
 			for i, value := range f.CategoryName.In {
@@ -253,6 +342,15 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`line_list.category_name IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CategoryName.NotIn) > 0 {
+			placeholders := make([]string, len(f.CategoryName.NotIn))
+			for i, value := range f.CategoryName.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(line_list.category_name IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.CategoryName.ILike != nil {
 			paramNum++
@@ -342,26 +440,33 @@ type LineListEntryFindOptions struct {
 }
 
 // LineListEntrySortField is a field FindPage orders LineListEntry rows by: its key
-// id, or a column of one value of text, a number or a time that is
-// never null.
+// id, or a column of one value of text, a number or a time. A page
+// orders a column's nulls last in either direction (D112).
 type LineListEntrySortField string
 
 const (
-	LineListEntrySortById          LineListEntrySortField = "id"
-	LineListEntrySortByDate        LineListEntrySortField = "date"
-	LineListEntrySortByName        LineListEntrySortField = "name"
-	LineListEntrySortByAccountId   LineListEntrySortField = "accountId"
-	LineListEntrySortByAccountName LineListEntrySortField = "accountName"
+	LineListEntrySortById           LineListEntrySortField = "id"
+	LineListEntrySortByDate         LineListEntrySortField = "date"
+	LineListEntrySortByName         LineListEntrySortField = "name"
+	LineListEntrySortByAccountId    LineListEntrySortField = "accountId"
+	LineListEntrySortByAccountName  LineListEntrySortField = "accountName"
+	LineListEntrySortByCategoryId   LineListEntrySortField = "categoryId"
+	LineListEntrySortByCategoryName LineListEntrySortField = "categoryName"
 )
 
 // lineListEntrySortColumns are the columns of the sort fields, qualified by the
 // view, and by page_key, the alias of the subquery that reads the key's row.
-var lineListEntrySortColumns = map[LineListEntrySortField]struct{ sql, key string }{
-	LineListEntrySortById:          {`line_list.id`, `page_key.id`},
-	LineListEntrySortByDate:        {`line_list."date"`, `page_key."date"`},
-	LineListEntrySortByName:        {`line_list."name"`, `page_key."name"`},
-	LineListEntrySortByAccountId:   {`line_list.account_id`, `page_key.account_id`},
-	LineListEntrySortByAccountName: {`line_list.account_name`, `page_key.account_name`},
+var lineListEntrySortColumns = map[LineListEntrySortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	LineListEntrySortById:           {`line_list.id`, `page_key.id`, false},
+	LineListEntrySortByDate:         {`line_list."date"`, `page_key."date"`, false},
+	LineListEntrySortByName:         {`line_list."name"`, `page_key."name"`, false},
+	LineListEntrySortByAccountId:    {`line_list.account_id`, `page_key.account_id`, false},
+	LineListEntrySortByAccountName:  {`line_list.account_name`, `page_key.account_name`, false},
+	LineListEntrySortByCategoryId:   {`line_list.category_id`, `page_key.category_id`, true},
+	LineListEntrySortByCategoryName: {`line_list.category_name`, `page_key.category_name`, true},
 }
 
 // LineListEntrySort is the order FindPage reads LineListEntry rows in: Field,
@@ -379,7 +484,7 @@ func ParseLineListEntrySort(text string) (LineListEntrySort, error) {
 	if _, ok := lineListEntrySortColumns[parsed.Field]; ok {
 		return parsed, nil
 	}
-	return LineListEntrySort{}, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId and accountName, not %q", text)
+	return LineListEntrySort{}, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId, accountName, categoryId and categoryName, not %q", text)
 }
 
 // LineListEntryPageKey is the position of a LineListEntry row in a FindPage order:
@@ -515,7 +620,7 @@ func (r *LineListEntryRepository) FindPage(ctx context.Context, filter *LineList
 	}
 	column, ok := lineListEntrySortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId and accountName, not %q", string(field))
+		return nil, fmt.Errorf("orm: LineListEntry sorts by id, date, name, accountId, accountName, categoryId and categoryName, not %q", string(field))
 	}
 	byKey := field == LineListEntrySortById
 	var args []interface{}
@@ -532,14 +637,23 @@ func (r *LineListEntryRepository) FindPage(ctx context.Context, filter *LineList
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`line_list.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`line_list.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
-			conditions = append(conditions, fmt.Sprintf(`(%s, line_list.id) %s ((SELECT %s FROM line_list AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, line_list.id) %s ((SELECT %s FROM line_list AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM line_list AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, line_list.id %s`, direction)
 	}

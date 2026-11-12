@@ -181,6 +181,110 @@
       ]
     },
     {
+      "checks": [
+        {
+          "column": "name",
+          "maxLength": 100,
+          "minLength": 1,
+          "name": "ck_user_api_key_name"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserApiKey.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserApiKey.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "UserApiKey.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "UserApiKey.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "nullable": true,
+          "origin": "UserApiKey.permissions",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "UserApiKey.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "UserApiKey.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "UserApiKey.lastUsedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "UserApiKey.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_api_key_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_user_api_key_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_api_key",
+      "origin": "UserApiKey",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_api_key_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "user_api_key_token_hash_key"
+        }
+      ]
+    },
+    {
       "columns": [
         {
           "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",

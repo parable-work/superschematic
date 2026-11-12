@@ -85,7 +85,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-timers.transcript.json", 139},
 	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
 	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
-	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 92},
+	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 101},
 	{"../../engine/testdata/rules/core-constants.transcript.json", 39},
 	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
 	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},

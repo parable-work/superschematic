@@ -78,18 +78,24 @@ const parts = [
 // The sorts listParts offers, each a field and whether it descends.
 const partSorts = { name: ["name", 1], "-name": ["name", -1], quantity: ["quantity", 1], "-quantity": ["quantity", -1] };
 
-const filterOperators = ["eq", "in", "gt", "gte", "lt", "lte", "contains", "isNull"];
+const filterOperators = ["eq", "ne", "in", "notIn", "gt", "gte", "lt", "lte", "contains", "isNull"];
 
 // keeps reports whether part passes one filter of a request, filter[field]
 // or filter[field][op]: a test's reader, enough to tell the parts apart.
+// ne and notIn keep the parts eq and in leave out, a part whose field is
+// null among them (D112).
 function keeps(part, field, op, text) {
   const actual = part[field];
   const typed = (value) => (typeof actual === "number" ? Number(value) : typeof actual === "boolean" ? value === "true" : value);
   switch (op) {
     case "eq":
       return actual === typed(text);
+    case "ne":
+      return actual !== typed(text);
     case "in":
       return text.split(",").map(typed).includes(actual);
+    case "notIn":
+      return !text.split(",").map(typed).includes(actual);
     case "gt":
       return actual !== null && actual > typed(text);
     case "gte":
@@ -532,16 +538,16 @@ describe("TypeScript SDK paged lists", () => {
     const page = await client.catalog.listParts({
       filter: {
         id: partId(1),
-        name: { contains: "X", in: ["axle", "bracket"], eq: "axle" },
+        name: { contains: "X", notIn: ["clamp"], in: ["axle", "bracket"], ne: "dowel", eq: "axle" },
         kind: { in: ["bolt", "nut"] },
         // The operators travel in the routes' order, whatever the object's.
-        quantity: { lte: 8, lt: 9, gte: 1, gt: 0, in: [1, 2], eq: 1 },
+        quantity: { lte: 8, lt: 9, gte: 1, gt: 0, notIn: [3, 4], in: [1, 2], ne: 5, eq: 1 },
         weight: { lt: 2.5 },
         price: { gte: "1.00", lte: "9.99" },
         discontinued: false,
         madeAt: { gt: "2025-12-31T00:00:00Z" },
         retiredOn: { isNull: true },
-        supplierId: { isNull: true },
+        supplierId: { isNull: true, ne: supplier },
       },
     });
     expect(page.items.map((part) => part.name)).toEqual(["axle"]);
@@ -550,11 +556,15 @@ describe("TypeScript SDK paged lists", () => {
       [
         ["filter[id]", partId(1)],
         ["filter[name]", "axle"],
+        ["filter[name][ne]", "dowel"],
         ["filter[name][in]", "axle,bracket"],
+        ["filter[name][notIn]", "clamp"],
         ["filter[name][contains]", "X"],
         ["filter[kind][in]", "bolt,nut"],
         ["filter[quantity]", "1"],
+        ["filter[quantity][ne]", "5"],
         ["filter[quantity][in]", "1,2"],
+        ["filter[quantity][notIn]", "3,4"],
         ["filter[quantity][gt]", "0"],
         ["filter[quantity][gte]", "1"],
         ["filter[quantity][lt]", "9"],
@@ -565,6 +575,7 @@ describe("TypeScript SDK paged lists", () => {
         ["filter[discontinued]", "false"],
         ["filter[madeAt][gt]", "2025-12-31T00:00:00Z"],
         ["filter[retiredOn][isNull]", "true"],
+        ["filter[supplierId][ne]", supplier],
         ["filter[supplierId][isNull]", "true"],
       ],
     ]);
@@ -584,6 +595,11 @@ describe("TypeScript SDK paged lists", () => {
     expect(await kept({ retiredOn: { isNull: false } })).toEqual(["bracket", "dowel"]);
     expect(await kept({ retiredOn: "2026-06-01" })).toEqual(["bracket"]);
     expect(await kept({ supplierId: { isNull: true }, kind: { in: ["bolt"] } })).toEqual(["axle", "dowel"]);
+    expect(await kept({ kind: { ne: "bolt" } })).toEqual(["bracket", "clamp", "eyelet"]);
+    expect(await kept({ quantity: { notIn: [1, 5] } })).toEqual(["bracket", "clamp", "dowel"]);
+    // ne and notIn keep a part whose field is null (D112).
+    expect(await kept({ supplierId: { ne: supplier } })).toEqual(["axle", "dowel", "eyelet"]);
+    expect(await kept({ retiredOn: { notIn: ["2026-06-01"] } })).toEqual(["axle", "clamp", "dowel", "eyelet"]);
     expect(queries().map((query) => query.filter(([name]) => name !== "limit"))).toEqual([
       [["filter[id][in]", `${partId(2)},${partId(4)}`]],
       [["filter[name][contains]", "CK"]],
@@ -602,13 +618,23 @@ describe("TypeScript SDK paged lists", () => {
         ["filter[supplierId][isNull]", "true"],
         ["filter[kind][in]", "bolt"],
       ],
+      [["filter[kind][ne]", "bolt"]],
+      [["filter[quantity][notIn]", "1,5"]],
+      [["filter[supplierId][ne]", supplier]],
+      [["filter[retiredOn][notIn]", "2026-06-01"]],
     ]);
   });
 
-  test("a member that is unset and an in of no value are left out", async () => {
+  test("a member that is unset and an in or a notIn of no value are left out", async () => {
     const client = sdk();
     const page = await client.catalog.listParts({
-      filter: { id: undefined, name: null, kind: { in: [] }, quantity: { gt: undefined, lt: null }, weight: {} },
+      filter: {
+        id: undefined,
+        name: null,
+        kind: { in: [], notIn: [] },
+        quantity: { gt: undefined, lt: null, ne: undefined },
+        weight: {},
+      },
       limit: 5,
     });
     expect(page.items).toHaveLength(5);
@@ -704,6 +730,20 @@ describe("TypeScript SDK paged lists", () => {
       "filter[quantity][in]": [{ validator: "listMax", message: "filter[quantity][in] must contain at most 100 items." }],
     });
 
+    // A notIn's values are held to what an in's are, at its own name.
+    expect(
+      await validationErrors(client.catalog.listParts({ filter: { name: { notIn: ["axle", "a,b", " c", "d\t", "", "  "] } } }))
+    ).toEqual({
+      "filter[name][notIn][1]": pattern("filter[name][notIn][1]"),
+      "filter[name][notIn][2]": pattern("filter[name][notIn][2]"),
+      "filter[name][notIn][3]": pattern("filter[name][notIn][3]"),
+      "filter[name][notIn][4]": required("filter[name][notIn][4]"),
+      "filter[name][notIn][5]": required("filter[name][notIn][5]"),
+    });
+    expect(await validationErrors(client.catalog.listParts({ filter: { quantity: { notIn: values(101) } } }))).toEqual({
+      "filter[quantity][notIn]": [{ validator: "listMax", message: "filter[quantity][notIn] must contain at most 100 items." }],
+    });
+
     // A contains of no text.
     expect(await validationErrors(client.catalog.listParts({ filter: { name: { contains: "" } } }))).toEqual({
       "filter[name][contains]": [{ validator: "minLength", message: "filter[name][contains] needs text." }],
@@ -718,9 +758,14 @@ describe("TypeScript SDK paged lists", () => {
     // Each fault of one filter is named, whatever the argument is called,
     // and the iterator and invokeTool refuse as the method does.
     expect(
-      await validationErrors(client.catalog.findParts({ where: { kind: { in: ["bolt", "nut,washer"] }, name: { contains: "" } } }))
+      await validationErrors(
+        client.catalog.findParts({
+          where: { kind: { in: ["bolt", "nut,washer"], notIn: [" nut"] }, name: { contains: "" } },
+        })
+      )
     ).toEqual({
       "filter[kind][in][1]": pattern("filter[kind][in][1]"),
+      "filter[kind][notIn][0]": pattern("filter[kind][notIn][0]"),
       "filter[name][contains]": [{ validator: "minLength", message: "filter[name][contains] needs text." }],
     });
     expect(await validationErrors(collect(client.catalog.listPartsAll({ filter: { id: { in: [" "] } } })))).toEqual({
@@ -729,17 +774,26 @@ describe("TypeScript SDK paged lists", () => {
     expect(
       await validationErrors(invokeTool(client, "catalog.listParts", { filter: { supplierId: { in: [`${supplier},${supplier}`] } } }))
     ).toEqual({ "filter[supplierId][in][0]": pattern("filter[supplierId][in][0]") });
+    expect(
+      await validationErrors(invokeTool(client, "catalog.findParts", { where: { id: { notIn: [""] } } }))
+    ).toEqual({ "filter[id][notIn][0]": required("filter[id][notIn][0]") });
     expect(state.requests).toEqual([]);
 
-    // The most an in and a request may hold are sent, a comma or a space
-    // in any other operator's value travels as it is, and an in of no
-    // value is left out.
+    // The most an in, a notIn and a request may hold are sent, a comma or
+    // a space in any other operator's value, a ne's among them, travels as
+    // it is, and an in and a notIn of no value are left out.
     expect((await client.catalog.listParts({ filter: { quantity: { in: values(100) } }, limit: 5 })).items).toHaveLength(5);
+    expect(
+      (await client.catalog.listParts({ filter: { quantity: { notIn: values(100).map((value) => value + 100) } }, limit: 5 })).items
+    ).toHaveLength(5);
     expect(await client.catalog.findParts({ where: fields(50) })).toEqual([]);
-    expect(await client.catalog.findParts({ where: { name: { eq: " a, b ", contains: " , ", in: [] } } })).toEqual([]);
-    expect(queries().map((query) => query.length)).toEqual([2, 50, 2]);
-    expect(queries()[2]).toEqual([
+    expect(
+      await client.catalog.findParts({ where: { name: { eq: " a, b ", ne: " c, d ", contains: " , ", in: [], notIn: [] } } })
+    ).toEqual([]);
+    expect(queries().map((query) => query.length)).toEqual([2, 2, 50, 3]);
+    expect(queries()[3]).toEqual([
       ["filter[name]", " a, b "],
+      ["filter[name][ne]", " c, d "],
       ["filter[name][contains]", " , "],
     ]);
   });
@@ -781,7 +835,8 @@ describe("TypeScript SDK paged lists", () => {
       const filter = {};
       for (const { field, operator, values } of vector.filters) {
         filter[field] ??= {};
-        filter[field][operator] = operator === "in" ? values : operator === "isNull" ? values[0] === "true" : values[0];
+        const list = operator === "in" || operator === "notIn";
+        filter[field][operator] = list ? values : operator === "isNull" ? values[0] === "true" : values[0];
       }
       expect([vector.name, Object.entries(filterParams(filter))]).toEqual([vector.name, vector.pairs]);
       // A request carries the same pairs.

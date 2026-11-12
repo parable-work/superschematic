@@ -272,7 +272,7 @@ type FilterField struct {
 }
 
 // OperatorKeys is the tuple of the field's operators, as the filter names
-// them, as a Python literal: ("eq", "in", "is_null").
+// them, as a Python literal: ("eq", "ne", "in", "not_in", "is_null").
 func (f FilterField) OperatorKeys() string {
 	keys := make([]string, len(f.Operators))
 	for i, operator := range f.Operators {
@@ -285,8 +285,9 @@ func (f FilterField) OperatorKeys() string {
 }
 
 // FilterOperator is one operator of a filter's field: Key is the member
-// of the field's operators, the wire's name but is_null for isNull, as the
-// SDK names a member in snake_case, and PyType the type of its value.
+// of the field's operators, the wire's name but not_in for notIn and
+// is_null for isNull, as the SDK names a member in snake_case, and PyType
+// the type of its value.
 type FilterOperator struct {
 	Key    string
 	PyType string
@@ -882,10 +883,14 @@ func setPageType(namespace *NamespaceInfo) {
 }
 
 // filterOperatorKey is the member of a field's operators for a wire
-// operator: the wire's name, but is_null for isNull, as the SDK names a
-// member in snake_case. in stays in: a member of a TypedDict is a string.
+// operator: the wire's name, but not_in for notIn and is_null for isNull,
+// as the SDK names a member in snake_case. in stays in: a member of a
+// TypedDict is a string.
 func filterOperatorKey(op string) string {
-	if op == ir.FilterOpIsNull {
+	switch op {
+	case ir.FilterOpNotIn:
+		return "not_in"
+	case ir.FilterOpIsNull:
 		return "is_null"
 	}
 	return op
@@ -894,8 +899,8 @@ func filterOperatorKey(op string) string {
 // convertFilterFields are the members of an operation's typed filter
 // (D106), in FilterBy's order: each field's value type, as a query
 // parameter of its type has it, and the TypedDict of its operators, named
-// for the filter and the field. eq and the comparisons take a value, in a
-// list of them, contains text and is_null a bool.
+// for the filter and the field. eq, ne and the comparisons take a value,
+// in and not_in a list of them, contains text and is_null a bool.
 func convertFilterFields(filter *apigen.FilterInfo, filterTypeName string) []FilterField {
 	fields := make([]FilterField, len(filter.Fields))
 	for i, field := range filter.Fields {
@@ -904,7 +909,7 @@ func convertFilterFields(filter *apigen.FilterInfo, filterTypeName string) []Fil
 		for j, op := range field.Operators {
 			operandType := pyType
 			switch op {
-			case ir.FilterOpIn:
+			case ir.FilterOpIn, ir.FilterOpNotIn:
 				operandType = pythonListType(pyType, 1)
 			case ir.FilterOpContains:
 				operandType = "str"

@@ -331,7 +331,7 @@ type ORMReference struct {
 // TypeScript runtime runs, by the names its TableStatements declares.
 var ormStatements = []string{
 	"columns", "qualifiedColumns", "selectColumn", "getOne", "getOneFields", "getMany", "live", "liveWhere", "liveCondition",
-	"findOne", "findMany", "count", "page", "pageAfterKey", "pageAfter", "pageOrder", "pageTiebreak", "pageKeyExists",
+	"findOne", "findMany", "count", "page", "pageAfterKey", "pageAfter", "pageAfterNulls", "pageOrder", "pageOrderNulls", "pageTiebreak", "pageKeyExists",
 	"insert", "insertMany", "update", "returning", "updateMany", "updatedAt", "updatedBy", "upsert",
 	"softDelete", "softDeleteMany", "delete", "deleteMany",
 }

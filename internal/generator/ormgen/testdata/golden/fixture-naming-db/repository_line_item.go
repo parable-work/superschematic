@@ -52,13 +52,19 @@ var LineItemQuotedFields = map[string]string{
 // lineItemSortColumns are the columns of LineItem's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var lineItemSortColumns = map[LineItemSortField]struct{ sql, key string }{
-	LineItemSortById:          {`"lineItem".id`, `page_key.id`},
-	LineItemSortByAmountCents: {`"lineItem"."amountCents"`, `page_key."amountCents"`},
-	LineItemSortByPostedOn:    {`"lineItem"."postedOn"`, `page_key."postedOn"`},
-	LineItemSortByCreatedAt:   {`"lineItem"."createdAt"`, `page_key."createdAt"`},
-	LineItemSortByUpdatedAt:   {`"lineItem"."updatedAt"`, `page_key."updatedAt"`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var lineItemSortColumns = map[LineItemSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	LineItemSortById:          {`"lineItem".id`, `page_key.id`, false},
+	LineItemSortByAmountCents: {`"lineItem"."amountCents"`, `page_key."amountCents"`, false},
+	LineItemSortByPostedOn:    {`"lineItem"."postedOn"`, `page_key."postedOn"`, false},
+	LineItemSortByMemo:        {`"lineItem".memo`, `page_key.memo`, true},
+	LineItemSortByExternalId:  {`"lineItem"."externalId"`, `page_key."externalId"`, true},
+	LineItemSortByCreatedAt:   {`"lineItem"."createdAt"`, `page_key."createdAt"`, false},
+	LineItemSortByUpdatedAt:   {`"lineItem"."updatedAt"`, `page_key."updatedAt"`, false},
 }
 
 // buildLineItemOrderByClause builds an ORDER BY clause for LineItem.
@@ -1049,7 +1055,7 @@ func (r *LineItemRepository) FindPage(ctx context.Context, filter *LineItemFilte
 	}
 	column, ok := lineItemSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: LineItem sorts by id, amountCents, postedOn, createdAt and updatedAt, not %q", string(field))
+		return nil, fmt.Errorf("orm: LineItem sorts by id, amountCents, postedOn, memo, externalId, createdAt and updatedAt, not %q", string(field))
 	}
 	byKey := field == LineItemSortById
 
@@ -1082,14 +1088,23 @@ func (r *LineItemRepository) FindPage(ctx context.Context, filter *LineItemFilte
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`"lineItem".id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`"lineItem".id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, "lineItem".id) %s ((SELECT %s FROM "lineItem" AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, "lineItem".id) %s ((SELECT %s FROM "lineItem" AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM "lineItem" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1097,6 +1112,9 @@ func (r *LineItemRepository) FindPage(ctx context.Context, filter *LineItemFilte
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, "lineItem".id %s`, direction)
 	}

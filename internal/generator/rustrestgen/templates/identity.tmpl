@@ -2,8 +2,9 @@
 //!
 //! The core user model's wiring (D50). The API's users are the
 //! `{{ .Identity.AuthDB }}` schema's, its authDb: the identity runtime signs them
-//! in and out, resolves a request's session to its caller, and manages
-//! users, roles and grants over the tables this module's descriptor names.
+//! in and out, resolves a request's session or API key to its caller, and
+//! manages users, roles and grants over the tables this module's
+//! descriptor names.
 //! A service builds the identity service over a store and its config, and
 //! hands `Implementations` the authenticator over it:
 //!

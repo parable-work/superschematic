@@ -21,10 +21,10 @@ func FilterWireDescription() string {
 // document (D106): one query parameter, filter whatever the argument is
 // called, of style deepObject and exploded, never required, whose schema
 // is a closed object with a property per field a caller may filter by.
-// Each field is a closed object of its operators: eq and the comparisons
-// hold a value of the field's type, described as a query parameter of that
-// type is (queryParamOpenAPISchema), in a list of 1 to
-// ir.FilterMaxInValues of them, contains text and isNull a boolean. The
+// Each field is a closed object of its operators: eq, ne and the
+// comparisons hold a value of the field's type, described as a query
+// parameter of that type is (queryParamOpenAPISchema), in and notIn a list
+// of 1 to ir.FilterMaxInValues of them, contains text and isNull a boolean. The
 // object form has no way to write filter[field]=value, which is the eq
 // member's: the parameter's and each field's description say so.
 func filterOpenAPIParameter(filter *FilterInfo, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]interface{} {
@@ -39,7 +39,7 @@ func filterOpenAPIParameter(filter *FilterInfo, scalarExamples, scalarDescriptio
 		for _, op := range field.Operators {
 			description := FilterOperatorDescription(op)
 			switch op {
-			case ir.FilterOpIn:
+			case ir.FilterOpIn, ir.FilterOpNotIn:
 				operators[op] = map[string]interface{}{
 					"type":        "array",
 					"items":       value(),

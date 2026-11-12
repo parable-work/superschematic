@@ -101,7 +101,7 @@ export interface ProjectFilter {
 export type ProjectOrderField = "id" | "name" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Project by (D60, amended); ties break by id. */
-export type ProjectSortField = "id" | "name" | "status";
+export type ProjectSortField = "id" | "name" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ProjectUniqueKey = readonly ["id"];
@@ -155,11 +155,11 @@ export const projectTable: TableDefinition = {
   table: "project",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "project.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "project.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "status", column: "status", field: "status", qualified: "project.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "project.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "project._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "project.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "project.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "project.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "project.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "project._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"name\", \"status\", \"status_entered_at\", \"_version\"",
@@ -177,7 +177,9 @@ export const projectTable: TableDefinition = {
     page: "SELECT %s FROM project%s%s LIMIT %d",
     pageAfterKey: "project.id %s %s",
     pageAfter: "(%s, project.id) %s ((SELECT %s FROM project AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM project AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", project.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM project WHERE project.id = $1)",
     insert: "INSERT INTO project (%s) VALUES (%s) RETURNING %s",
@@ -254,7 +256,7 @@ export interface TaskFilter {
 export type TaskOrderField = "id" | "title" | "priority" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Task by (D60, amended); ties break by id. */
-export type TaskSortField = "id" | "title" | "status";
+export type TaskSortField = "id" | "title" | "priority" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TaskUniqueKey = readonly ["id"];
@@ -308,13 +310,13 @@ export const taskTable: TableDefinition = {
   table: "task",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "task.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "title", column: "title", field: "title", qualified: "task.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "priority", column: "priority", field: "priority", qualified: "task.priority", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "projectId", column: "project_id", field: "project", qualified: "task.project_id", uuid: true, required: true, relation: "Project", filter: ["eq", "in", "isNull"] },
-    { name: "status", column: "status", field: "status", qualified: "task.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "task.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "task._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "task.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "task.title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "priority", column: "priority", field: "priority", qualified: "task.priority", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "projectId", column: "project_id", field: "project", qualified: "task.project_id", uuid: true, required: true, relation: "Project", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "status", column: "status", field: "status", qualified: "task.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "task.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "task._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"title\", \"priority\", \"project_id\", \"status\", \"status_entered_at\", \"_version\"",
@@ -332,7 +334,9 @@ export const taskTable: TableDefinition = {
     page: "SELECT %s FROM task%s%s LIMIT %d",
     pageAfterKey: "task.id %s %s",
     pageAfter: "(%s, task.id) %s ((SELECT %s FROM task AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM task AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", task.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM task WHERE task.id = $1)",
     insert: "INSERT INTO task (%s) VALUES (%s) RETURNING %s",
@@ -475,9 +479,11 @@ export const fixtureReactionsDbRules: RulesLayout = {
           {
             "behavior": "Workflow",
             "config": {
+              "finished": {
+                "done": "success"
+              },
               "outcomes": {
                 "cancelled": "neutral",
-                "done": "success",
                 "failed": "failure"
               },
               "states": [
@@ -507,6 +513,10 @@ export const fixtureReactionsDbRules: RulesLayout = {
                 {
                   "from": "active",
                   "to": "cancelled"
+                },
+                {
+                  "from": "done",
+                  "to": "active"
                 }
               ]
             },
@@ -629,8 +639,10 @@ export const fixtureReactionsDbRules: RulesLayout = {
           {
             "behavior": "Workflow",
             "config": {
+              "finished": {
+                "done": "success"
+              },
               "outcomes": {
-                "done": "success",
                 "dropped": "neutral",
                 "failed": "failure"
               },
@@ -661,6 +673,10 @@ export const fixtureReactionsDbRules: RulesLayout = {
                 {
                   "from": "doing",
                   "to": "dropped"
+                },
+                {
+                  "from": "done",
+                  "to": "todo"
                 }
               ]
             },
@@ -696,12 +712,14 @@ export const fixtureReactionsDbRules: RulesLayout = {
 export const fixtureReactionsDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

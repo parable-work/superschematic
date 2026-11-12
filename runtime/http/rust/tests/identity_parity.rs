@@ -15,9 +15,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use superschematic_http_runtime::has_any_permission;
 use superschematic_http_runtime::identity::{
-    capabilities_of, check_cross_origin, check_password, effective_permissions, extract_credential,
-    hash_password_with_salt, hash_token, token_from_bytes, uncovered, uncovered_user,
-    valid_permission, verify_password, Argon2Params, Config, CredentialOutcome, Route, TOKEN_BYTES,
+    api_key_from_bytes, capabilities_of, check_cross_origin, check_password, effective_permissions,
+    extract_credential, hash_password_with_salt, hash_token, narrow_permissions, token_from_bytes,
+    uncovered, uncovered_user, valid_permission, verify_password, Argon2Params, Config,
+    CredentialOutcome, Route, TOKEN_BYTES,
 };
 
 const VECTORS: &str = "../testdata/identity_parity.json";
@@ -32,6 +33,7 @@ struct ParityFile {
     hashes: Vec<HashCase>,
     verify: Vec<VerifyCase>,
     tokens: Vec<TokenCase>,
+    api_keys: Vec<TokenCase>,
     cookies: Vec<CookieCase>,
     credentials: Vec<CredentialCase>,
     cross_origin: Vec<CrossOriginCase>,
@@ -39,6 +41,7 @@ struct ParityFile {
     effective_permissions: Vec<EffectiveCase>,
     grants: Vec<GrantCase>,
     user_writes: Vec<UserWriteCase>,
+    key_permissions: Vec<NarrowCase>,
     capabilities: CapabilitiesTable,
 }
 
@@ -156,6 +159,15 @@ struct GrantCase {
     held: Vec<String>,
     given: Vec<String>,
     want: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NarrowCase {
+    name: String,
+    held: Vec<String>,
+    named: Vec<String>,
+    want: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -278,19 +290,37 @@ fn verify() {
     check.done();
 }
 
+/// A case's random bytes, from their hexadecimal.
+fn random_bytes(case: &TokenCase) -> [u8; TOKEN_BYTES] {
+    let bytes: Vec<u8> = (0..case.bytes.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&case.bytes[i..i + 2], 16).unwrap())
+        .collect();
+    bytes.try_into().expect("32 bytes")
+}
+
 #[test]
 fn tokens() {
     let file = vectors();
     unique("tokens", file.tokens.iter().map(|c| c.name.as_str()));
     let mut check = Check::default();
     for case in &file.tokens {
-        let bytes: Vec<u8> = (0..case.bytes.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&case.bytes[i..i + 2], 16).unwrap())
-            .collect();
-        let bytes: [u8; TOKEN_BYTES] = bytes.try_into().expect("32 bytes");
+        let bytes = random_bytes(case);
         let got = json!([token_from_bytes(&bytes), hash_token(&case.token)]);
         check.eq("tokens", &case.name, got, &json!([case.token, case.hash]));
+    }
+    check.done();
+}
+
+#[test]
+fn api_keys() {
+    let file = vectors();
+    unique("apiKeys", file.api_keys.iter().map(|c| c.name.as_str()));
+    let mut check = Check::default();
+    for case in &file.api_keys {
+        let bytes = random_bytes(case);
+        let got = json!([api_key_from_bytes(&bytes), hash_token(&case.token)]);
+        check.eq("apiKeys", &case.name, got, &json!([case.token, case.hash]));
     }
     check.done();
 }
@@ -330,17 +360,19 @@ fn credentials() {
         }
         let got = match extract_credential(&headers, &case.cookie_name) {
             CredentialOutcome::None => {
-                json!({"outcome": "none", "transport": null, "token": null})
+                json!({"outcome": "none", "transport": null, "token": null, "apiKey": false})
             }
             CredentialOutcome::Usable(credential) => json!({
                 "outcome": "usable",
                 "transport": credential.transport.as_str(),
                 "token": credential.token,
+                "apiKey": credential.api_key,
             }),
             CredentialOutcome::Invalid(transport) => json!({
                 "outcome": "invalid",
                 "transport": transport.as_str(),
                 "token": null,
+                "apiKey": false,
             }),
         };
         check.eq("credentials", &case.name, got, &case.want);
@@ -451,6 +483,21 @@ fn user_writes() {
         );
         let got = json!({"allowed": missing.is_empty(), "uncovered": missing});
         check.eq("userWrites", &case.name, got, &case.want);
+    }
+    check.done();
+}
+
+#[test]
+fn key_permissions() {
+    let file = vectors();
+    unique(
+        "keyPermissions",
+        file.key_permissions.iter().map(|c| c.name.as_str()),
+    );
+    let mut check = Check::default();
+    for case in &file.key_permissions {
+        let got = narrow_permissions(&case.held, &case.named);
+        check.eq("keyPermissions", &case.name, json!(got), &json!(case.want));
     }
     check.done();
 }

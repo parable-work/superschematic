@@ -20,9 +20,11 @@ mod implementations;
   by in its Args, under the argument's name: a `<Operation>Filter` with a
   member per field, `None` for a field the request does not filter by,
   each a `runtime::filter::Equals`, `Ordered` or `Text` of the field's
-  type holding the operators the request sent (`eq`, `in_`, `gt`, `gte`,
-  `lt`, `lte`, `contains`, `is_null`). Keep the items every member holds
-  for.
+  type holding the operators the request sent (`eq`, `ne`, `in_`,
+  `not_in`, `gt`, `gte`, `lt`, `lte`, `contains`, `is_null`). Keep the
+  items every member holds for. `ne` and `not_in` keep the items `eq` and
+  `in_` leave out (D112), an item whose field is null among them, which
+  SQL's `<>` and `NOT IN` drop.
 - An operation declared `@manualRouteRegistration` has no file: the
   service mounts its route itself (see `build_router`).
 {{- if .HasBehaviorOperations }}

@@ -81,25 +81,25 @@ type CatalogImplementation interface {
 // not filter by, each operator the request sent set on it. Every member set
 // holds at once.
 type CatalogListPartsFilter struct {
-	// Id filters by id: eq, in.
+	// Id filters by id: eq, ne, in, notIn.
 	Id *filterparse.Equals[types.IdentityUUID]
-	// Name filters by name: eq, in, contains.
+	// Name filters by name: eq, ne, in, notIn, contains.
 	Name *filterparse.Text[string]
-	// Kind filters by kind: eq, in.
+	// Kind filters by kind: eq, ne, in, notIn.
 	Kind *filterparse.Equals[types.PartKind]
-	// Quantity filters by quantity: eq, in, gt, gte, lt, lte.
+	// Quantity filters by quantity: eq, ne, in, notIn, gt, gte, lt, lte.
 	Quantity *filterparse.Ordered[int64]
-	// Weight filters by weight: eq, in, gt, gte, lt, lte.
+	// Weight filters by weight: eq, ne, in, notIn, gt, gte, lt, lte.
 	Weight *filterparse.Ordered[float64]
-	// Price filters by price: eq, in, gt, gte, lt, lte.
+	// Price filters by price: eq, ne, in, notIn, gt, gte, lt, lte.
 	Price *filterparse.Ordered[types.GenericDecimal]
-	// Discontinued filters by discontinued: eq, in.
+	// Discontinued filters by discontinued: eq, ne, in, notIn.
 	Discontinued *filterparse.Equals[bool]
-	// MadeAt filters by madeAt: eq, in, gt, gte, lt, lte.
+	// MadeAt filters by madeAt: eq, ne, in, notIn, gt, gte, lt, lte.
 	MadeAt *filterparse.Ordered[types.TemporalDateTime]
-	// RetiredOn filters by retiredOn: eq, in, gt, gte, lt, lte, isNull.
+	// RetiredOn filters by retiredOn: eq, ne, in, notIn, gt, gte, lt, lte, isNull.
 	RetiredOn *filterparse.Ordered[types.TemporalDate]
-	// SupplierId filters by supplierId: eq, in, isNull.
+	// SupplierId filters by supplierId: eq, ne, in, notIn, isNull.
 	SupplierId *filterparse.Equals[types.IdentityUUID]
 }
 

@@ -39,10 +39,11 @@ export type Encrypted<T extends string> = T & { readonly __encrypted: true };
 
 // Workflow's config on a table (D103, D104): @superschematic/schema's
 // WorkflowConfig, whose transitions may name who makes them (by), with the
-// permission that moves a row past by (overridePermission) and a move to the
-// state the row is in answered as no change (repeat). An engine type's
-// @behavior("Workflow", ...) takes the schema package's config, which has
-// none of the three, and the build refuses them on it.
+// permission that moves a row past by (overridePermission), a move to the
+// state the row is in answered as no change (repeat), and the states a
+// transition leaves that still count as finished (finished, D113). An
+// engine type's @behavior("Workflow", ...) takes the schema package's
+// config, which has none of the four, and the build refuses them on it.
 export interface WorkflowConfig extends Omit<BehaviorConfigs["Workflow"], "transitions"> {
   /** The moves the status may make. A state that no transition leaves is terminal. */
   readonly transitions: readonly WorkflowTransitionOn[];
@@ -50,6 +51,15 @@ export interface WorkflowConfig extends Omit<BehaviorConfigs["Workflow"], "trans
   readonly overridePermission?: string;
   /** "unchanged": a transition to the state the row is in answers { from, to, unchanged: true } and writes nothing; absent, it is the veto already_in_state. */
   readonly repeat?: "unchanged";
+  /**
+   * The outcome of each state it names that a transition leaves (D113):
+   * such a state counts as finished for the rules that read an outcome,
+   * Reactions' allTerminal and anyTerminal, as a terminal state does,
+   * though a row may leave it. `finished: { done: "success" }` beside
+   * `{ from: "done", to: "todo" }` lets a task be reopened and still close
+   * its project. A terminal state's outcome is outcomes' to name.
+   */
+  readonly finished?: Readonly<Record<string, WorkflowOutcome>>;
 }
 
 /**

@@ -35,7 +35,10 @@
 //! table form, and `transition`'s `from`, as a bad parameter. Ignoring a
 //! rule of who may move an instance would be a hole, and an engine type can
 //! be defined at run time, past any build's check. The engine never answers
-//! `unchanged`, `not_principal` or `stale`.
+//! `unchanged`, `not_principal` or `stale`. The config's `finished` (D113),
+//! the outcome of a state a transition leaves, is a table's alone too, and
+//! refused at define as they are: on an engine type only a terminal state
+//! has an outcome, and [`state_outcome`] answers for no other.
 //!
 //! configChange: while the schema has instances, a new version keeps every
 //! state of the old config, since an instance may be in any of them; with
@@ -350,9 +353,10 @@ impl Behavior for Workflow {
 
 // table_member says why a config names a member only a table's Workflow
 // takes (D104), the first of each transition's by, in config order, then
-// overridePermission, then repeat; None for a config that names none. It
-// runs before the config is read into its struct, whose transitions refuse
-// an unknown member in serde's words and whose config drops one silently.
+// overridePermission, then repeat, then finished (D113); None for a config
+// that names none. It runs before the config is read into its struct, whose
+// transitions refuse an unknown member in serde's words and whose config
+// drops one silently.
 fn table_member(raw: &Value) -> Option<String> {
     let by = raw
         .get("transitions")
@@ -382,6 +386,11 @@ fn table_member(raw: &Value) -> Option<String> {
     if raw.get("repeat").is_some() {
         return Some(format!(
             "repeat is a table's Workflow's ({TABLE_FORM}): on an engine type a transition to the state an instance is in stays the veto already_in_state"
+        ));
+    }
+    if raw.get("finished").is_some() {
+        return Some(format!(
+            "finished is a table's Workflow's ({TABLE_FORM}): on an engine type a state a transition leaves has no outcome"
         ));
     }
     None

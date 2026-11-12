@@ -31,15 +31,16 @@ use superschematic_rules_testkit::{
 };
 
 /// The steps `core-workflow.transcript.json` holds, of `core-workflow.json`'s
-/// 158: each one the reference host maps onto the core (61 define and
+/// 159: each one the reference host maps onto the core (61 define and
 /// publish checks, 34 creates, updates, deletes and invokes, and the test's
 /// raw write of Workflow's column) in the 14 scenarios the core an adapter
 /// embeds runs. The two scenarios that need a fixture (test.Dispatch, and a
-/// permission matcher of the test's own) hold none; the rest of the 62 left
-/// out are opens, reads of the host's, the outbox's reads and the two
-/// writes the store's own-field validation refuses. An adapter's replay
-/// holds its own count to this one, so a regression cannot pass by
-/// skipping.
+/// permission matcher of the test's own) hold none; the rest of the 63 left
+/// out are opens, reads of the host's, the outbox's reads, the two writes
+/// the store's own-field validation refuses, and the define the engine
+/// refuses for `finished`, a table's Workflow's alone, which the core takes
+/// (D113). An adapter's replay holds its own count to this one, so a
+/// regression cannot pass by skipping.
 const WORKFLOW_FLOOR: usize = 96;
 
 /// The steps `core-timers.transcript.json` holds, of `core-timers.json`'s
@@ -90,15 +91,16 @@ const REACTIONS_FLOOR: usize = 586;
 const REACTIONS_CHANGES_FLOOR: usize = 60;
 
 /// The steps `core-workflow-principals.transcript.json` holds, of the
-/// hand-written `core-workflow-principals.json`'s 122 (D104): 34 define
-/// and publish checks, twelve of them refused, and 58 commands, creates and
-/// transitions, five of them repeats answered unchanged, each holding the
-/// version of its row's command before it, in the 9 scenarios the core an
-/// adapter embeds runs. test.Gate's scenario holds none, since the
-/// reference host runs test.Gate as a fixture; the rest of the 30 left out
-/// are the opens, the reads of rows and the read of the event log. An
-/// adapter's replay holds its own count to this one.
-const WORKFLOW_PRINCIPALS_FLOOR: usize = 92;
+/// hand-written `core-workflow-principals.json`'s 133 (D104, D113): 38
+/// define and publish checks, fourteen of them refused, and 63 commands,
+/// creates and transitions, five of them repeats answered unchanged, each
+/// holding the version of its row's command before it, in the 10 scenarios
+/// the core an adapter embeds runs, the one of a state `finished` names
+/// among them (D113). test.Gate's scenario holds none, since the reference
+/// host runs test.Gate as a fixture; the rest of the 32 left out are the
+/// opens, the reads of rows and the read of the event log. An adapter's
+/// replay holds its own count to this one.
+const WORKFLOW_PRINCIPALS_FLOOR: usize = 101;
 
 /// The steps `core-constants.transcript.json` holds, of
 /// `core-constants.json`'s 65: 19 define and publish checks and 20 creates

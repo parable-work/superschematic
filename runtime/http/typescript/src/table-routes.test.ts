@@ -175,18 +175,18 @@ describe('a request’s filter as the repository’s', () => {
     const made = new Date('2026-01-01T00:00:00Z');
     expect(
       tableFilter({
-        status: { eq: 'open', in: ['open', 'done'] },
-        priority: { gt: 1, gte: 2, lt: 8, lte: 9 },
+        status: { eq: 'open', in: ['open', 'done'], ne: 'done', notIn: ['done', 'started'] },
+        priority: { gt: 1, gte: 2, lt: 8, lte: 9, notIn: [3] },
         createdAt: { gte: made },
         dueOn: { isNull: true, lt: '2026-03-01' },
-        assigneeId: { isNull: false },
+        assigneeId: { isNull: false, ne: 'm1' },
       })
     ).toEqual({
-      status: { eq: 'open', in: ['open', 'done'] },
-      priority: { gt: 1, gte: 2, lt: 8, lte: 9 },
+      status: { eq: 'open', in: ['open', 'done'], ne: 'done', notIn: ['done', 'started'] },
+      priority: { gt: 1, gte: 2, lt: 8, lte: 9, notIn: [3] },
       createdAt: { gte: made },
       dueOn: { isNull: true, lt: '2026-03-01' },
-      assigneeId: { isNull: false },
+      assigneeId: { isNull: false, ne: 'm1' },
     });
     expect(tableFilter({})).toEqual({});
   });

@@ -25,23 +25,25 @@ import {
  * The filter of listParts (FilterBy, D106): the rows the list keeps.
  * Each member is a field holding a value, for equality, or an object of
  * the field's operators, and a row is kept when every member holds: eq,
- * and in, one of the values, at most 100, on every field; gt, gte, lt and
- * lte on a number, a date and a time; contains, the text a value holds in
- * any case, on text; and isNull, true for the rows whose field is null
- * and false for the others, on a field that may be null. The method sends
- * it as filter[field]=value and filter[field][op]=value.
+ * and in, one of the values, at most 100, on every field, with ne and
+ * notIn, which negate them; gt, gte, lt and lte on a number, a date and
+ * a time; contains, the text a value holds in any case, on text; and
+ * isNull, true for the rows whose field is null and false for the
+ * others, on a field that may be null. ne and notIn keep the rows eq and
+ * in leave out, a row whose field is null among them (D112). The method
+ * sends it as filter[field]=value and filter[field][op]=value.
  */
 export interface CatalogListPartsFilter {
-  id?: string | { eq?: string; in?: string[] };
-  name?: string | { eq?: string; in?: string[]; contains?: string };
-  kind?: PartKind | { eq?: PartKind; in?: PartKind[] };
-  quantity?: number | { eq?: number; in?: number[]; gt?: number; gte?: number; lt?: number; lte?: number };
-  weight?: number | { eq?: number; in?: number[]; gt?: number; gte?: number; lt?: number; lte?: number };
-  price?: string | { eq?: string; in?: string[]; gt?: string; gte?: string; lt?: string; lte?: string };
-  discontinued?: boolean | { eq?: boolean; in?: boolean[] };
-  madeAt?: string | { eq?: string; in?: string[]; gt?: string; gte?: string; lt?: string; lte?: string };
-  retiredOn?: string | { eq?: string; in?: string[]; gt?: string; gte?: string; lt?: string; lte?: string; isNull?: boolean };
-  supplierId?: string | { eq?: string; in?: string[]; isNull?: boolean };
+  id?: string | { eq?: string; ne?: string; in?: string[]; notIn?: string[] };
+  name?: string | { eq?: string; ne?: string; in?: string[]; notIn?: string[]; contains?: string };
+  kind?: PartKind | { eq?: PartKind; ne?: PartKind; in?: PartKind[]; notIn?: PartKind[] };
+  quantity?: number | { eq?: number; ne?: number; in?: number[]; notIn?: number[]; gt?: number; gte?: number; lt?: number; lte?: number };
+  weight?: number | { eq?: number; ne?: number; in?: number[]; notIn?: number[]; gt?: number; gte?: number; lt?: number; lte?: number };
+  price?: string | { eq?: string; ne?: string; in?: string[]; notIn?: string[]; gt?: string; gte?: string; lt?: string; lte?: string };
+  discontinued?: boolean | { eq?: boolean; ne?: boolean; in?: boolean[]; notIn?: boolean[] };
+  madeAt?: string | { eq?: string; ne?: string; in?: string[]; notIn?: string[]; gt?: string; gte?: string; lt?: string; lte?: string };
+  retiredOn?: string | { eq?: string; ne?: string; in?: string[]; notIn?: string[]; gt?: string; gte?: string; lt?: string; lte?: string; isNull?: boolean };
+  supplierId?: string | { eq?: string; ne?: string; in?: string[]; notIn?: string[]; isNull?: boolean };
 }
 
 /**

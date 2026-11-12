@@ -1,13 +1,16 @@
 //! Roles' permissions: their form, a principal's permissions, the rule that
-//! no one grants what they do not hold, and capabilities over the routes
+//! no one grants what they do not hold, what an API key made with
+//! permissions holds of its user's roles, and capabilities over the routes
 //! (`runtime/http/testdata/README.md`, sections `permissionNames`,
-//! `effectivePermissions`, `grants` and `capabilities`).
+//! `effectivePermissions`, `grants`, `keyPermissions` and `capabilities`).
 
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{covers, OperationInfo};
+
+use super::store::Role;
 
 /// Whether `p` has a permission's form: dotted segments of ASCII letters,
 /// digits, `_` and `-`, none empty (`orders.read`,
@@ -66,6 +69,40 @@ where
     I: IntoIterator<Item = &'a [String]>,
 {
     uncovered(held, &effective_permissions(roles))
+}
+
+/// The permissions of `named` that some permission of `held` covers, in
+/// `named`'s order and without repeats. They are what an API key made with
+/// `named` holds of a role carrying `held` (D114): each permission it
+/// names while the role holds it, and never a part of one it names more
+/// broadly than the role does.
+pub fn narrow_permissions(held: &[String], named: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    named
+        .iter()
+        .filter(|p| seen.insert(p.as_str()))
+        .filter(|p| held.iter().any(|h| covers(h, p)))
+        .cloned()
+        .collect()
+}
+
+/// Roles as an API key made with `named` holds them (D114): each role with
+/// its permissions narrowed ([`narrow_permissions`]), in the order given,
+/// and a role left with no permission dropped. A key whose permissions are
+/// null names none and holds its user's roles as they are, so its roles
+/// are not narrowed.
+pub fn narrow_roles(roles: &[Role], named: &[String]) -> Vec<Role> {
+    roles
+        .iter()
+        .filter_map(|role| {
+            let permissions = narrow_permissions(&role.permissions, named);
+            (!permissions.is_empty()).then(|| Role {
+                id: role.id.clone(),
+                name: role.name.clone(),
+                permissions,
+            })
+        })
+        .collect()
 }
 
 /// What capabilities needs to know of one operation of the API: the route
@@ -150,4 +187,54 @@ pub fn capabilities_of(
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(ToString::to_string).collect()
+    }
+
+    fn role(id: &str, name: &str, permissions: &[&str]) -> Role {
+        Role {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            permissions: strings(permissions),
+        }
+    }
+
+    /// A key made with permissions holds each role narrowed to them, in
+    /// the roles' order, and no role it holds nothing of.
+    #[test]
+    fn narrow_roles_keeps_what_each_role_covers() {
+        let roles = [
+            role("1", "clerk", &["orders", "stock.read"]),
+            role("2", "auditor", &["audit.read"]),
+            role("3", "reader", &["orders.read"]),
+        ];
+        let got = narrow_roles(&roles, &strings(&["orders.read", "stock", "orders.read"]));
+        assert_eq!(
+            got,
+            [
+                role("1", "clerk", &["orders.read"]),
+                role("3", "reader", &["orders.read"]),
+            ]
+        );
+        assert_eq!(
+            effective_permissions(got.iter().map(|r| r.permissions.as_slice())),
+            ["orders.read"]
+        );
+        for (name, named) in [
+            ("nothing held", strings(&["billing"])),
+            ("nothing named", Vec::new()),
+        ] {
+            assert!(narrow_roles(&roles, &named).is_empty(), "{name}");
+        }
+        assert_eq!(
+            roles[0].permissions[0], "orders",
+            "the roles given are kept"
+        );
+    }
 }

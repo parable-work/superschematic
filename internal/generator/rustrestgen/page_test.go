@@ -81,7 +81,7 @@ func TestWriteRustAPIPagedGolden(t *testing.T) {
 			"async fn get_item(&self, ctx: RequestContext, args: CatalogGetItemArgs) -> Result<types::ItemView, ApiError>;",
 			"    pub filter: CatalogListPartsFilter,\n    /// The page asked for (D60)",
 			"#[derive(Debug, Clone, Default)]\npub struct CatalogListPartsFilter {\n",
-			"    /// Filters by `id`: eq, in.\n    pub id: Option<runtime::filter::Equals<types::IdentityUUID>>,\n",
+			"    /// Filters by `id`: eq, ne, in, notIn.\n    pub id: Option<runtime::filter::Equals<types::IdentityUUID>>,\n",
 			"    pub name: Option<runtime::filter::Text<String>>,\n",
 			"    pub kind: Option<runtime::filter::Equals<types::PartKind>>,\n",
 			"    pub quantity: Option<runtime::filter::Ordered<types::GenericInt64>>,\n",
@@ -89,7 +89,7 @@ func TestWriteRustAPIPagedGolden(t *testing.T) {
 			"    pub price: Option<runtime::filter::Ordered<types::GenericDecimal>>,\n",
 			"    pub discontinued: Option<runtime::filter::Equals<bool>>,\n",
 			"    pub made_at: Option<runtime::filter::Ordered<types::TemporalDateTime>>,\n",
-			"    /// Filters by `retiredOn`: eq, in, gt, gte, lt, lte, isNull.\n    pub retired_on: Option<runtime::filter::Ordered<types::TemporalDate>>,\n",
+			"    /// Filters by `retiredOn`: eq, ne, in, notIn, gt, gte, lt, lte, isNull.\n    pub retired_on: Option<runtime::filter::Ordered<types::TemporalDate>>,\n",
 			"    pub supplier_id: Option<runtime::filter::Equals<types::IdentityUUID>>,\n}",
 			"    /// It filters its list (FilterBy, D106): keep the items every member\n    /// of `args.filter` that is set holds for",
 			"async fn list_parts(&self, ctx: RequestContext, args: CatalogListPartsArgs) -> Result<runtime::page::Page<types::PartView>, ApiError>;",
@@ -121,8 +121,8 @@ func TestWriteRustAPIPagedGolden(t *testing.T) {
 			`        quantity: filter::decode_ordered(&filters, "quantity", &CATALOG_LIST_PARTS_FILTER_QUANTITY)?,` + "\n",
 			`        name: filter::decode_text(&filters, "name", &CATALOG_LIST_PARTS_FILTER_NAME)?,` + "\n",
 			`        supplier_id: filter::decode_equals(&filters, "supplierId", &CATALOG_LIST_PARTS_FILTER_SUPPLIER_ID)?,` + "\n",
-			"    pub const FILTER: FilterSpec = FilterSpec::new(&[\n" + `        FieldSpec::new("id", &[Operator::Eq, Operator::In]),` + "\n",
-			`        FieldSpec::new("retiredOn", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte, Operator::IsNull]),` + "\n",
+			"    pub const FILTER: FilterSpec = FilterSpec::new(&[\n" + `        FieldSpec::new("id", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn]),` + "\n",
+			`        FieldSpec::new("retiredOn", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte, Operator::IsNull]),` + "\n",
 			`            by.check(&CatalogListPartsArgs::FILTER, "madeAt", &CATALOG_LIST_PARTS_FILTER_MADE_AT)?;` + "\n",
 			"        self.filter.check()?;\n        Self::PAGE.check(&self.page)?;\n",
 		},
@@ -203,9 +203,10 @@ func TestPagedScaffoldsNameTheRuntime(t *testing.T) {
 // pages the other.
 //
 // catalog.listParts filters (D106): through the router, a filter on a
-// field of each kind keeps the parts it finds, by equality, in, a range,
-// contains and isNull, every filter holding at once, beside a sort and a
-// cursor, which carries no filter; a field or an operator the FilterBy
+// field of each kind keeps the parts it finds, by equality, in, their
+// negations ne and notIn (D112), which keep a part whose field is null, a
+// range, contains and isNull, every filter holding at once, beside a sort
+// and a cursor, which carries no filter; a field or an operator the FilterBy
 // does not take, and a value its field's type refuses, a date and a
 // decimal by their scalars' parse, are the 400 at filter[field]; and the
 // in-process call takes the typed filter, which
@@ -377,7 +378,9 @@ fn number(value: Value) -> Value {
 #[derive(Default)]
 struct By {
     eq: Option<Value>,
+    ne: Option<Value>,
     in_: Vec<Value>,
+    not_in: Vec<Value>,
     gt: Option<Value>,
     gte: Option<Value>,
     lt: Option<Value>,
@@ -389,14 +392,23 @@ struct By {
 impl By {
     fn equals<T: serde::Serialize>(by: &Option<Equals<T>>) -> Option<Self> {
         let by = by.as_ref()?;
-        Some(Self { eq: by.eq.as_ref().map(wire), in_: by.in_.iter().map(wire).collect(), is_null: by.is_null, ..Self::default() })
+        Some(Self {
+            eq: by.eq.as_ref().map(wire),
+            ne: by.ne.as_ref().map(wire),
+            in_: by.in_.iter().map(wire).collect(),
+            not_in: by.not_in.iter().map(wire).collect(),
+            is_null: by.is_null,
+            ..Self::default()
+        })
     }
 
     fn ordered<T: serde::Serialize>(by: &Option<Ordered<T>>) -> Option<Self> {
         let by = by.as_ref()?;
         Some(Self {
             eq: by.eq.as_ref().map(wire),
+            ne: by.ne.as_ref().map(wire),
             in_: by.in_.iter().map(wire).collect(),
+            not_in: by.not_in.iter().map(wire).collect(),
             gt: by.gt.as_ref().map(wire),
             gte: by.gte.as_ref().map(wire),
             lt: by.lt.as_ref().map(wire),
@@ -410,7 +422,9 @@ impl By {
         let by = by.as_ref()?;
         Some(Self {
             eq: by.eq.as_ref().map(wire),
+            ne: by.ne.as_ref().map(wire),
             in_: by.in_.iter().map(wire).collect(),
+            not_in: by.not_in.iter().map(wire).collect(),
             contains: by.contains.clone(),
             is_null: by.is_null,
             ..Self::default()
@@ -421,7 +435,9 @@ impl By {
     fn numbers(self) -> Self {
         Self {
             eq: self.eq.map(number),
+            ne: self.ne.map(number),
             in_: self.in_.into_iter().map(number).collect(),
+            not_in: self.not_in.into_iter().map(number).collect(),
             gt: self.gt.map(number),
             gte: self.gte.map(number),
             lt: self.lt.map(number),
@@ -430,13 +446,17 @@ impl By {
         }
     }
 
-    // Whether every operator set holds for a field's value.
+    // Whether every operator set holds for a field's value. ne and not_in
+    // hold for a value that is none of theirs, a null among them (D112).
     fn holds(&self, value: &Value) -> bool {
         let is = |other: &Option<Value>, wanted: &[Ordering]| {
             other.as_ref().is_none_or(|other| compare(value, other).is_some_and(|order| wanted.contains(&order)))
         };
+        let equals = |other: &Value| compare(value, other) == Some(Ordering::Equal);
         is(&self.eq, &[Ordering::Equal])
-            && (self.in_.is_empty() || self.in_.iter().any(|other| compare(value, other) == Some(Ordering::Equal)))
+            && !self.ne.as_ref().is_some_and(equals)
+            && (self.in_.is_empty() || self.in_.iter().any(equals))
+            && !self.not_in.iter().any(equals)
             && is(&self.gt, &[Ordering::Greater])
             && is(&self.gte, &[Ordering::Greater, Ordering::Equal])
             && is(&self.lt, &[Ordering::Less])
@@ -792,7 +812,7 @@ async fn a_list_sorts_each_way_and_its_next_names_the_sort() {
 async fn a_list_keeps_the_parts_its_filters_find() {
     // The parts in name order: 0 Anchor bolt, 4 Carriage bolt, 1 Hex nut,
     // 2 Lock washer, 3 Wing nut.
-    let cases: [(String, &[usize]); 31] = [
+    let cases: [(String, &[usize]); 46] = [
         (String::new(), &[0, 4, 1, 2, 3]),
         // Equality on a field of each kind.
         (format!("filter[id]={}", PART_IDS[3]), &[3]),
@@ -810,6 +830,21 @@ async fn a_list_keeps_the_parts_its_filters_find() {
         (format!("filter[id][in]={},{}", PART_IDS[0], PART_IDS[3]), &[0, 3]),
         ("filter[kind][in]=bolt,+washer".to_owned(), &[0, 4, 2]),
         ("filter[quantity][in]=75,200".to_owned(), &[4, 1]),
+        // ne keeps the parts eq leaves out (D112), one whose field is null
+        // among them.
+        ("filter[kind][ne]=nut".to_owned(), &[0, 4, 2]),
+        ("filter[name][ne]=Hex+nut".to_owned(), &[0, 4, 2, 3]),
+        ("filter[quantity][ne]=10".to_owned(), &[4, 1, 2]),
+        ("filter[price][ne]=0.1".to_owned(), &[0, 4, 2, 3]),
+        ("filter[discontinued][ne]=true".to_owned(), &[0, 1, 3]),
+        (format!("filter[supplierId][ne]={}", SUPPLIERS[0]), &[4, 1, 3]),
+        ("filter[retiredOn][ne]=2026/06/30".to_owned(), &[0, 4, 2, 3]),
+        // notIn keeps the parts in leaves out, its values trimmed.
+        (format!("filter[id][notIn]={},{}", PART_IDS[0], PART_IDS[3]), &[4, 1, 2]),
+        ("filter[kind][notIn]=bolt,+washer".to_owned(), &[1, 3]),
+        ("filter[quantity][notIn]=75,200".to_owned(), &[0, 2, 3]),
+        ("filter[price][notIn]=0.1,3".to_owned(), &[0, 2, 3]),
+        (format!("filter[supplierId][notIn]={},{}", SUPPLIERS[0], SUPPLIERS[1]), &[4, 1]),
         // A range, on a number, a decimal, a time and a date.
         ("filter[quantity][gte]=50&filter[quantity][lt]=200".to_owned(), &[4, 2]),
         ("filter[weight][gt]=1".to_owned(), &[0, 4]),
@@ -831,6 +866,9 @@ async fn a_list_keeps_the_parts_its_filters_find() {
         // Every filter holds at once.
         ("filter[kind]=nut&filter[quantity][lt]=100".to_owned(), &[3]),
         ("filter[kind]=nut&filter[discontinued]=true".to_owned(), &[]),
+        ("filter[kind][ne]=nut&filter[kind][notIn]=washer".to_owned(), &[0, 4]),
+        (format!("filter[supplierId][ne]={}&filter[supplierId][isNull]=false", SUPPLIERS[0]), &[3]),
+        ("filter[kind]=nut&filter[kind][ne]=nut".to_owned(), &[]),
         // The brackets percent-encoded.
         ("filter%5Bkind%5D%5Bin%5D=nut".to_owned(), &[1, 3]),
     ];
@@ -860,6 +898,18 @@ async fn a_list_keeps_the_parts_its_filters_find() {
     assert_eq!(ids(&wire(&page)), part_ids(&[2]));
     let page = parts_in_process(all_parts(CatalogListPartsFilter::default())).await.unwrap();
     assert_eq!(ids(&wire(&page)), part_ids(&[0, 4, 1, 2, 3]));
+
+    // ne and not_in, which keep the part of no supplier.
+    let others = CatalogListPartsFilter {
+        kind: Some(Equals { ne: Some(types::PartKind::Nut), ..Default::default() }),
+        supplier_id: Some(Equals { not_in: vec![value(json!(SUPPLIERS[0]))], ..Default::default() }),
+        ..Default::default()
+    };
+    let query = format!("/api/parts?limit=5&filter[kind][ne]=nut&filter[supplierId][notIn]={}", SUPPLIERS[0]);
+    let (_, body) = get(implementations(), &query).await;
+    let page = parts_in_process(all_parts(others)).await.unwrap();
+    assert_eq!(wire(&page), body["data"]);
+    assert_eq!(ids(&wire(&page)), part_ids(&[4]));
 }
 
 #[tokio::test]
@@ -910,13 +960,16 @@ async fn a_filter_the_route_does_not_take_is_refused_at_its_field() {
             "filter[color]",
             "is not a field this operation filters by; expected one of id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId",
         ),
-        ("filter[kind][gt]=bolt", "filter[kind]", "takes no operator gt; expected one of eq, in"),
-        ("filter[kind][neq]=bolt", "filter[kind]", "takes no operator neq; expected one of eq, in"),
-        ("filter[id][isNull]=true", "filter[id]", "takes no operator isNull; expected one of eq, in"),
-        ("filter[quantity][contains]=1", "filter[quantity]", "takes no operator contains; expected one of eq, in, gt, gte, lt, lte"),
+        ("filter[kind][gt]=bolt", "filter[kind]", "takes no operator gt; expected one of eq, ne, in, notIn"),
+        ("filter[kind][neq]=bolt", "filter[kind]", "takes no operator neq; expected one of eq, ne, in, notIn"),
+        ("filter[kind][notin]=bolt", "filter[kind]", "takes no operator notin; expected one of eq, ne, in, notIn"),
+        ("filter[id][isNull]=true", "filter[id]", "takes no operator isNull; expected one of eq, ne, in, notIn"),
+        ("filter[quantity][contains]=1", "filter[quantity]", "takes no operator contains; expected one of eq, ne, in, notIn, gt, gte, lt, lte"),
         ("filter[kind]=nut&filter[kind][eq]=bolt", "filter[kind]", "holds eq more than once"),
+        ("filter[kind][ne]=nut&filter[kind][ne]=bolt", "filter[kind]", "holds ne more than once"),
         ("filter[retiredOn][isNull]=1", "filter[retiredOn]", "isNull expects true or false"),
         ("filter[kind][in]=,", "filter[kind]", "in names no value"),
+        ("filter[kind][notIn]=,", "filter[kind]", "notIn names no value"),
         ("filter[name][contains]=", "filter[name]", "contains needs text"),
         ("filter=nut", "filter", "expected filter[field] or filter[field][operator]"),
         ("filter[kind][in][0]=nut", "filter[kind][in][0]", "expected filter[field] or filter[field][operator]"),
@@ -928,6 +981,10 @@ async fn a_filter_the_route_does_not_take_is_refused_at_its_field() {
         ("filter[weight][lt]=heavy", "filter[weight]", "expected a number"),
         ("filter[kind]=gear", "filter[kind]", "expected one of bolt, nut, washer"),
         ("filter[kind][in]=bolt,gear", "filter[kind]", "expected one of bolt, nut, washer"),
+        ("filter[kind][ne]=gear", "filter[kind]", "expected one of bolt, nut, washer"),
+        ("filter[kind][notIn]=bolt,gear", "filter[kind]", "expected one of bolt, nut, washer"),
+        ("filter[quantity][notIn]=1,2.5", "filter[quantity]", "expected an integer"),
+        ("filter[retiredOn][ne]=yesterday", "filter[retiredOn]", "expected a date"),
         // nope alone is a UUID's base62 text, so it is one.
         ("filter[id]=not-a-uuid", "filter[id]", "expected a UUID"),
         (ONE_BAD_SUPPLIER, "filter[supplierId]", "expected a UUID"),
@@ -948,7 +1005,7 @@ async fn a_filter_the_route_does_not_take_is_refused_at_its_field() {
         ),
         ("filter[madeAt]=yesterday&limit=0", "filter[madeAt]", "expected an RFC 3339 timestamp"),
         ("filter[kind]=gear&limit=99&sort=price&cursor=e30%3D", "filter[kind]", "expected one of bolt, nut, washer"),
-        ("filter[kind]=gear&filter[weight][contains]=1", "filter[weight]", "takes no operator contains; expected one of eq, in, gt, gte, lt, lte"),
+        ("filter[kind]=gear&filter[weight][contains]=1", "filter[weight]", "takes no operator contains; expected one of eq, ne, in, notIn, gt, gte, lt, lte"),
     ];
     for (query, parameter, reason) in cases {
         let (status, body) = get(implementations(), &format!("/api/parts?{query}")).await;
@@ -990,6 +1047,21 @@ async fn check_refuses_a_built_filter_as_the_router_refuses_a_requests() {
     assert_eq!(body["details"]["reason"], "in must hold at most 100 values");
     let filter = CatalogListPartsFilter {
         price: Some(Ordered { in_: vec![value(json!("7")); 101], ..Default::default() }),
+        ..Default::default()
+    };
+    same_refusal(status, &body, all_parts(filter).check().unwrap_err());
+
+    // A not_in past its most values, and a ne its type refuses.
+    let (status, body) = get(implementations(), &format!("/api/parts?filter[price][notIn]={many}")).await;
+    assert_eq!(body["details"]["reason"], "notIn must hold at most 100 values");
+    let filter = CatalogListPartsFilter {
+        price: Some(Ordered { not_in: vec![value(json!("7")); 101], ..Default::default() }),
+        ..Default::default()
+    };
+    same_refusal(status, &body, all_parts(filter).check().unwrap_err());
+    let (status, body) = get(implementations(), "/api/parts?filter[quantity][ne]=9007199254740993").await;
+    let filter = CatalogListPartsFilter {
+        quantity: Some(Ordered { ne: Some(9_007_199_254_740_993), ..Default::default() }),
         ..Default::default()
     };
     same_refusal(status, &body, all_parts(filter).check().unwrap_err());

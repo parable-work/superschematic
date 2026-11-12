@@ -15,8 +15,12 @@ import (
 
 // UUIDFilter provides filtering operations for UUID fields
 type UUIDFilter struct {
-	Eq     *types.IdentityUUID
-	In     []types.IdentityUUID
+	Eq *types.IdentityUUID
+	In []types.IdentityUUID
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne     *types.IdentityUUID
+	NotIn  []types.IdentityUUID
 	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
@@ -32,7 +36,11 @@ type StringFilter struct {
 	// An empty or nil slice adds no condition, so a caller narrowing a result
 	// set must treat "no allowed values" as its own case rather than passing
 	// the empty slice and getting every row back.
-	In    []string
+	In []string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *string
+	NotIn []string
 	ILike *string // Case-insensitive LIKE
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
@@ -40,7 +48,11 @@ type StringFilter struct {
 
 // Int64Filter provides filtering operations for integer fields
 type Int64Filter struct {
-	Eq      *int64
+	Eq *int64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *int64
+	NotIn   []int64
 	Gt      *int64
 	Gte     *int64
 	Lt      *int64
@@ -61,7 +73,11 @@ type Int64Range struct {
 
 // FloatFilter provides filtering operations for float fields
 type FloatFilter struct {
-	Eq      *float64
+	Eq *float64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *float64
+	NotIn   []float64
 	Gt      *float64
 	Gte     *float64
 	Lt      *float64
@@ -83,6 +99,10 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *bool
+	NotIn []bool
 	// In matches any value in the set; an empty or nil slice adds no
 	// condition (D89).
 	In []bool
@@ -92,7 +112,11 @@ type BoolFilter struct {
 
 // DateTimeFilter provides filtering operations for DateTime fields
 type DateTimeFilter struct {
-	Eq      *time.Time
+	Eq *time.Time
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *time.Time
+	NotIn   []time.Time
 	Gt      *time.Time
 	Gte     *time.Time
 	Lt      *time.Time
@@ -112,7 +136,11 @@ type DateTimeRange struct {
 
 // DateFilter provides filtering operations for Date fields
 type DateFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -136,7 +164,10 @@ type DateRange struct {
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
 type DurationFilter struct {
-	Eq      *time.Duration
+	Eq *time.Duration
+	// Ne keeps the rows Eq leaves out (D112), a row whose column is NULL
+	// among them.
+	Ne      *time.Duration
 	Gt      *time.Duration
 	Gte     *time.Duration
 	Lt      *time.Duration
@@ -507,10 +538,12 @@ type SessionFindOptions struct {
 type SessionSortField string
 
 const (
-	SessionSortById        SessionSortField = "id"
-	SessionSortByTokenHash SessionSortField = "tokenHash"
-	SessionSortByCreatedAt SessionSortField = "createdAt"
-	SessionSortByExpiresAt SessionSortField = "expiresAt"
+	SessionSortById         SessionSortField = "id"
+	SessionSortByTokenHash  SessionSortField = "tokenHash"
+	SessionSortByCreatedAt  SessionSortField = "createdAt"
+	SessionSortByExpiresAt  SessionSortField = "expiresAt"
+	SessionSortByLastSeenAt SessionSortField = "lastSeenAt"
+	SessionSortByRevokedAt  SessionSortField = "revokedAt"
 )
 
 // SessionSort is the order FindPage reads Session rows in: Field,
@@ -526,10 +559,10 @@ type SessionSort struct {
 func ParseSessionSort(text string) (SessionSort, error) {
 	parsed := SessionSort{Field: SessionSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case SessionSortById, SessionSortByTokenHash, SessionSortByCreatedAt, SessionSortByExpiresAt:
+	case SessionSortById, SessionSortByTokenHash, SessionSortByCreatedAt, SessionSortByExpiresAt, SessionSortByLastSeenAt, SessionSortByRevokedAt:
 		return parsed, nil
 	}
-	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt and expiresAt, not %q", text)
+	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt, expiresAt, lastSeenAt and revokedAt, not %q", text)
 }
 
 // SessionUniqueKey names a unique key of Session that UpsertOne and
@@ -782,6 +815,239 @@ type UserPage struct {
 	Next *UserPageKey
 }
 
+// UserApiKeyFields specifies which UserApiKey fields to select
+type UserApiKeyFields struct {
+	Id          bool
+	Name        bool
+	TokenHash   bool
+	Permissions bool
+	CreatedAt   bool
+	ExpiresAt   bool
+	LastUsedAt  bool
+	RevokedAt   bool
+	// User selects the user_id foreign key field
+	User bool
+	// UserNested selects fields for the related User
+	UserNested UserFields
+}
+
+// ToStringSlice converts UserApiKeyFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f UserApiKeyFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.User {
+		fields = append(fields, "user_id")
+	}
+	if f.Name {
+		fields = append(fields, "name")
+	}
+	if f.TokenHash {
+		fields = append(fields, "token_hash")
+	}
+	if f.Permissions {
+		fields = append(fields, "permissions")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.ExpiresAt {
+		fields = append(fields, "expires_at")
+	}
+	if f.LastUsedAt {
+		fields = append(fields, "last_used_at")
+	}
+	if f.RevokedAt {
+		fields = append(fields, "revoked_at")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f UserApiKeyFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.UserNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a UserApiKeyFields with all fields selected
+func (UserApiKeyFields) All() UserApiKeyFields {
+	return UserApiKeyFields{
+		Id:          true,
+		Name:        true,
+		TokenHash:   true,
+		Permissions: true,
+		CreatedAt:   true,
+		ExpiresAt:   true,
+		LastUsedAt:  true,
+		RevokedAt:   true,
+		User:        true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (UserApiKeyFields) Minimal() UserApiKeyFields {
+	return UserApiKeyFields{
+		Id:   true,
+		Name: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (UserApiKeyFields) WithoutAudit() UserApiKeyFields {
+	return UserApiKeyFields{
+		Id:          true,
+		Name:        true,
+		TokenHash:   true,
+		Permissions: true,
+		ExpiresAt:   true,
+		LastUsedAt:  true,
+		RevokedAt:   true,
+	}
+}
+
+// UserApiKeyOrderByField represents a field that can be used for ordering
+type UserApiKeyOrderByField string
+
+const (
+	UserApiKeyOrderById          UserApiKeyOrderByField = "id"
+	UserApiKeyOrderByName        UserApiKeyOrderByField = "name"
+	UserApiKeyOrderByTokenHash   UserApiKeyOrderByField = "token_hash"
+	UserApiKeyOrderByPermissions UserApiKeyOrderByField = "permissions"
+	UserApiKeyOrderByCreatedAt   UserApiKeyOrderByField = "created_at"
+	UserApiKeyOrderByExpiresAt   UserApiKeyOrderByField = "expires_at"
+	UserApiKeyOrderByLastUsedAt  UserApiKeyOrderByField = "last_used_at"
+	UserApiKeyOrderByRevokedAt   UserApiKeyOrderByField = "revoked_at"
+)
+
+// UserApiKeyOrderBy specifies ordering for UserApiKey queries
+type UserApiKeyOrderBy struct {
+	Field UserApiKeyOrderByField
+	Desc  bool
+}
+
+// UserApiKeyGetOptions contains options for UserApiKey GetOne operations
+type UserApiKeyGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields UserApiKeyFields
+}
+
+// UserApiKeyFindOptions contains options for UserApiKey Find operations
+type UserApiKeyFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields UserApiKeyFields
+	// OrderBy specifies sorting order
+	OrderBy []UserApiKeyOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// UserApiKeySortField is a field FindPage orders UserApiKey rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type UserApiKeySortField string
+
+const (
+	UserApiKeySortById         UserApiKeySortField = "id"
+	UserApiKeySortByName       UserApiKeySortField = "name"
+	UserApiKeySortByTokenHash  UserApiKeySortField = "tokenHash"
+	UserApiKeySortByCreatedAt  UserApiKeySortField = "createdAt"
+	UserApiKeySortByExpiresAt  UserApiKeySortField = "expiresAt"
+	UserApiKeySortByLastUsedAt UserApiKeySortField = "lastUsedAt"
+	UserApiKeySortByRevokedAt  UserApiKeySortField = "revokedAt"
+)
+
+// UserApiKeySort is the order FindPage reads UserApiKey rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type UserApiKeySort struct {
+	Field UserApiKeySortField
+	Desc  bool
+}
+
+// ParseUserApiKeySort reads a sort as a page request writes it, "name" or
+// "-name": an error for a field UserApiKey cannot be sorted by.
+func ParseUserApiKeySort(text string) (UserApiKeySort, error) {
+	parsed := UserApiKeySort{Field: UserApiKeySortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case UserApiKeySortById, UserApiKeySortByName, UserApiKeySortByTokenHash, UserApiKeySortByCreatedAt, UserApiKeySortByExpiresAt, UserApiKeySortByLastUsedAt, UserApiKeySortByRevokedAt:
+		return parsed, nil
+	}
+	return UserApiKeySort{}, fmt.Errorf("orm: UserApiKey sorts by id, name, tokenHash, createdAt, expiresAt, lastUsedAt and revokedAt, not %q", text)
+}
+
+// UserApiKeyUniqueKey names a unique key of UserApiKey that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type UserApiKeyUniqueKey string
+
+const (
+	UserApiKeyUniqueById        UserApiKeyUniqueKey = "id"
+	UserApiKeyUniqueByTokenHash UserApiKeyUniqueKey = "tokenHash"
+)
+
+// UserApiKeyPageKey is the position of a UserApiKey row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type UserApiKeyPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *UserApiKeyPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the UserApiKey key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// userApiKeyPageKeyOf is row's key: its id.
+func userApiKeyPageKeyOf(row *types.UserApiKey) *UserApiKeyPageKey {
+	key := &UserApiKeyPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// UserApiKeyPageOptions are FindPage's options.
+type UserApiKeyPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields UserApiKeyFields
+	// Sort is the order the rows are read in.
+	Sort UserApiKeySort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *UserApiKeyPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// UserApiKeyPage is a page of UserApiKey rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type UserApiKeyPage struct {
+	Rows []*types.UserApiKey
+	Next *UserApiKeyPageKey
+}
+
 // UserCredentialFields specifies which UserCredential fields to select
 type UserCredentialFields struct {
 	Id                bool
@@ -909,6 +1175,8 @@ type UserCredentialSortField string
 const (
 	UserCredentialSortById                UserCredentialSortField = "id"
 	UserCredentialSortByPasswordChangedAt UserCredentialSortField = "passwordChangedAt"
+	UserCredentialSortByDisabledAt        UserCredentialSortField = "disabledAt"
+	UserCredentialSortByPendingAt         UserCredentialSortField = "pendingAt"
 )
 
 // UserCredentialSort is the order FindPage reads UserCredential rows in: Field,
@@ -924,10 +1192,10 @@ type UserCredentialSort struct {
 func ParseUserCredentialSort(text string) (UserCredentialSort, error) {
 	parsed := UserCredentialSort{Field: UserCredentialSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case UserCredentialSortById, UserCredentialSortByPasswordChangedAt:
+	case UserCredentialSortById, UserCredentialSortByPasswordChangedAt, UserCredentialSortByDisabledAt, UserCredentialSortByPendingAt:
 		return parsed, nil
 	}
-	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id and passwordChangedAt, not %q", text)
+	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id, passwordChangedAt, disabledAt and pendingAt, not %q", text)
 }
 
 // UserCredentialUniqueKey names a unique key of UserCredential that UpsertOne and
@@ -1279,6 +1547,11 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`role.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`role.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1287,6 +1560,15 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`role.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(role.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1302,6 +1584,11 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`role."name" = $%d`, paramNum))
 			*args = append(*args, *f.Name.Eq)
 		}
+		if f.Name.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`role."name" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Name.Ne)
+		}
 		if len(f.Name.In) > 0 {
 			placeholders := make([]string, len(f.Name.In))
 			for i, value := range f.Name.In {
@@ -1310,6 +1597,15 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`role."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Name.NotIn) > 0 {
+			placeholders := make([]string, len(f.Name.NotIn))
+			for i, value := range f.Name.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(role."name" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Name.ILike != nil {
 			paramNum++
@@ -1492,6 +1788,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`"session".id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1500,6 +1801,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1515,6 +1825,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`"session".token_hash = $%d`, paramNum))
 			*args = append(*args, *f.TokenHash.Eq)
 		}
+		if f.TokenHash.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".token_hash IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.TokenHash.Ne)
+		}
 		if len(f.TokenHash.In) > 0 {
 			placeholders := make([]string, len(f.TokenHash.In))
 			for i, value := range f.TokenHash.In {
@@ -1523,6 +1838,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".token_hash IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.TokenHash.NotIn) > 0 {
+			placeholders := make([]string, len(f.TokenHash.NotIn))
+			for i, value := range f.TokenHash.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".token_hash IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.TokenHash.ILike != nil {
 			paramNum++
@@ -1542,6 +1866,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"session".created_at = $%d`, paramNum))
 			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
 		}
 		if f.CreatedAt.Gt != nil {
 			paramNum++
@@ -1580,6 +1909,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".created_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `"session".created_at IS NULL`)
@@ -1593,6 +1931,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"session".expires_at = $%d`, paramNum))
 			*args = append(*args, *f.ExpiresAt.Eq)
+		}
+		if f.ExpiresAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".expires_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Ne)
 		}
 		if f.ExpiresAt.Gt != nil {
 			paramNum++
@@ -1631,6 +1974,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".expires_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.ExpiresAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.NotIn))
+			for i, value := range f.ExpiresAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".expires_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.ExpiresAt.IsNull != nil {
 			if *f.ExpiresAt.IsNull {
 				conditions = append(conditions, `"session".expires_at IS NULL`)
@@ -1644,6 +1996,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"session".last_seen_at = $%d`, paramNum))
 			*args = append(*args, *f.LastSeenAt.Eq)
+		}
+		if f.LastSeenAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".last_seen_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.LastSeenAt.Ne)
 		}
 		if f.LastSeenAt.Gt != nil {
 			paramNum++
@@ -1682,6 +2039,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".last_seen_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.LastSeenAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.LastSeenAt.NotIn))
+			for i, value := range f.LastSeenAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".last_seen_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.LastSeenAt.IsNull != nil {
 			if *f.LastSeenAt.IsNull {
 				conditions = append(conditions, `"session".last_seen_at IS NULL`)
@@ -1695,6 +2061,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"session".revoked_at = $%d`, paramNum))
 			*args = append(*args, *f.RevokedAt.Eq)
+		}
+		if f.RevokedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".revoked_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Ne)
 		}
 		if f.RevokedAt.Gt != nil {
 			paramNum++
@@ -1733,6 +2104,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".revoked_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.RevokedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.NotIn))
+			for i, value := range f.RevokedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".revoked_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.RevokedAt.IsNull != nil {
 			if *f.RevokedAt.IsNull {
 				conditions = append(conditions, `"session".revoked_at IS NULL`)
@@ -1747,6 +2127,11 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`"session".user_id = $%d`, paramNum))
 			*args = append(*args, f.UserID.Eq.ToUUID())
 		}
+		if f.UserID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"session".user_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.UserID.Ne.ToUUID())
+		}
 		if len(f.UserID.In) > 0 {
 			placeholders := make([]string, len(f.UserID.In))
 			for i, id := range f.UserID.In {
@@ -1755,6 +2140,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`"session".user_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UserID.NotIn) > 0 {
+			placeholders := make([]string, len(f.UserID.NotIn))
+			for i, id := range f.UserID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`("session".user_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.UserID.IsNull != nil {
 			if *f.UserID.IsNull {
@@ -1819,6 +2213,9 @@ type UserFilter struct {
 	// ReferencedBySessionUser filters on the presence or absence of a
 	// Session whose user points at this row.
 	ReferencedBySessionUser *ReferencedByFilter
+	// ReferencedByUserApiKeyUser filters on the presence or absence of a
+	// UserApiKey whose user points at this row.
+	ReferencedByUserApiKeyUser *ReferencedByFilter
 	// ReferencedByUserCredentialUser filters on the presence or absence of a
 	// UserCredential whose user points at this row.
 	ReferencedByUserCredentialUser *ReferencedByFilter
@@ -1906,6 +2303,11 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`"user".id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"user".id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1914,6 +2316,15 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`"user".id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`("user".id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1929,6 +2340,11 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`"user".email = $%d`, paramNum))
 			*args = append(*args, *f.Email.Eq)
 		}
+		if f.Email.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"user".email IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Email.Ne)
+		}
 		if len(f.Email.In) > 0 {
 			placeholders := make([]string, len(f.Email.In))
 			for i, value := range f.Email.In {
@@ -1937,6 +2353,15 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`"user".email IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Email.NotIn) > 0 {
+			placeholders := make([]string, len(f.Email.NotIn))
+			for i, value := range f.Email.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("user".email IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Email.ILike != nil {
 			paramNum++
@@ -1957,6 +2382,11 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`"user".display_name = $%d`, paramNum))
 			*args = append(*args, *f.DisplayName.Eq)
 		}
+		if f.DisplayName.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"user".display_name IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.DisplayName.Ne)
+		}
 		if len(f.DisplayName.In) > 0 {
 			placeholders := make([]string, len(f.DisplayName.In))
 			for i, value := range f.DisplayName.In {
@@ -1965,6 +2395,15 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`"user".display_name IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.DisplayName.NotIn) > 0 {
+			placeholders := make([]string, len(f.DisplayName.NotIn))
+			for i, value := range f.DisplayName.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("user".display_name IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.DisplayName.ILike != nil {
 			paramNum++
@@ -1984,6 +2423,11 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"user".created_at = $%d`, paramNum))
 			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"user".created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
 		}
 		if f.CreatedAt.Gt != nil {
 			paramNum++
@@ -2022,6 +2466,15 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 			conditions = append(conditions, fmt.Sprintf(`"user".created_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`("user".created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `"user".created_at IS NULL`)
@@ -2033,6 +2486,14 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 	if f.ReferencedBySessionUser != nil {
 		probe := `SELECT 1 FROM "session" WHERE "session".user_id = "user".id`
 		if f.ReferencedBySessionUser.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByUserApiKeyUser != nil {
+		probe := `SELECT 1 FROM user_api_key WHERE user_api_key.user_id = "user".id`
+		if f.ReferencedByUserApiKeyUser.Exists {
 			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
@@ -2053,6 +2514,607 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		} else {
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// UserApiKeyFilter provides filtering for UserApiKey queries
+type UserApiKeyFilter struct {
+	Id          *UUIDFilter
+	Name        *StringFilter
+	TokenHash   *StringFilter
+	Permissions *ArrayStringFilter
+	CreatedAt   *DateTimeFilter
+	ExpiresAt   *DateTimeFilter
+	LastUsedAt  *DateTimeFilter
+	RevokedAt   *DateTimeFilter
+	// UserID allows filtering by foreign key
+	UserID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []UserApiKeyFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserApiKeyFilter
+}
+
+// UserApiKeyUpdate provides fields that can be updated
+type UserApiKeyUpdate struct {
+	Name               *string
+	TokenHash          *types.CryptoSHA256
+	Permissions        *[]string
+	PermissionsSetNull bool
+	ExpiresAt          *types.TemporalDateTime
+	LastUsedAt         *types.TemporalDateTime
+	LastUsedAtSetNull  bool
+	RevokedAt          *types.TemporalDateTime
+	RevokedAtSetNull   bool
+	// UserID allows updating the foreign key for user
+	UserID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewUserApiKeySnapshotUpdate maps every mutable field from a complete
+// UserApiKey value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewUserApiKeySnapshotUpdate(input *types.UserApiKey) *UserApiKeyUpdate {
+	update := &UserApiKeyUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Name = &input.Name
+	update.TokenHash = &input.TokenHash
+	if input.Permissions == nil {
+		update.PermissionsSetNull = true
+	} else {
+		update.Permissions = &input.Permissions
+	}
+	update.ExpiresAt = &input.ExpiresAt
+	if input.LastUsedAt == nil {
+		update.LastUsedAtSetNull = true
+	} else {
+		update.LastUsedAt = input.LastUsedAt
+	}
+	if input.RevokedAt == nil {
+		update.RevokedAtSetNull = true
+	} else {
+		update.RevokedAt = input.RevokedAt
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *UserApiKeyUpdate) ApplyTo(row *types.UserApiKey) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Name != nil {
+		row.Name = *u.Name
+	}
+	if u.TokenHash != nil {
+		row.TokenHash = *u.TokenHash
+	}
+	if u.PermissionsSetNull {
+		row.Permissions = nil
+	} else if u.Permissions != nil {
+		row.Permissions = *u.Permissions
+	}
+	if u.ExpiresAt != nil {
+		row.ExpiresAt = *u.ExpiresAt
+	}
+	if u.LastUsedAtSetNull {
+		row.LastUsedAt = nil
+	} else if u.LastUsedAt != nil {
+		row.LastUsedAt = u.LastUsedAt
+	}
+	if u.RevokedAtSetNull {
+		row.RevokedAt = nil
+	} else if u.RevokedAt != nil {
+		row.RevokedAt = u.RevokedAt
+	}
+	if u.UserID != nil {
+		row.User.Id = u.UserID
+	}
+}
+
+// UserApiKeyFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func UserApiKeyFilterConditions(filter *UserApiKeyFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a UserApiKeyFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *UserApiKeyFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *UserApiKeyFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `user_api_key.id IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Name != nil {
+		if f.Name.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key."name" = $%d`, paramNum))
+			*args = append(*args, *f.Name.Eq)
+		}
+		if f.Name.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key."name" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Name.Ne)
+		}
+		if len(f.Name.In) > 0 {
+			placeholders := make([]string, len(f.Name.In))
+			for i, value := range f.Name.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Name.NotIn) > 0 {
+			placeholders := make([]string, len(f.Name.NotIn))
+			for i, value := range f.Name.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key."name" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Name.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key."name" ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Name.ILike+"%")
+		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `user_api_key."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key."name" IS NOT NULL`)
+			}
+		}
+	}
+	if f.TokenHash != nil {
+		if f.TokenHash.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.token_hash = $%d`, paramNum))
+			*args = append(*args, *f.TokenHash.Eq)
+		}
+		if f.TokenHash.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.token_hash IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.TokenHash.Ne)
+		}
+		if len(f.TokenHash.In) > 0 {
+			placeholders := make([]string, len(f.TokenHash.In))
+			for i, value := range f.TokenHash.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.token_hash IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.TokenHash.NotIn) > 0 {
+			placeholders := make([]string, len(f.TokenHash.NotIn))
+			for i, value := range f.TokenHash.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.token_hash IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.TokenHash.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.token_hash ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.TokenHash.ILike+"%")
+		}
+		if f.TokenHash.IsNull != nil {
+			if *f.TokenHash.IsNull {
+				conditions = append(conditions, `user_api_key.token_hash IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.token_hash IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `user_api_key.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.ExpiresAt != nil {
+		if f.ExpiresAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at = $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Eq)
+		}
+		if f.ExpiresAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Ne)
+		}
+		if f.ExpiresAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at > $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gt)
+		}
+		if f.ExpiresAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at >= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gte)
+		}
+		if f.ExpiresAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at < $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lt)
+		}
+		if f.ExpiresAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at <= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lte)
+		}
+		if f.ExpiresAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at >= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at <= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.End)
+		}
+		if len(f.ExpiresAt.In) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.In))
+			for i, value := range f.ExpiresAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.expires_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ExpiresAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.NotIn))
+			for i, value := range f.ExpiresAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.expires_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ExpiresAt.IsNull != nil {
+			if *f.ExpiresAt.IsNull {
+				conditions = append(conditions, `user_api_key.expires_at IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.expires_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.LastUsedAt != nil {
+		if f.LastUsedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at = $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Eq)
+		}
+		if f.LastUsedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Ne)
+		}
+		if f.LastUsedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at > $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Gt)
+		}
+		if f.LastUsedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at >= $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Gte)
+		}
+		if f.LastUsedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at < $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Lt)
+		}
+		if f.LastUsedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at <= $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Lte)
+		}
+		if f.LastUsedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at >= $%d`, paramNum))
+			*args = append(*args, f.LastUsedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at <= $%d`, paramNum))
+			*args = append(*args, f.LastUsedAt.Between.End)
+		}
+		if len(f.LastUsedAt.In) > 0 {
+			placeholders := make([]string, len(f.LastUsedAt.In))
+			for i, value := range f.LastUsedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.last_used_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.LastUsedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.LastUsedAt.NotIn))
+			for i, value := range f.LastUsedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.last_used_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.LastUsedAt.IsNull != nil {
+			if *f.LastUsedAt.IsNull {
+				conditions = append(conditions, `user_api_key.last_used_at IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.last_used_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.RevokedAt != nil {
+		if f.RevokedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at = $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Eq)
+		}
+		if f.RevokedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Ne)
+		}
+		if f.RevokedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at > $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Gt)
+		}
+		if f.RevokedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at >= $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Gte)
+		}
+		if f.RevokedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at < $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Lt)
+		}
+		if f.RevokedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at <= $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Lte)
+		}
+		if f.RevokedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at >= $%d`, paramNum))
+			*args = append(*args, f.RevokedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at <= $%d`, paramNum))
+			*args = append(*args, f.RevokedAt.Between.End)
+		}
+		if len(f.RevokedAt.In) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.In))
+			for i, value := range f.RevokedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.revoked_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RevokedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.NotIn))
+			for i, value := range f.RevokedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.revoked_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RevokedAt.IsNull != nil {
+			if *f.RevokedAt.IsNull {
+				conditions = append(conditions, `user_api_key.revoked_at IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.revoked_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UserID != nil {
+		if f.UserID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.user_id = $%d`, paramNum))
+			*args = append(*args, f.UserID.Eq.ToUUID())
+		}
+		if f.UserID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.user_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.UserID.Ne.ToUUID())
+		}
+		if len(f.UserID.In) > 0 {
+			placeholders := make([]string, len(f.UserID.In))
+			for i, id := range f.UserID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_api_key.user_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UserID.NotIn) > 0 {
+			placeholders := make([]string, len(f.UserID.NotIn))
+			for i, id := range f.UserID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_api_key.user_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.UserID.IsNull != nil {
+			if *f.UserID.IsNull {
+				conditions = append(conditions, `user_api_key.user_id IS NULL`)
+			} else {
+				conditions = append(conditions, `user_api_key.user_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_api_key.user_id IN (SELECT "user".id FROM "user"%s)`, where))
 	}
 
 	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
@@ -2213,6 +3275,11 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			conditions = append(conditions, fmt.Sprintf(`user_credential.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -2221,6 +3288,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_credential.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_credential.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -2236,6 +3312,11 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			conditions = append(conditions, fmt.Sprintf(`user_credential.password_hash = $%d`, paramNum))
 			*args = append(*args, *f.PasswordHash.Eq)
 		}
+		if f.PasswordHash.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.password_hash IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.PasswordHash.Ne)
+		}
 		if len(f.PasswordHash.In) > 0 {
 			placeholders := make([]string, len(f.PasswordHash.In))
 			for i, value := range f.PasswordHash.In {
@@ -2244,6 +3325,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_credential.password_hash IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.PasswordHash.NotIn) > 0 {
+			placeholders := make([]string, len(f.PasswordHash.NotIn))
+			for i, value := range f.PasswordHash.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_credential.password_hash IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.PasswordHash.ILike != nil {
 			paramNum++
@@ -2263,6 +3353,11 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`user_credential.password_changed_at = $%d`, paramNum))
 			*args = append(*args, *f.PasswordChangedAt.Eq)
+		}
+		if f.PasswordChangedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.password_changed_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.PasswordChangedAt.Ne)
 		}
 		if f.PasswordChangedAt.Gt != nil {
 			paramNum++
@@ -2301,6 +3396,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_credential.password_changed_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.PasswordChangedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.PasswordChangedAt.NotIn))
+			for i, value := range f.PasswordChangedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_credential.password_changed_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.PasswordChangedAt.IsNull != nil {
 			if *f.PasswordChangedAt.IsNull {
 				conditions = append(conditions, `user_credential.password_changed_at IS NULL`)
@@ -2314,6 +3418,11 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`user_credential.disabled_at = $%d`, paramNum))
 			*args = append(*args, *f.DisabledAt.Eq)
+		}
+		if f.DisabledAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.disabled_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.DisabledAt.Ne)
 		}
 		if f.DisabledAt.Gt != nil {
 			paramNum++
@@ -2352,6 +3461,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_credential.disabled_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.DisabledAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.DisabledAt.NotIn))
+			for i, value := range f.DisabledAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_credential.disabled_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.DisabledAt.IsNull != nil {
 			if *f.DisabledAt.IsNull {
 				conditions = append(conditions, `user_credential.disabled_at IS NULL`)
@@ -2365,6 +3483,11 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at = $%d`, paramNum))
 			*args = append(*args, *f.PendingAt.Eq)
+		}
+		if f.PendingAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.PendingAt.Ne)
 		}
 		if f.PendingAt.Gt != nil {
 			paramNum++
@@ -2403,6 +3526,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.PendingAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.PendingAt.NotIn))
+			for i, value := range f.PendingAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_credential.pending_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.PendingAt.IsNull != nil {
 			if *f.PendingAt.IsNull {
 				conditions = append(conditions, `user_credential.pending_at IS NULL`)
@@ -2417,6 +3549,11 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			conditions = append(conditions, fmt.Sprintf(`user_credential.user_id = $%d`, paramNum))
 			*args = append(*args, f.UserID.Eq.ToUUID())
 		}
+		if f.UserID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.user_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.UserID.Ne.ToUUID())
+		}
 		if len(f.UserID.In) > 0 {
 			placeholders := make([]string, len(f.UserID.In))
 			for i, id := range f.UserID.In {
@@ -2425,6 +3562,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_credential.user_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UserID.NotIn) > 0 {
+			placeholders := make([]string, len(f.UserID.NotIn))
+			for i, id := range f.UserID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_credential.user_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.UserID.IsNull != nil {
 			if *f.UserID.IsNull {
@@ -2582,6 +3728,11 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_role_grant.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -2590,6 +3741,15 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_role_grant.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -2604,6 +3764,11 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.granted_at = $%d`, paramNum))
 			*args = append(*args, *f.GrantedAt.Eq)
+		}
+		if f.GrantedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_role_grant.granted_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.GrantedAt.Ne)
 		}
 		if f.GrantedAt.Gt != nil {
 			paramNum++
@@ -2642,6 +3807,15 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.granted_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.GrantedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.GrantedAt.NotIn))
+			for i, value := range f.GrantedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_role_grant.granted_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.GrantedAt.IsNull != nil {
 			if *f.GrantedAt.IsNull {
 				conditions = append(conditions, `user_role_grant.granted_at IS NULL`)
@@ -2656,6 +3830,11 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.user_id = $%d`, paramNum))
 			*args = append(*args, f.UserID.Eq.ToUUID())
 		}
+		if f.UserID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_role_grant.user_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.UserID.Ne.ToUUID())
+		}
 		if len(f.UserID.In) > 0 {
 			placeholders := make([]string, len(f.UserID.In))
 			for i, id := range f.UserID.In {
@@ -2664,6 +3843,15 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.user_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UserID.NotIn) > 0 {
+			placeholders := make([]string, len(f.UserID.NotIn))
+			for i, id := range f.UserID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_role_grant.user_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.UserID.IsNull != nil {
 			if *f.UserID.IsNull {
@@ -2679,6 +3867,11 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.role_id = $%d`, paramNum))
 			*args = append(*args, f.RoleID.Eq.ToUUID())
 		}
+		if f.RoleID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_role_grant.role_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.RoleID.Ne.ToUUID())
+		}
 		if len(f.RoleID.In) > 0 {
 			placeholders := make([]string, len(f.RoleID.In))
 			for i, id := range f.RoleID.In {
@@ -2687,6 +3880,15 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.role_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RoleID.NotIn) > 0 {
+			placeholders := make([]string, len(f.RoleID.NotIn))
+			for i, id := range f.RoleID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(user_role_grant.role_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.RoleID.IsNull != nil {
 			if *f.RoleID.IsNull {

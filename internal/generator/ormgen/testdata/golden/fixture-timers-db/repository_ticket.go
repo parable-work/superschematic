@@ -446,11 +446,17 @@ var TicketQuotedFields = map[string]string{
 // ticketSortColumns are the columns of Ticket's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var ticketSortColumns = map[TicketSortField]struct{ sql, key string }{
-	TicketSortById:     {`ticket.id`, `page_key.id`},
-	TicketSortByTitle:  {`ticket.title`, `page_key.title`},
-	TicketSortByStatus: {`ticket.status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var ticketSortColumns = map[TicketSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	TicketSortById:              {`ticket.id`, `page_key.id`, false},
+	TicketSortByTitle:           {`ticket.title`, `page_key.title`, false},
+	TicketSortByVisitAt:         {`ticket.visit_at`, `page_key.visit_at`, true},
+	TicketSortByStatus:          {`ticket.status`, `page_key.status`, false},
+	TicketSortByStatusEnteredAt: {`ticket.status_entered_at`, `page_key.status_entered_at`, true},
 }
 
 // buildTicketOrderByClause builds an ORDER BY clause for Ticket.
@@ -1128,7 +1134,7 @@ func (r *TicketRepository) FindPage(ctx context.Context, filter *TicketFilter, o
 	}
 	column, ok := ticketSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Ticket sorts by id, title and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Ticket sorts by id, title, visitAt, status and statusEnteredAt, not %q", string(field))
 	}
 	byKey := field == TicketSortById
 
@@ -1158,14 +1164,23 @@ func (r *TicketRepository) FindPage(ctx context.Context, filter *TicketFilter, o
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`ticket.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`ticket.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, ticket.id) %s ((SELECT %s FROM ticket AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, ticket.id) %s ((SELECT %s FROM ticket AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM ticket AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1173,6 +1188,9 @@ func (r *TicketRepository) FindPage(ctx context.Context, filter *TicketFilter, o
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, ticket.id %s`, direction)
 	}

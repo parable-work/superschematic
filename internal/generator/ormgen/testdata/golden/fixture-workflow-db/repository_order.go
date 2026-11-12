@@ -262,11 +262,17 @@ var OrderQuotedFields = map[string]string{
 // orderSortColumns are the columns of Order's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var orderSortColumns = map[OrderSortField]struct{ sql, key string }{
-	OrderSortById:     {`"order".id`, `page_key.id`},
-	OrderSortByTitle:  {`"order".title`, `page_key.title`},
-	OrderSortByStatus: {`"order".status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var orderSortColumns = map[OrderSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	OrderSortById:              {`"order".id`, `page_key.id`, false},
+	OrderSortByTitle:           {`"order".title`, `page_key.title`, false},
+	OrderSortByPlacedAt:        {`"order".placed_at`, `page_key.placed_at`, true},
+	OrderSortByStatus:          {`"order".status`, `page_key.status`, false},
+	OrderSortByStatusEnteredAt: {`"order".status_entered_at`, `page_key.status_entered_at`, true},
 }
 
 // buildOrderOrderByClause builds an ORDER BY clause for Order.
@@ -944,7 +950,7 @@ func (r *OrderRepository) FindPage(ctx context.Context, filter *OrderFilter, opt
 	}
 	column, ok := orderSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Order sorts by id, title and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Order sorts by id, title, placedAt, status and statusEnteredAt, not %q", string(field))
 	}
 	byKey := field == OrderSortById
 
@@ -974,14 +980,23 @@ func (r *OrderRepository) FindPage(ctx context.Context, filter *OrderFilter, opt
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`"order".id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`"order".id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, "order".id) %s ((SELECT %s FROM "order" AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, "order".id) %s ((SELECT %s FROM "order" AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM "order" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -989,6 +1004,9 @@ func (r *OrderRepository) FindPage(ctx context.Context, filter *OrderFilter, opt
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, "order".id %s`, direction)
 	}

@@ -245,6 +245,11 @@ for (const driver of drivers) {
           { ...orderFlow, outcomes: { shipped: 'success', open: 'failure' } },
           'outcomes names "open", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome',
         ],
+        // finished, the outcome of a state a transition leaves, is a table's Workflow's alone (D113): an engine type refuses it.
+        [
+          { ...orderFlow, finished: { open: 'failure' } },
+          "finished is a table's Workflow's (status: Workflow<{ ... }> on a DB table, D104): on an engine type a state a transition leaves has no outcome",
+        ],
       ];
       for (const [config, message] of refusals) {
         const error = thrown(() => engine.schemas.define(alice, orderSchema(config)), SchemaDocumentError);

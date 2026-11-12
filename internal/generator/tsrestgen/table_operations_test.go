@@ -406,6 +406,7 @@ var tableCases = []string{
 	"a hard delete removes the row, and one under another parent is not found",
 	"a list pages by cursor in the repository's order, under its parents",
 	"a list sorts by each field either way, each next bound to its sort",
+	"a list sorts by a field that may be null, its nulls last either way, and pages through them",
 	"a list searches by its text",
 	"a list filters by each kind of field",
 	"a list's contains matches % and _ as themselves",

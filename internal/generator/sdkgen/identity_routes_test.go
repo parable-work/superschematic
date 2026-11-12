@@ -69,31 +69,39 @@ type userRouteOperation struct {
 	// carriesPassword marks the operations whose @mcp record is hidden
 	// because an input field is a password.
 	carriesPassword bool
+	// answersCredential marks createApiKey, whose @mcp record is hidden
+	// because its answer is a credential (D114).
+	answersCredential bool
 }
 
 // userRouteOperations is each operation of fixture-user-routes-api, keyed
 // by its SDK method name.
 var userRouteOperations = map[string]userRouteOperation{
-	"login":           {"account", "POST", "/api/auth/login", "", true},
-	"logout":          {"account", "POST", "/api/auth/logout", "", false},
-	"me":              {"account", "GET", "/api/auth/me", "", false},
-	"capabilities":    {"account", "GET", "/api/auth/capabilities", "", false},
-	"changePassword":  {"account", "POST", "/api/auth/password", "", true},
-	"register":        {"account", "POST", "/api/auth/register", "", true},
-	"createUser":      {"account-admin", "POST", "/api/auth/admin/users", "identity.users.write", true},
-	"listUsers":       {"account-admin", "GET", "/api/auth/admin/users", "identity.users.read", false},
-	"getUser":         {"account-admin", "GET", "/api/auth/admin/users/{id}", "identity.users.read", false},
-	"disableUser":     {"account-admin", "POST", "/api/auth/admin/users/{id}/disable", "identity.users.write", false},
-	"enableUser":      {"account-admin", "POST", "/api/auth/admin/users/{id}/enable", "identity.users.write", false},
-	"approveUser":     {"account-admin", "POST", "/api/auth/admin/users/{id}/approve", "identity.users.write", false},
-	"setUserPassword": {"account-admin", "PUT", "/api/auth/admin/users/{id}/password", "identity.users.write", true},
-	"listRoles":       {"account-admin", "GET", "/api/auth/admin/roles", "identity.roles.read", false},
-	"createRole":      {"account-admin", "POST", "/api/auth/admin/roles", "identity.roles.write", false},
-	"updateRole":      {"account-admin", "PUT", "/api/auth/admin/roles/{id}", "identity.roles.write", false},
-	"deleteRole":      {"account-admin", "DELETE", "/api/auth/admin/roles/{id}", "identity.roles.write", false},
-	"grantRole":       {"account-admin", "PUT", "/api/auth/admin/users/{id}/roles/{roleId}", "identity.roles.write", false},
-	"revokeRole":      {"account-admin", "DELETE", "/api/auth/admin/users/{id}/roles/{roleId}", "identity.roles.write", false},
-	"greet":           {"greeting", "GET", "/api/greeting", "", false},
+	"login":            {"account", "POST", "/api/auth/login", "", true, false},
+	"logout":           {"account", "POST", "/api/auth/logout", "", false, false},
+	"me":               {"account", "GET", "/api/auth/me", "", false, false},
+	"capabilities":     {"account", "GET", "/api/auth/capabilities", "", false, false},
+	"changePassword":   {"account", "POST", "/api/auth/password", "", true, false},
+	"register":         {"account", "POST", "/api/auth/register", "", true, false},
+	"createApiKey":     {"account", "POST", "/api/auth/keys", "", false, true},
+	"listApiKeys":      {"account", "GET", "/api/auth/keys", "", false, false},
+	"revokeApiKey":     {"account", "DELETE", "/api/auth/keys/{id}", "", false, false},
+	"createUser":       {"account-admin", "POST", "/api/auth/admin/users", "identity.users.write", true, false},
+	"listUsers":        {"account-admin", "GET", "/api/auth/admin/users", "identity.users.read", false, false},
+	"getUser":          {"account-admin", "GET", "/api/auth/admin/users/{id}", "identity.users.read", false, false},
+	"disableUser":      {"account-admin", "POST", "/api/auth/admin/users/{id}/disable", "identity.users.write", false, false},
+	"enableUser":       {"account-admin", "POST", "/api/auth/admin/users/{id}/enable", "identity.users.write", false, false},
+	"approveUser":      {"account-admin", "POST", "/api/auth/admin/users/{id}/approve", "identity.users.write", false, false},
+	"setUserPassword":  {"account-admin", "PUT", "/api/auth/admin/users/{id}/password", "identity.users.write", true, false},
+	"listRoles":        {"account-admin", "GET", "/api/auth/admin/roles", "identity.roles.read", false, false},
+	"createRole":       {"account-admin", "POST", "/api/auth/admin/roles", "identity.roles.write", false, false},
+	"updateRole":       {"account-admin", "PUT", "/api/auth/admin/roles/{id}", "identity.roles.write", false, false},
+	"deleteRole":       {"account-admin", "DELETE", "/api/auth/admin/roles/{id}", "identity.roles.write", false, false},
+	"grantRole":        {"account-admin", "PUT", "/api/auth/admin/users/{id}/roles/{roleId}", "identity.roles.write", false, false},
+	"revokeRole":       {"account-admin", "DELETE", "/api/auth/admin/users/{id}/roles/{roleId}", "identity.roles.write", false, false},
+	"listUserApiKeys":  {"account-admin", "GET", "/api/auth/admin/users/{id}/keys", "identity.users.read", false, false},
+	"revokeUserApiKey": {"account-admin", "DELETE", "/api/auth/admin/users/{id}/keys/{keyId}", "identity.users.write", false, false},
+	"greet":            {"greeting", "GET", "/api/greeting", "", false, false},
 }
 
 // TestWriteSDKGoldenUserRoutes pins every file of the TypeScript SDK for
@@ -144,7 +152,8 @@ func TestUserRoutesSDKMethods(t *testing.T) {
 
 // TestUserRoutesTools: tools/schema.json lists each operation as a tool.
 // The five whose input carries a password have an @mcp record that hides
-// them, with the reason the loader gives; the others have none, as an
+// them, with the reason the loader gives, and createApiKey, which answers
+// a credential, one with its own (D114); the others have none, as an
 // operation without @mcp has none. Each tool's schemas are the ones
 // toolsutil pins.
 func TestUserRoutesTools(t *testing.T) {
@@ -165,9 +174,13 @@ func TestUserRoutesTools(t *testing.T) {
 		} `json:"tools"`
 	}
 	readJSON(t, filepath.Join(outDir, "tools", "schema.json"), &document)
+	if len(userRouteOperations) != 25 {
+		t.Fatalf("userRouteOperations lists %d operations, want the 24 of the user model and greet", len(userRouteOperations))
+	}
 	if len(document.Tools) != len(userRouteOperations) {
 		t.Errorf("tools/schema.json has %d tools, want %d", len(document.Tools), len(userRouteOperations))
 	}
+	hidden := 0
 	for _, tool := range document.Tools {
 		want, ok := userRouteOperations[tool.MethodName]
 		if !ok {
@@ -189,12 +202,21 @@ func TestUserRoutesTools(t *testing.T) {
 			t.Errorf("%s: requiredPermissions = %v, want %v", tool.Name, tool.RequiredPermissions, wantPermissions)
 		}
 		var wantMCP map[string]any
-		if want.carriesPassword {
+		switch {
+		case want.carriesPassword:
 			wantMCP = map[string]any{"hidden": true, "hiddenReason": ir.IdentityPasswordToolReason}
+		case want.answersCredential:
+			wantMCP = map[string]any{"hidden": true, "hiddenReason": ir.IdentityAPIKeyToolReason}
 		}
 		if !maps.Equal(tool.MCP, wantMCP) {
 			t.Errorf("%s: mcp = %v, want %v", tool.Name, tool.MCP, wantMCP)
 		}
+		if tool.MCP != nil {
+			hidden++
+		}
+	}
+	if hidden != 6 {
+		t.Errorf("tools/schema.json hides %d tools, want the five that carry a password and createApiKey", hidden)
 	}
 	requireToolSchemasMatchToolsutil(t, outDir, userRoutesAPI)
 }

@@ -12,6 +12,10 @@ roles, so @requirePermission, the permission matcher and every
 implementation that reads ctx.principal work unchanged. It reads the
 Authorization header itself (readsAuthorization), so a malformed one is 401
 unauthorized, as in the Go runtime, rather than hono/bearer-auth's 400.
+An API key in that header authenticates as a session token does (D114):
+its principal has an empty session id, and its permissions and roles are
+the ones the key holds, narrowed to those it names. identityPrincipalOf
+answers the key's id.
 */
 
 const identityPrincipals = new WeakMap<Principal, IdentityPrincipal>();

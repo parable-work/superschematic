@@ -5,7 +5,7 @@
 //! `core-staterules.json` and `core-approvals.json`, and from the scenarios
 //! written by hand in their format where the engine recorded none,
 //! `core-workflow-principals.json` (D104: a transition's `by`,
-//! `overridePermission`, `repeat` and `from`) and
+//! `overridePermission`, `repeat` and `from`; D113: `finished`) and
 //! `core-freezes-and-sign-offs.json` (D104: Constants' `oneWay`,
 //! StateRules' `by`, and Approvals' `resetOn` and `pinned`); from the work
 //! queue's recordings of the behaviors D104 ports to tables,
@@ -125,12 +125,13 @@ const REACTIONS_FLOOR: usize = 586;
 /// steps, 48 commands (24 of them changes) and 12 checks.
 const REACTIONS_CHANGES_FLOOR: usize = 60;
 
-/// core-workflow-principals' floor, as the core's milestone states it: 92
-/// steps of the scenarios written by hand (D104), 58 commands, each holding
-/// its row's version, and 34 checks. What the transcript leaves out, with
-/// its reasons, is the scenario whose gate is a test behavior of the
-/// reference host's, and the opens and reads.
-const WORKFLOW_PRINCIPALS_FLOOR: usize = 92;
+/// core-workflow-principals' floor, as the core's milestone states it: 101
+/// steps of the scenarios written by hand (D104, and D113's of a state
+/// finished names), 63 commands, each holding its row's version, and 38
+/// checks. What the transcript leaves out, with its reasons, is the
+/// scenario whose gate is a test behavior of the reference host's, and the
+/// opens and reads.
+const WORKFLOW_PRINCIPALS_FLOOR: usize = 101;
 
 /// core-constants' floor, as the core's milestone states it: 39 steps, 20
 /// commands (5 creates and 15 updates, its object, list and string fields

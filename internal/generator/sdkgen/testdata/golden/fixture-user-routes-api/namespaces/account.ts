@@ -3,8 +3,11 @@
 import { HttpClient, toRequestOptions } from '../client';
 import { ValidationError } from '../types';
 import type {
+  ApiKey,
   Capabilities,
   ChangePasswordInput,
+  CreateApiKeyInput,
+  CreatedApiKey,
   CurrentUser,
   LoginInput,
   LoginResult,
@@ -13,11 +16,14 @@ import type {
   ValidationResult,
 } from '@schemas/fixture-user-routes-api-types';
 import {
+  parseApiKeyFromJSON,
   parseCapabilitiesFromJSON,
+  parseCreatedApiKeyFromJSON,
   parseCurrentUserFromJSON,
   parseLoginResultFromJSON,
   parseRegisterResultFromJSON,
   validateChangePasswordInput,
+  validateCreateApiKeyInput,
   validateLoginInput,
   validateRegisterInput,
 } from '@schemas/fixture-user-routes-api-types';
@@ -50,6 +56,80 @@ export class AccountNamespace {
       { ...toRequestOptions(signal) }
     );
     return parseCapabilitiesFromJSON(result);
+  }
+
+  /**
+   * Lists the caller's API keys that are not revoked, newest first, each without its token.
+   * @requires Authentication
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Array of ApiKey
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async listApiKeys(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<ApiKey[]> {
+    // Make GET request
+    const result = await this.client.get<ApiKey[]>(
+      `/api/auth/keys`,
+      { ...toRequestOptions(signal) }
+    );
+    return Array.isArray(result) ? result.map(parseApiKeyFromJSON) : result;
+  }
+
+  /**
+   * Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key.
+   * @requires Authentication
+   * @param input - Request payload
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns CreatedApiKey
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async createApiKey(
+    input: CreateApiKeyInput,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<CreatedApiKey> {
+    if (input === null || input === undefined) {
+      throw new ValidationError({ '': [{ validator: 'required', message: 'input is required' }] });
+    }
+    // Validate input before sending request
+    const validationErrors: ValidationResult = validateCreateApiKeyInput(input);
+    if (validationErrors !== true) {
+      throw new ValidationError(validationErrors);
+    }
+    // Make POST request
+    const result = await this.client.post<CreatedApiKey>(
+      `/api/auth/keys`,
+      input,
+      { ...toRequestOptions(signal) }
+    );
+    return parseCreatedApiKeyFromJSON(result);
+  }
+
+  /**
+   * Revokes an API key of the caller's, which authenticates no request after. It answers true.
+   * @requires Authentication
+   * @param id - id parameter
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns boolean
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async revokeApiKey(
+    id: string,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<boolean> {
+    // Make DELETE request; config.data carries its input or its arguments as
+    // the body, where the route reads them.
+    const result = await this.client.delete<boolean>(
+      `/api/auth/keys/${encodeURIComponent(id)}`,
+      { ...toRequestOptions(signal) }
+    );
+    return result;
   }
 
   /**
