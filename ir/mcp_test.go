@@ -113,6 +113,14 @@ func TestSchemaValidateChecksOperationMCP(t *testing.T) {
 	if errs := s.Validate(known); len(errs) != 0 {
 		t.Fatalf("hidden without docs: %v", errs)
 	}
+
+	// Neither does a visible tool of a @tableOperation, which the loader
+	// gives its docs from its declaration (D111).
+	op.MCP = &OperationMCP{Handle: "get_order"}
+	op.TableOperation = &TableOperation{}
+	if errs := s.Validate(known); len(errs) != 0 {
+		t.Fatalf("a table operation's tool without docs: %v", errs)
+	}
 }
 
 // TestOperationMCPMarshal: hidden is always written; the generated fields and

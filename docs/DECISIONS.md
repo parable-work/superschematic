@@ -17674,7 +17674,7 @@ operation says it.
 | A read, an update and a delete find the live row under the path's key and parents that one member of `by` also holds the caller in. A row that names someone else is the 404 `not_found` of a row that is not there, and nothing is written. A list keeps the same rows beside the path's parents and the request's filter, in an `allOf` of its own, so no filter widens it. | A 403 for a row that exists and names another, which tells a caller which keys are taken. Checking the row after it is read, which a list cannot do without reading past its page. |
 | The caller is the request's principal, by its subject. A member that holds an id is compared with a subject that reads as one, in either of its forms, and a member that holds text with the subject as it is. A request with no caller, and a caller whose subject no member can hold, reach no row: an empty page, and a 404. | Reading a service caller's name as a subject. A service that needs every row holds the override permission, or the operation is written by hand. |
 | A create sets each member of `by` but `createdBy` to the caller, and its body's view may not hold one: the member is the rule's. `createdBy` stays the repository's stamp. A create whose caller is no one is a 401, and one whose caller has no id for a member that holds one a 403. The loader refuses a create whose rule names the table's key or a relation its path sets. | Leaving the member to the body and refusing a value that is not the caller's, a second way to say one thing. Skipping the rule on a create, which would let a caller write a row they then cannot read. |
-| `overridePermission` names one permission whose holder the rule does not hold back, matched as a route's permission is (`notes` covers `notes.admin`). The permission catalog lists it under the operation. Without it the rule holds for every caller. | A list of permissions, or a role: one permission is what a route's own guard names, and a role is a set of them. An implicit override for an admin, which no schema would show. |
+| `overridePermission` names one permission whose holder the rule does not hold back, matched as a route's permission is (`notes` covers `notes.admin`). The permission catalog lists it under the operation, and it counts among the permissions the API requires when the build checks what a seeded role's permissions cover. Without it the rule holds for every caller. | A list of permissions, or a role: one permission is what a route's own guard names, and a role is a set of them. An implicit override for an admin, which no schema would show. |
 | The loader holds the rule to the table (`verify.checkRowRule`): the route requires a caller (`@auth`, `@requirePermission`, an `Authenticated` set); each member is one of the table's, holds a subject, and is no secret, no field a behavior owns and no audit field but `createdBy`; no member is named twice; and the table is no projection. `@requireOwnership` on a `@tableOperation` still fails the load, and its message now names the rule. | Leaving a member's kind to the generators, which would surface a mistake at a build or a request. |
 | `createdBy` and `updatedBy` keep a filter in both ORMs, as `createdAt` and `updatedAt` do: `sqlutil.tableOf` gives every column but `deletedAt`, `deletedBy` and an encrypted one its filter, and the Go ORM's filter struct declares them. A rule by `createdBy` is a filter the repository already had the column for. | A filter only the generated handlers reach, which the Go ORM's typed filter has no place for. |
 | The TypeScript handlers build the rule from the router's table (`by`, `overridePermission` on each `TableOperation`) and the repository's own columns. A member the repository keeps no equality filter for throws before anything is read, for every caller: a repository drops a filter's member it does not know, and a rule that dropped one would reach every row. | Trusting the loader's check alone, when the router and the types package are built apart and one may be stale. |
@@ -17764,3 +17764,32 @@ Status: built. `TestFilterFillsEachFieldsKindAndOperators` and
 `listIssues`; and on Postgres, on both servers,
 `TestGeneratedTableOperationsEndToEnd` and
 `TestTableOperationsGoServerServesItsTables`.
+
+## D111. A table operation documents itself: its docs and its tool come from its declaration (D106 amended)
+
+The tracker declares seventy-two operations, sixty-seven of them
+`@tableOperation`. Each carried five decorators, and two of the five said
+nothing its method did not: `@docs({ title: "List issues", description:
+..., capability: "issues.list", lifecycle: "active", visibility:
+"public", replayMode: "read_only" })` and `@mcp({ handle: "list_issues"
+})`, above a method named `listIssues` with a comment that was the
+description. An operation the loader adds for a behavior has had both
+from its declaration since D103. One the build serves from a table knows
+as much about itself.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `@tableOperation` that declares no `@docs` is given them once the loader has filled it (`verify.documentTableOperations`): the title is the method's name as words (`List issues`), the description its comment as one paragraph, or a sentence of its kind and its table without one, the capability its set and its method (`issues.list-issues`), `active`, `public` and `mapped`, and a read and a list replay as `read_only`. | A title from the kind and the table, "List Issue", which two reads of one table would share and which says less than the name its author chose. Requiring `@docs` and offering a snippet, which is the boilerplate. |
+| One that declares no `@mcp` is a visible tool: its handle the method's name in snake_case (`list_issues`), its invocation the policy's default. An operation only a calling service reaches is hidden with that reason (D37), and so is one whose payload is encrypted, which no tool call seals. | Tools only on request, as a hand-written operation's are. The route's guards hold a tool's call as they hold a request's, so a tool reaches nothing its caller could not; and `@mcp({ hidden: true, reason })` says otherwise in one line. `ask` for a delete by default, which would fail the build of an API that names no confirmation key (D93). |
+| A name another operation of the API holds takes its set's before it, in the handle and the title: two sets that each declare `list` are `teams_list` and `members_list`, "Teams: list" and "Members: list". So does a default that would repeat a handle or a title another operation declares. | Failing the build for a clash between two defaults, which no declaration the author wrote would explain. |
+| What the operation declares is kept: `@docs` and `@mcp` are each the author's when written and each given when only the other is, so a `@tableOperation`'s visible `@mcp` stands without `@docs`, where `Schema.Validate` refuses any other operation's. An operation the project implements is given neither. | Defaults for every operation of an API, whose hand-written ones the loader cannot describe beyond their names. |
+
+Left: one declaration that serves a whole table, its five operations
+from the table, its views and a path (D106's list), which would take the
+`@rest` lines too; and a per-kind invocation policy for a set.
+
+Status: built. `TestTableOperationsDocumentThemselves`;
+`TestTableOperationEndpoints`, whose OpenAPI document carries the
+summaries and whose endpoints the tools; `TestSchemaValidateChecksOperationMCP`;
+and `examples/tracker`, whose sixty-seven table operations carry no
+`@docs` and whose MCP endpoint lists their tools.

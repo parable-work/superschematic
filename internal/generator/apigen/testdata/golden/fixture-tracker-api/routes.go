@@ -220,7 +220,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/notes",
 			Handler: requireTableCaller(createNotesListNotesHandler(cfg.DB)),
 		},
-		// Deletes a note the caller wrote.
+		// Deletes a note the caller wrote. It names its own tool and no @docs,
+		// which its declaration gives it (D111).
 		{
 			Method:  "DELETE",
 			Path:    "/notes/{id}",
@@ -857,7 +858,8 @@ func createNotesListNotesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
 
 // createNotesDeleteNoteHandler creates a handler for DELETE /api/notes/{id}
 //
-// Deletes a note the caller wrote.
+// Deletes a note the caller wrote. It names its own tool and no @docs,
+// which its declaration gives it (D111).
 //
 // It serves the delete of Note, a table of fixture-tracker-db, from its
 // repository in one transaction (D106): no implementation method serves
