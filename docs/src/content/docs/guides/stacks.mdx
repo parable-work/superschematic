@@ -1251,7 +1251,9 @@ job's `NewJobs` in `go/shop-orders/jobs.go`:
 The worker files one open restock request per product, which a unique
 index in `shop-db` holds it to, and the job files one for each product the
 engine lists low (`Stock.low`) and orders each open one, watching the
-`Shutdown` its entrypoint cancels on SIGTERM:
+`Shutdown` its entrypoint cancels on SIGTERM. Both write `shop-db` through
+the repositories its Rust types carry, on a connection of the pool `Deps`
+holds, so neither writes a statement by hand:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
