@@ -7,6 +7,7 @@ import {
   UNREADABLE,
   formatDuration,
   jsonMemberValue,
+  messageUUID,
   parseDuration,
   unset,
   type Queue,
@@ -258,12 +259,15 @@ export function sqliteMemberValue(column: unknown, field: QueueField): unknown {
   if (field.list) {
     if (typeof column !== 'string') throw new Error(`the column holds ${JSON.stringify(column)}, no JSON text`);
     const value: unknown = JSON.parse(column);
+    if (field.uuid) return messageUUID(value, true);
     if (field.timestamp && Array.isArray(value)) {
       return value.map(element => (typeof element === 'string' ? new Date(element) : element));
     }
     return value;
   }
   if (field.boolean) return column !== 0 && column !== '0' && column !== false;
+  // A UUID is TEXT here, hyphenated as enqueue writes it, and is handed on as base62, as the Postgres client hands it.
+  if (field.uuid && typeof column === 'string') return messageUUID(column, false);
   if (field.timestamp && typeof column === 'string') return new Date(column);
   if (field.interval && typeof column === 'string') return formatDuration(parseDuration(column));
   if (typeof column === 'bigint') {

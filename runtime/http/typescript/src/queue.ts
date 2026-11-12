@@ -7,6 +7,7 @@ import {
   UNREADABLE,
   formatDuration,
   jsonMemberValue,
+  messageUUID,
   parseDuration,
   unset,
   type PostgresQueue,
@@ -226,6 +227,9 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
       // A list of a type pg does not know, such as citext[], arrives as its text.
       value = parseArray(value);
     }
+    // A UUID column's hyphenated text is handed on as base62, the form the
+    // TypeScript types hold a UUID in everywhere else.
+    if (field.uuid && !field.json) value = messageUUID(value, field.list);
     message[field.name] = value;
   });
   return { id: String(id), token: String(token), attempt: Number(attempt), message: message as M };

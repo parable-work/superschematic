@@ -661,7 +661,8 @@ export interface FixtureQueriesDbQueries {
   accountNamed(params: T.AccountNamedParams): Promise<T.AccountNamedRow>;
   /** The query budgets. */
   budgets(params: T.BudgetsParams): Promise<T.BudgetsRow[]>;
-  /** The query categoryTotals. */
+  /** What each category spent and earned between two times, a sub-category's
+   * under its parent, over the accounts the caller names or over every one. */
   categoryTotals(params: T.CategoryTotalsParams): Promise<T.CategoryTotalsRow[]>;
   /** The query dashboardCategories. */
   dashboardCategories(params: T.DashboardFilter): Promise<T.DashboardCategoriesRow[]>;

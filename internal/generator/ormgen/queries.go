@@ -22,11 +22,12 @@ import (
 
 // Query is a declared query as queries.go writes it.
 type Query struct {
-	// Name is the query's name, Method its method of Queries, Doc its
-	// class's comment.
-	Name   string
-	Method string
-	Doc    string
+	// Name is the query's name, Method its method of Queries, and
+	// MethodDoc the method's doc comment: what it runs and its class's
+	// comment, wrapped, so a comment of several lines stays a comment.
+	Name      string
+	Method    string
+	MethodDoc string
 	// Params and Row are the Go types of its params and of a row.
 	Params string
 	Row    string
@@ -140,8 +141,13 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 			Const:   lowerFirstRune(q.Name) + "Query",
 			Returns: q.Returns,
 		}
+		doc := ""
 		if td := schema.Types[q.Type]; td != nil {
-			query.Doc = codegen.DocText(td.Description, td.Comment)
+			doc = strings.TrimSpace(codegen.DocText(td.Description, td.Comment))
+		}
+		query.MethodDoc = "// " + method + " runs the query " + q.Name + "."
+		if doc != "" {
+			query.MethodDoc = docComment("", method+" runs the query "+q.Name+": "+doc)
 		}
 		text := q.Text
 		if q.OrderBy == nil {

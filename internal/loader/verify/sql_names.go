@@ -13,7 +13,9 @@ import (
 // graph or a projection view gives itself takes no override, and two
 // tables, or two columns of one table, may not take one name, a column the
 // generator adds among them; checkQueues holds a queue's table and columns
-// to the same.
+// to the same. The join table a @manyToMany list is kept in, which sqlgen
+// names after the two tables it joins, is held to the same: it is no
+// declared table's and no other list's.
 func checkSQLNames(schema *ir.Schema, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
 	tables := map[string]string{}
@@ -41,6 +43,41 @@ func checkSQLNames(schema *ir.Schema, r *Result) {
 	for table, owner := range tables {
 		if other, taken := tables[table+"_history"]; taken && schema.Types[owner].Versioned {
 			r.errorf(schema.Types[other].Owner, "%s: its table is %s, the history table of %s; give it another name with @table", other, table+"_history", owner)
+		}
+	}
+	checkJoinTableNames(schema, bases, tables, r)
+}
+
+// checkJoinTableNames holds the join table of each @manyToMany list to the
+// names the schema's tables took: sqlgen writes it as <table>_<target's
+// table> (buildJoinTable), with nothing to rename it by, so one that is a
+// declared table's name, or another list's join table, would be created
+// twice. tables are the declared tables by name.
+func checkJoinTableNames(schema *ir.Schema, bases map[string]bool, tables map[string]string, r *Result) {
+	joins := map[string]string{}
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		if !hasTable(td, bases) || codegen.IsEngineType(td) {
+			continue
+		}
+		for _, fd := range td.Fields {
+			if fd == nil || !fd.ManyToMany || !fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.JsonField {
+				continue
+			}
+			target := schema.Types[fd.TypeRef.Name]
+			if !hasTable(target, bases) || codegen.IsEngineType(target) {
+				continue
+			}
+			join := sqlutil.TableName(td) + "_" + sqlutil.TableName(target)
+			list := td.Name + "." + fd.Name
+			switch {
+			case tables[join] != "":
+				r.errorf(td.Owner, "%s: its join table is %s, the table of %s; give %s another name with @table, or drop the list and keep %s as the join, with its two relations", list, join, tables[join], tables[join], tables[join])
+			case joins[join] != "":
+				r.errorf(td.Owner, "%s: its join table is %s, the join table of %s; a table keeps one @manyToMany list of another table, so declare the second join as a table of its own, with a relation to each", list, join, joins[join])
+			default:
+				joins[join] = list
+			}
 		}
 	}
 }

@@ -8,7 +8,7 @@ client (queue.ts, ./postgres) and the SQLite client (queue-sqlite.ts,
 which imports nothing, so a Worker bundles it.
 */
 
-import { uuidToDb } from './uuid.js';
+import { uuidFromDb, uuidToDb } from './uuid.js';
 
 /** A field of a queue's message and the column it writes, as a types package's ./queues entry declares it. */
 export interface QueueField {
@@ -283,4 +283,16 @@ export const UNREADABLE = 'the message could not be read';
  */
 export function canonicalUUID(value: unknown): string {
   return uuidToDb(value);
+}
+
+/**
+ * A UUID a claimed message's column holds, hyphenated text, as the member
+ * the handler reads: base62, the form a repository's row holds a UUID in
+ * and ctx.principal's subject is in (uuid.ts), so a handler compares a
+ * message's id with a row's without converting either. A list maps each
+ * element; a null element stays null.
+ */
+export function messageUUID(value: unknown, list: boolean | undefined): unknown {
+  if (list && Array.isArray(value)) return value.map(element => (element === null ? null : uuidFromDb(element)));
+  return uuidFromDb(value);
 }

@@ -221,10 +221,11 @@ describe('the queue client on SQLite', () => {
     expect(second.length).toBe(1);
     expect(first[0]!.id).not.toBe(second[0]!.id);
     const byOrder = new Map([...first, ...second].map(c => [c.message.orderId, c]));
-    const full = byOrder.get('6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e')!;
+    // A UUID is handed on in base62, the form a repository's row holds it in.
+    const full = byOrder.get('3Nf1lmBDcdDKfsC9ccR4DG')!;
     expect(full.attempt).toBe(1);
     expect(full.message).toEqual({
-      orderId: '6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e',
+      orderId: '3Nf1lmBDcdDKfsC9ccR4DG',
       placedAt: new Date('2026-10-11T07:15:00.123Z'),
       priority: 'high',
       quantity: 9007199254740991,
@@ -235,7 +236,7 @@ describe('the queue client on SQLite', () => {
       tags: ['a', 'b "c"', 'x,y'],
       seenAt: [new Date('2026-10-09T12:30:15.250Z')],
     });
-    const unset = byOrder.get('0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b')!;
+    const unset = byOrder.get('NXgbePD9wdfLRTkUZGl1X')!;
     expect(unset.message.priority).toBe('low');
     expect(unset.message.tags).toEqual([]);
     expect('gift' in unset.message).toBe(false);
@@ -337,7 +338,7 @@ describe('the queue client on SQLite', () => {
     await enqueueSqlite(db, orderPlaced, MESSAGE);
     await db.prepare(`INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ('0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b', 'low', 1, '{not json')`).run();
     const claims = await sqliteQueue(db, orderPlaced).claim(5);
-    expect(claims.map(c => c.message.orderId)).toEqual(['6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e']);
+    expect(claims.map(c => c.message.orderId)).toEqual(['3Nf1lmBDcdDKfsC9ccR4DG']);
     const bad = await db
       .prepare(`SELECT state, attempts, last_error FROM order_placed_queue WHERE order_id = '0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b'`)
       .first<{ state: string; attempts: number; last_error: string }>();

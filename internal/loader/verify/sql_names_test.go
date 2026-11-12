@@ -44,6 +44,41 @@ func postedQueue(s *ir.Schema) {
 	}}
 }
 
+// TestJoinTableNames: the join table of a @manyToMany list, which sqlgen
+// names after the two tables it joins, is refused when a declared table
+// has its name, as an explicit join table beside the list does, and when
+// a second list of the same two tables would take it; one list alone
+// loads.
+func TestJoinTableNames(t *testing.T) {
+	str := ir.TypeRef{Name: "string"}
+	labels := func(name string) *ir.FieldDef {
+		return &ir.FieldDef{Name: name, TypeRef: ir.TypeRef{Name: "Category", IsArray: true}, ManyToMany: true}
+	}
+	one := namingSchema(func(s *ir.Schema) {
+		s.Types["LineItem"].Fields = append(s.Types["LineItem"].Fields, labels("tags"))
+	})
+	if errs := namingErrors(one); len(errs) != 0 {
+		t.Fatalf("one list: errors = %v", errs)
+	}
+	declared := namingSchema(func(s *ir.Schema) {
+		s.Types["LineItem"].Fields = append(s.Types["LineItem"].Fields, labels("tags"))
+		s.Types["LineItemCategory"] = &ir.TypeDef{Name: "LineItemCategory", Role: ir.RoleDBTable, SQLName: "lineItem_category", Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: str, Required: true, Key: true},
+		}}
+	})
+	want := "LineItem.tags: its join table is lineItem_category, the table of LineItemCategory; give LineItemCategory another name with @table, or drop the list and keep LineItemCategory as the join, with its two relations"
+	if errs := namingErrors(declared); !slices.Contains(errs, want) {
+		t.Errorf("a declared table of the join's name: errors = %v, want %q", errs, want)
+	}
+	twice := namingSchema(func(s *ir.Schema) {
+		s.Types["LineItem"].Fields = append(s.Types["LineItem"].Fields, labels("tags"), labels("moreTags"))
+	})
+	want = "LineItem.moreTags: its join table is lineItem_category, the join table of LineItem.tags; a table keeps one @manyToMany list of another table, so declare the second join as a table of its own, with a relation to each"
+	if errs := namingErrors(twice); !slices.Contains(errs, want) {
+		t.Errorf("two lists of one table: errors = %v, want %q", errs, want)
+	}
+}
+
 // TestSQLNamesLoad: @table on a table and @column on its fields, a
 // relation's foreign key among them, load, as they do on a queue (D85).
 func TestSQLNamesLoad(t *testing.T) {

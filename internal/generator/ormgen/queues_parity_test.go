@@ -669,10 +669,10 @@ import (
 )
 
 // printedClaim is a claim the TypeScript client or the Rust binary
-// printed, its message as that side's types serialize it: TypeScript's
-// UUID hyphenated and its timestamp as its ISO text, Rust's UUID in base62
-// and its timestamp in RFC 3339, its fraction trimmed, as Go's types write
-// them.
+// printed, its message as that side's types serialize it: a UUID in
+// base62 on both, as Go's types write it, TypeScript's timestamp as its
+// ISO text and Rust's in RFC 3339, its fraction trimmed, as Go's types
+// write them.
 type printedClaim struct {
 	ID      string         ` + "`json:\"id\"`" + `
 	Token   string         ` + "`json:\"token\"`" + `
@@ -1312,7 +1312,7 @@ func testGoAndTypeScript(t *testing.T) {
 		t.Fatalf("the TypeScript claim = %+v, want the Go message's first attempt", claims)
 	}
 	want := map[string]any{
-		"orderId":  "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e",
+		"orderId":  "3Nf1lmBDcdDKfsC9ccR4DG",
 		"placedAt": "2026-10-09T12:30:15.250Z",
 		"priority": "high",
 		"quantity": float64(9007199254740991),
@@ -1547,10 +1547,10 @@ func testGoAndTypeScriptReadRust(t *testing.T) {
 		p.expect(c.ID, "ready", 0, "")
 	}
 
-	// Each message as TypeScript's types hold it, by its ID.
+	// Each message as TypeScript's types hold it, by its ID in base62.
 	wantTS := map[string]map[string]any{
-		"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d": {
-			"orderId":  "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+		"4v7SY1Hl6T7rchI10grWdp": {
+			"orderId":  "4v7SY1Hl6T7rchI10grWdp",
 			"placedAt": "2026-10-11T07:15:00.125Z",
 			"priority": "high",
 			"quantity": float64(9007199254740991),
@@ -1558,8 +1558,8 @@ func testGoAndTypeScriptReadRust(t *testing.T) {
 			"shipTo":   map[string]any{"line1": "3 Oak Ave", "city": "Ogdenville"},
 			"tags":     []any{"from-rust", "b \"c\"", "x,y"},
 		},
-		"3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d": {
-			"orderId":  "3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d",
+		"1rQEED3tFAHf9ylzV54KNR": {
+			"orderId":  "1rQEED3tFAHf9ylzV54KNR",
 			"placedAt": "2026-10-11T10:00:00.654Z",
 			"priority": "low",
 			"quantity": float64(0),
