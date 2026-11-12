@@ -17,6 +17,9 @@ pub use runtime::{
     EncryptedPayloadEnvelope, EncryptedRequestOptions, ForwardedUser, MultipartBody, PublicEncryptionKey,
     RequestHook, RequestOptions, UploadFile,
 };
+{{- if .HasFilteredEndpoints}}
+pub use runtime::{Equals, Ordered, Text};
+{{- end}}
 {{- if .HasPagedEndpoints}}
 pub use runtime::{Page, Pager};
 {{- end}}

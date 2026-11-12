@@ -1,6 +1,6 @@
-import { Identity } from "superscalar";
+import { Generic, Identity, Temporal } from "superscalar";
 import { display, Nullable, Validate } from "@superschematic/schema";
-import { HttpMethod, paginated, QueryParam, rest, SortBy } from "@superschematic/api";
+import { FilterBy, HttpMethod, paginated, QueryParam, rest, SortBy } from "@superschematic/api";
 
 // An item of the catalog.
 @display({ noun: "Item", plural: "Items", titleField: "name", summaryFields: ["name", "sku"] })
@@ -28,6 +28,27 @@ export abstract class BasketView {
   lines: BasketLine[];
 }
 
+// What a part is.
+export enum PartKind {
+  Bolt = "bolt",
+  Nut = "nut",
+  Washer = "washer"
+}
+
+// A part of an item: a field of every kind a filter compares.
+export abstract class PartView {
+  id: Identity.UUID;
+  name: string;
+  kind: PartKind;
+  quantity: Generic.Int64;
+  weight: number;
+  price: Generic.Decimal;
+  discontinued: boolean;
+  madeAt: Temporal.DateTime;
+  retiredOn: Nullable<Temporal.Date>;
+  supplierId: Nullable<Identity.UUID>;
+}
+
 export class Catalog {
   // The items, two to a page unless the caller asks for up to five, by
   // their ids or their stock, in order of their names unless the caller
@@ -52,6 +73,18 @@ export class Catalog {
   @rest(HttpMethod.GET, "tags")
   @paginated()
   listTags(): string[] {
+    throw new Error("schema declaration only");
+  }
+
+  // The parts, in order of their names unless the caller sorts them by
+  // quantity, kept to the ones the caller's filters find (D106): a filter
+  // on a field of each kind, beside a page and a sort.
+  @rest(HttpMethod.GET, "parts")
+  @paginated({ defaultLimit: 2, maxLimit: 5, defaultSort: "name" })
+  listParts(
+    sort: SortBy<PartView, ["name", "quantity"]>,
+    filter: FilterBy<PartView, ["id", "name", "kind", "quantity", "weight", "price", "discontinued", "madeAt", "retiredOn", "supplierId"]>
+  ): PartView[] {
     throw new Error("schema declaration only");
   }
 

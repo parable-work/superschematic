@@ -60,6 +60,29 @@ for await (const item of sdk.catalog.listItemsAll()) {
 }
 ```
 
+### Filters
+
+A filtered list (`FilterBy`) takes its filter as a member of its query
+parameters, `filter`, under a type the SDK exports (`CatalogListPartsFilter`).
+Each member is a field holding a value, for equality, or an object of the
+field's operators: `eq` and `in` on every field, `gt`, `gte`, `lt` and
+`lte` on a number, a date and a time, `contains` on text, and `isNull` on
+a field that may be null. The list keeps the items every member holds
+for. The SDK sends the filter as `filter[field]=value` and
+`filter[field][op]=value`, and the route refuses a field, an operator or
+a value it does not take. Before the request the SDK refuses, with a
+`ValidationError`, what the route would not read as it was given: an `in`
+of more than 100 values, or of a value that is blank or holds a comma or
+surrounding space, a `contains` of no text, and more than 50 filters. A
+cursor holds no filter, so ask for each next page with the same one;
+`<method>All` sends it with every page.
+
+```typescript
+const filtered = await sdk.catalog.listParts({
+  filter: { id: '0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40', quantity: { gte: 10 } },
+});
+```
+
 ### Error Handling
 
 ```typescript

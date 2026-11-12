@@ -231,17 +231,11 @@ func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, param := range params {
-		typeRef := ir.TypeRef{Name: param.Type, IsArray: param.IsArray}
 		definition := map[string]interface{}{
 			"name":     param.Name,
 			"in":       "query",
 			"required": param.Required,
-			"schema": openAPIFieldSchema(typeRef, true, openAPIBounds{
-				min: param.ValidateMin, max: param.ValidateMax,
-				minLength: param.ValidateMinLength, maxLength: param.ValidateMaxLength,
-				pattern: param.ValidatePattern,
-				listMin: param.ValidateListMin, listMax: param.ValidateListMax,
-			}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
+			"schema":   queryParamOpenAPISchema(param, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
 		}
 		if param.IsArray {
 			definition["style"] = "form"
@@ -261,6 +255,20 @@ func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalar
 		result = append(result, definition)
 	}
 	return result
+}
+
+// queryParamOpenAPISchema is the schema of a query parameter's value, as
+// buildQueryParams describes it: never nullable, with its scalar's
+// constraints and the argument's bounds. One value of a filter's field
+// (D106) takes the same schema, a query parameter of the field's type.
+func queryParamOpenAPISchema(param Param, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]interface{} {
+	typeRef := ir.TypeRef{Name: param.Type, IsArray: param.IsArray}
+	return openAPIFieldSchema(typeRef, true, openAPIBounds{
+		min: param.ValidateMin, max: param.ValidateMax,
+		minLength: param.ValidateMinLength, maxLength: param.ValidateMaxLength,
+		pattern: param.ValidatePattern,
+		listMin: param.ValidateListMin, listMax: param.ValidateListMax,
+	}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 }
 
 func applyOpenAPIValidationConstraints(
@@ -347,6 +355,12 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 
 		if len(endpoint.QueryParams) > 0 {
 			parameters = append(parameters, buildQueryParams(endpoint.QueryParams, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)...)
+		}
+
+		// The filter is one deepObject parameter, a property per field
+		// (D106), after the operation's other query parameters.
+		if endpoint.Filter != nil {
+			parameters = append(parameters, filterOpenAPIParameter(endpoint.Filter, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies))
 		}
 
 		// A page's cursor and limit follow the operation's own (D60).
@@ -620,6 +634,13 @@ func buildOpenAPISchemas(endpoints []EndpointInfo, scalarExamples, scalarDescrip
 		for _, param := range append(append(endpoint.PathParams, endpoint.QueryParams...), endpoint.ScalarArgs...) {
 			if param.Type != "" {
 				addSchemaFromIR(schemas, param.Type, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
+			}
+		}
+		// A filter's field of an enum references its component (D106),
+		// which the item's own field has already added.
+		if endpoint.Filter != nil {
+			for _, field := range endpoint.Filter.Fields {
+				addSchemaFromIR(schemas, field.Value.Type, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
 			}
 		}
 	}

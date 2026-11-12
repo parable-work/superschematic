@@ -35,6 +35,9 @@ use {{ .RuntimeCrateIdent }}::page::{PageSpec, SortSpec};
 {{- else if .HasPages }}
 use {{ .RuntimeCrateIdent }}::page::PageSpec;
 {{- end }}
+{{- if .HasFilters }}
+use {{ .RuntimeCrateIdent }}::filter::{self, FieldSpec, FilterSpec, Operator};
+{{- end }}
 {{- if .HasAuth }}
 use {{ .RuntimeCrateIdent }}::Principal;
 {{- end }}
@@ -61,9 +64,36 @@ static {{ .Name }}: Pattern = Pattern::new({{ rustString .Source }});
 
 // How the router decodes each operation's arguments (ParamSpec): the kind,
 // the declared bounds and the scalar's own constraints of each.
+{{- if .HasFilters }} A
+// filter's field has one too, filter[field], for each of its values (D106).
+{{- end }}
 {{- range .Specs }}
 static {{ .Spec }}: ParamSpec = {{ .SpecExpr }};
 {{- end }}
+{{- end }}
+{{- with .ScalarParse }}
+
+// A filter's value of a date or a decimal is read by its scalar's parse
+// (D106), the scalar core's, which gives its canonical text.
+{{- range .Scalars }}
+
+/// `{{ .Canonical }}` as the scalar core parses it.
+fn {{ .Fn }}(text: &str) -> Result<String, Vec<schema::ValidationError>> {
+    scalar_parse({{ rustString .Canonical }}, text)
+}
+{{- end }}
+
+/// The scalar core's parse of text as the scalar `canonical`: its
+/// canonical text, or the core's error.
+fn scalar_parse(canonical: &str, text: &str) -> Result<String, Vec<schema::ValidationError>> {
+    let registry = {{ .Registry }};
+    match registry.scalar(canonical) {
+        Some(scalar) => scalar
+            .parse(registry, text)
+            .map_err(|error| vec![schema::ValidationError::new(error.kind.as_str(), error.message)]),
+        None => Err(vec![schema::ValidationError::new("enum", format!("unknown scalar: {canonical}"))]),
+    }
+}
 {{- end }}
 
 #[derive(Clone)]
@@ -338,7 +368,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 {{- if .HasArgs }}
 
 /// Decodes the arguments of {{ .Namespace }}.{{ .Name }} in the order the TypeScript
-/// router reads them: path, query, {{ if .Page }}the page, {{ end }}input, then body fields.
+/// router reads them: {{ .DecodeSteps }}.
 fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName }}, ApiError> {
     Ok({{ .ArgsName }} {
 {{- range .PathArgs }}
@@ -346,6 +376,9 @@ fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName
 {{- end }}
 {{- range .QueryArgs }}
         {{ .Field }}: {{ .Spec }}.query(query)?,
+{{- end }}
+{{- with .Filter }}
+        {{ .Field }}: decode_{{ $endpoint.SnakeName }}_filter(query)?,
 {{- end }}
 {{- if .Page }}
 {{- if .Page.Sort }}
@@ -363,7 +396,50 @@ fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName
     })
 }
 
+{{- with .Filter }}
+
+/// Reads what a request of {{ .Operation }} filters by (FilterBy, D106):
+/// its filters, the bracket form's `filter[field]=value` and
+/// `filter[field][operator]=value`, by the runtime's reader, whose refusal
+/// is the 400 every server answers at `filter[field]`, then each field's,
+/// its values decoded as items of a query list of the field's type.
+fn decode_{{ $endpoint.SnakeName }}_filter(query: &QueryValues) -> Result<{{ .TypeName }}, ApiError> {
+    let filters = {{ $endpoint.ArgsName }}::FILTER.query(query)?;
+    Ok({{ .TypeName }} {
+{{- range .Fields }}
+        {{ .Field }}: filter::{{ .Decode }}(&filters, {{ rustString .Name }}, &{{ .Value.Spec }})?,
+{{- end }}
+    })
+}
+
+impl {{ .TypeName }} {
+    /// Checks a filter a caller built, in-process rather than in a request,
+    /// as the router checks a request's: each member by its field's
+    /// operators, then its values by the field's type, a refusal the 400
+    /// the router answers at `filter[field]`.
+    pub fn check(&self) -> Result<(), ApiError> {
+{{- range .Fields }}
+        if let Some(by) = &self.{{ .Field }} {
+            by.check(&{{ $endpoint.ArgsName }}::FILTER, {{ rustString .Name }}, &{{ .Value.Spec }})?;
+        }
+{{- end }}
+        Ok(())
+    }
+}
+{{- end }}
+
 impl {{ .ArgsName }} {
+{{- with .Filter }}
+    /// The route's FilterBy (D106): the fields a request filters by and
+    /// the operators each takes, by which the router reads the
+    /// `filter[field]` and `filter[field][operator]` query parameters into
+    /// `{{ .Field }}`, and `check` holds a caller's `{{ .Field }}`.
+    pub const FILTER: FilterSpec = FilterSpec::new(&[
+{{- range .SpecFields }}
+        {{ . }},
+{{- end }}
+    ]);
+{{ end }}
 {{- with .Page }}
     /// The route's @paginated limits (D60): the router reads the `cursor`
     /// and `limit` query parameters into `page` by them, and `check` holds
@@ -378,7 +454,13 @@ impl {{ .ArgsName }} {
 {{ end }}
     /// Checks arguments a caller built, in-process rather than in a
     /// request, as the router checks a request's: each by its parameter's
-{{- if .Page }}
+{{- if and .Filter .Page }}
+    /// rules, the filter by its fields', the page by the route's limits,
+    /// then the input by its type's, a refusal the 400 the router answers.
+{{- else if .Filter }}
+    /// rules, the filter by its fields', then the input by its type's, a
+    /// refusal the 400 the router answers.
+{{- else if .Page }}
     /// rules, the page by the route's limits, then the input by its type's,
     /// a refusal the 400 the router answers.
 {{- else }}
@@ -391,6 +473,9 @@ impl {{ .ArgsName }} {
 {{- end }}
 {{- range .QueryArgs }}
         {{ .Spec }}.check_value(ParamLocation::Query, &self.{{ .Field }})?;
+{{- end }}
+{{- with .Filter }}
+        self.{{ .Field }}.check()?;
 {{- end }}
 {{- if .Page }}
         Self::PAGE.check(&self.page)?;

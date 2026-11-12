@@ -36,8 +36,13 @@ does. You never write, edit or duplicate:
   handler what a constraint can say.
 - Request and response types, DTOs or mappers between layers: the types
   are generated in Go, TypeScript, Python and Rust.
+- The handler that reads, lists, creates, updates or deletes a table's
+  rows through `@source` views: mark the method `@tableOperation()` and
+  the TypeScript and Go servers serve it from the repositories, in one
+  transaction and as the caller.
 - Routing, argument decoding, 400s, auth and permission checks, rate,
-  body and time limits, pagination plumbing, webhook signature checks.
+  body and time limits, pagination plumbing, a list's filter parsing,
+  webhook signature checks.
 - OpenAPI, SDKs, MCP tool documents, env-var loaders, server entrypoints,
   Dockerfiles, deploy scripts, CI.
 - Anything under the output root, `<schemas-root>/dist/`: it is rewritten
@@ -53,8 +58,9 @@ does. You never write, edit or duplicate:
 
 You do write:
 
-- each operation's body, against the generated interface (`Constructor`,
-  `Implementations`, `Deps` in Go; the same names in TypeScript and Rust);
+- the body of each operation that is not a `@tableOperation`, against
+  the generated interface (`Constructor`, `Implementations`, `Deps` in
+  Go; the same names in TypeScript and Rust);
 - ownership checks behind `@requireOwnership`;
 - `@virtual` fields of a view, job bodies, worker handlers, and the
   handler of a `@manualRouteRegistration` operation;
@@ -148,6 +154,23 @@ path for when the store is unavailable.
   classes listing the fields it shows; the loader checks each against the
   table, and `@sourceMustProject` warns when a view drops a field it must
   carry.
+- **A table's plain operations are declared.** A `GET` by key, a paged
+  list, a `POST`, a `PATCH` and a `DELETE` whose result and body are
+  `@source` views of one table take `@tableOperation()` and no handler:
+  a path parameter named for a relation's key (`teams/{teamId}/issues`)
+  holds the row to its parent, a body view lists only the columns a
+  caller may set, and an update's members are all `Nullable`. Write the
+  operation by hand, with the same route and types, when it needs a
+  `@virtual` field, an ownership check, a rule over which rows the caller
+  sees, or a Rust server. `superschematic catalog decorators` has its
+  rules.
+- **A list's page, sort, search and filters are declared.** `@paginated`
+  on a `GET` that returns a list, with a `SortBy<Item, [...]>`, a
+  `SearchQuery` and a `FilterBy<Item, [...]>` argument. Don't add a
+  `QueryParam` per filter or parse `filter[field][op]=value` yourself:
+  the handler takes the filter typed, a member per field, and copies it
+  into the repository's filter. `superschematic catalog decorators` has
+  each one's rules.
 - **Permissions on the operation.** `extends Authenticated`, `@auth`,
   `@requirePermission([...])`, `@publicRoute`. For users and sign-in, turn
   on the user model (`implements User<{ login }>` on a DB table,

@@ -18,13 +18,14 @@
 use std::thread::sleep;
 use std::time::Duration;
 
+use acme_shop_orders_api::runtime::filter::Equals;
 use acme_shop_orders_api::runtime::page::{Cursor, Page, PageRequest, Sort};
 use acme_shop_orders_api::runtime::{ApiError, Principal, RequestContext};
 use acme_shop_orders_api::{
     types, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs,
-    OrderPlaceOrderArgs, ProductCatalogGetProductArgs, ProductCatalogImplementation,
-    ProductCatalogListProductsArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
-    ProductReviewsWriteReviewArgs,
+    OrderListOrdersFilter, OrderPlaceOrderArgs, ProductCatalogGetProductArgs,
+    ProductCatalogImplementation, ProductCatalogListProductsArgs, ProductReviewsImplementation,
+    ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs,
 };
 use acme_shop_orders_server::{
     add_shopper, add_staff, update_roles, users_in_memory, Shop, SHOPPER_PERMISSIONS,
@@ -319,8 +320,11 @@ async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
         // so the list's order is the order they were placed in.
         sleep(Duration::from_millis(3));
     }
-    let list = |statuses, page| {
-        shop.list_orders(shopper(SHOPPERS[0]), OrderListOrdersArgs { statuses, page })
+    // The list as a request's filter of the orders' status asks for it
+    // (D106), none for every status.
+    let list = |status: Option<Equals<types::OrderStatus>>, page| {
+        let filter = OrderListOrdersFilter { status };
+        shop.list_orders(shopper(SHOPPERS[0]), OrderListOrdersArgs { filter, page })
     };
     let ids = order_ids;
 
@@ -343,7 +347,10 @@ async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
     shop.cancel_order(shopper(SHOPPERS[0]), cancel)
         .await
         .unwrap();
-    let placed_only = Some(vec![types::OrderStatus::Placed]);
+    let placed_only = Some(Equals {
+        in_: vec![types::OrderStatus::Placed],
+        ..Default::default()
+    });
     let first = list(placed_only.clone(), PageRequest::first(1))
         .await
         .unwrap();
@@ -351,13 +358,22 @@ async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
     let second = list(placed_only, after(&first, 1)).await.unwrap();
     assert_eq!(ids(&second), [placed[2]]);
     assert_eq!(second.next, None);
-    let cancelled = list(
-        Some(vec![types::OrderStatus::Cancelled]),
-        PageRequest::first(20),
-    )
-    .await
-    .unwrap();
+    // filter[status]=cancelled is the filter's eq, and beside an in the
+    // two hold at once.
+    let cancelled_only = Equals {
+        eq: Some(types::OrderStatus::Cancelled),
+        ..Default::default()
+    };
+    let cancelled = list(Some(cancelled_only.clone()), PageRequest::first(20))
+        .await
+        .unwrap();
     assert_eq!(ids(&cancelled), [placed[1]]);
+    let neither = Equals {
+        in_: vec![types::OrderStatus::Placed, types::OrderStatus::Shipped],
+        ..cancelled_only
+    };
+    let none = list(Some(neither), PageRequest::first(20)).await.unwrap();
+    assert!(none.items.is_empty());
     assert_refused_cursor(list(None, forged()).await);
 }
 
@@ -370,7 +386,7 @@ async fn orders_page_by_total<S: OrderImplementation>(shop: &S) {
         shop.list_orders(
             shopper(SHOPPERS[0]),
             OrderListOrdersArgs {
-                statuses: None,
+                filter: OrderListOrdersFilter::default(),
                 page,
             },
         )
@@ -423,7 +439,7 @@ async fn every_order<S: OrderImplementation>(
         shop.list_orders(
             ctx(),
             OrderListOrdersArgs {
-                statuses: None,
+                filter: OrderListOrdersFilter::default(),
                 page,
             },
         )

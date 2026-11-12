@@ -79,6 +79,18 @@ pub struct {{.ScalarInputStructName}} {
 }
 
 {{end}}
+{{- if .Filter}}
+/// The filter of `{{.MethodName}}` (D106): a member per field a caller may
+/// filter by, `None` or the field's operators, and all of them hold at
+/// once.
+#[derive(Debug, Clone, Default)]
+pub struct {{.FilterStructName}} {
+{{- range .FilterFields}}
+    pub {{.RustName}}: Option<{{.RustType}}>,
+{{- end}}
+}
+
+{{end}}
 {{- if .HasQueryParams}}
 #[derive(Debug, Clone{{if .QueryDerivesDefault}}, Default{{end}})]
 pub struct {{.QueryStructName}} {
@@ -127,9 +139,12 @@ pub struct {{.FilesStructName}} {
     /// page holds, 1 to {{.Page.MaxLimit}}, {{.Page.DefaultLimit}} when `None`. `{{.AllMethodName}}`
     /// yields every item, page after page.
 {{- end}}
-{{- if .Filterable}}
+{{- if .Filter}}
     ///
-    /// - `filters`: optional bracket-notation filters serialized as `filter[field]=value` or `filter[field][op]=value`.
+    /// `query.{{.FilterFieldName}}` keeps the items its members find (D106): each
+    /// member is a field's operators (`eq`, `one_of`, and the ones its type
+    /// adds), and all of them hold at once.{{if .Page}} A cursor carries no filter:
+    /// the next page is asked with the same one, as `{{.AllMethodName}}` does.{{end}}
 {{- end}}
 {{- if .HasEncryptedBody}}
     ///
@@ -156,9 +171,6 @@ pub struct {{.FilesStructName}} {
 {{- end}}
 {{- if .HasQueryParams}}
         query: Option<&{{.QueryStructName}}>,
-{{- end}}
-{{- if .Filterable}}
-        filters: Option<&std::collections::HashMap<String, runtime::FilterValue>>,
 {{- end}}
 {{- if .HasEncryptedBody}}
         options: Option<&runtime::EncryptedRequestOptions>,
@@ -356,9 +368,8 @@ pub struct {{.FilesStructName}} {
             )));
         }
 {{- end}}
-{{- if or .HasQueryParams .Filterable}}
-        let mut query_params: Vec<(String, String)> = Vec::new();
 {{- if .HasQueryParams}}
+        let mut query_params: Vec<(String, String)> = Vec::new();
         if let Some(query) = query {
 {{- range .QueryParams}}
 {{- template "queryParam" .}}
@@ -366,12 +377,6 @@ pub struct {{.FilesStructName}} {
         }{{if .HasRequiredQueryParams}} else {
             return Err(SDKError::config("query parameters are required"));
         }{{end}}
-{{- end}}
-{{- if .Filterable}}
-        if let Some(filters) = filters {
-            query_params.extend(runtime::filters_to_query_params(filters));
-        }
-{{- end}}
 {{- else}}
 {{- if and .HasScalarArgs (eq .HTTPMethod "GET")}}
         let mut query_params: Vec<(String, String)> = Vec::new();
@@ -454,6 +459,9 @@ pub struct {{.FilesStructName}} {
     /// page is asked for, with the last one's `next`, only when the items
     /// before it are taken; an error ends the iteration, and so does a page
     /// whose `next` is the cursor it was asked with, after its items.
+{{- if .Filter}}
+    /// Every page is asked with `query.{{.FilterFieldName}}` (D106).
+{{- end}}
 {{- if .PathParams}}
     // Each page's request takes its own copy of a path value, whose type
     // may be Copy (a number or an enum).
@@ -470,9 +478,6 @@ pub struct {{.FilesStructName}} {
         input: {{.ScalarInputStructName}},
 {{- end}}
         query: Option<&{{.QueryStructName}}>,
-{{- if .Filterable}}
-        filters: Option<&'a std::collections::HashMap<String, runtime::FilterValue>>,
-{{- end}}
         options: Option<&'a runtime::RequestOptions>,
     ) -> runtime::Pager<'a, {{.PageItemRustType}}> {
 {{- if .QueryDerivesDefault}}
@@ -508,9 +513,6 @@ pub struct {{.FilesStructName}} {
                     input,
 {{- end}}
                     {{if .QueryDerivesDefault}}Some(&page_query){{else}}page_query.as_ref(){{end}},
-{{- if .Filterable}}
-                    filters,
-{{- end}}
                     options,
                 )
                 .await
@@ -626,8 +628,28 @@ comma-separated value (?name=a,b), which the route splits on commas,
 trimming each item and refusing an empty one; so an empty list is left
 out (a required one is refused), and each item is checked: that the value
 carries its text as it is, and the argument's rules, which the route
-checks per item. */}}
+checks per item. The operation's filter (D106) is written in the bracket
+form instead, a pair for each operator a member sets, and refused before
+the request for what the route's reader would refuse: an isNull on a
+field that is never null, and more filters than a request may hold. */}}
 {{- define "queryParam"}}
+{{- if .FilterFields}}
+            // The filter is written in the bracket form (D106):
+            // filter[field]=value, or filter[field][op]=value.
+            if let Some(query_filter) = &query.{{.RustName}} {
+                let query_filter_start = query_params.len();
+{{- range .FilterFields}}
+                if let Some(query_filter_field) = &query_filter.{{.RustName}} {
+                    query_filter_field.append_query("{{.Name}}", {{.Nullable}}, &mut query_params)?;
+                }
+{{- end}}
+                runtime::check_filter_count(query_params.len() - query_filter_start)?;
+            }
+{{- else}}
+{{- template "queryParamChecked" .}}
+{{- end}}
+{{- end}}
+{{- define "queryParamChecked"}}
 {{- if .Required}}
             let query_param_value = &query.{{.RustName}};
 {{- if .IsArray}}

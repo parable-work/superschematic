@@ -98,6 +98,79 @@
         ],
         "type": "object"
       },
+      "PartKind": {
+        "description": "What a part is.",
+        "enum": [
+          "bolt",
+          "nut",
+          "washer"
+        ],
+        "type": "string"
+      },
+      "PartView": {
+        "description": "A part of an item: a field of every kind a filter compares.",
+        "properties": {
+          "discontinued": {
+            "type": "boolean"
+          },
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PartKind"
+          },
+          "madeAt": {
+            "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "price": {
+            "description": "Exact decimal number in plain notation, carried as a string",
+            "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "retiredOn": {
+            "description": "Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+            "format": "date",
+            "maxLength": 40,
+            "nullable": true,
+            "type": "string"
+          },
+          "supplierId": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "weight": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "quantity",
+          "weight",
+          "price",
+          "discontinued",
+          "madeAt"
+        ],
+        "type": "object"
+      },
       "ResponseMeta": {
         "properties": {
           "requestId": {
@@ -389,6 +462,489 @@
           }
         },
         "summary": "getItem",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/parts": {
+      "get": {
+        "description": "The parts, in order of their names unless the caller sorts them by\nquantity, kept to the ones the caller's filters find (D106): a filter\non a field of each kind, beside a page and a sort.",
+        "operationId": "CatalogListPartsHandler",
+        "parameters": [
+          {
+            "description": "The order of the page: a field, or - and a field for descending; ties break by id. A cursor holds the sort it was returned under.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "enum": [
+                "name",
+                "-name",
+                "quantity",
+                "-quantity"
+              ],
+              "type": "string"
+            },
+            "x-superschematic-sort": true
+          },
+          {
+            "description": "The rows the list keeps: each member is a field (id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId) holding a value, for equality, or an object of operators, and all of them hold at once. In the query string `filter[field]=value` is equality, as `filter[field][eq]=value` is, and `filter[field][operator]=value` names an operator. A request holds at most 50 filters.",
+            "explode": true,
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "additionalProperties": false,
+              "properties": {
+                "discontinued": {
+                  "additionalProperties": false,
+                  "description": "Filters by discontinued: `filter[discontinued]=value` is equality, and `filter[discontinued][operator]=value` names one of eq, in.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "type": "boolean"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "type": "boolean"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "additionalProperties": false,
+                  "description": "Filters by id: `filter[id]=value` is equality, and `filter[id][operator]=value` names one of eq, in.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                      "type": "string"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                        "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "kind": {
+                  "additionalProperties": false,
+                  "description": "Filters by kind: `filter[kind]=value` is equality, and `filter[kind][operator]=value` names one of eq, in.",
+                  "properties": {
+                    "eq": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/PartKind"
+                        }
+                      ],
+                      "description": "The field equals the value."
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "$ref": "#/components/schemas/PartKind"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "madeAt": {
+                  "additionalProperties": false,
+                  "description": "Filters by madeAt: `filter[madeAt]=value` is equality, and `filter[madeAt][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "gt": {
+                      "description": "The field is greater than the value.",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "gte": {
+                      "description": "The field is the value or greater.",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "lt": {
+                      "description": "The field is less than the value.",
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "lte": {
+                      "description": "The field is the value or less.",
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "name": {
+                  "additionalProperties": false,
+                  "description": "Filters by name: `filter[name]=value` is equality, and `filter[name][operator]=value` names one of eq, in, contains.",
+                  "properties": {
+                    "contains": {
+                      "description": "The field's text holds the value, in any case.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "type": "string"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "price": {
+                  "additionalProperties": false,
+                  "description": "Filters by price: `filter[price]=value` is equality, and `filter[price][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                      "type": "string"
+                    },
+                    "gt": {
+                      "description": "The field is greater than the value.",
+                      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                      "type": "string"
+                    },
+                    "gte": {
+                      "description": "The field is the value or greater.",
+                      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                      "type": "string"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "description": "Exact decimal number in plain notation, carried as a string",
+                        "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "lt": {
+                      "description": "The field is less than the value.",
+                      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                      "type": "string"
+                    },
+                    "lte": {
+                      "description": "The field is the value or less.",
+                      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "quantity": {
+                  "additionalProperties": false,
+                  "description": "Filters by quantity: `filter[quantity]=value` is equality, and `filter[quantity][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "gt": {
+                      "description": "The field is greater than the value.",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "gte": {
+                      "description": "The field is the value or greater.",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                        "format": "int64",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "lt": {
+                      "description": "The field is less than the value.",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "lte": {
+                      "description": "The field is the value or less.",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "retiredOn": {
+                  "additionalProperties": false,
+                  "description": "Filters by retiredOn: `filter[retiredOn]=value` is equality, and `filter[retiredOn][operator]=value` names one of eq, in, gt, gte, lt, lte, isNull.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "format": "date",
+                      "maxLength": 40,
+                      "type": "string"
+                    },
+                    "gt": {
+                      "description": "The field is greater than the value.",
+                      "format": "date",
+                      "maxLength": 40,
+                      "type": "string"
+                    },
+                    "gte": {
+                      "description": "The field is the value or greater.",
+                      "format": "date",
+                      "maxLength": 40,
+                      "type": "string"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "description": "Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+                        "format": "date",
+                        "maxLength": 40,
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "isNull": {
+                      "description": "true keeps the items whose field is null, false the others.",
+                      "type": "boolean"
+                    },
+                    "lt": {
+                      "description": "The field is less than the value.",
+                      "format": "date",
+                      "maxLength": 40,
+                      "type": "string"
+                    },
+                    "lte": {
+                      "description": "The field is the value or less.",
+                      "format": "date",
+                      "maxLength": 40,
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "supplierId": {
+                  "additionalProperties": false,
+                  "description": "Filters by supplierId: `filter[supplierId]=value` is equality, and `filter[supplierId][operator]=value` names one of eq, in, isNull.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                      "type": "string"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                        "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                        "type": "string"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "isNull": {
+                      "description": "true keeps the items whose field is null, false the others.",
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                },
+                "weight": {
+                  "additionalProperties": false,
+                  "description": "Filters by weight: `filter[weight]=value` is equality, and `filter[weight][operator]=value` names one of eq, in, gt, gte, lt, lte.",
+                  "properties": {
+                    "eq": {
+                      "description": "The field equals the value.",
+                      "format": "double",
+                      "type": "number"
+                    },
+                    "gt": {
+                      "description": "The field is greater than the value.",
+                      "format": "double",
+                      "type": "number"
+                    },
+                    "gte": {
+                      "description": "The field is the value or greater.",
+                      "format": "double",
+                      "type": "number"
+                    },
+                    "in": {
+                      "description": "The field is one of the values, at most 100. The query string separates them with commas.",
+                      "items": {
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "maxItems": 100,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "lt": {
+                      "description": "The field is less than the value.",
+                      "format": "double",
+                      "type": "number"
+                    },
+                    "lte": {
+                      "description": "The field is the value or less.",
+                      "format": "double",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "The `next` of the previous page; absent for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The most items the page holds: 1 to 5, 2 when absent.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "items": {
+                          "items": {
+                            "$ref": "#/components/schemas/PartView"
+                          },
+                          "type": "array"
+                        },
+                        "next": {
+                          "description": "The cursor of the next page, to send as cursor; null after the last page.",
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "next"
+                      ],
+                      "type": "object"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "listParts",
         "tags": [
           "catalog"
         ]

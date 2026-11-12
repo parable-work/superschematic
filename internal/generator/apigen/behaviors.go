@@ -33,14 +33,14 @@ func (o *APIOutput) HasBehaviorEndpoints() bool {
 }
 
 // HandlerEndpoints are the endpoints routes.go writes a handler factory
-// for: Endpoints, and BehaviorEndpoints, whose factories call the ORM, in
-// Generate's order (by path, then method). Without BehaviorEndpoints they
-// are Endpoints.
+// for: Endpoints, and BehaviorEndpoints and TableEndpoints, whose
+// factories call the ORM, in Generate's order (by path, then method).
+// Without the last two they are Endpoints.
 func (o *APIOutput) HandlerEndpoints() []EndpointInfo {
-	if len(o.BehaviorEndpoints) == 0 {
+	if len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.BehaviorEndpoints)
+	return sortedEndpoints(o.Endpoints, o.BehaviorEndpoints, o.TableEndpoints)
 }
 
 // sortedEndpoints are the endpoints of each list, in Generate's order: by

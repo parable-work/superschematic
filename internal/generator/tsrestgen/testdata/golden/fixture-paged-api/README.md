@@ -14,7 +14,14 @@ Generated TypeScript API server for the `fixture-paged-api` schema. Built on
   `@paginated` operation's method takes `args.page`, the `PageRequest` the
   router read from the `cursor` and `limit` query parameters, and returns a
   `Page`, `{items, next}` with `next` null after the last page; the runtime's
-  `pageFromRows`, `encodeCursor` and `decodeCursor` build and read one.
+  `pageFromRows`, `encodeCursor` and `decodeCursor` build and read one. A
+  list with a `FilterBy` argument (D106) takes the request's filters under
+  that argument, typed as its `<Operation>Filter`: a member per field the
+  request filters by (`filter[field]=value`, `filter[field][op]=value`),
+  each holding the operators it sent with their values read as the field's
+  type, and `{}` for a request that filters by none. The router answers a
+  field or an operator the filter does not take, and a value its type
+  refuses, with 400 at `filter[field]` before the method runs.
 - `router.ts`: `buildRouter(implementations, options)` returns a Hono router
   that mounts every `@rest` operation under `/api`, decodes parameters,
   parses JSON bodies through the generated strict `parse<Input>FromJSON`
@@ -44,6 +51,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `POST` | `/api/baskets` | `catalog.placeBasket` | none |
 | `GET` | `/api/items` | `catalog.listItems` (paged) | none |
 | `GET` | `/api/items/{itemId}` | `catalog.getItem` | none |
+| `GET` | `/api/parts` | `catalog.listParts` (filtered) (paged) | none |
 | `GET` | `/api/tags` | `catalog.listTags` (paged) | none |
 
 ## Usage

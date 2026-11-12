@@ -157,8 +157,14 @@ exists only when it resolves:
 - With no such type, the key is a plain value.
 - With such a type that no operation lists, or that two operations list,
   the key is a plain value.
-- With two or more such types, the key is a plain value, and the loader
-  warns: `OrderLineView.productId reads the key of shop-db.OrderLine.product
+- With two or more such types, the key refers to the one of them an
+  operation lists (D61, amended by D106): an API that serves a table
+  through `@tableOperation` has several views of it, its result and each
+  body, and only the one its list returns is what a key names
+  ([Operations the build serves](/superschematic/guides/api-routes/#operations-the-build-serves)).
+  When none of them is listed, the key is a plain value, with no warning.
+  When two or more are, the key is a plain value and the loader warns:
+  `OrderLineView.productId reads the key of shop-db.OrderLine.product
   and refers to nothing: ProductCard and ProductView are both
   @source(shop-db.Product); name one with RefersTo`.
 
@@ -266,6 +272,10 @@ acme's `listProducts` searches the products by name, its `q` a
 `SearchQuery` over `Product.name`'s `search_text`, so a Topcoat app's
 control for each order line's product is a search picker
 ([Choices from references](/superschematic/guides/topcoat/#choices-from-references)).
+
+A list narrows by its items' fields with a `FilterBy` argument, beside
+its search or without one
+([Filters](/superschematic/guides/api-routes/#filters)).
 
 A search keeps the items whose searchable text contains each of its words,
 case-insensitively, and does not rank them. A word is a run of characters

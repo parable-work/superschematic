@@ -206,6 +206,11 @@ type EndpointInfo struct {
 	Description string
 	// Operation is the schema operation the endpoint is generated from.
 	Operation *ir.FieldDef `json:"-"`
+	// TableByHand marks, in the view ImplementedOutput returns, a table
+	// operation the Go server writes no handler for yet (D106,
+	// UnservedTableOperations): it is among Endpoints, an operation the
+	// project implements.
+	TableByHand bool
 	// BehaviorPreconditions is a behavior operation whose input carries the
 	// caller's preconditions (D16, D104), each use's entry by its use id,
 	// in its member preconditions (BehaviorPreconditionsMember), which the
@@ -259,8 +264,12 @@ type EndpointInfo struct {
 	BodyLimit *int
 	Timeout   *int
 
-	Encrypted  bool
-	Filterable bool
+	Encrypted bool
+
+	// Filter is the operation's FilterBy (D106), nil for every other
+	// endpoint. It is not among QueryParams: each writer renders the
+	// bracket form's parameters from Filter.
+	Filter *FilterInfo
 
 	// Page is the operation's @paginated (D60), nil for every other
 	// endpoint. Its two query parameters, cursor and limit, are not IR
@@ -369,6 +378,21 @@ type APIOutput struct {
 	// output Generate returns, whose Endpoints hold every operation.
 	BehaviorEndpoints []EndpointInfo
 
+	// TableEndpoints are the API's table operations (D106), which the
+	// generated handlers serve from the tables of the API's database
+	// through its ORM: ImplementedOutput moves them here from Endpoints,
+	// so the Go server mounts them on those handlers and implements none
+	// of them, and Tables is what tables.go is written from. Both are nil
+	// in the output Generate returns, whose Endpoints hold every
+	// operation.
+	TableEndpoints []EndpointInfo
+	Tables         *TablesInfo
+
+	// tables is what the table operations' handlers are modelled from:
+	// the schema, its dependencies, the database's among them, and the
+	// type mapper Generate read the operations with.
+	tables *tableSource
+
 	// Registration is the API's @userSessions when its register admits
 	// users otherwise than open registration with no roles does (D81), and
 	// nil otherwise: the identity wiring passes it to the runtime.
@@ -377,7 +401,7 @@ type APIOutput struct {
 	HasAuth                  bool
 	HasEncryptedEndpoints    bool
 	HasPermissionEndpoints   bool
-	HasFilterableEndpoints   bool
+	HasFilteredEndpoints     bool
 	HasFileUpload            bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
@@ -491,14 +515,14 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 }
 
 // RoutedEndpoints are the endpoints RegisterRoutes mounts and the identity
-// route table lists: Endpoints, IdentityEndpoints and BehaviorEndpoints, in
-// Generate's order (by path, then method). Without IdentityEndpoints and
-// BehaviorEndpoints they are Endpoints.
+// route table lists: Endpoints, IdentityEndpoints, BehaviorEndpoints and
+// TableEndpoints, in Generate's order (by path, then method). Without the
+// last three they are Endpoints.
 func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
-	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 {
+	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints)
+	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints)
 }
 
 // ManualEndpoints are the @manualRouteRegistration endpoints among
@@ -574,7 +598,7 @@ func (o *APIOutput) HasConstants() bool {
 // HTTP runtime's bodyargs package.
 func (o *APIOutput) HasBodyArgs() bool {
 	for _, endpoint := range o.HandlerEndpoints() {
-		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput {
+		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput || endpoint.Filter != nil {
 			return true
 		}
 	}
@@ -618,6 +642,20 @@ func (e EndpointInfo) ArgumentsInBody() bool {
 	return e.Method != "GET"
 }
 
+// RoutesNeedPaging gates the paging import in routes.go: a handler factory
+// of a paged endpoint reads the page, an implemented one's and a table
+// operation's alike (D60, D106).
+func (o *APIOutput) RoutesNeedPaging() bool {
+	return slices.ContainsFunc(o.HandlerEndpoints(), func(ep EndpointInfo) bool { return ep.Page != nil })
+}
+
+// RoutesNeedFilters gates the filterparse import in routes.go: a handler
+// factory of a filtered endpoint reads its filters, an implemented one's
+// and a table operation's alike (D106).
+func (o *APIOutput) RoutesNeedFilters() bool {
+	return slices.ContainsFunc(o.HandlerEndpoints(), func(ep EndpointInfo) bool { return ep.Filter != nil })
+}
+
 // handlerUsesTypes reports whether the endpoint's handler factory in
 // routes.go references the generated types module. It follows the branches
 // of routes.tmpl.
@@ -625,6 +663,10 @@ func (e EndpointInfo) handlerUsesTypes() bool {
 	// An input type, with or without file uploads, is decoded into
 	// types.<Input>, and body arguments collect types.ValidationErrors.
 	if e.HasInput || (len(e.ScalarArgs) > 0 && e.ArgumentsInBody()) {
+		return true
+	}
+	// A filter's values collect types.ValidationErrors (D106).
+	if e.Filter != nil {
 		return true
 	}
 	// A nil inner list of a list-of-lists response is sent as []<Output>{}.
@@ -898,6 +940,15 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if db := behaviorDatabase(output.Endpoints); db != "" && output.Deps.Database == "" {
 		output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: true}
 	}
+	// The table operations are served from the tables of the API's
+	// database through its ORM (D106), which Deps holds too.
+	if db := tableDatabase(output.Endpoints); db != "" {
+		output.tables = &tableSource{schema: schema, dependencies: opts.Dependencies, types: types}
+		if output.Deps.Database == "" {
+			output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: DeclaresTableBehaviors(opts.Dependencies[db])}
+		}
+		output.setTableDeps()
+	}
 
 	if err := output.summarizeEndpoints(); err != nil {
 		return nil, err
@@ -996,7 +1047,7 @@ func permissionCatalog(output *APIOutput, schema *ir.Schema, writes func(op *ir.
 // again on the ones a server implements.
 func (o *APIOutput) summarizeEndpoints() error {
 	o.HasAuth, o.RoutesNeedTime, o.HasFileUpload, o.HasEncryptedEndpoints = false, false, false, false
-	o.HasPermissionEndpoints, o.HasFilterableEndpoints, o.HasWebhookHMACEndpoints = false, false, false
+	o.HasPermissionEndpoints, o.HasFilteredEndpoints, o.HasWebhookHMACEndpoints = false, false, false
 	o.HasServiceCallers, o.NeedsTypesImport = false, false
 	o.RequiredWebhookProviders, o.Namespaces = nil, nil
 	for _, endpoint := range o.Endpoints {
@@ -1007,11 +1058,11 @@ func (o *APIOutput) summarizeEndpoints() error {
 		if endpoint.Encrypted {
 			o.HasEncryptedEndpoints = true
 		}
-		if endpoint.Filterable {
-			if endpoint.Method != "GET" {
-				return fmt.Errorf("@filterable is only supported on GET operations, but %s.%s is %s", endpoint.Namespace, endpoint.Name, endpoint.Method)
+		if endpoint.Filter != nil {
+			if endpoint.Method != "GET" || !endpoint.OutputIsArray {
+				return fmt.Errorf("apigen: operation %s: a filter is an argument of a GET whose result is a list (D106)", endpoint.Filter.Operation)
 			}
-			o.HasFilterableEndpoints = true
+			o.HasFilteredEndpoints = true
 		}
 		if endpoint.WebhookHMACProvider != "" {
 			o.HasWebhookHMACEndpoints = true
@@ -1248,6 +1299,11 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		title = op.Docs.Title
 	}
 
+	filter, err := types.filterInfo(set, op)
+	if err != nil {
+		return nil, fmt.Errorf("apigen: operation %w", err)
+	}
+
 	endpoint := &EndpointInfo{
 		Name:                         op.Name,
 		Title:                        title,
@@ -1291,7 +1347,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
 		Encrypted:                    operationEncrypted(set, op),
-		Filterable:                   op.Filterable,
+		Filter:                       filter,
 		Page:                         pageInfo(set, op),
 		ManualRouteRegistration:      op.ManualRouteRegistration,
 		IdentityOperation:            op.IdentityOperation,
@@ -1428,6 +1484,14 @@ func endpointNeedsTypesImport(endpoint *EndpointInfo) bool {
 	for _, arg := range endpoint.ScalarArgs {
 		if strings.HasPrefix(arg.GoType, "types.") {
 			return true
+		}
+	}
+	// The filter's type names each field's (D106).
+	if endpoint.Filter != nil {
+		for _, field := range endpoint.Filter.Fields {
+			if strings.HasPrefix(field.Value.GoType, "types.") {
+				return true
+			}
 		}
 	}
 	return false

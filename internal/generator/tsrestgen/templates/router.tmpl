@@ -19,16 +19,41 @@
 // parser reads it (D87), since a provider adds keys to its payloads over
 // time; every other input refuses them.
 {{- end }}
+{{- if .HasFilters }}
+// A list's filter (FilterBy, D106) carries the fields a caller may filter
+// by, each with its operators and the spec of one of its values: the route
+// reads the request's filters with readFilter after the query parameters,
+// the bracket form filter[field]=value and filter[field][op]=value,
+// answering their 400 at filter[field] as the Go and Rust routers do, and
+{{- if .FilteredEndpoints }}
+// hands the implementation the filter typed, a member per field the
+// request filters by.
+{{- else }}
+// hands the table operation's handler the filter, a member per field the
+// request filters by.
+{{- end }}
+{{- end }}
 {{- if .HasPages }}
 // A @paginated operation's page (D60) carries its limits: the route reads
 // the request's cursor and limit with readPage after the query parameters,
+{{- if .ImplementsPages }}
 // answering their 400 as the Go and Rust routers do, and sends the Page the
 // implementation returns as data.
+{{- else }}
+// answering their 400 as the Go and Rust routers do, and sends the Page the
+// table operation's handler returns as data.
+{{- end }}
 {{- if .HasSortedPages }}
+{{- if .ImplementsPages }}
 // A sorted page's spec carries its sort too (D60, amended): readPage reads
 // it after the limit into args.page.sort and unbinds the cursor from the
 // sort it was returned under, and bindPage binds the next the
 // implementation returns to it.
+{{- else }}
+// A sorted page's spec carries its sort too (D60, amended): readPage reads
+// it after the limit and unbinds the cursor from the sort it was returned
+// under, and bindPage binds the next the handler returns to it.
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if .HasBehaviors }}
@@ -49,6 +74,19 @@
 // the operation's options, never among its parameters, and the core checks
 // it before it reads the row.
 {{- end }}
+{{- end }}
+{{- if .HasTableOperations }}
+//
+// The operations marked @tableOperation (D106) each read or write the rows
+// of one table of {{ .Deps.Database }} and have no implementation method: the route
+// runs the runtime's handler of the operation's kind, a read, a list, a
+// create, an update or a delete, with the operation's entry of
+// tableOperations, through options.orm, the database's repositories, in
+// one transaction, as the request's caller, and answers the row's view,
+// the members the operation's result lists. A key that holds no live row
+// under the path's parents is 404 not_found, a unique key another row
+// holds 409 conflict, and a relation's key that names no row 400 at the
+// body's member.
 {{- end }}
 {{- if .Identity }}
 //
@@ -115,10 +153,10 @@ import {
 {{- end }}
 } from '{{ .Package }}/validators';
 {{- end }}
-{{- if .HasBehaviors }}
+{{- if .RouterNeedsORM }}
 import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
 {{- end }}
-import type { Implementations } from './interfaces';
+import type { Implementations{{ range .FilterTypeNames }}, {{ . }}{{ end }} } from './interfaces';
 {{- if .MCP }}
 import { mcpTools } from './mcp';
 {{- end }}
@@ -150,6 +188,15 @@ export const operationSpecs = {
 {{- if .Download }}
     download: {{ .DownloadLiteral }},
 {{- end }}
+{{- if .Filter }}
+    filter: {
+      fields: [
+{{- range .Filter.Fields }}
+        {{ .FieldSpecLiteral }},
+{{- end }}
+      ],
+    },
+{{- end }}
 {{- if .Page }}
     page: {{ .PageSpecLiteral }},
 {{- end }}
@@ -175,7 +222,25 @@ export const operationSpecs = {
     manual: {{ .Manual }},
   },
 {{- end }}
-} as const satisfies Record<OperationName, OperationSpec{{ if .HasPages }} & { readonly page?: PageSpec }{{ end }}>;
+} as const satisfies Record<OperationName, {{ .OperationTableType }}>;
+{{- if .HasTableOperations }}
+
+/**
+ * What each @tableOperation does (D106), which the runtime's handler of
+ * its kind reads: the table, or the keyed projection, and the member of
+ * the repositories that holds its repository; the key and the parents its
+ * path names, each the row's member too; the members of its result's
+ * view, which are all a response holds of the row; and the members of the
+ * body a create and an update set.
+ */
+export const tableOperations = {
+{{- range .Endpoints }}
+{{- if .Table }}
+  {{ .Key }}: {{ .Table.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, TableOperation>>;
+{{- end }}
 
 {{ if .Identity -}}
 export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
@@ -202,6 +267,16 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * The repositories of {{ .Deps.Database }} (Deps.orm), which run the behavior
    * operations (D103): each in a transaction of its own, through the
    * behaviors' core, as the request's caller.
+{{- if .HasTableOperations }}
+   * They run the table operations too (D106), each in one transaction,
+   * as the request's caller.
+{{- end }}
+   */
+  orm: {{ .Deps.ORM }};
+{{- else if .HasTableOperations }}
+  /**
+   * The repositories of {{ .Deps.Database }} (Deps.orm), which run the table
+   * operations (D106): each in one transaction, as the request's caller.
    */
   orm: {{ .Deps.ORM }};
 {{- end }}
@@ -267,8 +342,8 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
  * The user model's operations are mounted with the identity runtime's handlers.
 {{- end }}
  * Throws without options.identity, or with options.authenticate beside it.
-{{- if .HasBehaviors }}
- * Throws without options.orm, the repositories the behavior operations run through (D103).
+{{- if .RouterNeedsORM }}
+ * Throws without options.orm, the repositories {{ .ORMRuns }} run through ({{ .ORMDecisions }}).
 {{- end }}
 {{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
@@ -277,11 +352,11 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
  * Without options.authenticateService (serviceAuthenticator, say), every @requireService or @allowService operation answers 401 service_unauthorized.
 {{- end }}
  */
-{{ else if or .WebhookProviders .HasServiceCallers .HasBehaviors -}}
+{{ else if or .WebhookProviders .HasServiceCallers .RouterNeedsORM -}}
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
-{{- if .HasBehaviors }}
- * Throws without options.orm, the repositories the behavior operations run through (D103).
+{{- if .RouterNeedsORM }}
+ * Throws without options.orm, the repositories {{ .ORMRuns }} run through ({{ .ORMDecisions }}).
 {{- end }}
 {{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
@@ -298,14 +373,14 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
 {{ $runtime = "runtime" -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
-{{- else if .HasBehaviors -}}
+{{- else if .RouterNeedsORM -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
 {{- else -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
 {{- end }}
-{{- if .HasBehaviors }}
+{{- if .RouterNeedsORM }}
   if (!options.orm) {
-    throw new Error({{ tsString (printf "RouterOptions.orm is required: it runs the behavior operations of %s (D103)" .SchemaName) }});
+    throw new Error({{ tsString (printf "RouterOptions.orm is required: it runs %s of %s (%s)" .ORMRuns .SchemaName .ORMDecisions) }});
   }
 {{- end }}
 {{- if .WebhookProviders }}
@@ -398,11 +473,50 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
     }
   );
+{{- else if .Table }}
+  // {{ .Table.Article }} of {{ .Table.Type }} (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+{{- if .Page }}
+    (ctx, request) => {
+{{- if .Filter }}
+      // The request's filters (D106), read before its page.
+      const filter = readFilter(ctx.query, operationSpecs.{{ .Key }}.filter);
+{{- end }}
+      const page = readPage(ctx.query, operationSpecs.{{ .Key }}.page);
+{{- if .Page.Sort }}
+      // The page names the sort it was read in (D60, amended): readPage
+      // unbinds the cursor, and bindPage binds the next.
+      return {{ .Table.Handler }}(options.orm, tableOperations.{{ .Key }}, ctx, request, page{{ if .Filter }}, filter{{ end }}).then(outcome => bindPage(outcome, page));
+{{- else }}
+      return {{ .Table.Handler }}(options.orm, tableOperations.{{ .Key }}, ctx, request, page{{ if .Filter }}, filter{{ end }});
+{{- end }}
+    },
+{{- else }}
+    (ctx, request) => {{ .Table.Handler }}(options.orm, tableOperations.{{ .Key }}, ctx, request),
+{{- end }}
+    {{ $runtime }},
+    {
+      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
+      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+      timeoutSeconds: options.timeouts?.{{ .Key }},
+{{- if .WebhookProvider }}
+      webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
+{{- end }}
+    }
+  );
 {{- else if and .Page .Page.Sort }}
   mountOperation(
     router,
     operationSpecs.{{ .Key }},
     (ctx, request) => {
+{{- if .Filter }}
+      // The request's filters, typed (D106), read before its page.
+      const filter = readFilter(ctx.query, operationSpecs.{{ .Key }}.filter) as {{ .Filter.TypeName }};
+{{- end }}
       // The page names the sort it was read in (D60, amended): readPage
       // unbinds the cursor, and bindPage binds the next.
       const page = readPage(ctx.query, operationSpecs.{{ .Key }}.page);
@@ -420,6 +534,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
 {{- if .HasInput }}
             input: request.input as {{ .InputType }}{{ if not .InputRequired }} | undefined{{ end }},
+{{- end }}
+{{- if .Filter }}
+            {{ .Filter.TSName }}: filter,
 {{- end }}
             page,
           },
@@ -461,6 +578,10 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
 {{- if .Uploads }}
           files: request.files as {{ .FilesArgType }},
+{{- end }}
+{{- if .Filter }}
+          // The request's filters, typed (D106){{ if .Page }}, read before its page{{ end }}.
+          {{ .Filter.TSName }}: readFilter(ctx.query, operationSpecs.{{ .Key }}.filter) as {{ .Filter.TypeName }},
 {{- end }}
 {{- if .Page }}
           page: readPage(ctx.query, operationSpecs.{{ .Key }}.page),

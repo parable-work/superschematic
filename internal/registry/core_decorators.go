@@ -325,6 +325,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	})
 	// A list operation that pages by a cursor (core_page.go, D60).
 	specs = append(specs, paginatedDecorator())
+	// An operation the build serves from a table (core_table_operation.go,
+	// D106).
+	specs = append(specs, tableOperationDecorator())
 	specs = append(specs, docsDecorators(r.ToolInvocationPolicy)...)
 	specs = append(specs, behaviorDecorator(r.Behavior, r.BehaviorNames))
 	specs = append(specs, displayDecorator(), fieldDisplayDecorator())

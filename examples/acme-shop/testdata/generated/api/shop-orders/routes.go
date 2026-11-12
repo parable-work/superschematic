@@ -16,6 +16,7 @@ import (
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
@@ -238,7 +239,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			},
 		},
 		// The caller's orders, or every customer's for staff, oldest first:
-		// by when each was placed, or by its total with sort, then by their ids.
+		// by when each was placed, or by its total with sort, then by their ids;
+		// filter[status] keeps the orders of one status, or of several (D106).
 		{
 			Method:  "GET",
 			Path:    "/orders",
@@ -508,27 +510,29 @@ func createCheckoutsStartCheckoutHandler(impl CheckoutsImplementation) gohttp.Ha
 // createOrderListOrdersHandler creates a handler for GET /api/orders
 //
 // The caller's orders, or every customer's for staff, oldest first:
-// by when each was placed, or by its total with sort, then by their ids.
+// by when each was placed, or by its total with sort, then by their ids;
+// filter[status] keeps the orders of one status, or of several (D106).
 func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
-	// List arguments in the query string: the JSON type of each item, then
-	// its rules in the order they are checked (the scalar type's own, then
-	// the argument's).
-	queryListStatusesArg := bodyargs.NewArg("statuses", bodyargs.String)
+	// A filter's values (D106): each field's value as an item of a query
+	// list of its type, its error recorded at filter[field].
+	filterStatusArg := bodyargs.NewArg("filter[status]", bodyargs.String)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract query parameters
-
-		// statuses travels in the query string as repeated keys,
-		// comma-separated values or both. Each item is read as its JSON type
-		// and checked as a list element at statuses[i]; no item is an
-		// absent list.
-		var Statuses []types.OrderStatus
-		{
-			listErrors := types.NewValidationErrors()
-			Statuses = bodyargs.QueryList[types.OrderStatus](listErrors, r.URL.Query(), queryListStatusesArg)
-			if listErrors.HasErrors() {
-				RespondValidationErrors(w, r, listErrors)
-				return
-			}
+		// Read the request's filters (FilterBy, D106): the bracket form,
+		// filter[field]=value and filter[field][op]=value, its own reader,
+		// whose refusal is the 400 every server answers at filter[field].
+		// Each value is then decoded as an item of a query list of its
+		// field's type.
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "status", Operators: []filterparse.Operator{"eq", "in"}}}})
+		if !ok {
+			return
+		}
+		filterErrors := types.NewValidationErrors()
+		filters := OrderListOrdersFilter{
+			Status: filterparse.DecodeEquals[types.OrderStatus](filterErrors, filterRequest, "status", filterStatusArg),
+		}
+		if filterErrors.HasErrors() {
+			RespondValidationErrors(w, r, filterErrors)
+			return
 		}
 
 		// Read the page's cursor and limit (@paginated): its own reader, whose
@@ -549,7 +553,7 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.ListOrders(callerContext(r.Context()), Statuses, page)
+		result, err := impl.ListOrders(callerContext(r.Context()), filters, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

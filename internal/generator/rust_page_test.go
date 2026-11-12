@@ -17,7 +17,8 @@ import (
 // the crate it writes and in RustAPIOf, the record the in-process call
 // and Topcoat read (D60): its limits, the element of its page, the page it
 // returns, and listItems's sort (D60, amended), which its PAGE holds and
-// its Args carry in page alone.
+// its Args carry in page alone; and listParts's filter (D106), which its
+// Args carry typed, under the argument's name, and its FILTER holds.
 func TestTheRustServerRendersPages(t *testing.T) {
 	service := "fixture-paged-api"
 	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, service))
@@ -48,12 +49,31 @@ func TestTheRustServerRendersPages(t *testing.T) {
 	if strings.Contains(string(interfaces), "pub sort:") {
 		t.Error("interfaces.rs gives the sort a field of its own; the page holds it")
 	}
+	for _, want := range []string{
+		"    pub filter: CatalogListPartsFilter,\n",
+		"#[derive(Debug, Clone, Default)]\npub struct CatalogListPartsFilter {\n",
+		"    pub quantity: Option<runtime::filter::Ordered<types::GenericInt64>>,\n",
+		"    pub name: Option<runtime::filter::Text<String>>,\n",
+		"    pub supplier_id: Option<runtime::filter::Equals<types::IdentityUUID>>,\n",
+	} {
+		if !strings.Contains(string(interfaces), want) {
+			t.Errorf("interfaces.rs does not contain %q", want)
+		}
+	}
 	router, err := os.ReadFile(filepath.Join(APIDir(root, service), "src", "router.rs"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `pub const PAGE: PageSpec = PageSpec::new(2, 5).sorted(SortSpec::new("sort", &["name", "sku"], "name"));`; !strings.Contains(string(router), want) {
-		t.Errorf("router.rs does not contain %q", want)
+	for _, want := range []string{
+		`pub const PAGE: PageSpec = PageSpec::new(2, 5).sorted(SortSpec::new("sort", &["name", "sku"], "name"));`,
+		"    pub const FILTER: FilterSpec = FilterSpec::new(&[\n",
+		`        FieldSpec::new("supplierId", &[Operator::Eq, Operator::In, Operator::IsNull]),` + "\n",
+		"        filter: decode_catalog_list_parts_filter(query)?,\n",
+		`        made_at: filter::decode_ordered(&filters, "madeAt", &CATALOG_LIST_PARTS_FILTER_MADE_AT)?,` + "\n",
+	} {
+		if !strings.Contains(string(router), want) {
+			t.Errorf("router.rs does not contain %q", want)
+		}
 	}
 
 	outputs, err := ParseOutputs(cfg.Outputs)
@@ -64,6 +84,41 @@ func TestTheRustServerRendersPages(t *testing.T) {
 	output, err := RustAPIOf(r.GenerateContext)
 	if err != nil || output == nil {
 		t.Fatalf("RustAPIOf: %v, %v", output, err)
+	}
+	var listParts bool
+	for _, endpoint := range output.Endpoints {
+		if endpoint.Name != "listParts" {
+			if endpoint.Filter != nil {
+				t.Errorf("catalog.%s has a filter: %+v", endpoint.Name, endpoint.Filter)
+			}
+			continue
+		}
+		listParts = true
+		filter := endpoint.Filter
+		if filter == nil || filter.Argument != "filter" || filter.Field != "filter" || filter.TypeName != "CatalogListPartsFilter" {
+			t.Fatalf("catalog.listParts filter = %+v", filter)
+		}
+		if got, want := strings.Join(filter.FieldNames(), ","), "id,name,kind,quantity,weight,price,discontinued,madeAt,retiredOn,supplierId"; got != want {
+			t.Errorf("catalog.listParts filters by %s, want %s", got, want)
+		}
+		for _, field := range filter.Fields {
+			if field.Name != "retiredOn" {
+				continue
+			}
+			if field.Field != "retired_on" || field.RustType() != "Option<runtime::filter::Ordered<types::TemporalDate>>" ||
+				strings.Join(field.Operators, ",") != "eq,in,gt,gte,lt,lte,isNull" || field.Decode() != "decode_ordered" ||
+				field.Value.Name != "filter[retiredOn]" || field.Value.Spec != "CATALOG_LIST_PARTS_FILTER_RETIRED_ON" {
+				t.Errorf("catalog.listParts filter field retiredOn = %+v", field)
+			}
+		}
+		// The filter is no query field of the Args, and the sort is the
+		// page's.
+		if len(endpoint.QueryArgs) != 0 || endpoint.Page == nil || endpoint.Page.Sort == nil {
+			t.Errorf("catalog.listParts query args = %+v, page = %+v", endpoint.QueryArgs, endpoint.Page)
+		}
+	}
+	if !listParts {
+		t.Error("RustAPIOf has no catalog.listParts")
 	}
 	for _, endpoint := range output.Endpoints {
 		if endpoint.Name != "listItems" {

@@ -27,6 +27,9 @@ function catalogImplementation(deps: Deps): CatalogImplementation {
     async getItem() {
       throw notImplemented('catalog.getItem');
     },
+    async listParts() {
+      throw notImplemented('catalog.listParts');
+    },
     async listTags() {
       throw notImplemented('catalog.listTags');
     },

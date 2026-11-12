@@ -12,7 +12,7 @@ from enum import Enum
 {{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import DownloadedFile, EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilteredEndpoints}} FilterField,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasFilteredEndpoints}}, filter_query_params{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
 from ..errors import SDKError, ValidationError
 {{- if .Namespace.HasPagedEndpoints}}
 from ..page import Page{{if ne .Namespace.PageType "Page"}} as {{.Namespace.PageType}}{{end}}
@@ -102,6 +102,39 @@ class {{.FilesTypeName}}(TypedDict, total=False):
 {{- end}}
 
 {{- end}}
+{{- if .Filter}}
+
+
+# The operators of each field of {{.FilterTypeName}} (D106), all optional:
+# eq and the comparisons take a value of the field, in a list of them,
+# contains text, and is_null, for a field that may be null, a bool.
+{{- range .FilterFields}}
+{{.OperatorsTypeName}} = TypedDict(
+    "{{.OperatorsTypeName}}",
+    { {{- range $i, $operator := .Operators}}{{if $i}}, {{end}}"{{$operator.Key}}": "{{$operator.PyType}}"{{end -}} },
+    total=False,
+)
+{{- end}}
+
+
+class {{.FilterTypeName}}(TypedDict, total=False):
+    """The filter of {{.MethodName}} (D106): a member per field a caller may
+    filter by, a value, for equality, or the field's operators, and all of
+    them hold at once."""
+{{range .FilterFields}}
+    {{.PyName}}: {{.PyType}} | {{.OperatorsTypeName}}
+{{- end}}
+
+
+# The fields of {{.FilterTypeName}}: each member, the item's field as the
+# wire names it, the type of its values, and its operators.
+{{.FilterFieldsName}} = (
+{{- range .FilterFields}}
+    FilterField("{{.PyName}}", "{{.Name}}", "{{.PyType}}", {{.OperatorKeys}}),
+{{- end}}
+)
+
+{{end}}
 {{- end}}
 class {{.Namespace.ClassName}}:
     def __init__(
@@ -742,7 +775,14 @@ class {{.ClassName}}:
 {{- if .HasQueryParams}}
         query_params: dict[str, Any] | None = {}
 {{- range .QueryParams}}
-{{- if .IsArray}}
+{{- if .FilterFieldsName}}
+        if {{.PyName}} is not None:
+            # The filter is written in the bracket form (D106):
+            # filter[field]=value, or filter[field][op]=value.
+            query_params.update(
+                filter_query_params({{.PyName}}, "{{.PyName}}", {{.FilterFieldsName}}, self._validate_scalar_argument),
+            )
+{{- else if .IsArray}}
 {{- if .Required}}
         if not {{.PyName}}:
             raise ValidationError(
@@ -797,16 +837,6 @@ class {{.ClassName}}:
             query_params = None
 {{- else}}
         query_params: dict[str, Any] | None = None
-{{- end}}
-{{- if .Filterable}}
-        if filters:
-            if query_params is None:
-                query_params = {}
-            for _field, _spec in filters.items():
-                if isinstance(_spec, str):
-                    query_params[f"filter[{_field}]"] = _spec
-                else:
-                    query_params[f"filter[{_field}][{_spec['op']}]"] = _spec["value"]
 {{- end}}
 
 {{- if .HasFileUpload}}
@@ -981,7 +1011,8 @@ class {{.ClassName}}:
         it is None, and each page holds up to limit items. A page is asked
         for, with the last one's next, only when the items before it are
         taken; an error raises there, and so does a page whose next is the
-        cursor it was asked with, after its items.
+        cursor it was asked with, after its items.{{if .Filter}} Every page is asked
+        with the same filter (D106), which a cursor does not carry.{{end}}
         """
         while True:
             page = self.{{.MethodName}}({{range $i, $param := .MethodParams}}{{if $i}}, {{end}}{{$param.Name}}={{$param.Name}}{{end}})

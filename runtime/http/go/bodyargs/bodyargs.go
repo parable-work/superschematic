@@ -447,6 +447,24 @@ func QueryList[T any](errs validate.ValidationErrors, query url.Values, arg *Arg
 	return values
 }
 
+// Name is the argument's name, the path its errors are recorded under.
+func (a *Arg) Name() string { return a.name }
+
+// QueryItem decodes one item of the query string as QueryList decodes each
+// item of a list: read as its kind's JSON value, then checked and decoded
+// as a list element, its one error recorded at path. A filter's value
+// (D106) is read this way, at filter[field].
+func QueryItem[T any](errs validate.ValidationErrors, arg *Arg, path, item string) T {
+	var value T
+	raw, ok := arg.kind.fromQuery(item)
+	if !ok {
+		errs.AddFieldError(path, "type", arg.kind.typeMessage())
+		return value
+	}
+	decode(errs, arg, path, raw, &value)
+	return value
+}
+
 // fromQuery reads a query string item as a JSON value of the kind. ok is
 // false for a Number or Integer item that is not a JSON number and a Boolean
 // item strconv.ParseBool refuses.

@@ -295,6 +295,9 @@ async fn {{ .Fn }}(cx: &Cx) -> Option<Listed> {
 {{- range .Nones }}
         {{ . }}: None,
 {{- end }}
+{{- with .Filter }}
+        {{ . }}: Default::default(),
+{{- end }}
 {{- if .Paged }}
         page: {{ .PageRequest }}::first({{ .API }}::{{ .ArgsName }}::PAGE.max_limit()),
 {{- end }}
@@ -323,6 +326,9 @@ async fn {{ .Search.Fn }}(cx: &Cx, text: &str) -> Option<Result<Listed, String>>
         {{ .Search.Field }}: (!text.is_empty()).then(|| text.to_owned()),
 {{- range .Search.Others }}
         {{ . }}: None,
+{{- end }}
+{{- with .Filter }}
+        {{ . }}: Default::default(),
 {{- end }}
 {{- if .Paged }}
         page: {{ .PageRequest }}::first({{ .API }}::{{ .ArgsName }}::PAGE.default_limit()),
@@ -357,6 +363,9 @@ async fn {{ .Fn }}(cx: &Cx, values: &[String]) -> Option<Vec<Value>> {
         {{ .Field }}: Some(wanted),
 {{- range .Others }}
         {{ . }}: None,
+{{- end }}
+{{- with .Options.Filter }}
+        {{ . }}: Default::default(),
 {{- end }}
 {{- if .Options.Paged }}
         page: {{ .Options.PageRequest }}::first({{ .Options.API }}::{{ .Options.ArgsName }}::PAGE.max_limit()),

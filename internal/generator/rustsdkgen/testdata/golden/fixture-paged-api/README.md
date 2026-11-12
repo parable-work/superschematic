@@ -44,6 +44,39 @@ let request_options = RequestOptions {
 };
 ```
 
+## Filters
+
+A list that takes a filter has a typed one, `<Operation>Filter`, as the field
+of its query struct named for the operation's argument (`filter` here), beside
+its sort and its page: a member per field a caller may filter by, `None` or
+the field's operators as an `Equals`, an `Ordered` (which adds `gt`, `gte`,
+`lt` and `lte`) or a `Text` (which adds `contains`). The operators set hold at
+once. `one_of` is the wire's `in`, at most 100 values, and an empty one is
+left out; `is_null` is for a field that may be null. The SDK writes the filter
+as `filter[field]=value` and `filter[field][op]=value`, and a `*_all` method
+sends it with every page.
+
+```rust
+use your_sdk_crate::namespaces::issues::{ListIssuesFilter, ListIssuesQueryParams};
+use your_sdk_crate::{Equals, Ordered, Text};
+
+let query = ListIssuesQueryParams {
+    filter: Some(ListIssuesFilter {
+        state_id: Some(Equals { one_of: vec![open, in_review], ..Default::default() }),
+        priority: Some(Ordered { gte: Some(2), lt: Some(5), ..Default::default() }),
+        title: Some(Text { contains: Some("crash".to_string()), ..Default::default() }),
+        assignee_id: Some(Equals { is_null: Some(true), ..Default::default() }),
+        ..Default::default()
+    }),
+    sort: Some("-createdAt".to_string()),
+    limit: Some(50),
+    ..Default::default()
+};
+// filter[stateId][in]=…,…&filter[priority][gte]=2&filter[priority][lt]=5
+// &filter[title][contains]=crash&filter[assigneeId][isNull]=true
+let page = sdk.issues.list_issues(Some(&query), None).await?;
+```
+
 ## Encrypted Endpoints
 
 For encrypted endpoints, pass `EncryptedRequestOptions` with a `PublicEncryptionKey`.

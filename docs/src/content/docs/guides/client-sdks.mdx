@@ -52,8 +52,9 @@ These four programs make the same calls against the Go server. With no
 token, they read the catalog a page at a time and every product, fetch a
 missing product, search a product's reviews and write one; as the shopper,
 they place an order for a product that does not exist, read the orders a
-page at a time and every order, ask for the orders after a cursor the
-server never returned, and fetch a missing order:
+page at a time and every order, count the orders still on their way with
+a [filter](#filters), ask for the orders after a cursor the server never
+returned, and fetch a missing order:
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -134,6 +135,87 @@ An SDK refuses a `limit` past the operation's most before it sends, and an
 iterator ends with an error, not a loop, on a page whose `next` is the
 cursor it was asked with. The server refuses a cursor it never returned
 with 400, and the caller starts again from the first page.
+
+## Filters
+
+A list whose operation takes a `FilterBy` argument
+([Filters](/superschematic/guides/api-routes/#filters)) takes its filter
+typed, a member per field a caller may filter by, under the name of the
+schema's argument (D106). A member holds the field's operators: `eq` and
+`in` on every field, `gt`, `gte`, `lt` and `lte` on a number, a date and a
+time, `contains` on text, and `isNull` on a field that may be null. Every
+member set holds at once. The SDK writes the filter into the query as
+`filter[field]=value` and `filter[field][op]=value`:
+
+| Language | The filter | A field's member |
+| --- | --- | --- |
+| Go | `Filter *OrderListOrdersFilter` on the query struct (`<Namespace><Operation>Filter`) | a `*filterparse.Equals[T]`, `Ordered[T]` or `Text[T]` of the HTTP runtime, as the field's operators say: `Eq`, `In`, `Gt`, `Gte`, `Lt`, `Lte`, `Contains`, `IsNull` |
+| TypeScript | `params.filter`, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`), which the package exports | a value, for equality, or an object of the field's operators, `{ gte: 5000, lt: 10000 }` |
+| Python | the keyword `filter=`, a `ListOrdersFilter` (`<Operation>Filter`), a `TypedDict` of the namespace's module with its fields in snake_case | a value, for equality, or a mapping of the field's operators, `is_null` for `isNull` |
+| Rust | `filter: Option<ListOrdersFilter>` on the query struct (`<Operation>Filter`) | an `Option` of the crate's `Equals<T>`, `Ordered<T>` or `Text<T>`: `eq`, `one_of` for `in`, `gt`, `gte`, `lt`, `lte`, `contains`, `is_null` |
+
+A value is of the type the SDK gives a query argument of the field's type:
+a number, a boolean, an enum's value, and text for any other, a UUID, a
+decimal, a date and a time among them. Go's is the type an item of a list
+query argument has, the types package's own (`types.OrderStatus`,
+`types.IdentityUUID`, `types.TemporalDateTime`), as the Go server's filter
+holds it. A Go SDK with a filtered operation requires the HTTP runtime's
+module, for `filterparse`.
+
+acme's clients count the orders still on their way, the placed and the
+fulfilled ones, a page of one at a time:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="go/clients_test.go" from="// The orders still on their way" to={'fmt.Fprintf(&out, "orders on their way'} />
+  </TabItem>
+  <TabItem label="TypeScript">
+    <Snippet file="typescript/clients/orders-client.ts" from="// The orders still on their way" to="console.log(`orders on their way" />
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="python/orders_client.py" from="# The orders still on their way" to='print(f"orders on their way' />
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="rust/src/main.rs" from="// The orders still on their way" to='println!("orders on their way' />
+  </TabItem>
+</Tabs>
+
+A field that takes the comparisons holds them in one member, as
+`{ totalCents: { gte: 5000, lt: 10000 } }` would for a list that filters
+by its total.
+
+A cursor holds no filter, so the page after one is asked with the same
+filters, and `<operation>All` sends the filter it was given with every
+page. A member that is not set, and an `in` of no value, is left out.
+
+Each SDK refuses, before it sends, a filter the route would refuse or
+would read as another one, since the route splits an `in` at its commas,
+trims each value and drops an empty one:
+
+| Refused | Named at |
+| --- | --- |
+| an `in` of more than 100 values | `filter[field][in]` |
+| an `in`'s value that is blank, or holds a comma or a space at either end | `filter[field][in][i]` |
+| a `contains` of no text | `filter[field][contains]` |
+| more than 50 filters in one request | `filter` |
+
+The error is the one the SDK fails with before any request
+([Checks before sending](#checks-before-sending)):
+
+| Language | The error | What it holds |
+| --- | --- | --- |
+| Go | `*namespaces.ValidationError` | the first fault, at its path: `filter[status][in][1]`, `must not contain a comma or surrounding space` |
+| TypeScript | `ValidationError` | every fault of the filter, keyed by its path |
+| Python | `ValidationError` | every fault of the filter, keyed by the argument's and the members' Python names, `filter[cancel_reason][is_null]` |
+| Rust | `SDKError::Config` | the first fault, as one message: `filter[status][in][1] must not contain a comma or surrounding space` |
+
+Python's `TypedDict` is not checked when the program runs, so its SDK
+also refuses a member that is no field of the filter, an operator its
+field does not take, an `in` that is no list, an `is_null` that is no
+`bool` and, with the types package installed, a value of another type.
+Rust refuses `is_null` on a field that is never null. The TypeScript SDK
+sends an operator it does not know as it is. Whatever an SDK lets through,
+the route refuses with its 400 at `filter[field]`.
 
 ## Files
 

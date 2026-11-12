@@ -37,6 +37,14 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- else }}
 {{ .ScalarCrate }} = "0.1.0"
 {{- end }}
+{{- else }}
+{{- with .ScalarParse }}
+{{- if .DepPath }}
+{{ .Crate }} = { path = "{{ .DepPath }}" }
+{{- else }}
+{{ .Crate }} = "0.1.0"
+{{- end }}
+{{- end }}
 {{- end }}
 {{- range .DependencyCrates }}
 {{ .Name }} = { path = "{{ .Path }}" }

@@ -25,17 +25,17 @@ var templatesFS embed.FS
 
 // NamespaceInfo represents a namespace with its endpoints
 type NamespaceInfo struct {
-	Name                   string         // Namespace name (e.g., "auth", "orders")
-	ClassName              string         // TypeScript class name (e.g., "AuthNamespace")
-	Endpoints              []EndpointInfo // Endpoints in this namespace
-	IsScopedNS             bool           // Whether the namespace hoists a scope path parameter to its constructor
-	HasAuth                bool           // Whether any endpoint requires auth
-	HasEncryptedPayload    bool           // Whether namespace has encrypted POST/PUT/PATCH endpoints
-	HasFilterableEndpoints bool           // Whether namespace has any @filterable endpoint
-	HasFileUpload          bool           // Whether namespace has a file upload endpoint, whose methods name RequestOptions
-	HasFileDownload        bool           // Whether namespace has a FileDownload endpoint (D81), whose methods resolve to DownloadedFile
-	ScopeParamName         string         // Name of the hoisted scope parameter if IsScopedNS
-	Imports                []string       // Unique list of types to import from types package
+	Name                 string         // Namespace name (e.g., "auth", "orders")
+	ClassName            string         // TypeScript class name (e.g., "AuthNamespace")
+	Endpoints            []EndpointInfo // Endpoints in this namespace
+	IsScopedNS           bool           // Whether the namespace hoists a scope path parameter to its constructor
+	HasAuth              bool           // Whether any endpoint requires auth
+	HasEncryptedPayload  bool           // Whether namespace has encrypted POST/PUT/PATCH endpoints
+	HasFilteredEndpoints bool           // Whether an endpoint takes a filter (FilterBy, D106); the namespace then imports withFilter
+	HasFileUpload        bool           // Whether namespace has a file upload endpoint, whose methods name RequestOptions
+	HasFileDownload      bool           // Whether namespace has a FileDownload endpoint (D81), whose methods resolve to DownloadedFile
+	ScopeParamName       string         // Name of the hoisted scope parameter if IsScopedNS
+	Imports              []string       // Unique list of types to import from types package
 	// HasMapArgs gates the validateMapArgument helper, for a map argument
 	// (ScalarArg.IsMap), and HasObjectMapArgs the setObjectErrors helper,
 	// for a map of an object type (ScalarArg.ValueIsObject).
@@ -102,32 +102,33 @@ type NamespaceTemplateData struct {
 
 // EndpointInfo represents a single API endpoint for the SDK
 type EndpointInfo struct {
-	Name           string            // Method name (e.g., "sendMagicLink")
-	Member         string            // the behavior use's member holding the method (D103), e.g. "status"; "" for a namespace's own
-	ToolName       string            // Tool name (apigen.ToolName, e.g., "auth.sendMagicLink")
-	OperationID    string            // OpenAPI operation id (the handler name)
-	Title          string            // @docs title; "" without it
-	Docs           *ir.OperationDocs // @docs record; nil without it
-	MCP            *ir.OperationMCP  // resolved @mcp record; nil without it
-	RequiredPerms  []string          // permissions the route requires
-	Path           string            // API path (e.g., "/api/auth/send-magic-link")
-	Method         string            // HTTP method (GET, POST, etc.)
-	InputType      string            // TypeScript input type (if any)
-	OutputType     string            // TypeScript output type
-	OutputIsArray  bool              // Whether output is an array
-	HasInput       bool              // Whether endpoint has input
-	InputRequired  bool              // Whether the input argument is non-null (!) in GraphQL
-	RequiresAuth   bool              // Whether endpoint requires authentication
-	PathParams     []PathParam       // Path parameters
-	QueryParams    []QueryParam      // Query string parameters (from @query directive)
-	ScalarArgs     []ScalarArg       // Scalar arguments (not input types)
-	Description    string            // @docs description, else the operation's comment
-	TSPath         string            // TypeScript template literal path
-	ResourceTSPath string            // resource route path as TypeScript template literal
-	Encrypted      bool              // Whether endpoint payload must be encrypted
-	Filterable     bool              // Whether endpoint accepts bracket-notation filter query params
-	Page           *apigen.PageInfo  // @paginated (D60); nil when the endpoint does not page
-	PageType       string            // the namespace's name for the SDK's Page; set with Page
+	Name           string             // Method name (e.g., "sendMagicLink")
+	Member         string             // the behavior use's member holding the method (D103), e.g. "status"; "" for a namespace's own
+	ToolName       string             // Tool name (apigen.ToolName, e.g., "auth.sendMagicLink")
+	OperationID    string             // OpenAPI operation id (the handler name)
+	Title          string             // @docs title; "" without it
+	Docs           *ir.OperationDocs  // @docs record; nil without it
+	MCP            *ir.OperationMCP   // resolved @mcp record; nil without it
+	RequiredPerms  []string           // permissions the route requires
+	Path           string             // API path (e.g., "/api/auth/send-magic-link")
+	Method         string             // HTTP method (GET, POST, etc.)
+	InputType      string             // TypeScript input type (if any)
+	OutputType     string             // TypeScript output type
+	OutputIsArray  bool               // Whether output is an array
+	HasInput       bool               // Whether endpoint has input
+	InputRequired  bool               // Whether the input argument is non-null (!) in GraphQL
+	RequiresAuth   bool               // Whether endpoint requires authentication
+	PathParams     []PathParam        // Path parameters
+	QueryParams    []QueryParam       // Query string parameters (from @query directive)
+	ScalarArgs     []ScalarArg        // Scalar arguments (not input types)
+	Description    string             // @docs description, else the operation's comment
+	TSPath         string             // TypeScript template literal path
+	ResourceTSPath string             // resource route path as TypeScript template literal
+	Encrypted      bool               // Whether endpoint payload must be encrypted
+	Filter         *apigen.FilterInfo // FilterBy (D106); nil when the endpoint takes no filter
+	FilterType     string             // the filter's exported type (CatalogListPartsFilter); set with Filter
+	Page           *apigen.PageInfo   // @paginated (D60); nil when the endpoint does not page
+	PageType       string             // the namespace's name for the SDK's Page; set with Page
 
 	// File upload configuration
 	HasFileUpload    bool              // True if any input field is a file-type scalar
@@ -288,18 +289,18 @@ func (a ScalarArg) Validator() string {
 
 // SDKOutput contains all generated SDK code metadata
 type SDKOutput struct {
-	SchemaName             string          // Schema name (e.g., "my-api")
-	Author                 string          // package.json author, from Naming.PackageAuthor
-	SDKClassName           string          // Main SDK class name (e.g., "WebApiSDK")
-	PackageName            string          // NPM package name (e.g., "@schemas/my-api-sdk")
-	TypesPackage           string          // Types package name (e.g., "@schemas/my-api-types")
-	Namespaces             []NamespaceInfo // All namespaces
-	HasAuth                bool            // Whether any endpoint requires auth
-	HasFilterableEndpoints bool            // Whether any endpoint is @filterable (gates FilterParam in types.ts)
-	HasPagedEndpoints      bool            // Whether any endpoint is @paginated (gates Page and pageItems, D60)
-	HasSortedEndpoints     bool            // Whether a paged endpoint takes a sort (SortBy, D60 amended), which the README's paged lists then name
-	Timestamp              string          // Generation timestamp
-	Version                string          // Package version
+	SchemaName           string          // Schema name (e.g., "my-api")
+	Author               string          // package.json author, from Naming.PackageAuthor
+	SDKClassName         string          // Main SDK class name (e.g., "WebApiSDK")
+	PackageName          string          // NPM package name (e.g., "@schemas/my-api-sdk")
+	TypesPackage         string          // Types package name (e.g., "@schemas/my-api-types")
+	Namespaces           []NamespaceInfo // All namespaces
+	HasAuth              bool            // Whether any endpoint requires auth
+	HasFilteredEndpoints bool            // Whether any endpoint takes a filter (FilterBy, D106), which gates filterParams and withFilter in client.ts
+	HasPagedEndpoints    bool            // Whether any endpoint is @paginated (gates Page and pageItems, D60)
+	HasSortedEndpoints   bool            // Whether a paged endpoint takes a sort (SortBy, D60 amended), which the README's paged lists then name
+	Timestamp            string          // Generation timestamp
+	Version              string          // Package version
 
 	// CookieSessions reports whether the API's sessions can travel in the
 	// session cookie (D50): its authDb has a User table. SDKConfig then
@@ -446,9 +447,13 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if endpoint.Encrypted && apigen.EncryptedBodyMethod(endpoint.Method) {
 			namespaceMap[ns].HasEncryptedPayload = true
 		}
-		if endpoint.Filterable {
-			namespaceMap[ns].HasFilterableEndpoints = true
-			output.HasFilterableEndpoints = true
+		if sdkEndpoint.Filter != nil {
+			namespaceMap[ns].HasFilteredEndpoints = true
+			output.HasFilteredEndpoints = true
+			// A filter's enum field is typed by the enum.
+			for _, name := range sdkEndpoint.filterTypeImports() {
+				importsMap[ns][name] = true
+			}
 		}
 		if sdkEndpoint.HasFileUpload {
 			namespaceMap[ns].HasFileUpload = true
@@ -621,7 +626,8 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 		Description:      description,
 		TSPath:           tsPath,
 		Encrypted:        ep.Encrypted,
-		Filterable:       ep.Filterable,
+		Filter:           ep.Filter,
+		FilterType:       filterTypeName(ep),
 		Page:             ep.Page,
 		HasFileUpload:    ep.HasFileUpload,
 		FileUploadFields: fileUploadFields,
@@ -734,9 +740,10 @@ func (n NamespaceInfo) typesValues() []string {
 }
 
 // HasQuery reports whether the method takes a query object: its query
-// parameters, or a paged endpoint's cursor and limit (D60).
+// parameters, a paged endpoint's cursor and limit (D60), or a filtered
+// endpoint's filter (D106).
 func (e EndpointInfo) HasQuery() bool {
-	return len(e.QueryParams) > 0 || e.Page != nil
+	return len(e.QueryParams) > 0 || e.Page != nil || e.Filter != nil
 }
 
 // TSItemType is the TypeScript type of one item of a paged endpoint's list
@@ -1141,9 +1148,9 @@ func toolsTemplateFuncs() template.FuncMap {
 // SDK method, in the order the method declares its parameters: the path
 // parameters (a scoped namespace takes its scope in the factory); the input
 // type's fields under their names in the types package, or the body
-// arguments as one object; the query parameters, with a paged endpoint's
-// cursor and limit, as one object; and the options of an encrypted
-// operation.
+// arguments as one object; the query parameters, with a filtered
+// endpoint's filter (D106) and a paged endpoint's cursor and limit, as one
+// object; and the options of an encrypted operation.
 //
 // The SDK method takes body arguments as positional parameters, or all of
 // them as one object in the first (the object call, which also works when
@@ -1164,10 +1171,15 @@ func buildInvocationArgs(tool ToolDefinition, ns ToolsNamespace) string {
 	bodyStart := len(args)
 
 	var query string
-	if len(tool.QueryArgs) > 0 || tool.Page != nil {
-		fields := make([]string, 0, len(tool.QueryArgs)+2)
+	if len(tool.QueryArgs) > 0 || tool.Page != nil || tool.Filter != nil {
+		fields := make([]string, 0, len(tool.QueryArgs)+3)
 		for _, arg := range tool.QueryArgs {
 			fields = append(fields, fmt.Sprintf("%s: %s.%s", arg.TSName, params, arg.TSName))
+		}
+		// The method takes the filter (D106) as an object and writes the
+		// bracket form.
+		if tool.Filter != nil {
+			fields = append(fields, fmt.Sprintf("%s: %s.%s", tsPropertyName(tool.FilterParam), params, tool.FilterParam))
 		}
 		// A paged endpoint's cursor and limit (D60) travel in the query.
 		if tool.Page != nil {

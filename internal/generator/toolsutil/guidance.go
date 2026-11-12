@@ -95,3 +95,41 @@ func PagedDescription(description string, page *apigen.PageInfo) string {
 	}
 	return strings.TrimRight(description, " ") + " " + sentence
 }
+
+// FilterSentence is what a filtered operation's tool description adds
+// (D106): the fields its filter compares, under the filter's tool
+// parameter, which the SDKs key by the argument's camelCase name.
+func FilterSentence(filter *apigen.FilterInfo) string {
+	return filterSentence(filter, false)
+}
+
+// PagedFilterSentence is FilterSentence for an operation that pages: a
+// cursor carries no filter, so the next page is asked with the same one.
+func PagedFilterSentence(filter *apigen.FilterInfo) string {
+	return filterSentence(filter, true)
+}
+
+func filterSentence(filter *apigen.FilterInfo, paged bool) string {
+	param := tsutil.ToCamelCase(filter.Argument)
+	sentence := "Filters: `" + param + "` keeps the items its members match, a member per field (" +
+		strings.Join(filter.FieldNames(), ", ") + "), each a value or an object of operators"
+	if paged {
+		sentence += "; pass the same `" + param + "` with each `cursor`"
+	}
+	return sentence + "."
+}
+
+// FilteredDescription is a tool's description with FilterSentence after it
+// when the endpoint takes a filter, PagedFilterSentence when it pages too,
+// and the description as it is otherwise. It follows PagedDescription: the
+// page's sentence, then the filter's.
+func FilteredDescription(description string, filter *apigen.FilterInfo, page *apigen.PageInfo) string {
+	if filter == nil {
+		return description
+	}
+	sentence := filterSentence(filter, page != nil)
+	if description == "" {
+		return sentence
+	}
+	return strings.TrimRight(description, " ") + " " + sentence
+}

@@ -51,6 +51,10 @@ type EndpointInfo struct {
 	// Args carry the page asked for, read from the cursor and limit query
 	// parameters, and it returns a page of the list it declares.
 	Page *PageInfo
+	// Filter is the operation's FilterBy (D106), nil for every other: its
+	// Args carry what the request filters by, typed, read from the bracket
+	// form's query parameters after the operation's own.
+	Filter *FilterInfo
 	// OutputRustType is the Rust type of the operation's result: for a
 	// paged operation the page, runtime::page::Page<types::ItemView>, which
 	// names the runtime by the API crate's re-export (D43).
@@ -221,15 +225,30 @@ func (e EndpointInfo) SnakeName() string {
 }
 
 // HasArgs reports whether the implementation method takes an Args struct:
-// a paged operation's holds its page, even without an argument.
+// a paged operation's holds its page, and a filtered one's its filter,
+// even without an argument.
 func (e EndpointInfo) HasArgs() bool {
-	return e.Input != nil || len(e.PathArgs) > 0 || len(e.QueryArgs) > 0 || len(e.BodyArgs) > 0 || e.Page != nil
+	return e.Input != nil || len(e.PathArgs) > 0 || len(e.QueryArgs) > 0 || len(e.BodyArgs) > 0 || e.Page != nil || e.Filter != nil
 }
 
 // ReadsQuery reports whether the handler's decode function reads the query
-// string: for a query argument, or for the page's cursor and limit.
+// string: for a query argument, for the filters, or for the page's cursor
+// and limit.
 func (e EndpointInfo) ReadsQuery() bool {
-	return len(e.QueryArgs) > 0 || e.Page != nil
+	return len(e.QueryArgs) > 0 || e.Page != nil || e.Filter != nil
+}
+
+// DecodeSteps are what the handler's decode function reads, in its order,
+// as its comment lists them.
+func (e EndpointInfo) DecodeSteps() string {
+	steps := []string{"path", "query"}
+	if e.Filter != nil {
+		steps = append(steps, "the filter")
+	}
+	if e.Page != nil {
+		steps = append(steps, "the page")
+	}
+	return strings.Join(append(steps, "input"), ", ") + ", then body fields"
 }
 
 // ReadsBody reports whether the handler reads the request body: for the
@@ -399,6 +418,11 @@ type APIOutput struct {
 	// TypesCrateIdent is TypesCrate as a Rust path segment; lib.rs
 	// re-exports the crate as `types`.
 	TypesCrateIdent string
+	// ScalarParse is how the router reads a filter's dates and decimals by
+	// the scalar core (D106): nil unless a filter has a field of either
+	// kind. The crate then depends on the scalar crate, as one with the
+	// user model does.
+	ScalarParse *ScalarParseInfo
 	// Patterns are the compiled patterns the parameter specs share.
 	Patterns []PatternStatic
 	// DependencyCrates are the dependency types crates whose validators
@@ -457,6 +481,18 @@ func (o *APIOutput) HasSortedPages() bool {
 	return false
 }
 
+// HasFilters reports whether a mounted operation filters its list (D106):
+// the router then names the runtime's filter module, and the interfaces
+// the runtime.
+func (o *APIOutput) HasFilters() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Filter != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // pages reports whether one of endpoints pages.
 func pages(endpoints []EndpointInfo) bool {
 	for _, endpoint := range endpoints {
@@ -502,12 +538,18 @@ type IdentityInfo struct {
 	Registration *ir.UserSessionsConfig
 }
 
-// Specs are the ParamSpec statics of every mounted operation's arguments.
+// Specs are the ParamSpec statics of every mounted operation's arguments,
+// and of each value of its filter's fields (D106).
 func (o *APIOutput) Specs() []ParamInfo {
 	var specs []ParamInfo
 	for _, endpoint := range o.Endpoints {
 		specs = append(specs, endpoint.PathArgs...)
 		specs = append(specs, endpoint.QueryArgs...)
+		if endpoint.Filter != nil {
+			for _, field := range endpoint.Filter.Fields {
+				specs = append(specs, field.Value)
+			}
+		}
 		specs = append(specs, endpoint.BodyArgs...)
 	}
 	return specs
@@ -610,6 +652,20 @@ type Options struct {
 // to the same spec. Its method returns runtime::page::Page of the list's
 // element, which the router answers as the envelope's data, {items, next};
 // an in-process caller gets the same page.
+//
+// An operation with a FilterBy argument (D106) takes what the request
+// filters by in its Args, under the argument's name: a struct of the
+// operation, <Namespace><Operation>Filter, with a member per field, each
+// the runtime's filter::Equals, Ordered or Text of the field's type by the
+// operators it takes. The router reads the bracket form's query parameters,
+// filter[field]=value and filter[field][op]=value, after the operation's
+// own and before the page, by the Args' FILTER spec (the runtime's
+// FilterSpec::query), and decodes each value as an item of a query list of
+// the field's type; a refusal is the 400 at filter[field]. A date's and a
+// decimal's value, which a query parameter takes as text, is read by the
+// scalar core's parse, as its canonical text, so the crate of a filter with
+// one depends on the scalar crate. check holds a filter a caller built to
+// the same rules.
 //
 // An @hmacVerified operation's route runs its provider's WebhookVerifier
 // before the handler, as the Go router runs the provider's WebhookVerifier
@@ -776,6 +832,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	sortEndpoints(output.ManualEndpoints)
 	sortEndpoints(output.IdentityEndpoints)
 	output.Patterns = b.patterns
+	output.ScalarParse = b.scalarParse()
 	output.DependencyCrates = b.dependencyCrates()
 	if output.Jobs, err = jobsOf(schema); err != nil {
 		return nil, err
@@ -1072,8 +1129,9 @@ func rustString(s string) string {
 // Unlike the Go targets, the http-runtime path dependency is mandatory: there
 // is no published crate for Cargo to fall back on, so an unset [paths]
 // http_runtime_rust is an error rather than a no-op. The scalar crate a
-// crate with the user model reads (D50) follows [paths] scalar_rust, as the
-// types crate's does: unset, the manifest names its version.
+// crate with the user model reads (D50), or one whose filters parse a date
+// or a decimal (D106), follows [paths] scalar_rust, as the types crate's
+// does: unset, the manifest names its version.
 func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir string) error {
 	if paths.HTTPRuntimeRust == "" || outputDir == "" {
 		return fmt.Errorf("rustrestgen: [paths] http_runtime_rust and an output dir are required to locate the http-runtime crate")
@@ -1085,6 +1143,11 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 	output.RuntimeDepPath = rel
 	if output.Identity != nil {
 		if output.Identity.ScalarDepPath, err = naming.RelPath(outputDir, paths.ScalarRust); err != nil {
+			return fmt.Errorf("scalar crate path: %w", err)
+		}
+	}
+	if output.ScalarParse != nil {
+		if output.ScalarParse.DepPath, err = naming.RelPath(outputDir, paths.ScalarRust); err != nil {
 			return fmt.Errorf("scalar crate path: %w", err)
 		}
 	}

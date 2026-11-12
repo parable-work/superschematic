@@ -143,11 +143,11 @@ var symbolPackages = map[string]string{
 	"requireService": "@superschematic/api", "allowService": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
-	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
+	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api", "FilterBy": "@superschematic/api",
 	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api", "behaviorWorker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
-	"paginated": "@superschematic/api",
+	"paginated": "@superschematic/api", "tableOperation": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
 	// @superschematic/stack

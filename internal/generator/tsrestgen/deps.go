@@ -192,6 +192,22 @@ func (o *APIOutput) checkBehaviorDeps(deps DepsInfo) error {
 	return fmt.Errorf("tsrestgen: %s serves the behavior operations of %s's %s, %s (@behaviorOperations on %s), which run through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Type, route.Use, behaviortypes.An(route.Behavior), route.Set, route.Database, why)
 }
 
+// checkTableDeps refuses deps for an API with a table operation (D106)
+// when they hold no repositories, as checkBehaviorDeps does for a
+// behavior operation: the router runs each through RouterOptions.orm.
+func (o *APIOutput) checkTableDeps(deps DepsInfo) error {
+	routes := o.TableRoutes()
+	if len(routes) == 0 || depsORM(deps) {
+		return nil
+	}
+	route := routes[0]
+	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
+	if deps.Dialect == SQLiteDialect {
+		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D106)", route.Database)
+	}
+	return fmt.Errorf("tsrestgen: %s serves %s, a @tableOperation (a %s of %s), which runs through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Operation, route.Kind, route.Type, route.Database, why)
+}
+
 // DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
 // database whose DB service lists sqlite first (D64).
 func (o *APIOutput) DepsSQLite() bool {
@@ -205,10 +221,13 @@ var depsFields = []string{"config", "db", "orm", "engine", "logger"}
 // SetDeps sets what Deps holds, refusing a client, a bucket or a memory
 // store whose member
 // would take the name of another of its members, and, for an API that
-// serves a table's behavior operations (D103), Deps without the
-// repositories they run through.
+// serves a table's behavior operations (D103) or has a table operation
+// (D106), Deps without the repositories they run through.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if err := o.checkBehaviorDeps(deps); err != nil {
+		return err
+	}
+	if err := o.checkTableDeps(deps); err != nil {
 		return err
 	}
 	if err := o.checkBehaviorWorkers(deps); err != nil {

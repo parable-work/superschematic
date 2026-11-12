@@ -55,6 +55,9 @@ type ToolDefinition struct {
 	ScalarArgs               []ToolScalarArg          // Scalar arguments (not path params)
 	QueryArgs                []ToolQueryArg           // Query arguments, with shape and bounds
 	Page                     *apigen.PageInfo         // @paginated (D60): cursor and limit join the query; nil otherwise
+	Filter                   *apigen.FilterInfo       // FilterBy (D106): the filter joins the query; nil otherwise
+	FilterParam              string                   // the filter's parameter, the argument's name in camelCase; set with Filter
+	FilterType               string                   // the SDK's type of the filter, which tools/index.ts types the parameter with; set with Filter
 	Encrypted                bool                     // Whether endpoint payload must be encrypted
 	BindingStatus            string                   // ready, or unsupported_multipart for a file upload
 	InputSchemaDigest        string                   // sha256 of the encoded Parameters
@@ -88,6 +91,7 @@ type ToolsOutput struct {
 	Invocation        apigen.ToolInvocationPolicy // the key and values the documents write a tool's invocation policy with
 	Tools             []ToolDefinition            // All tool definitions
 	TypeImports       []string                    // types-package types tools/index.ts imports, sorted
+	FilterTypes       []string                    // the SDK's filter types tools/index.ts imports (D106), sorted
 	VisibleTools      []ToolDefinition            // Tools with a visible @mcp record: the provider tool lists
 	Namespaces        []ToolsNamespace            // Tools grouped by namespace
 	Timestamp         string                      // Generation timestamp
@@ -106,6 +110,10 @@ type ToolsOutput struct {
 	HasReferences bool
 	HasSearch     bool
 	HasSort       bool
+	// HasFilters reports whether a tool takes a filter (D106), whose
+	// members are a value or an object of operators and so have no type
+	// of their own: tools/index.ts then leaves a property's type optional.
+	HasFilters bool
 }
 
 // ToolsNamespace groups tools by namespace for TypeScript generation
@@ -142,6 +150,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 	inputTypeFields := toolsutil.BuildInputTypeFieldsMap(apiOutput)
 	scalars := apiOutput.Scalars
 	typeImports := map[string]bool{}
+	filterTypes := map[string]bool{}
 
 	// A @requireService operation keeps its SDK method, which a service
 	// calls, but is no tool: no end user's agent can call it. The SDK
@@ -185,6 +194,10 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			output.HasReferences = output.HasReferences || holding.Reference
 			output.HasSearch = output.HasSearch || holding.Search
 			output.HasSort = output.HasSort || holding.Sort
+			if tool.Filter != nil {
+				output.HasFilters = true
+				filterTypes[tool.FilterType] = true
+			}
 			if tool.MCP != nil && !tool.MCP.Hidden {
 				output.VisibleTools = append(output.VisibleTools, tool)
 			}
@@ -193,6 +206,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		output.Namespaces = append(output.Namespaces, toolsNS)
 	}
 	output.TypeImports = sortedSet(typeImports)
+	output.FilterTypes = sortedSet(filterTypes)
 
 	return output, nil
 }
@@ -218,6 +232,7 @@ func endpointToTool(
 		description = fmt.Sprintf("%s (Requires authentication)", description)
 	}
 	description = toolsutil.PagedDescription(description, endpoint.Page)
+	description = toolsutil.FilteredDescription(description, endpoint.Filter, endpoint.Page)
 
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
@@ -270,6 +285,7 @@ func endpointToTool(
 		},
 		keys,
 		endpoint.Page,
+		endpoint.Filter,
 	)
 	parametersJSON, _ := json.Marshal(parameters)
 	paramTypes, typeImports := toolParamTSTypes(endpoint, parameters, inputTypeFields, scalars)
@@ -316,6 +332,9 @@ func endpointToTool(
 		ScalarArgs:               scalarArgs,
 		QueryArgs:                queryArgs,
 		Page:                     endpoint.Page,
+		Filter:                   endpoint.Filter,
+		FilterParam:              endpoint.FilterParam(),
+		FilterType:               endpoint.FilterType,
 		Encrypted:                endpoint.Encrypted,
 		BindingStatus:            bindingStatus,
 		InputSchemaDigest:        fmt.Sprintf("sha256:%x", sha256.Sum256(parametersJSON)),
@@ -339,7 +358,8 @@ func endpointToTool(
 // the input type whose type is a scalar takes the input type's own field
 // type (PaintInput['at']), because a scalar's TypeScript type is the
 // types package's choice (JSDate for a date-time). Anything else is typed
-// from its JSON Schema.
+// from its JSON Schema, but a filter (D106), which takes the type the SDK
+// method takes it under (CatalogListPartsFilter), exported by the SDK.
 func toolParamTSTypes(
 	endpoint EndpointInfo,
 	parameters JSONSchemaObject,
@@ -391,6 +411,9 @@ func toolParamTSTypes(
 	}
 	for _, arg := range endpoint.ScalarArgs {
 		nameType(tsutil.ToCamelCase(arg.Name), arg.Type, arg.ArrayDepth(), arg.IsMap)
+	}
+	if endpoint.Filter != nil {
+		types[endpoint.FilterParam()] = endpoint.FilterType
 	}
 	return types, sortedSet(imports)
 }
@@ -466,6 +489,19 @@ func buildMCPToolBinding(
 			Required:      isRequired,
 			Kind:          "query",
 			Target:        fmt.Sprintf("query.%s", queryParam.Name),
+		})
+		querySources = append(querySources, paramName)
+	}
+	// A filtered endpoint's filter (D106) is a member of the method's query
+	// object, which the method writes as the bracket form.
+	if endpoint.Filter != nil {
+		paramName := endpoint.FilterParam()
+		_, isRequired := required[paramName]
+		arguments = append(arguments, MCPToolArgumentBinding{
+			ToolParameter: paramName,
+			Required:      isRequired,
+			Kind:          "query",
+			Target:        "query." + endpoint.Filter.Argument,
 		})
 		querySources = append(querySources, paramName)
 	}

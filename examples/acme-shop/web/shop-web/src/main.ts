@@ -21,7 +21,7 @@ const status = document.getElementById('status');
 
 /** Lists the products in stock, as the shopper whose session token is token. */
 function listProducts(api: Apis['shopApi'], token: string): Promise<ProductView[]> {
-  return api.client({ auth: { token } }).product.listProducts({ inStock: true });
+  return api.client({ auth: { token } }).product.listProducts({ filter: { inStock: true } });
 }
 
 function show(products: readonly ProductView[]): void {

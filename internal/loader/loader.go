@@ -408,11 +408,12 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 }
 
 // databaseFor reads the API's database (ir.Schema.Database), whose tables
-// its @behaviorOperations sets and @behaviorWorker classes name (D103):
+// its @behaviorOperations sets and @behaviorWorker classes name (D103) and
+// its @tableOperation operations read and write (D106):
 // authDB when the database is the authDb and it is read already, else
 // through the dependency loader (WithDependencyLoader) or as the service
 // of that name beside this one. It reads nothing for a schema with no such
-// set or worker, one that is not an API, one that connects to no one
+// set, worker or operation, one that is not an API, one that connects to no one
 // database, or the load of a database itself; the verification pass
 // refuses the ones that need it.
 func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema, reg *registry.Registry) (*ir.Schema, error) {
@@ -429,6 +430,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 		if set.IsBehaviorOperations() {
 			why = "whose tables its @behaviorOperations sets name"
 		}
+	}
+	if schema.HasTableOperations() {
+		why = "whose tables its @tableOperation operations read and write"
 	}
 	if why == "" {
 		return nil, nil
@@ -518,6 +522,9 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 		for _, op := range set.Operations {
 			if ir.SortArgument(op) != nil {
 				need(op.TypeRef.Name, "whose type a SortBy sorts")
+			}
+			if op != nil && op.Filter != nil {
+				need(op.TypeRef.Name, "whose type a FilterBy filters")
 			}
 		}
 	}

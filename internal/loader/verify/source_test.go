@@ -94,8 +94,51 @@ func TestARelationsKeyNeedsNoVirtual(t *testing.T) {
 	}
 }
 
-// Each refusal of a relation's key, and the warning when two types are
-// @source of the related table, in the loader's words (D61, amended).
+// listed adds a type that is @source of shop-db.Product and an operation
+// that lists it, so a key of the product may refer to it.
+func listed(s *ir.Schema, name string) {
+	s.Types[name] = &ir.TypeDef{Name: name, Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+	}}
+	s.OperationSets[0].Operations = append(s.OperationSets[0].Operations, &ir.FieldDef{
+		Name: "list" + name + "s", HTTPMethod: "GET", RestPath: "products/" + name, TypeRef: ir.TypeRef{Name: name, IsArray: true}, Required: true,
+	})
+}
+
+// A type that is @source of the related table and that no operation lists
+// is not one a key names: the body of a @tableOperation is such a view of
+// its table (D106), and the key still refers to the one view an operation
+// lists, without a warning.
+func TestARelationsKeyIgnoresViewsNoOperationLists(t *testing.T) {
+	schema, in := keySchema()
+	schema.Types["CreateProductInput"] = &ir.TypeDef{Name: "CreateProductInput", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}}
+	schema.Types["UpdateProductInput"] = &ir.TypeDef{Name: "UpdateProductInput", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}}
+	errs, warnings := sourceDiagnostics(schema, in)
+	if len(errs) != 0 || len(warnings) != 0 {
+		t.Fatalf("errors = %q, warnings = %q", errs, warnings)
+	}
+	deps := map[string]*ir.Schema{"shop-db": {Name: "shop-db", Kind: ir.SchemaKindDB, Types: map[string]*ir.TypeDef{
+		"OrderLine": in.ExternalTypes["shop-db.OrderLine"], "Product": in.ExternalTypes["shop-db.Product"],
+	}}}
+	line := schema.Types["OrderLineView"]
+	if ref, derived := ir.FieldReference(schema, deps, line, line.Fields[1]); !derived || ref.Type != "ProductView" {
+		t.Fatalf("FieldReference = %+v, %v; want ProductView, derived", ref, derived)
+	}
+
+	// With no view of the table listed, the key refers to nothing, as a
+	// key whose one view no operation lists does, and nothing is warned.
+	schema.OperationSets[0].Operations = nil
+	if errs, warnings := sourceDiagnostics(schema, in); len(errs) != 0 || len(warnings) != 0 {
+		t.Fatalf("no view listed: errors = %q, warnings = %q", errs, warnings)
+	}
+	if ref, _ := ir.FieldReference(schema, deps, line, line.Fields[1]); ref != nil {
+		t.Fatalf("no view listed: FieldReference = %+v, want none", ref)
+	}
+}
+
+// Each refusal of a relation's key, and the warning when two types that
+// operations list are @source of the related table, in the loader's words
+// (D61, amended).
 func TestARelationsKeyRefusalsAndWarning(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -119,12 +162,12 @@ func TestARelationsKeyRefusalsAndWarning(t *testing.T) {
 			importCatalogCards(s, in)
 			s.Types["OrderLineView"].Fields[1].References = &ir.ReferenceDef{Type: "SupplierCard"}
 		}, []string{"src/orders.schema.ts: OrderLineView.productId: RefersTo names SupplierCard, which is @source(shop-db.Supplier), but the field reads the key of shop-db.OrderLine.product, a Relation to Product"}, nil},
-		{"two types sourced from the related table", func(s *ir.Schema, _ Input) {
-			s.Types["ProductCard"] = &ir.TypeDef{Name: "ProductCard", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}}
+		{"two listed types sourced from the related table", func(s *ir.Schema, _ Input) {
+			listed(s, "ProductCard")
 		}, nil, []string{"src/orders.schema.ts: OrderLineView.productId reads the key of shop-db.OrderLine.product and refers to nothing: ProductCard and ProductView are both @source(shop-db.Product); name one with RefersTo"}},
-		{"three types sourced from the related table", func(s *ir.Schema, _ Input) {
-			s.Types["ProductCard"] = &ir.TypeDef{Name: "ProductCard", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}}
-			s.Types["ProductRow"] = &ir.TypeDef{Name: "ProductRow", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}}
+		{"three listed types sourced from the related table", func(s *ir.Schema, _ Input) {
+			listed(s, "ProductCard")
+			listed(s, "ProductRow")
 		}, nil, []string{"src/orders.schema.ts: OrderLineView.productId reads the key of shop-db.OrderLine.product and refers to nothing: ProductCard, ProductRow and ProductView are all @source(shop-db.Product); name one with RefersTo"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

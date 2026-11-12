@@ -7,7 +7,6 @@ import (
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
-	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
 	"go.uber.org/zap"
@@ -47,12 +46,6 @@ type inputProblemDetail struct {
 // ValidationCode is the code of a request a route's validation refuses,
 // the bad_request every generated server, Go, TypeScript and Rust, sends.
 const ValidationCode = "bad_request"
-
-// filterProblemDetail extends problemDetail with filter-level parse errors.
-type filterProblemDetail struct {
-	problemDetail
-	Errors []filterparse.ParseError `json:"errors"`
-}
 
 // writeProblemJSON writes an RFC 9457 Problem Details response.
 func writeProblemJSON(w http.ResponseWriter, v any, status int) {
@@ -324,61 +317,4 @@ func isNilOrNilSlice(v any) bool {
 	}
 	rv := reflect.ValueOf(v)
 	return rv.Kind() == reflect.Slice && rv.IsNil()
-}
-
-// FilterErrors sends an RFC 9457 Problem Details filter-error response.
-func FilterErrors(w http.ResponseWriter, errors []filterparse.ParseError, errorCode ...string) {
-	// Marshal nil as an empty array so clients can unconditionally
-	// iterate `body.errors` without null-checking.
-	if errors == nil {
-		errors = []filterparse.ParseError{}
-	}
-	d := filterProblemDetail{
-		problemDetail: problemDetail{
-			Type:   "about:blank",
-			Title:  "Invalid Filter Parameters",
-			Status: http.StatusBadRequest,
-			Detail: "Invalid filter parameters",
-		},
-		Errors: errors,
-	}
-	if len(errorCode) > 0 {
-		d.Code = errorCode[0]
-	}
-	writeProblemJSON(w, d, http.StatusBadRequest)
-}
-
-// LoggedFilterErrors extracts the request-scoped logger from context, emits a
-// Warn-level structured log, then writes an RFC 9457 filter-error response
-// including the requestId from context.
-func LoggedFilterErrors(w http.ResponseWriter, r *http.Request, errors []filterparse.ParseError, errorCode ...string) {
-	// Marshal nil as an empty array so clients can unconditionally
-	// iterate `body.errors` without null-checking.
-	if errors == nil {
-		errors = []filterparse.ParseError{}
-	}
-	logger := requestctx.LoggerFromContext(r.Context())
-	logFields := []zap.Field{
-		zap.Int("status", http.StatusBadRequest),
-		zap.Int("filter_error_count", len(errors)),
-	}
-	if len(errorCode) > 0 && errorCode[0] != "" {
-		logFields = append(logFields, zap.String("error_code", errorCode[0]))
-	}
-	logger.Warn("http filter error response", logFields...)
-
-	d := filterProblemDetail{
-		problemDetail: problemDetail{
-			Type:      "about:blank",
-			Title:     "Invalid Filter Parameters",
-			Status:    http.StatusBadRequest,
-			Detail:    "Invalid filter parameters",
-			RequestID: chimiddleware.GetReqID(r.Context()),
-		},
-		Errors: errors,
-	}
-	if len(errorCode) > 0 {
-		d.Code = errorCode[0]
-	}
-	writeProblemJSON(w, d, http.StatusBadRequest)
 }

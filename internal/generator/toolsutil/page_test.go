@@ -16,8 +16,8 @@ func TestPagedToolParametersReturnsAndDescription(t *testing.T) {
 	query := []ToolQueryArg{{Name: "inStock", Type: "boolean"}}
 	scalars := map[string]apigen.ScalarJSONSchemaInfo{"boolean": {Type: "boolean"}}
 
-	unpaged := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys(), nil)
-	paged := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys(), page)
+	unpaged := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys(), nil, nil)
+	paged := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys(), page, nil)
 	if len(unpaged.Properties) != 1 || len(paged.Properties) != 3 || len(paged.Required) != 0 {
 		t.Fatalf("parameters: unpaged %v, paged %v (required %v)", unpaged.Properties, paged.Properties, paged.Required)
 	}
@@ -71,7 +71,7 @@ func TestSortedToolParametersAndDescription(t *testing.T) {
 
 	encode := func(keys apigen.ToolKeys) string {
 		t.Helper()
-		schema := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, keys, page)
+		schema := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, keys, page, nil)
 		if len(schema.Required) != 0 {
 			t.Fatalf("required = %v", schema.Required)
 		}
@@ -117,4 +117,34 @@ func jsonEqual(t *testing.T, a, b any) bool {
 		t.Fatal(err)
 	}
 	return string(x) == string(y)
+}
+
+// A filtered operation's tool description (D106) names the fields its
+// filter compares, under the filter's tool parameter, after the page's
+// sentence, and asks a paged one for the same filter with each cursor.
+func TestFilteredDescription(t *testing.T) {
+	filter := &apigen.FilterInfo{Argument: "part_filter", Fields: []apigen.FilterFieldInfo{{Name: "id"}, {Name: "retiredOn"}}}
+	const sentence = "Filters: `partFilter` keeps the items its members match, a member per field (id, retiredOn), each a value or an object of operators"
+	if got := FilterSentence(filter); got != sentence+"." {
+		t.Errorf("sentence = %q", got)
+	}
+	if got := PagedFilterSentence(filter); got != sentence+"; pass the same `partFilter` with each `cursor`." {
+		t.Errorf("paged sentence = %q", got)
+	}
+	page := &apigen.PageInfo{DefaultLimit: 2, MaxLimit: 5}
+	for _, test := range []struct {
+		description string
+		filter      *apigen.FilterInfo
+		page        *apigen.PageInfo
+		want        string
+	}{
+		{"The parts.", nil, page, "The parts."},
+		{"The parts. ", filter, nil, "The parts. " + FilterSentence(filter)},
+		{"", filter, nil, FilterSentence(filter)},
+		{PagedDescription("The parts.", page), filter, page, "The parts. " + PageSentence + " " + PagedFilterSentence(filter)},
+	} {
+		if got := FilteredDescription(test.description, test.filter, test.page); got != test.want {
+			t.Errorf("FilteredDescription(%q) = %q, want %q", test.description, got, test.want)
+		}
+	}
 }

@@ -1229,6 +1229,9 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	if info.sortBy != nil {
 		return nil, errorAtNode(prop.Type, "SortBy marks an operation's argument; a field is no sort")
 	}
+	if info.filterBy != nil {
+		return nil, errorAtNode(prop.Type, "FilterBy marks an operation's argument; a field is no filter")
+	}
 	if info.fileDownload != nil {
 		return nil, errorAtNode(prop.Type, "FileDownload marks an operation's result; a field that is a file is FileUpload")
 	}
@@ -1507,6 +1510,10 @@ func (w *walker) walkTypeAlias(node *astNode) {
 			w.addErr(errorAtNode(sig.Type, "SortBy marks an operation's argument; a field is no sort"))
 			continue
 		}
+		if info.filterBy != nil {
+			w.addErr(errorAtNode(sig.Type, "FilterBy marks an operation's argument; a field is no filter"))
+			continue
+		}
 		optional := sig.PostfixToken != nil && sig.PostfixToken.Kind == kindQuestionToken
 		td.Fields = append(td.Fields, &ir.FieldDef{
 			Name:       m.Name().Text(),
@@ -1638,6 +1645,9 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 	if info.sortBy != nil {
 		return nil, nil, errorAtNode(method.Type, "SortBy marks an operation's argument, not its result")
 	}
+	if info.filterBy != nil {
+		return nil, nil, errorAtNode(method.Type, "FilterBy marks an operation's argument, not its result")
+	}
 	if info.fileUpload != nil {
 		return nil, nil, errorAtNode(method.Type, "FileUpload marks a field of an input type; a result that is a file is FileDownload")
 	}
@@ -1674,6 +1684,20 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 
 	if method.Parameters != nil {
 		for _, p := range method.Parameters.Nodes {
+			filter, serr := w.filterFromParameter(setName, op, p)
+			if serr != nil {
+				return nil, nil, serr
+			}
+			if filter != nil {
+				// A filter is no query parameter of one value (D106): the
+				// operation holds it, beside its arguments.
+				if op.Filter != nil {
+					return nil, nil, errorAtNode(p.AsParameterDeclaration().Type, "%s.%s: has two filter arguments, %s and %s; an operation takes one FilterBy",
+						setName, op.Name, op.Filter.Argument, filter.Argument)
+				}
+				op.Filter = filter
+				continue
+			}
 			arg, sortItem, serr := w.argumentFromParameter(p)
 			if serr != nil {
 				return nil, nil, serr
@@ -1688,6 +1712,48 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 		}
 	}
 	return op, decorators, nil
+}
+
+// filterFromParameter reads a parameter declared FilterBy<Item, Fields>
+// (D106) as the operation's filter, or returns nil for any other
+// parameter. Only this form names the item a filter filters, so the check
+// that the operation lists it is the reader's; the loader holds the fields
+// to the item.
+func (w *walker) filterFromParameter(setName string, op *ir.FieldDef, p *astNode) (*ir.OperationFilter, *SchemaError) {
+	param := p.AsParameterDeclaration()
+	if param.Type == nil || !w.isFilterBy(param.Type) {
+		return nil, nil
+	}
+	info, serr := w.resolveTypeNode(param.Type)
+	if serr != nil {
+		return nil, serr
+	}
+	if info.filterBy == nil {
+		return nil, nil
+	}
+	if info.filterItem != op.TypeRef.Name {
+		return nil, errorAtNode(param.Type, "%s.%s: FilterBy<%s, …> filters %s, and %s lists %s",
+			setName, op.Name, info.filterItem, info.filterItem, op.Name, op.TypeRef.Name)
+	}
+	if param.QuestionToken != nil {
+		return nil, errorAtNode(p, "%s.%s: FilterBy is optional already; write the argument without ?", setName, op.Name)
+	}
+	filter := &ir.OperationFilter{Argument: strings.TrimPrefix(p.Name().Text(), "_"), Fields: []*ir.FilterField{}}
+	for _, name := range info.filterBy {
+		filter.Fields = append(filter.Fields, &ir.FilterField{Name: name})
+	}
+	return filter, nil
+}
+
+// isFilterBy reports whether a type expression is FilterBy<…> itself, the
+// only form a filter is written in: one inside Nullable, QueryParam,
+// Validate or a list is refused where it resolves.
+func (w *walker) isFilterBy(node *astNode) bool {
+	if node.Kind != kindTypeReference {
+		return false
+	}
+	id, ok := w.identityOf(node.AsTypeReferenceNode().TypeName)
+	return ok && w.isAuthoring(id) && id.name == "FilterBy"
 }
 
 // argumentFromParameter converts one method parameter into an ArgumentDef,
@@ -1714,6 +1780,9 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 	}
 	if info.fileDownload != nil {
 		return nil, "", errorAtNode(p, "FileDownload marks an operation's result, not an argument")
+	}
+	if info.filterBy != nil {
+		return nil, "", errorAtNode(p, "FilterBy is written on the argument itself, filter: FilterBy<Item, Fields>: it takes no Nullable, QueryParam, Validate or list around it")
 	}
 	w.recordReference(info)
 

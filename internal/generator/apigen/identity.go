@@ -32,25 +32,48 @@ import (
 // scaffold have no method for them, and a namespace whose every operation
 // is a behavior's has no implementation. The router mounts them, so the
 // flags it reads count them, the permission check's imports included.
+//
+// The table operations (D106, EndpointInfo.TableOperation) go to
+// TableEndpoints likewise: the generated handlers serve them from the
+// tables of the API's database, which Tables models, so the interfaces and
+// the scaffold hold only the operations of a set the project writes. A
+// table operation the Go handlers cannot serve yet stays among Endpoints,
+// marked TableByHand, an operation the project implements
+// (UnservedTableOperations); one the loader did not fill is an error that
+// names it.
 func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
-	identity, behavior := false, false
+	identity, behavior, table := false, false, false
 	for _, endpoint := range output.Endpoints {
 		identity = identity || endpoint.IdentityOperation != ""
 		behavior = behavior || endpoint.BehaviorOperation() != nil
+		table = table || endpoint.ServedTable() != nil
 	}
-	if !identity && !behavior {
+	if !identity && !behavior && !table {
 		return output, nil
+	}
+	var tables *tablePlan
+	if table {
+		var err error
+		if tables, err = planTables(output, true); err != nil {
+			return nil, err
+		}
 	}
 	view := *output
 	view.Endpoints = make([]EndpointInfo, 0, len(output.Endpoints))
 	view.IdentityEndpoints = nil
 	view.BehaviorEndpoints = nil
+	view.TableEndpoints = nil
 	for _, endpoint := range output.Endpoints {
 		switch {
 		case endpoint.IdentityOperation != "":
 			view.IdentityEndpoints = append(view.IdentityEndpoints, endpoint)
 		case endpoint.BehaviorOperation() != nil:
 			view.BehaviorEndpoints = append(view.BehaviorEndpoints, endpoint)
+		case endpoint.ServedTable() != nil && tables.byHand[endpoint.Operation]:
+			endpoint.TableByHand = true
+			view.Endpoints = append(view.Endpoints, endpoint)
+		case endpoint.ServedTable() != nil:
+			view.TableEndpoints = append(view.TableEndpoints, endpoint)
 		default:
 			view.Endpoints = append(view.Endpoints, endpoint)
 		}
@@ -72,6 +95,13 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	// project's routes do, with the provider's routePermissions.
 	for _, endpoint := range view.BehaviorEndpoints {
 		view.summarizeRoute(endpoint)
+	}
+	// So does a table operation's route.
+	for _, endpoint := range view.TableEndpoints {
+		view.summarizeRoute(endpoint)
+	}
+	if table {
+		view.Tables = tables.info
 	}
 	imports, err := rawBodyCheckImports(view.HandlerEndpoints())
 	if err != nil {

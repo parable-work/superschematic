@@ -1,13 +1,18 @@
 // This file runs inside the generated API module of fixture-paged-api
 // (TestPagedRoutesServePages copies it there, with the HTTP runtimes'
-// page vectors as testdata/page_parity.json, the scaffolds as scaffolds/
-// and the implementation scaffold as impl/). It registers the generated
-// routes with an in-memory catalog and pages its lists over httptest
-// (D60): the first page, the next by its cursor, the last with a null
-// next; filters applied to each page; the limit and its bounds; the items
-// sorted by name or sku, each way, with the next cursor bound to the sort
-// (D60, amended); and every refusal the vectors hold, worded as they word
-// it.
+// page vectors as testdata/page_parity.json, their filter vectors as
+// testdata/filter_parity.json, the scaffolds as scaffolds/ and the
+// implementation scaffold as impl/). It registers the generated routes
+// with an in-memory catalog and pages its lists over httptest (D60): the
+// first page, the next by its cursor, the last with a null next; filters
+// applied to each page; the limit and its bounds; the items sorted by
+// name or sku, each way, with the next cursor bound to the sort (D60,
+// amended); and every refusal the vectors hold, worded as they word it.
+// It filters the parts through listParts's FilterBy (D106): a filter on a
+// field of each kind, every operator, beside a sort and a cursor, the
+// typed filter the implementation takes, the reader's refusals as the
+// filter vectors word them, and a value its field's type refuses, a 400
+// at filter[field].
 package fixturepagedapi_test
 
 import (
@@ -17,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,10 +31,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 
 	api "example.com/schemas/api/fixture-paged-api"
@@ -50,11 +58,14 @@ type itemKey struct {
 }
 
 // shelf is an in-memory catalog: its items in their order, its tags in
-// theirs, and every page request the routes passed it.
+// theirs, its parts, and every page request and every filter the routes
+// passed it.
 type shelf struct {
-	items []types.ItemView
-	tags  []string
-	pages []paging.Request
+	items   []types.ItemView
+	tags    []string
+	parts   []types.PartView
+	pages   []paging.Request
+	filters []api.CatalogListPartsFilter
 }
 
 func (s *shelf) PlaceBasket(context.Context, *types.BasketInput) (*types.BasketView, error) {
@@ -143,6 +154,157 @@ func (s *shelf) ListTags(_ context.Context, page paging.Request) (paging.Page[st
 	return paging.FromRows(rows, page.Limit, func(tag string) any { return tag })
 }
 
+// partKey is the position of a part in the page's order: the value of the
+// field the page is sorted by, and its id, which breaks ties.
+type partKey struct {
+	Name     string             `json:"name,omitempty"`
+	Quantity *int64             `json:"quantity,omitempty"`
+	ID       types.IdentityUUID `json:"id"`
+}
+
+// keepEquals reports whether a field passes its filter (D106), as a
+// query's WHERE would: every member set holds at once, and a null field,
+// a nil value, passes no comparison, only isNull=true. A nil filter keeps
+// every row.
+func keepEquals[T comparable](filter *filterparse.Equals[T], value *T) bool {
+	if filter == nil {
+		return true
+	}
+	return keepNull(filter.IsNull, value) &&
+		(filter.Eq == nil || value != nil && *value == *filter.Eq) &&
+		(filter.In == nil || value != nil && slices.Contains(filter.In, *value))
+}
+
+// keepOrdered is keepEquals for an ordered field, whose values compare
+// orders.
+func keepOrdered[T any](filter *filterparse.Ordered[T], value *T, compare func(a, b T) int) bool {
+	if filter == nil {
+		return true
+	}
+	holds := func(bound *T, ok func(order int) bool) bool {
+		return bound == nil || value != nil && ok(compare(*value, *bound))
+	}
+	return keepNull(filter.IsNull, value) &&
+		holds(filter.Eq, func(order int) bool { return order == 0 }) &&
+		holds(filter.Gt, func(order int) bool { return order > 0 }) &&
+		holds(filter.Gte, func(order int) bool { return order >= 0 }) &&
+		holds(filter.Lt, func(order int) bool { return order < 0 }) &&
+		holds(filter.Lte, func(order int) bool { return order <= 0 }) &&
+		(filter.In == nil || value != nil && slices.ContainsFunc(filter.In, func(one T) bool { return compare(*value, one) == 0 }))
+}
+
+// keepText is keepEquals for a field of text, whose contains is the text a
+// value holds, in any case.
+func keepText(filter *filterparse.Text[string], value *string) bool {
+	if filter == nil {
+		return true
+	}
+	return keepNull(filter.IsNull, value) &&
+		(filter.Eq == nil || value != nil && *value == *filter.Eq) &&
+		(filter.In == nil || value != nil && slices.Contains(filter.In, *value)) &&
+		(filter.Contains == nil || value != nil && strings.Contains(strings.ToLower(*value), strings.ToLower(*filter.Contains)))
+}
+
+// keepNull is a filter's isNull: true keeps a null field, false any
+// other.
+func keepNull[T any](isNull *bool, value *T) bool {
+	return isNull == nil || *isNull == (value == nil)
+}
+
+// compareDecimals orders two decimals by their values, not their text.
+func compareDecimals(a, b types.GenericDecimal) int {
+	x, _ := new(big.Rat).SetString(string(a))
+	y, _ := new(big.Rat).SetString(string(b))
+	return x.Cmp(y)
+}
+
+// ListParts reads the parts the filter keeps, in the page's sort, name or
+// quantity, ties broken by id in the same direction, up to one past the
+// limit after the cursor's, and builds the page from them.
+func (s *shelf) ListParts(_ context.Context, filter api.CatalogListPartsFilter, page paging.Request) (paging.Page[types.PartView], error) {
+	s.pages = append(s.pages, page)
+	s.filters = append(s.filters, filter)
+	sorted := slices.Clone(s.parts)
+	slices.SortFunc(sorted, func(a, b types.PartView) int {
+		order := strings.Compare(a.Name, b.Name)
+		if page.Sort.Field == "quantity" {
+			order = cmp.Compare(a.Quantity, b.Quantity)
+		}
+		order = cmp.Or(order, strings.Compare(a.Id.String(), b.Id.String()))
+		if page.Sort.Desc {
+			return -order
+		}
+		return order
+	})
+	start := 0
+	if page.Cursor != "" {
+		var key partKey
+		if err := paging.DecodeCursor(page.Cursor, &key); err != nil {
+			return paging.Page[types.PartView]{}, err
+		}
+		at := slices.IndexFunc(sorted, func(part types.PartView) bool { return part.Id == key.ID })
+		if at < 0 {
+			return paging.Page[types.PartView]{}, paging.RefusedCursor()
+		}
+		start = at + 1
+	}
+	var rows []types.PartView
+	for _, part := range sorted[start:] {
+		quantity := int64(part.Quantity)
+		keep := keepEquals(filter.Id, &part.Id) &&
+			keepText(filter.Name, &part.Name) &&
+			keepEquals(filter.Kind, &part.Kind) &&
+			keepOrdered(filter.Quantity, &quantity, cmp.Compare[int64]) &&
+			keepOrdered(filter.Weight, &part.Weight, cmp.Compare[float64]) &&
+			keepOrdered(filter.Price, &part.Price, compareDecimals) &&
+			keepEquals(filter.Discontinued, &part.Discontinued) &&
+			keepOrdered(filter.MadeAt, &part.MadeAt, func(a, b types.TemporalDateTime) int { return time.Time(a).Compare(time.Time(b)) }) &&
+			keepOrdered(filter.RetiredOn, part.RetiredOn, func(a, b types.TemporalDate) int { return strings.Compare(string(a), string(b)) }) &&
+			keepEquals(filter.SupplierId, part.SupplierId)
+		if !keep {
+			continue
+		}
+		if rows = append(rows, part); len(rows) > page.Limit {
+			break
+		}
+	}
+	return paging.FromRows(rows, page.Limit, func(part types.PartView) any {
+		if page.Sort.Field == "quantity" {
+			quantity := int64(part.Quantity)
+			return partKey{Quantity: &quantity, ID: part.Id}
+		}
+		return partKey{Name: part.Name, ID: part.Id}
+	})
+}
+
+// The catalog's parts, in the order of their names: a value of every kind
+// a filter compares. An empty retiredOn or supplier is null. Prices order
+// by value, not by text (9.5 before 10.25), and two parts hold a
+// quantity, which their ids order.
+var bins = []struct {
+	id, name, kind string
+	quantity       int64
+	weight         float64
+	price          string
+	discontinued   bool
+	madeAt         string
+	retiredOn      string
+	supplier       string
+}{
+	{"1c9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e51", "Washer-M6", "washer", 3, 0.2, "10.25", true, "2026-05-20T00:00:00Z", "", acme},
+	{"1c9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e52", "bolt-m4", "bolt", 40, 1.5, "0.10", false, "2026-01-10T00:00:00Z", "", acme},
+	{"1c9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e53", "bolt-m6", "bolt", 12, 2.5, "9.5", false, "2026-02-10T08:30:00Z", "", zenith},
+	{"1c9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e54", "nut-m4", "nut", 40, 0.5, "0.05", true, "2026-03-01T00:00:00Z", "2026-06-30", acme},
+	{"1c9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e55", "nut-m6", "nut", 7, 0.75, "0.08", false, "2026-03-15T12:00:00Z", "", ""},
+	{"1c9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e56", "washer-m4", "washer", 100, 0.1, "0.02", false, "2026-04-01T00:00:00Z", "2026-09-01", ""},
+}
+
+// The parts' suppliers.
+const (
+	acme   = "2d9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e61"
+	zenith = "2d9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e62"
+)
+
 // The catalog's items, in the order of their names; ids are the scalar's
 // text. Two share a sku, which their ids order.
 var stock = []struct {
@@ -166,7 +328,33 @@ func serve(t *testing.T) (*httptest.Server, *shelf) {
 		}
 		impl.items = append(impl.items, types.ItemView{Id: id, Name: item.name, Sku: types.IdentitySlug(item.sku), InStock: item.inStock})
 	}
+	for _, bin := range bins {
+		part := types.PartView{
+			Id: mustParse(t, types.ParseIdentityUUID, bin.id), Name: bin.name, Kind: types.PartKind(bin.kind),
+			Quantity: types.GenericInt64(bin.quantity), Weight: bin.weight, Price: types.GenericDecimal(bin.price),
+			Discontinued: bin.discontinued, MadeAt: mustParse(t, types.ParseTemporalDateTime, bin.madeAt),
+		}
+		if bin.retiredOn != "" {
+			retiredOn := mustParse(t, types.ParseTemporalDate, bin.retiredOn)
+			part.RetiredOn = &retiredOn
+		}
+		if bin.supplier != "" {
+			supplier := mustParse(t, types.ParseIdentityUUID, bin.supplier)
+			part.SupplierId = &supplier
+		}
+		impl.parts = append(impl.parts, part)
+	}
 	return serveWith(t, api.Implementations{Catalog: impl}), impl
+}
+
+// mustParse is a scalar's value of its text.
+func mustParse[T any](t *testing.T, parse func(string) (T, error), text string) T {
+	t.Helper()
+	value, err := parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func serveWith(t *testing.T, implementations api.Implementations) *httptest.Server {
@@ -235,16 +423,22 @@ func page(t *testing.T, got reply) (items []any, next any) {
 	return items, next
 }
 
-// walk follows next from the first page under query, and returns the
-// names of the items of each page.
+// walk follows next from the first page of the items under query, and
+// returns the names of the items of each page.
 func walk(t *testing.T, server *httptest.Server, query url.Values) [][]string {
+	t.Helper()
+	return walkPath(t, server, "/api/items", query)
+}
+
+// walkPath is walk over the list at path.
+func walkPath(t *testing.T, server *httptest.Server, path string, query url.Values) [][]string {
 	t.Helper()
 	var pages [][]string
 	for {
-		if len(pages) > len(stock) {
+		if len(pages) > len(stock)+len(bins) {
 			t.Fatalf("more pages than items: %v", pages)
 		}
-		items, next := page(t, get(t, server, "/api/items", query.Encode()))
+		items, next := page(t, get(t, server, path, query.Encode()))
 		var names []string
 		for _, item := range items {
 			names = append(names, item.(map[string]any)["name"].(string))
@@ -593,9 +787,346 @@ func TestScaffoldAnswersNotImplemented(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := serveWith(t, implementations)
-	for _, path := range []string{"/api/items", "/api/tags"} {
+	for _, path := range []string{"/api/items", "/api/tags", "/api/parts"} {
 		if got := get(t, server, path, "limit=1"); got.status != http.StatusNotImplemented {
 			t.Errorf("GET %s = %d %v, want 501", path, got.status, got.body)
 		}
+	}
+	// A filtered list's scaffold takes the filter and answers the same.
+	if got := get(t, server, "/api/parts", "filter[kind]=nut&filter[quantity][gte]=1"); got.status != http.StatusNotImplemented {
+		t.Errorf("GET /api/parts under a filter = %d %v, want 501", got.status, got.body)
+	}
+}
+
+// parts is the names of the parts a query of listParts answers, every
+// page of it in one list.
+func parts(t *testing.T, server *httptest.Server, query string) []string {
+	t.Helper()
+	values, err := url.ParseQuery(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values.Set("limit", "5")
+	var names []string
+	for _, page := range walkPath(t, server, "/api/parts", values) {
+		names = append(names, page...)
+	}
+	return names
+}
+
+// A filter on a field of each kind, and each operator a kind takes
+// (D106): filter[field]=value is equality, filter[field][op]=value names
+// an operator, an in lists its values between commas, and the members
+// hold at once. The parts answer in the order of their names.
+func TestListPartsFiltersByEachKind(t *testing.T) {
+	server, _ := serve(t)
+	for _, tc := range []struct {
+		name, query string
+		want        []string
+	}{
+		{"no filter", "", []string{"Washer-M6", "bolt-m4", "bolt-m6", "nut-m4", "nut-m6", "washer-m4"}},
+
+		// Equality, one per kind.
+		{"a uuid", "filter[id]=" + bins[3].id, []string{"nut-m4"}},
+		{"a string", "filter[name]=bolt-m6", []string{"bolt-m6"}},
+		{"a string in another case is another string", "filter[name]=BOLT-M6", nil},
+		{"an enum", "filter[kind]=nut", []string{"nut-m4", "nut-m6"}},
+		{"an integer", "filter[quantity]=40", []string{"bolt-m4", "nut-m4"}},
+		{"a float", "filter[weight]=0.5", []string{"nut-m4"}},
+		{"a decimal, by its value", "filter[price]=0.1", []string{"bolt-m4"}},
+		{"a boolean", "filter[discontinued]=true", []string{"Washer-M6", "nut-m4"}},
+		{"a datetime", "filter[madeAt]=2026-03-01T00:00:00Z", []string{"nut-m4"}},
+		{"a datetime in another offset", "filter[madeAt]=2026-03-01T01:00:00%2B01:00", []string{"nut-m4"}},
+		{"a date", "filter[retiredOn]=2026-06-30", []string{"nut-m4"}},
+		{"a uuid that may be null", "filter[supplierId]=" + zenith, []string{"bolt-m6"}},
+		{"equality by its operator", "filter[kind][eq]=washer", []string{"Washer-M6", "washer-m4"}},
+		{"brackets percent-encoded", "filter%5Bkind%5D=bolt", []string{"bolt-m4", "bolt-m6"}},
+
+		// in.
+		{"an in of enums", "filter[kind][in]=bolt,washer", []string{"Washer-M6", "bolt-m4", "bolt-m6", "washer-m4"}},
+		{"an in of uuids, trimmed", "filter[id][in]=" + bins[0].id + ",+" + bins[5].id + ",", []string{"Washer-M6", "washer-m4"}},
+		{"an in of integers", "filter[quantity][in]=7,12,99", []string{"bolt-m6", "nut-m6"}},
+		{"an in of decimals", "filter[price][in]=0.050,10.25", []string{"Washer-M6", "nut-m4"}},
+		{"an in of booleans", "filter[discontinued][in]=true,false", []string{"Washer-M6", "bolt-m4", "bolt-m6", "nut-m4", "nut-m6", "washer-m4"}},
+		{"an in of dates leaves a null out", "filter[retiredOn][in]=2026-06-30,2026-09-01", []string{"nut-m4", "washer-m4"}},
+
+		// Ranges.
+		{"an integer range", "filter[quantity][gte]=7&filter[quantity][lt]=40", []string{"bolt-m6", "nut-m6"}},
+		{"an integer's bounds, both inside", "filter[quantity][gt]=7&filter[quantity][lte]=40", []string{"bolt-m4", "bolt-m6", "nut-m4"}},
+		{"a float range", "filter[weight][gt]=0.5&filter[weight][lte]=1.5", []string{"bolt-m4", "nut-m6"}},
+		{"a decimal range orders values, not text", "filter[price][gt]=9.9", []string{"Washer-M6"}},
+		{"a decimal's upper bound", "filter[price][lte]=0.08", []string{"nut-m4", "nut-m6", "washer-m4"}},
+		{"a datetime range", "filter[madeAt][gte]=2026-02-10T08:30:00Z&filter[madeAt][lt]=2026-03-15T12:00:00Z", []string{"bolt-m6", "nut-m4"}},
+		{"a date range leaves a null out", "filter[retiredOn][lt]=2026-07-01", []string{"nut-m4"}},
+
+		// contains.
+		{"contains, in any case", "filter[name][contains]=M6", []string{"Washer-M6", "bolt-m6", "nut-m6"}},
+		{"contains keeps its spaces", "filter[name][contains]=+m6", nil},
+
+		// isNull.
+		{"isNull true", "filter[supplierId][isNull]=true", []string{"nut-m6", "washer-m4"}},
+		{"isNull false", "filter[retiredOn][isNull]=false", []string{"nut-m4", "washer-m4"}},
+		{"isNull false beside a range", "filter[retiredOn][isNull]=false&filter[retiredOn][gt]=2026-06-30", []string{"washer-m4"}},
+
+		// Members hold at once.
+		{"two fields", "filter[kind]=nut&filter[discontinued]=false", []string{"nut-m6"}},
+		{"three fields and an operator each", "filter[kind][in]=bolt,nut&filter[quantity][gte]=12&filter[supplierId]=" + acme, []string{"bolt-m4", "nut-m4"}},
+		{"two members no part holds at once", "filter[kind]=bolt&filter[discontinued]=true", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parts(t, server, tc.query); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("%s: parts = %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// The filter reaches the implementation typed (D106): a member per field,
+// nil for a field the request does not filter by, each operator the
+// request sent set on it and no other, its values decoded as the field's
+// type.
+func TestListPartsHandsTheImplementationATypedFilter(t *testing.T) {
+	server, impl := serve(t)
+	page(t, get(t, server, "/api/parts", ""))
+	if got := impl.filters[0]; !reflect.DeepEqual(got, api.CatalogListPartsFilter{}) {
+		t.Fatalf("no filter sent: the implementation got %+v", got)
+	}
+
+	query := "filter[quantity][gte]=10&filter[quantity][lt]=100&filter[kind][in]=bolt,+nut&filter[supplierId][isNull]=false" +
+		"&filter[name][contains]=m&filter[madeAt][gt]=2026-01-01T00:00:00Z&filter[price]=0.10&filter[discontinued]=false" +
+		"&filter[weight][lte]=2.5&filter[id][in]=" + bins[1].id + "&filter[retiredOn][isNull]=true"
+	page(t, get(t, server, "/api/parts", query))
+	ten, hundred, no, yes, m, weight := int64(10), int64(100), false, true, "m", 2.5
+	madeAt, price := mustParse(t, types.ParseTemporalDateTime, "2026-01-01T00:00:00Z"), types.GenericDecimal("0.10")
+	want := api.CatalogListPartsFilter{
+		Id:           &filterparse.Equals[types.IdentityUUID]{In: []types.IdentityUUID{mustParse(t, types.ParseIdentityUUID, bins[1].id)}},
+		Name:         &filterparse.Text[string]{Contains: &m},
+		Kind:         &filterparse.Equals[types.PartKind]{In: []types.PartKind{types.PartKind_Bolt, types.PartKind_Nut}},
+		Quantity:     &filterparse.Ordered[int64]{Gte: &ten, Lt: &hundred},
+		Weight:       &filterparse.Ordered[float64]{Lte: &weight},
+		Price:        &filterparse.Ordered[types.GenericDecimal]{Eq: &price},
+		Discontinued: &filterparse.Equals[bool]{Eq: &no},
+		MadeAt:       &filterparse.Ordered[types.TemporalDateTime]{Gt: &madeAt},
+		RetiredOn:    &filterparse.Ordered[types.TemporalDate]{IsNull: &yes},
+		SupplierId:   &filterparse.Equals[types.IdentityUUID]{IsNull: &no},
+	}
+	got := impl.filters[1]
+	// A time compares by its instant, not its fields.
+	if got.MadeAt == nil || got.MadeAt.Gt == nil || !time.Time(*got.MadeAt.Gt).Equal(time.Time(madeAt)) {
+		t.Fatalf("madeAt = %+v", got.MadeAt)
+	}
+	got.MadeAt.Gt = &madeAt
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the implementation got\n%s\nwant\n%s", describe(got), describe(want))
+	}
+}
+
+// describe is a filter as JSON, for a failure's message.
+func describe(filter api.CatalogListPartsFilter) string {
+	data, err := json.Marshal(filter)
+	if err != nil {
+		return err.Error()
+	}
+	return string(data)
+}
+
+// A filter beside a sort and a cursor (D106, D60): the filters apply to
+// each page, in the page's sort, and a cursor carries none, so the next
+// page is asked with the same filters and one taken under other filters
+// goes on from its position under these.
+func TestListPartsFiltersEachPageOfASort(t *testing.T) {
+	server, impl := serve(t)
+	query := func(sort string) url.Values {
+		return url.Values{"filter[kind][in]": {"bolt,nut"}, "filter[discontinued]": {"false"}, "sort": {sort}, "limit": {"1"}}
+	}
+	for _, tc := range []struct {
+		sort string
+		want [][]string
+	}{
+		{"name", [][]string{{"bolt-m4"}, {"bolt-m6"}, {"nut-m6"}}},
+		{"-name", [][]string{{"nut-m6"}, {"bolt-m6"}, {"bolt-m4"}}},
+		{"quantity", [][]string{{"nut-m6"}, {"bolt-m6"}, {"bolt-m4"}}},
+		{"-quantity", [][]string{{"bolt-m4"}, {"bolt-m6"}, {"nut-m6"}}},
+	} {
+		before := len(impl.pages)
+		if got := walkPath(t, server, "/api/parts", query(tc.sort)); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("sort=%s: pages = %v, want %v", tc.sort, got, tc.want)
+		}
+		// Every page's request carried the sort and the same filter.
+		sort, _ := paging.ParseSort(tc.sort)
+		for i, request := range impl.pages[before:] {
+			filter := impl.filters[before+i]
+			if request.Sort != sort || request.Limit != 1 || (request.Cursor == "") != (i == 0) ||
+				filter.Kind == nil || len(filter.Kind.In) != 2 || filter.Discontinued == nil || *filter.Discontinued.Eq {
+				t.Errorf("sort=%s: page %d: request %+v, filter %s", tc.sort, i, request, describe(filter))
+			}
+		}
+	}
+
+	// Two parts hold 40, which their ids order, in the sort's direction.
+	if got, want := walkPath(t, server, "/api/parts", url.Values{"filter[quantity]": {"40"}, "sort": {"-quantity"}, "limit": {"1"}}), [][]string{{"nut-m4"}, {"bolt-m4"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a tie under -quantity: pages = %v, want %v", got, want)
+	}
+
+	// A cursor taken under no filter, after bolt-m4, goes on under one.
+	_, next := page(t, get(t, server, "/api/parts", ""))
+	after := url.Values{"filter[kind]": {"washer"}, "cursor": {next.(string)}}
+	if got, want := walkPath(t, server, "/api/parts", after), [][]string{{"washer-m4"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("washers after bolt-m4: pages = %v, want %v", got, want)
+	}
+
+	// The next of a filtered page names its sort and no filter.
+	_, next = page(t, get(t, server, "/api/parts", "filter[kind]=nut&sort=-quantity&limit=1"))
+	data, err := base64.RawURLEncoding.DecodeString(next.(string))
+	if err != nil || !strings.HasPrefix(string(data), `{"sort":"-quantity","key":{"quantity":40,"id":`) || strings.Contains(string(data), "nut") {
+		t.Fatalf("next = %s, %v", data, err)
+	}
+}
+
+// filterVectors are the HTTP runtimes' filter vectors
+// (runtime/http/testdata/filter_parity.json).
+type filterVectors struct {
+	Reads []struct {
+		Name    string
+		Query   string
+		Problem map[string]any
+	}
+}
+
+// refusedFilter is the 400 the filter reader answers at a parameter, as
+// the filter vectors hold one: its detail, and details that name the
+// parameter and the reason.
+func refusedFilter(parameter, reason string) map[string]any {
+	return map[string]any{
+		"status": float64(http.StatusBadRequest), "code": "bad_request",
+		"detail":  "Invalid query parameter " + parameter + ": " + reason,
+		"details": map[string]any{"location": "query", "parameter": parameter, "reason": reason},
+	}
+}
+
+// The reader's refusals (D106), each the 400 every server answers at
+// filter[field], which no implementation sees: a field FilterBy does not
+// name, an operator the field's kind does not take, an operator sent
+// twice, and a value an operator does not take. The vectors' refusals
+// that hold under any FilterBy, a key that is no filter[field] and more
+// filters than a request may hold, go through the route as they are.
+func TestListPartsRefusesAFilterAsTheVectors(t *testing.T) {
+	server, impl := serve(t)
+	fields := "id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId"
+	ordered := "eq, in, gt, gte, lt, lte"
+	type refusal struct {
+		name, query string
+		want        map[string]any
+	}
+	cases := []refusal{
+		{"a field FilterBy does not name", "filter[secret]=x", refusedFilter("filter[secret]", "is not a field this operation filters by; expected one of "+fields)},
+		{"a field in another case", "filter[Kind]=nut", refusedFilter("filter[Kind]", "is not a field this operation filters by; expected one of "+fields)},
+		{"an operator no field takes", "filter[kind][neq]=nut", refusedFilter("filter[kind]", "takes no operator neq; expected one of eq, in")},
+		{"an order on an enum", "filter[kind][gt]=nut", refusedFilter("filter[kind]", "takes no operator gt; expected one of eq, in")},
+		{"an order on a uuid", "filter[id][lte]=" + bins[0].id, refusedFilter("filter[id]", "takes no operator lte; expected one of eq, in")},
+		{"an order on a boolean", "filter[discontinued][gte]=true", refusedFilter("filter[discontinued]", "takes no operator gte; expected one of eq, in")},
+		{"an order on text", "filter[name][lt]=m", refusedFilter("filter[name]", "takes no operator lt; expected one of eq, in, contains")},
+		{"contains on a number", "filter[quantity][contains]=4", refusedFilter("filter[quantity]", "takes no operator contains; expected one of "+ordered)},
+		{"contains on a date", "filter[retiredOn][contains]=2026", refusedFilter("filter[retiredOn]", "takes no operator contains; expected one of "+ordered+", isNull")},
+		{"isNull on a field that is never null", "filter[madeAt][isNull]=true", refusedFilter("filter[madeAt]", "takes no operator isNull; expected one of "+ordered)},
+		{"isNull that is no boolean", "filter[supplierId][isNull]=1", refusedFilter("filter[supplierId]", "isNull expects true or false")},
+		{"equality sent both ways", "filter[kind]=nut&filter[kind][eq]=bolt", refusedFilter("filter[kind]", "holds eq more than once")},
+		{"an in of no value", "filter[kind][in]=,", refusedFilter("filter[kind]", "in names no value")},
+		{"contains of no text", "filter[name][contains]=", refusedFilter("filter[name]", "contains needs text")},
+		// The reader refuses before any value is decoded, and before the
+		// page is read.
+		{"a refused field beside a refused value", "filter[quantity]=many&filter[secret]=x", refusedFilter("filter[secret]", "is not a field this operation filters by; expected one of "+fields)},
+		{"a refused field beside a refused limit", "limit=0&filter[secret]=x", refusedFilter("filter[secret]", "is not a field this operation filters by; expected one of "+fields)},
+	}
+	data, err := os.ReadFile("testdata/filter_parity.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors filterVectors
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	fromVectors := 0
+	for _, vector := range vectors.Reads {
+		details, _ := vector.Problem["details"].(map[string]any)
+		// A refusal that names no field of the vector's own FilterBy.
+		if details["parameter"] == "filter" || details["reason"] == "expected filter[field] or filter[field][operator]" {
+			fromVectors++
+			cases = append(cases, refusal{"vector: " + vector.Name, vector.Query, vector.Problem})
+		}
+	}
+	if fromVectors < 5 {
+		t.Fatalf("%d filter vectors hold under any FilterBy, want the malformed keys and the limit", fromVectors)
+	}
+	before := len(impl.filters)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			checkProblem(t, get(t, server, "/api/parts", tc.query), tc.want)
+		})
+	}
+	if len(impl.filters) != before {
+		t.Errorf("a refused filter reached the implementation: %d calls", len(impl.filters)-before)
+	}
+
+	// A list without a FilterBy leaves a filter parameter alone, as it
+	// leaves any parameter it does not declare.
+	if got := walk(t, server, url.Values{"filter[name]": {"anvil"}, "limit": {"5"}}); len(got) != 1 || len(got[0]) != len(stock) {
+		t.Errorf("listItems under a filter parameter: pages = %v", got)
+	}
+}
+
+// A value its field's type refuses (D106) is a 400 that names
+// filter[field]: the route decodes each value as an item of a query list
+// of the field's type, after the reader, and answers every refused field
+// at once. No implementation sees the request.
+func TestListPartsRefusesAValueAtItsField(t *testing.T) {
+	server, impl := serve(t)
+	before := len(impl.filters)
+	for _, tc := range []struct {
+		name, query string
+		fields      []string
+	}{
+		{"an integer that is a word", "filter[quantity]=many", []string{"filter[quantity]"}},
+		{"an integer with a fraction", "filter[quantity][gte]=1.5", []string{"filter[quantity]"}},
+		{"an integer past its range", "filter[quantity]=9007199254740993", []string{"filter[quantity]"}},
+		{"a float that is a word", "filter[weight][lt]=heavy", []string{"filter[weight]"}},
+		{"a float that is no JSON number", "filter[weight]=NaN", []string{"filter[weight]"}},
+		{"a decimal that is a word", "filter[price]=cheap", []string{"filter[price]"}},
+		{"an enum's unknown member", "filter[kind]=gear", []string{"filter[kind]"}},
+		{"an enum's member in another case", "filter[kind]=Nut", []string{"filter[kind]"}},
+		// Identity.UUID reads base62 too, so a short word is one: nope is.
+		{"a uuid that is none", "filter[id]=not-a-uuid", []string{"filter[id]"}},
+		{"a uuid that may be null and is none", "filter[supplierId]=not+a+uuid", []string{"filter[supplierId]"}},
+		{"a boolean that is a word", "filter[discontinued]=maybe", []string{"filter[discontinued]"}},
+		{"a datetime that is a word", "filter[madeAt]=yesterday", []string{"filter[madeAt]"}},
+		{"a datetime bound that is a date of no month", "filter[madeAt][gte]=2026-13-01T00:00:00Z", []string{"filter[madeAt]"}},
+		{"a date that is a word", "filter[retiredOn]=soon", []string{"filter[retiredOn]"}},
+		{"one value of an in", "filter[quantity][in]=1,two,3", []string{"filter[quantity]"}},
+		{"one enum of an in", "filter[kind][in]=bolt,gear", []string{"filter[kind]"}},
+		{"one uuid of an in", "filter[id][in]=" + bins[0].id + ",not-a-uuid", []string{"filter[id]"}},
+		{"two fields, each named", "filter[quantity]=many&filter[kind]=gear&filter[name]=bolt-m4", []string{"filter[kind]", "filter[quantity]"}},
+		{"a refused value before a refused limit", "filter[madeAt]=yesterday&limit=0", []string{"filter[madeAt]"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := get(t, server, "/api/parts", tc.query)
+			if got.status != http.StatusBadRequest || got.body["code"] != "bad_request" || got.body["status"] != float64(http.StatusBadRequest) {
+				t.Fatalf("GET /api/parts?%s = %d %v, want a 400 bad_request", tc.query, got.status, got.body)
+			}
+			errors, _ := got.body["errors"].(map[string]any)
+			var named []string
+			for field, reasons := range errors {
+				if list, _ := reasons.([]any); len(list) == 0 {
+					t.Errorf("errors[%s] holds no reason: %v", field, reasons)
+				}
+				named = append(named, field)
+			}
+			slices.Sort(named)
+			if !reflect.DeepEqual(named, tc.fields) {
+				t.Errorf("GET /api/parts?%s: errors name %v, want %v: %v", tc.query, named, tc.fields, got.body)
+			}
+		})
+	}
+	if len(impl.filters) != before {
+		t.Errorf("a refused value reached the implementation: %d calls", len(impl.filters)-before)
 	}
 }

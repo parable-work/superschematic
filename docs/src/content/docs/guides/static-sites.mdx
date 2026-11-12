@@ -90,7 +90,7 @@ TypeScript SDK at that address:
 import { loadApis } from "../config.generated";
 
 const { shopApi } = await loadApis();
-const products = await shopApi.client({ auth: { token } }).product.listProducts({ inStock: true });
+const products = await shopApi.client({ auth: { token } }).product.listProducts({ filter: { inStock: true } });
 ```
 
 `client` takes the SDK's options but `baseUrl`: `auth`, `credentials` for

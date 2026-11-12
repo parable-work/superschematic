@@ -40,6 +40,14 @@ type argForm struct {
 	// for an unsorted one.
 	Paged bool
 	Sort  *argSort
+	// Filter is the Args' field of the operation's FilterBy (D106), empty
+	// without one, FilterType the API crate's struct it holds, and Filters
+	// a control per field the list filters by, after the arguments': the
+	// form holds what each sent, reads it back from the query's bracket
+	// form, and its parse builds the typed filter of them.
+	Filter     string
+	FilterType string
+	Filters    []*filterControl
 	// ServiceOnly marks the form of an operation whose route admits only a
 	// service caller (@requireService): it has `submit_as(cx, service)`,
 	// which calls it through operations::as_service, in place of
@@ -75,6 +83,118 @@ func (f argForm) InputActs() bool { return f.Input != nil && f.Input.Struct.Acts
 // row_action: a post whose "Find" acts on it, and whose input does not
 // read it.
 func (f argForm) OwnAction() bool { return f.Acts() && !f.InputActs() }
+
+// filterControl is one field of a filtered list's FilterBy in its argument
+// form (D106): a control named for the field, which writes one operator
+// of it in the bracket form, `filter[field]=value` or
+// `filter[field][operator]=value`. A field of an enum is a group of its
+// members' checkboxes, written as `in`; a field of text is a text box,
+// written as `contains`; and any other is its type's control, a boolean's
+// a select of Yes and No, written as equality. The form has no control for
+// a range or for isNull.
+type filterControl struct {
+	// The control, as an argument's of the field's type is: Name is the
+	// form's member (filter_status) and JSONName where its errors are
+	// keyed, the route's parameter, filter[status].
+	*formField
+	// Field is the item's field, by its JSON name, and Member the typed
+	// filter's member of it.
+	Field  string
+	Member string
+	// Operator is the operator the control writes: in, contains or eq.
+	Operator string
+	// Shape is the runtime's type of the field's filter: Equals, Ordered
+	// or Text, and ValueType the Rust type of one value of the field, as
+	// the crate names it: crate::api::types::OrderStatus.
+	Shape     string
+	ValueType string
+}
+
+// The operators a filter's control writes.
+const (
+	filterIn       = "in"
+	filterContains = "contains"
+	filterEq       = "eq"
+)
+
+// ControlName is the control's name, the query parameter it sends:
+// filter[status][in], filter[name][contains], or filter[quantity] for
+// equality.
+func (c *filterControl) ControlName() string {
+	if c.Operator == filterEq {
+		return c.JSONName
+	}
+	return c.JSONName + "[" + c.Operator + "]"
+}
+
+// IsGroup reports whether the control is a group of choices, whose member
+// holds each one chosen.
+func (c *filterControl) IsGroup() bool { return c.Operator == filterIn }
+
+// Decoded reports whether the parse decodes what the control sent into
+// the field's type: every control's but a text box's, whose text is the
+// filter's as it is.
+func (c *filterControl) Decoded() bool { return c.Operator != filterContains }
+
+// Says is what the member holds, for its doc comment.
+func (c *filterControl) Says() string {
+	switch c.Operator {
+	case filterIn:
+		return "the values chosen, any one of them"
+	case filterContains:
+		return "text it holds, in any case"
+	}
+	return "the value it equals"
+}
+
+// PostedExpr reads what a query holds of the field, under `filter`: an
+// in's values and an equality as one more (filter_choices), a contains's
+// text, or an equality's value, sent either way (filter_equal).
+func (c *filterControl) PostedExpr() string {
+	field := `posted.get("filter").get(` + rustString(c.Field) + ")"
+	switch c.Operator {
+	case filterIn:
+		return "filter_choices(" + field + ")"
+	case filterContains:
+		return field + `.get("contains").first()`
+	}
+	return "filter_equal(" + field + ")"
+}
+
+// ReadExpr is the parse's read of a decoded control: its values, or its
+// value, as the JSON a request carries, decoded into the field's type,
+// none sent as none.
+func (c *filterControl) ReadExpr() string {
+	key := rustString(c.JSONName)
+	if c.IsGroup() {
+		return fmt.Sprintf("list::<Option<Vec<%s>>>(&mut errors, %s, &self.%s, %s)", c.ValueType, key, c.Name, c.Read)
+	}
+	return fmt.Sprintf("single::<Option<%s>>(&mut errors, %s, %s(self.%s.as_deref()))", c.ValueType, key, c.Read, c.Name)
+}
+
+// MemberExpr is the typed filter's member of the field: the runtime's
+// filter of its shape with the control's operator set, or None when the
+// control sent nothing.
+func (c *filterControl) MemberExpr() string {
+	shape := "crate::api::runtime::filter::" + c.Shape
+	switch c.Operator {
+	case filterIn:
+		return c.Name + ".map(|in_| " + shape + " { in_, ..Default::default() })"
+	case filterContains:
+		return "self." + c.Name + ".clone().map(|contains| " + shape + " { contains: Some(contains), ..Default::default() })"
+	}
+	return c.Name + ".map(|eq| " + shape + " { eq: Some(eq), ..Default::default() })"
+}
+
+// FilterNames are the fields the form filters by, as the alternatives of
+// a Rust pattern: "status" | "placedAt".
+func (f argForm) FilterNames() string {
+	names := make([]string, len(f.Filters))
+	for i, c := range f.Filters {
+		names[i] = rustString(c.Field)
+	}
+	return strings.Join(names, " | ")
+}
 
 // argSort is the sort of a sorted operation's form (D60, amended): the
 // query parameter its SortBy argument names, and the form's field, which
@@ -170,10 +290,10 @@ func (f argForm) PathFields() []*argField {
 	return out
 }
 
-// ShownArgs reports whether the component renders an argument's control:
-// a path argument's is hidden.
+// ShownArgs reports whether the component renders an argument's control,
+// or a filter's (D106): a path argument's is hidden.
 func (f argForm) ShownArgs() bool {
-	return len(f.PathFields()) < len(f.Fields)
+	return len(f.PathFields()) < len(f.Fields) || len(f.Filters) > 0
 }
 
 // Rows reports whether the embedded input holds rows: the form then
@@ -197,7 +317,8 @@ func (c *crate) FormsUseTypes() bool {
 // argFormsOf is an argument form per operation of inProcess that a form
 // submits, sorted by name: a GET operation with a query argument, whose
 // form is a filter (a GET whose arguments its path carries alone is a
-// link), a paged one (D60), whose page its query carries, and any other
+// link), a paged one (D60), whose page its query carries, one with a
+// FilterBy argument (D106), whose filters its query carries, and any other
 // operation with an argument beside its input (one with only a path
 // argument is a button). inputs are the input forms' structs by type: an
 // operation whose input has none gets no argument form, nor does one with
@@ -206,7 +327,9 @@ func argFormsOf(schemas schemaSet, inProcess []declared, inputs map[string]*form
 	var forms []argForm
 	for _, d := range inProcess {
 		e := d.endpoint
-		paged := e.Page != nil
+		// A page and a filter are each read from the query, as a query
+		// argument is.
+		paged := e.Page != nil || e.Filter != nil
 		if len(e.PathArgs)+len(e.QueryArgs)+len(e.BodyArgs) == 0 && !paged {
 			continue
 		}
@@ -247,6 +370,7 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		Method:    method,
 		IDBase:    kebabCase(e.Namespace) + "-" + kebabCase(e.Name),
 		Paged:     e.Page != nil,
+		Filter:    o.Filter,
 		// The form of a @requireService operation submits as a service.
 		ServiceOnly: o.ServiceOnly,
 	}
@@ -304,8 +428,82 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 	}
 	// The search text is the form's first control (D62).
 	sort.SliceStable(f.Fields, func(i, j int) bool { return f.Fields[i].Search && !f.Fields[j].Search })
+	if e.Filter != nil {
+		if reason, err := s.filterControls(&f, e, op, names); err != nil || reason != "" {
+			return argForm{}, reason, err
+		}
+	}
 	f.render(nil)
 	return f, "", nil
+}
+
+// filterControls adds a control per field of the operation's FilterBy to
+// its form (D106), or says why the form cannot hold them: an argument, or
+// an input's field, is named filter, the query parameter every filter
+// travels under, or one of the form's members is named as a filter's.
+func (s schemaSet) filterControls(f *argForm, e registry.RustEndpoint, op *ir.FieldDef, names map[string]string) (string, error) {
+	if other, taken := names[ir.FilterParam]; taken {
+		return fmt.Sprintf("its filter and %s share a form field's name", other), nil
+	}
+	if op.Filter == nil || len(op.Filter.Fields) != len(e.Filter.Fields) {
+		return "", fmt.Errorf("topcoat: argument form of %s.%s: its filter is not the operation's", e.Namespace, e.Name)
+	}
+	members := map[string]string{"cursor": "its page's cursor", "limit": "its page's limit", "input": "its input", "finds": "its pickers' texts", "row_action": "its row buttons", "overflow": "its overflow"}
+	for _, field := range f.Fields {
+		members[field.Name] = "argument " + field.JSONName
+	}
+	if f.Sort != nil {
+		members[f.Sort.Field] = "its sort"
+	}
+	f.FilterType = e.Filter.TypeName
+	for i, typed := range e.Filter.Fields {
+		field := op.Filter.Fields[i]
+		if field == nil || field.Name != typed.Name || field.TypeRef == nil {
+			return "", fmt.Errorf("topcoat: argument form of %s.%s: filter field %s is not the operation's", e.Namespace, e.Name, typed.Name)
+		}
+		c := s.filterControl(field, typed.Field, typed.Shape, typed.Value.RustType)
+		if other, taken := members[c.Name]; taken {
+			return fmt.Sprintf("its filter of %s and %s share a form member's name, %s", field.Name, other, c.Name), nil
+		}
+		members[c.Name] = "its filter of " + field.Name
+		f.Filters = append(f.Filters, c)
+	}
+	return "", nil
+}
+
+// filterControl builds the control of one field of a filter (D106). Its
+// control and attributes are those a query argument of the field's type
+// gets (argField), a list of it for an enum, whose members are a group of
+// checkboxes, so a boolean is a select of Yes and No, a number a number
+// input and a date a date input. A field of text is a plain text box:
+// what it sends is text the field holds, which the field's own rules do
+// not bind. No control takes the app's choices. member is the typed
+// filter's member of the field, shape the runtime's type of its filter and
+// rustType the Rust type of one value of it.
+func (s schemaSet) filterControl(field *ir.FilterField, member, shape, rustType string) *filterControl {
+	c := &filterControl{Field: field.Name, Member: member, Operator: filterEq, Shape: shape, ValueType: strings.ReplaceAll(rustType, "types::", "crate::api::types::")}
+	ref := ir.TypeRef{Name: field.TypeRef.Name}
+	if field.Kind == ir.FilterKindEnum && s.enum(ref.Name) != nil {
+		c.Operator, ref.IsArray = filterIn, true
+	}
+	arg := &ir.ArgumentDef{Name: field.Name, TypeRef: ref}
+	param := registry.RustParam{Name: field.Name, Field: "filter_" + strings.TrimPrefix(member, "r#"), RustType: "Option<" + rustType + ">"}
+	c.formField = s.argField(arg, param, "query", true).formField
+	c.JSONName, c.Hint, c.Choosable = ir.FilterParam+"["+field.Name+"]", "", false
+	plain := func() {
+		c.Kind, c.Control, c.Read, c.Attrs, c.Options = kindValue, "text", "text", "", nil
+		c.Label = humanize(field.Name)
+	}
+	switch {
+	case field.Kind == ir.FilterKindString:
+		c.Operator = filterContains
+		plain()
+	case c.Control == "textarea" || c.Kind != kindValue && c.Kind != kindGroup:
+		// A type no control holds is its text, compared for equality.
+		c.Operator = filterEq
+		plain()
+	}
+	return c
 }
 
 // render writes the form's view, picks the search pickers by the paths
@@ -469,7 +667,37 @@ func (r *formRenderer) arguments(f argForm, indent int) {
 			r.repeated(sc, a.formField, path, indent)
 		}
 	}
+	for _, c := range f.Filters {
+		r.visible = true
+		r.filter(sc, c, indent)
+	}
 	if f.Input != nil {
 		r.fields(scope{form: "form.input", idBase: f.IDBase}, f.Input.Struct, indent)
 	}
+}
+
+// filter writes the control of one field of a filter (D106): a group of
+// an enum's members, or one control with its label, named as the query
+// parameter it sends, its errors those at the route's parameter of the
+// field, filter[field], whichever operator the control writes.
+func (r *formRenderer) filter(sc scope, c *filterControl, indent int) {
+	value := sc.form + "." + c.Name
+	sent, at := rustString(c.ControlName()), rustString(c.JSONName)
+	if c.IsGroup() {
+		r.use(value)
+		r.line(indent, `<fieldset class="ss-choices" data-field=`+at+">")
+		r.line(indent+1, "<legend>"+rustString(c.Label)+"</legend>")
+		r.errors(indent+1, true, at)
+		for _, option := range c.Options {
+			r.line(indent+1, `<label class="ss-choice"><input type="checkbox" name=`+sent+" value="+rustString(option.Value)+" checked=(checked(&"+value+", "+rustString(option.Value)+"))>"+rustString(option.Label)+"</label>")
+		}
+		r.line(indent, "</fieldset>")
+		return
+	}
+	id := rustString(controlID(sc.idBase, []pathSegment{{key: ir.FilterParam}, {key: c.Field}}))
+	r.line(indent, `<div class="field">`)
+	r.line(indent+1, "<label for="+id+">"+rustString(c.Label)+"</label>")
+	r.control(indent+1, c.formField, value, name{attr: sent, arg: at}, name{attr: id, arg: id}, false, "", "")
+	r.errors(indent+1, false, at)
+	r.line(indent, "</div>")
 }

@@ -288,7 +288,8 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
   refers to an item gives the reference under
   `x-superschematic-reference`, the search argument's property says
   `"x-superschematic-search": true`, and a sorted page's sort argument
-  says `"x-superschematic-sort": true` (see below).
+  says `"x-superschematic-sort": true` (see below). A filtered list's
+  filter is one property, an object (see below).
 - `inputSchemaDigest` is `sha256:` and the hex SHA-256 of `parameters` as
   the generator encodes it (vendor keys first, then `additionalProperties`,
   `type`, `properties`, `required`; in each property its scalar,
@@ -345,6 +346,66 @@ passes it to the method's query object; `tools/index.ts` types the
 parameter as the union of its values, and each vendor key on its
 `JSONSchemaProperty` when a tool holds one. `inputSchemaDigest` changes
 only for the tools whose arguments hold a reference, a search or a sort.
+
+A filtered list's filter (`FilterBy`, D106) is one optional property,
+named as the argument is: a closed object with a property per field a
+caller may filter by. A field's property is `oneOf` two schemas, a value
+of the field's type, for equality, and a closed object of the field's
+operators: `eq`, `gt`, `gte`, `lt` and `lte` a value, `in` an array of 1
+to 100 values, `contains` a string of at least one character, and
+`isNull` a boolean. The two differ in their `type`, so the field's
+property has none of its own. For
+`filter: FilterBy<PartView, ["id", "name", "kind", "quantity"]>`, with the
+property of `kind`, an enum, shown:
+
+```json
+"filter": {
+  "additionalProperties": false,
+  "type": "object",
+  "description": "The rows the list keeps: each member is a field (id, name, kind, quantity) holding a value, for equality, or an object of operators, and all of them hold at once.",
+  "properties": {
+    "kind": {
+      "description": "Filters by kind: a value it equals, or its operators (eq, in).",
+      "oneOf": [
+        {"type": "string", "enum": ["bolt", "nut", "washer"]},
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "eq": {"type": "string", "description": "The field equals the value.", "enum": ["bolt", "nut", "washer"]},
+            "in": {
+              "type": "array",
+              "description": "The field is one of the values, at most 100.",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {"type": "string", "enum": ["bolt", "nut", "washer"]}
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+The tool's description names the fields after the page's sentence, and
+asks a paged tool for the same filter with each cursor, since a cursor
+holds no filter:
+
+```
+Filters: `filter` keeps the items its members match, a member per field (id, name, kind, quantity), each a value or an object of operators; pass the same `filter` with each `cursor`.
+```
+
+`tools/mcp-binding.json` binds the filter as a query argument,
+`{"toolParameter": "filter", "required": false, "kind": "query", "target": "query.filter"}`,
+among the sources of the method's query object. `invokeTool` passes the
+object there, and the SDK method writes it into the query as the bracket
+form, `filter[field]=value` and `filter[field][op]=value`
+([Filters](/superschematic/guides/api-routes/#filters)). `tools/index.ts`
+types the parameter as the SDK's own filter type, here
+`CatalogListPartsFilter`, and leaves a `JSONSchemaProperty`'s `type`
+optional when a tool takes a filter. `ir.ToolSchemaProperty` writes no
+`type` for a property without one.
 
 `ir.ToolManifest` (in the `ir` module) is the Go type of this document and
 `ir.ToolBindingManifest` of `tools/mcp-binding.json`. A test in the SDK
@@ -497,8 +558,12 @@ route of the tool's operation that carries the endpoint request's
 headers (its `Authorization`, cookie, `Service-Authorization` and
 forwarded addresses) and its request id. Each argument goes where the
 route reads it: a path argument into the path, a query argument into the
-query string (a list as repeated keys), and an input type's fields or the
+query string (a list as repeated keys), a filter (`FilterBy`, D106) into
+the query string as the bracket form, and an input type's fields or the
 body arguments into the JSON body, as `tools/mcp-binding.json` binds them.
+A filter's member that holds a value is `filter[field]=value`, and one
+that holds an object of operators is `filter[field][op]=value` for each,
+an `in`'s list joined by commas.
 So the route's rate limit, body limit, permission check, validation and
 timeout apply to the call as to a request:
 
@@ -512,7 +577,18 @@ timeout apply to the call as to a request:
 - an argument the tool does not take is a tool error with a 400 problem,
   `get_order takes id, not "extra"`, and a tool the API does not offer
   the caller is the JSON-RPC error `-32602`,
-  `fixture-mcp has no tool "delete_order"`.
+  `fixture-mcp has no tool "delete_order"`;
+- a filter that has no bracket form is a tool error with a 400 problem
+  that names the member, and the route is not called: a filter that is
+  no object, a member that is null or a list
+  (`list_parts: filter.kind is a value, for equality, or an object of operators`,
+  for a tool whose handle is `list_parts`), and an operand that is null,
+  an object, or a list for any operator but `in`. So is a filter the
+  route would read as another one, as the SDKs refuse it before a
+  request: an `in` of more than 100 values, an `in`'s value that is blank
+  or holds a comma or a space at either end, and a `contains` of no text.
+  A field or an operator the operation does not take goes to the route as
+  it is, whose 400 at `filter[field]` is the tool error.
 
 A tool whose `@mcp` says `invocationPolicy: "ask"` reads
 `"invocationPolicy": "ask"` in its `_meta`, as on the engine's endpoint,

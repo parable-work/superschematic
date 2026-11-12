@@ -18,15 +18,52 @@ use superschematic_http_runtime::{
     RequestContext, RouterOptions, ScalarConstraints,
 };
 use superschematic_http_runtime::page::{PageSpec, SortSpec};
+use superschematic_http_runtime::filter::{self, FieldSpec, FilterSpec, Operator};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 // How the router decodes each operation's arguments (ParamSpec): the kind,
-// the declared bounds and the scalar's own constraints of each.
+// the declared bounds and the scalar's own constraints of each. A
+// filter's field has one too, filter[field], for each of its values (D106).
 static CATALOG_LIST_ITEMS_IDS: ParamSpec = ParamSpec::new("ids", ParamKind::Uuid).array().list_max(5).check(types::validators::scalars::validate_identity_uuid);
 static CATALOG_LIST_ITEMS_IN_STOCK: ParamSpec = ParamSpec::new("inStock", ParamKind::Boolean);
 static CATALOG_GET_ITEM_ITEM_ID: ParamSpec = ParamSpec::new("itemId", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
+static CATALOG_LIST_PARTS_FILTER_ID: ParamSpec = ParamSpec::new("filter[id]", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
+static CATALOG_LIST_PARTS_FILTER_NAME: ParamSpec = ParamSpec::new("filter[name]", ParamKind::String).required();
+static CATALOG_LIST_PARTS_FILTER_KIND: ParamSpec = ParamSpec::new("filter[kind]", ParamKind::Enum).required().enum_values(&["bolt", "nut", "washer"]);
+static CATALOG_LIST_PARTS_FILTER_QUANTITY: ParamSpec = ParamSpec::new("filter[quantity]", ParamKind::Integer).required().scalar(ScalarConstraints::new("Generic.Int64").min(-9007199254740991.0).max(9007199254740991.0));
+static CATALOG_LIST_PARTS_FILTER_WEIGHT: ParamSpec = ParamSpec::new("filter[weight]", ParamKind::Number).required();
+static CATALOG_LIST_PARTS_FILTER_PRICE: ParamSpec = ParamSpec::new("filter[price]", ParamKind::Decimal).required().parse(parse_generic_decimal);
+static CATALOG_LIST_PARTS_FILTER_DISCONTINUED: ParamSpec = ParamSpec::new("filter[discontinued]", ParamKind::Boolean).required();
+static CATALOG_LIST_PARTS_FILTER_MADE_AT: ParamSpec = ParamSpec::new("filter[madeAt]", ParamKind::DateTime).required().check(types::validators::scalars::validate_temporal_date_time);
+static CATALOG_LIST_PARTS_FILTER_RETIRED_ON: ParamSpec = ParamSpec::new("filter[retiredOn]", ParamKind::Date).required().parse(parse_temporal_date);
+static CATALOG_LIST_PARTS_FILTER_SUPPLIER_ID: ParamSpec = ParamSpec::new("filter[supplierId]", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
+
+// A filter's value of a date or a decimal is read by its scalar's parse
+// (D106), the scalar core's, which gives its canonical text.
+
+/// `Generic.Decimal` as the scalar core parses it.
+fn parse_generic_decimal(text: &str) -> Result<String, Vec<schema::ValidationError>> {
+    scalar_parse("Generic.Decimal", text)
+}
+
+/// `Temporal.Date` as the scalar core parses it.
+fn parse_temporal_date(text: &str) -> Result<String, Vec<schema::ValidationError>> {
+    scalar_parse("Temporal.Date", text)
+}
+
+/// The scalar core's parse of text as the scalar `canonical`: its
+/// canonical text, or the core's error.
+fn scalar_parse(canonical: &str, text: &str) -> Result<String, Vec<schema::ValidationError>> {
+    let registry = superscalar::Registry::builtin();
+    match registry.scalar(canonical) {
+        Some(scalar) => scalar
+            .parse(registry, text)
+            .map_err(|error| vec![schema::ValidationError::new(error.kind.as_str(), error.message)]),
+        None => Err(vec![schema::ValidationError::new("enum", format!("unknown scalar: {canonical}"))]),
+    }
+}
 
 #[derive(Clone)]
 pub struct RouterState {
@@ -48,6 +85,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/baskets", post(handle_catalog_place_basket));
     router = router.route("/api/items", get(handle_catalog_list_items));
     router = router.route("/api/items/{itemId}", get(handle_catalog_get_item));
+    router = router.route("/api/parts", get(handle_catalog_list_parts));
     router = router.route("/api/tags", get(handle_catalog_list_tags));
     router
         .with_state(state)
@@ -245,6 +283,142 @@ async fn handle_catalog_get_item(
         .catalog
         .get_item(ctx, args)
         .await;
+    operation_response(result, request_id.as_deref())
+}
+
+/// Decodes the arguments of catalog.listParts in the order the TypeScript
+/// router reads them: path, query, the filter, the page, input, then body fields.
+fn decode_catalog_list_parts(query: &QueryValues) -> Result<CatalogListPartsArgs, ApiError> {
+    Ok(CatalogListPartsArgs {
+        filter: decode_catalog_list_parts_filter(query)?,
+        page: CatalogListPartsArgs::PAGE.unbind(CatalogListPartsArgs::PAGE.query(query)?)?,
+    })
+}
+
+/// Reads what a request of Catalog.listParts filters by (FilterBy, D106):
+/// its filters, the bracket form's `filter[field]=value` and
+/// `filter[field][operator]=value`, by the runtime's reader, whose refusal
+/// is the 400 every server answers at `filter[field]`, then each field's,
+/// its values decoded as items of a query list of the field's type.
+fn decode_catalog_list_parts_filter(query: &QueryValues) -> Result<CatalogListPartsFilter, ApiError> {
+    let filters = CatalogListPartsArgs::FILTER.query(query)?;
+    Ok(CatalogListPartsFilter {
+        id: filter::decode_equals(&filters, "id", &CATALOG_LIST_PARTS_FILTER_ID)?,
+        name: filter::decode_text(&filters, "name", &CATALOG_LIST_PARTS_FILTER_NAME)?,
+        kind: filter::decode_equals(&filters, "kind", &CATALOG_LIST_PARTS_FILTER_KIND)?,
+        quantity: filter::decode_ordered(&filters, "quantity", &CATALOG_LIST_PARTS_FILTER_QUANTITY)?,
+        weight: filter::decode_ordered(&filters, "weight", &CATALOG_LIST_PARTS_FILTER_WEIGHT)?,
+        price: filter::decode_ordered(&filters, "price", &CATALOG_LIST_PARTS_FILTER_PRICE)?,
+        discontinued: filter::decode_equals(&filters, "discontinued", &CATALOG_LIST_PARTS_FILTER_DISCONTINUED)?,
+        made_at: filter::decode_ordered(&filters, "madeAt", &CATALOG_LIST_PARTS_FILTER_MADE_AT)?,
+        retired_on: filter::decode_ordered(&filters, "retiredOn", &CATALOG_LIST_PARTS_FILTER_RETIRED_ON)?,
+        supplier_id: filter::decode_equals(&filters, "supplierId", &CATALOG_LIST_PARTS_FILTER_SUPPLIER_ID)?,
+    })
+}
+
+impl CatalogListPartsFilter {
+    /// Checks a filter a caller built, in-process rather than in a request,
+    /// as the router checks a request's: each member by its field's
+    /// operators, then its values by the field's type, a refusal the 400
+    /// the router answers at `filter[field]`.
+    pub fn check(&self) -> Result<(), ApiError> {
+        if let Some(by) = &self.id {
+            by.check(&CatalogListPartsArgs::FILTER, "id", &CATALOG_LIST_PARTS_FILTER_ID)?;
+        }
+        if let Some(by) = &self.name {
+            by.check(&CatalogListPartsArgs::FILTER, "name", &CATALOG_LIST_PARTS_FILTER_NAME)?;
+        }
+        if let Some(by) = &self.kind {
+            by.check(&CatalogListPartsArgs::FILTER, "kind", &CATALOG_LIST_PARTS_FILTER_KIND)?;
+        }
+        if let Some(by) = &self.quantity {
+            by.check(&CatalogListPartsArgs::FILTER, "quantity", &CATALOG_LIST_PARTS_FILTER_QUANTITY)?;
+        }
+        if let Some(by) = &self.weight {
+            by.check(&CatalogListPartsArgs::FILTER, "weight", &CATALOG_LIST_PARTS_FILTER_WEIGHT)?;
+        }
+        if let Some(by) = &self.price {
+            by.check(&CatalogListPartsArgs::FILTER, "price", &CATALOG_LIST_PARTS_FILTER_PRICE)?;
+        }
+        if let Some(by) = &self.discontinued {
+            by.check(&CatalogListPartsArgs::FILTER, "discontinued", &CATALOG_LIST_PARTS_FILTER_DISCONTINUED)?;
+        }
+        if let Some(by) = &self.made_at {
+            by.check(&CatalogListPartsArgs::FILTER, "madeAt", &CATALOG_LIST_PARTS_FILTER_MADE_AT)?;
+        }
+        if let Some(by) = &self.retired_on {
+            by.check(&CatalogListPartsArgs::FILTER, "retiredOn", &CATALOG_LIST_PARTS_FILTER_RETIRED_ON)?;
+        }
+        if let Some(by) = &self.supplier_id {
+            by.check(&CatalogListPartsArgs::FILTER, "supplierId", &CATALOG_LIST_PARTS_FILTER_SUPPLIER_ID)?;
+        }
+        Ok(())
+    }
+}
+
+impl CatalogListPartsArgs {
+    /// The route's FilterBy (D106): the fields a request filters by and
+    /// the operators each takes, by which the router reads the
+    /// `filter[field]` and `filter[field][operator]` query parameters into
+    /// `filter`, and `check` holds a caller's `filter`.
+    pub const FILTER: FilterSpec = FilterSpec::new(&[
+        FieldSpec::new("id", &[Operator::Eq, Operator::In]),
+        FieldSpec::new("name", &[Operator::Eq, Operator::In, Operator::Contains]),
+        FieldSpec::new("kind", &[Operator::Eq, Operator::In]),
+        FieldSpec::new("quantity", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("weight", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("price", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("discontinued", &[Operator::Eq, Operator::In]),
+        FieldSpec::new("madeAt", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("retiredOn", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte, Operator::IsNull]),
+        FieldSpec::new("supplierId", &[Operator::Eq, Operator::In, Operator::IsNull]),
+    ]);
+
+    /// The route's @paginated limits (D60): the router reads the `cursor`
+    /// and `limit` query parameters into `page` by them, and `check` holds
+    /// a caller's `page` to them.
+    /// Its sort (D60, amended) is the `sort` query parameter, which the
+    /// router reads after the limit; `PAGE.unbind` fills its default in and
+    /// unbinds the cursor, and `Page::bind` binds the next to it, in the
+    /// router and in an in-process call alike.
+    pub const PAGE: PageSpec = PageSpec::new(2, 5).sorted(SortSpec::new("sort", &["name", "quantity"], "name"));
+
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, the filter by its fields', the page by the route's limits,
+    /// then the input by its type's, a refusal the 400 the router answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        self.filter.check()?;
+        Self::PAGE.check(&self.page)?;
+        Ok(())
+    }
+}
+
+async fn handle_catalog_list_parts(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Response {
+    let request_id = request_id_from_headers(&headers);
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let args = match decode_catalog_list_parts(&query) {
+        Ok(args) => args,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(method_from_str("get"), "/api/parts".to_string());
+    ctx.headers = headers_to_map(&headers);
+    ctx.query_params = query.last_values();
+    // The page's next names the sort it was read in (D60, amended).
+    let page = args.page.clone();
+    let result = state
+        .implementations
+        .catalog
+        .list_parts(ctx, args)
+        .await
+        .and_then(|listed| listed.bind(&page));
     operation_response(result, request_id.as_deref())
 }
 

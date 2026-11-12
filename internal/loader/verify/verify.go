@@ -140,18 +140,20 @@ type Input struct {
 
 	// Database is the loaded schema of the API's database
 	// (ir.Schema.Database), which @behaviorOperations sets read their
-	// tables from (D103). The loader reads it for an API with such a set
-	// and leaves it nil otherwise.
+	// tables from (D103) and @tableOperation operations theirs (D106). The
+	// loader reads it for an API with such a set or operation and leaves
+	// it nil otherwise.
 	Database *ir.Schema
 
 	// DependencySchemas holds the loaded schemas of the dependencies whose
-	// types a RefersTo names (D61), or a SortBy operation lists (D60,
-	// amended), or a MemoryStore schema's payloads and enum parts name
-	// (D75), by service name, which ResolveReference reads a target and
-	// its options from, and checkSorts an item, when the schema does not
-	// declare it. The loader reads a dependency only for a reference or a
-	// sorted list that names a type the schema imports from it, and leaves
-	// the map nil otherwise.
+	// types a RefersTo names (D61), or a SortBy or FilterBy operation
+	// lists (D60, amended; D106), or a MemoryStore schema's payloads and
+	// enum parts name (D75), by service name, which ResolveReference reads
+	// a target and its options from, and checkSorts and checkFilters an
+	// item, when the schema does not declare it. The loader reads a
+	// dependency only for a reference or a sorted or filtered list that
+	// names a type the schema imports from it, and leaves the map nil
+	// otherwise.
 	DependencySchemas map[string]*ir.Schema
 }
 
@@ -286,6 +288,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkReferences(schema, in, r)
 	checkSearches(schema, r)
 	checkSorts(schema, in, r)
+	checkFilters(schema, in, r)
+	checkTableOperations(schema, in, r)
 	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)
 	}

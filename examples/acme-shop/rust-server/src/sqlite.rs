@@ -476,10 +476,11 @@ fn review_row(row: &Row) -> rusqlite::Result<types::ReviewView> {
 #[async_trait]
 impl OrderImplementation for SqliteShop {
     /// The caller's orders, or every customer's for staff, in the page's
-    /// sort, by when each was placed or by its total, with the given
-    /// statuses, or of every status when there are none. A cursor names
-    /// the order a page ends at, and the caller's condition holds every
-    /// page, so a shopper's pages hold their own orders alone.
+    /// sort, by when each was placed or by its total, of the statuses the
+    /// request's filter keeps (D106), or of every status when it filters
+    /// by none. A cursor names the order a page ends at, and the caller's
+    /// condition holds every page beside the filter's, so a shopper's
+    /// pages hold their own orders alone.
     async fn list_orders(
         &self,
         ctx: RequestContext,
@@ -490,14 +491,21 @@ impl OrderImplementation for SqliteShop {
         if let Some(customer) = customer_of(&ctx)? {
             query.condition("customer_id = ?", [Value::Text(customer)]);
         }
-        if let Some(statuses) = args.statuses.filter(|statuses| !statuses.is_empty()) {
-            // The statuses go in as one JSON array, which json_each reads.
-            let statuses: Vec<&str> = statuses.iter().map(|status| status.as_str()).collect();
-            let statuses = serde_json::to_string(&statuses).map_err(internal)?;
-            query.condition(
-                "status IN (SELECT value FROM json_each(?))",
-                [Value::Text(statuses)],
-            );
+        if let Some(by) = &args.filter.status {
+            // Each operator the request sent is one condition:
+            // filter[status]=placed its eq, filter[status][in] its in_.
+            if let Some(status) = by.eq {
+                query.condition("status = ?", [Value::Text(status.as_str().to_owned())]);
+            }
+            if !by.in_.is_empty() {
+                // The statuses go in as one JSON array, which json_each reads.
+                let statuses: Vec<&str> = by.in_.iter().map(|status| status.as_str()).collect();
+                let statuses = serde_json::to_string(&statuses).map_err(internal)?;
+                query.condition(
+                    "status IN (SELECT value FROM json_each(?))",
+                    [Value::Text(statuses)],
+                );
+            }
         }
         let conn = self.conn();
         query.after(&conn, r#""order""#, args.page.cursor.as_ref(), &sort)?;

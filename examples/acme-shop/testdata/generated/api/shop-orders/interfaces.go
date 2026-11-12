@@ -9,6 +9,7 @@ import (
 	"context"
 	types "example.com/acme/types/go/shop-orders"
 	"fmt"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 	gohttp "net/http"
 )
@@ -41,7 +42,13 @@ type OrderImplementation interface {
 	// ListOrders handles GET /api/orders
 	//
 	// The caller's orders, or every customer's for staff, oldest first:
-	// by when each was placed, or by its total with sort, then by their ids.
+	// by when each was placed, or by its total with sort, then by their ids;
+	// filter[status] keeps the orders of one status, or of several (D106).
+	//
+	// This endpoint filters its list (FilterBy, D106): filter holds what the
+	// request filters by, a member per field, nil for a field it does not
+	// filter by, and each operator the request sent set on it. Every member
+	// set must hold at once.
 	//
 	// This endpoint pages its list (@paginated): page is the request's cursor,
 	// "" for the first page, and its limit, 1 to 100 (20 when the request
@@ -53,7 +60,7 @@ type OrderImplementation interface {
 	// request sends none: a field of placedAt, totalCents, descending when page.Sort.Desc,
 	// ties broken by id in the same direction. The cursor is your own key's;
 	// the route binds it to the sort and back.
-	ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error)
+	ListOrders(ctx context.Context, filter OrderListOrdersFilter, page paging.Request) (paging.Page[types.OrderView], error)
 	// PlaceOrder handles POST /api/orders
 	PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (*types.OrderView, error)
 	// GetOrder handles GET /api/orders/{id}
@@ -127,6 +134,15 @@ type ProductReviewsImplementation interface {
 	ListReviews(ctx context.Context, productId types.IdentityUUID, minRating *float64, q *string, page paging.Request) (paging.Page[types.ReviewView], error)
 	// WriteReview handles POST /api/products/{productId}/reviews
 	WriteReview(ctx context.Context, productId types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error)
+}
+
+// OrderListOrdersFilter is what a request of OrderQueries.listOrders filters by
+// (FilterBy, D106): a member per field, nil for a field the request does
+// not filter by, each operator the request sent set on it. Every member set
+// holds at once.
+type OrderListOrdersFilter struct {
+	// Status filters by status: eq, in.
+	Status *filterparse.Equals[types.OrderStatus]
 }
 
 // Implementations holds all namespace implementation interfaces.

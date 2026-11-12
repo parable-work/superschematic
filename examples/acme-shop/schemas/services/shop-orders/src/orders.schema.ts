@@ -2,6 +2,7 @@ import { Generic, Identity, Temporal } from "superscalar";
 import { Nullable, Validate, display, docs } from "@superschematic/schema";
 import {
   Authenticated,
+  FilterBy,
   HttpMethod,
   QueryParam,
   RefersTo,
@@ -117,13 +118,14 @@ export class OrderQueries extends Authenticated {
   }
 
   // The caller's orders, or every customer's for staff, oldest first:
-  // by when each was placed, or by its total with sort, then by their ids.
+  // by when each was placed, or by its total with sort, then by their ids;
+  // filter[status] keeps the orders of one status, or of several (D106).
   @rest(HttpMethod.GET, "orders")
   @requirePermission(["orders.read"])
   @paginated({ defaultLimit: 20, maxLimit: 100, defaultSort: "placedAt" })
   listOrders(
-    statuses: QueryParam<Nullable<OrderStatus[]>>,
-    sort: SortBy<OrderView, ["placedAt", "totalCents"]>
+    sort: SortBy<OrderView, ["placedAt", "totalCents"]>,
+    filter: FilterBy<OrderView, ["status"]>
   ): OrderView[] {
     throw new Error("schema declaration only");
   }

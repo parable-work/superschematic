@@ -1,6 +1,6 @@
 import { Generic, Identity, Temporal } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
-import { Authenticated, HttpMethod, QueryParam, rateLimit, requirePermission, rest, source } from "@superschematic/api";
+import { Authenticated, FilterBy, HttpMethod, QueryParam, rateLimit, requirePermission, rest, source } from "@superschematic/api";
 import { Product } from "@acme/shop-db";
 
 // What the API returns for a product: the columns of the Product table a
@@ -56,9 +56,11 @@ export class ProductQueries extends Authenticated {
     throw new Error("schema declaration only");
   }
 
+  // The products, or with filter[inStock] the ones in stock, or out of it
+  // (D106).
   @rest(HttpMethod.GET, "products")
   @requirePermission(["products.read"])
-  listProducts(inStock: QueryParam<boolean>): ProductView[] {
+  listProducts(filter: FilterBy<ProductView, ["inStock"]>): ProductView[] {
     throw new Error("schema declaration only");
   }
 }

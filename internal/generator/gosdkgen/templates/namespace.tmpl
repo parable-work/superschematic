@@ -2,6 +2,9 @@ package namespaces
 
 import (
 	"context"
+{{- if .NeedsJSON}}
+	"encoding/json"
+{{- end}}
 {{- if .NeedsFmt}}
 	"fmt"
 {{- end}}
@@ -104,6 +107,65 @@ type {{.ScalarInputStructName}} struct {
 }
 
 {{- end}}
+{{- if .Filter}}
+// {{.FilterStructName}} is the filter of {{.MethodName}} (FilterBy, D106): the rows
+// the list keeps. Each member is a field's filter, nil for none: Eq, and
+// In, one of the values, on every field; Gt, Gte, Lt and Lte on a number,
+// a date and a time; Contains, the text a value holds in any case, on
+// text; and IsNull, true for the rows whose field is null and false for
+// the others, on a field that may be null. A row is kept when every
+// member holds. The method sends the filter as filter[field]=value and
+// filter[field][op]=value, and refuses, before the request, an In of more
+// than {{$.FilterMaxInValues}} values or of one that is blank or holds a comma or surrounding
+// space, a Contains of no text, and more than {{$.FilterMaxFilters}} filters.
+type {{.FilterStructName}} struct {
+	{{- range .FilterFields}}
+	{{.GoName}} *{{.GoType}} `json:"{{.Name}},omitempty"`
+	{{- end}}
+}
+
+// Filters are the filters the members set, field by field, which
+// filterparse.Query writes as the bracket form. A nil filter is none.
+func (f *{{.FilterStructName}}) Filters() []filterparse.Filter {
+	if f == nil {
+		return nil
+	}
+	var filters []filterparse.Filter
+	{{- range .FilterFields}}
+	filters = append(filters, f.{{.GoName}}.Filters("{{.Name}}")...)
+	{{- end}}
+	return filters
+}
+
+// UnmarshalJSON reads the filter as a tool call sends it: an object with
+// a member per field, each a value, for equality, or an object of the
+// field's operators. It refuses a field the filter does not hold and an
+// operator the field does not take.
+func (f *{{.FilterStructName}}) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	var filter {{.FilterStructName}}
+	for name, member := range members {
+		var err error
+		switch name {
+		{{- range .FilterFields}}
+		case "{{.Name}}":
+			filter.{{.GoName}}, err = filterMember(member, func(m *{{.GoType}}) any { return &m.Eq })
+		{{- end}}
+		default:
+			err = fmt.Errorf("the filter has no such field")
+		}
+		if err != nil {
+			return fmt.Errorf("{{.Filter.Argument}}.%s: %w", name, err)
+		}
+	}
+	*f = filter
+	return nil
+}
+
+{{- end}}
 {{- if .HasQueryParams}}
 type {{.QueryStructName}} struct {
 	{{- range .QueryParams}}
@@ -118,6 +180,10 @@ type {{.QueryStructName}} struct {
 	{{- else}}
 	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
 	{{- end}}
+	{{- end}}
+	{{- if .Filter}}
+	// {{.FilterGoName}} keeps the rows its members find (D106); nil keeps every row.
+	{{.FilterGoName}} *{{.FilterStructName}} `json:"{{.Filter.Argument}},omitempty"`
 	{{- end}}
 }
 
@@ -140,6 +206,11 @@ type {{.FilesStructName}} struct {
 // It returns one page of the list (D60): page.Cursor is the Next of the
 // page before, "" for the first page, and page.Limit the most items the
 // page holds, 1 to {{.Page.MaxLimit}}, or 0 for {{.Page.DefaultLimit}}. {{.AllMethodName}} yields every item.
+{{- end}}
+{{- if .Filter}}
+//
+// query.{{.FilterGoName}} keeps the rows its members find (D106){{if .Page}}; a cursor holds no
+// filter, so each next page is asked with the same one, as {{.AllMethodName}} does{{end}}.
 {{- end}}
 func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- template "parameters" .}}
@@ -319,7 +390,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	}
 	{{- end}}
 
-	{{- if or .HasQueryParams .Filterable .Page}}
+	{{- if or .HasQueryParams .Page}}
 	{{- if .Page}}
 	queryValues := url.Values{}
 	{{- else}}
@@ -341,18 +412,20 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		runtime.AddQueryParam(queryValues, "{{.Name}}", query.{{.GoName}})
 		{{- end}}
 		{{- end}}
-	}
-	{{- end}}
-	{{- if .Filterable}}
-	// Delegate to filterparse.Serialize so the wire contract lives in one
-	// place (the runtime package). Merge into any existing query params.
-	if serialized := filterparse.Serialize(filters); len(serialized) > 0 {
-		if queryValues == nil {
-			queryValues = url.Values{}
+		{{- if .Filter}}
+		// The filter (D106) travels as the bracket form, filter[field]=value
+		// and filter[field][op]=value, which filterparse.Query writes. One
+		// the route's reader would refuse or read as something else is
+		// refused here (filterparse.Check).
+		filters := query.{{.FilterGoName}}.Filters()
+		if err := filterparse.Check(filters); err != nil {
+			var zero {{.OutputGoType}}
+			return zero, filterError(err)
 		}
-		for k, v := range serialized {
-			queryValues[k] = v
+		for name, values := range filterparse.Query(filters) {
+			queryValues[name] = values
 		}
+		{{- end}}
 	}
 	{{- end}}
 	{{- if .Page}}
@@ -552,7 +625,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		ctx,
 		"{{.HTTPMethod}}",
 		path,
-		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Filterable .Page}}
+		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Page}}
 		queryValues,
 		{{- else}}
 		nil,
@@ -569,7 +642,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		ctx,
 		"{{.HTTPMethod}}",
 		path,
-		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Filterable .Page}}
+		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Page}}
 		queryValues,
 		{{- else}}
 		nil,
@@ -680,8 +753,7 @@ func (n *{{$.Namespace.StructName}}) {{.AllMethodName}}(
 			{{- range .PathParams}}, {{.GoName}}{{end}}
 			{{- if or .HasInput .HasScalarArgs}}, input{{end}}
 			{{- if .HasFileUpload}}, files{{end}}
-			{{- if .HasQueryParams}}, query{{end}}
-			{{- if .Filterable}}, filters{{end}}, page)
+			{{- if .HasQueryParams}}, query{{end}}, page)
 	})
 }
 {{- end}}
@@ -704,9 +776,6 @@ func (n *{{$.Namespace.StructName}}) {{.AllMethodName}}(
 	{{- end}}
 	{{- if .HasQueryParams}}
 	query *{{.QueryStructName}},
-	{{- end}}
-	{{- if .Filterable}}
-	filters []filterparse.Filter,
 	{{- end}}
 	{{- if .HasEncryptedBody}}
 	options *runtime.EncryptedRequestOptions,

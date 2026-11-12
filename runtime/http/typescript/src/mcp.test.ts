@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { mountManualOperation, mountOperation, type RouterRuntimeOptions } from './hono';
-import type { Authenticator, OperationSpec } from './index';
+import { readFilter, type Authenticator, type FilterSpec, type OperationSpec } from './index';
 import { MCP_MAX_BODY_BYTES, McpUnknownToolError, mountMcp, serveMcp, type McpRouteTool, type McpToolSet } from './mcp';
 
 /*
@@ -255,6 +255,123 @@ describe('the router endpoint', () => {
     const [reply] = await messages(await post(app, rpc('tools/call', { name: 'get_item', arguments: { id: 'i1' } }), { 'x-api-key': 'k1' }));
     expect(reply.result.structuredContent.by).toBe('service-key');
     expect((await post(app, rpc('tools/list'))).status).toBe(401);
+  });
+
+  describe('a filter argument (FilterBy, D106)', () => {
+    const listParts = {
+      name: 'listParts',
+      namespace: 'item',
+      method: 'GET',
+      path: '/api/parts',
+      pathParams: [],
+      queryParams: [{ name: 'tag', kind: 'string', required: false }],
+      bodyParams: [],
+      auth: { public: true, required: false, permissions: [] },
+      manual: false,
+    } as const satisfies OperationSpec;
+    const filter = {
+      fields: [
+        { name: 'name', operators: ['eq', 'in', 'contains'], value: { name: 'filter[name]', kind: 'string', required: false } },
+        {
+          name: 'quantity',
+          operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'],
+          value: { name: 'filter[quantity]', kind: 'integer', required: false },
+        },
+        { name: 'discontinued', operators: ['eq', 'in'], value: { name: 'filter[discontinued]', kind: 'boolean', required: false } },
+        { name: 'retiredOn', operators: ['eq', 'in', 'isNull'], value: { name: 'filter[retiredOn]', kind: 'string', required: false } },
+      ],
+    } as const satisfies FilterSpec;
+
+    /** A router whose route answers the filter it read and its query's filter keys, and whose tool takes the filter as `where`. */
+    function parts(): Hono {
+      const app = new Hono();
+      mountOperation(app, listParts, async (ctx, request) => ({
+        filter: readFilter(ctx.query, filter),
+        tag: request.query.tag ?? null,
+        keys: [...ctx.query.keys()].filter(key => key.startsWith('filter')),
+      }));
+      const args: McpRouteTool['arguments'] = [
+        { key: 'tag', in: 'query', name: 'tag' },
+        { key: 'where', in: 'filter', name: 'filter' },
+      ];
+      const tools: McpRouteTool[] = [{ ...tool('list_parts', 'ping', args), operation: 'listParts' }];
+      mountMcp(app, { listParts }, tools, {}, { api: 'items-api', version: '1.0.0', requiresAuth: false });
+      return app;
+    }
+    const list = async (args: unknown) => (await call(parts(), 'none', 'list_parts', args)).result;
+
+    test('reaches the route as the bracket form: a value is equality, an object its operators, an in joined by commas', async () => {
+      const result = await list({
+        tag: 'steel',
+        where: {
+          name: 'Hex bolt',
+          quantity: { gte: 2, lt: 10, in: [3, 4] },
+          discontinued: false,
+          retiredOn: { isNull: true },
+        },
+      });
+      expect(result.isError).toBeUndefined();
+      expect(result.structuredContent).toEqual({
+        filter: {
+          name: { eq: 'Hex bolt' },
+          quantity: { in: [3, 4], gte: 2, lt: 10 },
+          discontinued: { eq: false },
+          retiredOn: { isNull: true },
+        },
+        tag: 'steel',
+        keys: ['filter[name]', 'filter[quantity][gte]', 'filter[quantity][lt]', 'filter[quantity][in]', 'filter[discontinued]', 'filter[retiredOn][isNull]'],
+      });
+      const text = await list({ where: { name: { contains: 'a&b=c d', eq: 'x, y ' }, quantity: { eq: 7 } } });
+      expect(text.structuredContent.filter).toEqual({ name: { eq: 'x, y ', contains: 'a&b=c d' }, quantity: { eq: 7 } });
+      // An in of one value, of 100, and of values with a space inside.
+      const hundred = Array.from({ length: 100 }, (_, i) => i);
+      const many = await list({ where: { quantity: { in: hundred }, name: { in: 'Hex nut' } } });
+      expect(many.structuredContent.filter).toEqual({ name: { in: ['Hex nut'] }, quantity: { in: hundred } });
+    });
+
+    test('absent, null or empty, the route reads no filter', async () => {
+      for (const args of [{}, { where: null }, { where: {} }, { where: { quantity: {} } }]) {
+        expect((await list(args)).structuredContent).toEqual({ filter: {}, tag: null, keys: [] });
+      }
+    });
+
+    test("a field, an operator or a value the route refuses is the route's 400 at filter[field]", async () => {
+      for (const [where, detail] of [
+        [{ secret: 1 }, 'Invalid query parameter filter[secret]: is not a field this operation filters by; expected one of name, quantity, discontinued, retiredOn'],
+        [{ name: { gt: 'a' } }, 'Invalid query parameter filter[name]: takes no operator gt; expected one of eq, in, contains'],
+        [{ quantity: 'many' }, 'Invalid query parameter filter[quantity]: expected an integer'],
+        [{ quantity: { in: [] } }, 'Invalid query parameter filter[quantity]: in names no value'],
+        [{ retiredOn: { isNull: 'yes' } }, 'Invalid query parameter filter[retiredOn]: isNull expects true or false'],
+      ] as const) {
+        const result = await list({ where });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toMatchObject({ status: 400, code: 'bad_request', detail });
+      }
+    });
+
+    test('a filter with no bracket form is a tool error that names the member', async () => {
+      for (const [where, detail] of [
+        ['name=x', 'list_parts: where is an object with a member per field'],
+        [['name'], 'list_parts: where is an object with a member per field'],
+        [{ retiredOn: null }, 'list_parts: where.retiredOn is a value, for equality, or an object of operators'],
+        [{ name: ['a', 'b'] }, 'list_parts: where.name is a value, for equality, or an object of operators'],
+        [{ quantity: { gte: null } }, 'list_parts: where.quantity.gte is a value'],
+        [{ quantity: { gte: [1] } }, 'list_parts: where.quantity.gte is a value'],
+        [{ quantity: { in: [1, [2]] } }, 'list_parts: where.quantity.in is a list of values'],
+        [{ name: { in: { a: 1 } } }, 'list_parts: where.name.in is a list of values'],
+        // What the bracket form would read as another filter than the caller sent.
+        [{ name: { in: ['Hex nut', 'Smith, John'] } }, 'list_parts: where.name.in[1] must not be blank or hold a comma or a space at either end'],
+        [{ name: { in: [''] } }, 'list_parts: where.name.in[0] must not be blank or hold a comma or a space at either end'],
+        [{ name: { in: ['a', 'b', ' c'] } }, 'list_parts: where.name.in[2] must not be blank or hold a comma or a space at either end'],
+        [{ name: { in: 'c\u0085' } }, 'list_parts: where.name.in[0] must not be blank or hold a comma or a space at either end'],
+        [{ quantity: { in: Array.from({ length: 101 }, (_, i) => i) } }, 'list_parts: where.quantity.in holds more than 100 values'],
+        [{ name: { contains: '' } }, 'list_parts: where.name.contains must not be empty'],
+      ] as const) {
+        const result = await list({ where });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toMatchObject({ status: 400, code: 'bad_request', detail });
+      }
+    });
   });
 
   test('an API whose routes need no caller serves its endpoint to anyone', async () => {

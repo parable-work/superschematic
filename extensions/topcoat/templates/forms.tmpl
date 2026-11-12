@@ -470,6 +470,10 @@ const MAX_ROWS: usize = 1000;
 
 /// A control's name as its steps, `rooms[0].roomId` as `rooms`, `0` and
 /// `roomId`; None for a name no control has.
+{{- if .FormsUse "filters" }} A filter's bracket form
+/// (D106) names its field and its operator between brackets, each a key:
+/// `filter[status][in]` is `filter`, `status` and `in`.
+{{- end }}
 fn segments(name: &str) -> Option<Vec<Segment>> {
     let mut path = Vec::new();
     let mut rest = name;
@@ -482,7 +486,15 @@ fn segments(name: &str) -> Option<Vec<Segment>> {
         rest = &rest[end..];
         while let Some(index) = rest.strip_prefix('[') {
             let (digits, after) = index.split_once(']')?;
+{{- if .FormsUse "filters" }}
+            path.push(match digits.parse() {
+                Ok(index) => Segment::Index(index),
+                Err(_) if !digits.is_empty() && !digits.contains(['.', '[']) => Segment::Key(digits.to_owned()),
+                Err(_) => return None,
+            });
+{{- else }}
             path.push(Segment::Index(digits.parse().ok()?));
+{{- end }}
             rest = after;
         }
         if path.len() > MAX_DEPTH {
@@ -590,6 +602,30 @@ impl Posted {
         self.rows.values().take(limit.saturating_add(1))
     }
 {{- end }}
+}
+{{- end }}
+{{- if .FormsUse "filterChoices" }}
+
+/// The choices a query holds of a filter's field (D106), `field` what was
+/// sent under `filter[field]`: each value of its `in`, split on commas as
+/// the route splits one, then the value it is equal to when that is not
+/// among them, so `filter[status]=placed` is one choice.
+fn filter_choices(field: &Posted) -> Vec<String> {
+    let mut choices = field.get("in").values(true);
+    if let Some(equal) = filter_equal(field)
+        && !choices.contains(&equal)
+    {
+        choices.push(equal);
+    }
+    choices
+}
+{{- end }}
+{{- if .FormsUse "filterEqual" }}
+
+/// The value a query holds a filter's field equal to (D106), `field` what
+/// was sent under `filter[field]`: its own value, else its `eq`'s.
+fn filter_equal(field: &Posted) -> Option<String> {
+    field.first().or_else(|| field.get("eq").first())
 }
 {{- end }}
 {{- if .FormsUse "read" }}

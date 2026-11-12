@@ -1,7 +1,9 @@
 package namespaces
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 
@@ -20,4 +22,28 @@ type jsonClient interface {
 // passed.
 func pathSegment(value any) string {
 	return url.PathEscape(fmt.Sprint(value))
+}
+
+// filterMember reads one member of a filter as a tool call sends it
+// (D106): an object of the field's operators, an operator the field does
+// not take refused, or a value, for equality, which eq points at the
+// member to hold. It is nil for null.
+func filterMember[F any](data json.RawMessage, eq func(*F) any) (*F, error) {
+	data = bytes.TrimSpace(data)
+	if string(data) == "null" {
+		return nil, nil
+	}
+	var member F
+	if len(data) > 0 && data[0] == '{' {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&member); err != nil {
+			return nil, err
+		}
+		return &member, nil
+	}
+	if err := json.Unmarshal(data, eq(&member)); err != nil {
+		return nil, err
+	}
+	return &member, nil
 }

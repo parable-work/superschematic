@@ -44,6 +44,10 @@ use crate::ApiError;
 /// `JsonObject` and `JsonArray` are body parameters of a scalar whose value
 /// is a JSON object (`Generic.StringMap`) or a JSON array
 /// (`Embedding.Vector`). None of those four is read from a string.
+/// `Date` and `Decimal` are a filter's value of a calendar date and of a
+/// decimal number (D106), text the scalar core parses into its canonical
+/// form ([`ParamSpec::parse`]); a query parameter of either type stays a
+/// `String`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParamKind {
     String,
@@ -52,6 +56,8 @@ pub enum ParamKind {
     Boolean,
     Uuid,
     DateTime,
+    Date,
+    Decimal,
     Enum,
     Object,
     Json,
@@ -80,6 +86,11 @@ impl ParamLocation {
 /// A scalar's generated validator (`validate_<scalar>`), which checks a UUID
 /// or timestamp parameter.
 pub type ScalarCheck = fn(Option<&Value>) -> ScalarResult;
+
+/// A scalar's parse, which reads a `Date` or `Decimal` value: its canonical
+/// text (`2026/3/1` is `2026-03-01`), or the scalar core's errors for text
+/// that is none. The generated router hands the scalar crate's.
+pub type ScalarParse = fn(&str) -> Result<String, Vec<ValidationError>>;
 
 /// An object type's generated `prepare_<type>`: its defaults filled, its
 /// undeclared keys refused and the value validated.
@@ -175,6 +186,9 @@ pub struct ParamSpec {
     pub scalar: Option<ScalarConstraints>,
     /// A `Uuid` or `DateTime` parameter's scalar validator.
     pub check: Option<ScalarCheck>,
+    /// A `Date` or `Decimal` value's scalar parse; without one the value
+    /// is taken as the text it is.
+    pub parse: Option<ScalarParse>,
     /// An `Object` parameter's `prepare_<type>`; without one the value is
     /// taken as the JSON object it is.
     pub prepare: Option<ObjectPrepare>,
@@ -200,6 +214,7 @@ impl ParamSpec {
             pattern: None,
             scalar: None,
             check: None,
+            parse: None,
             prepare: None,
         }
     }
@@ -296,6 +311,12 @@ impl ParamSpec {
     }
 
     #[must_use]
+    pub const fn parse(mut self, parse: ScalarParse) -> Self {
+        self.parse = Some(parse);
+        self
+    }
+
+    #[must_use]
     pub const fn prepare(mut self, prepare: ObjectPrepare) -> Self {
         self.prepare = Some(prepare);
         self
@@ -356,6 +377,14 @@ impl ParamSpec {
         decode_json_param(location, self, Some(&value)).map(drop)
     }
 
+    /// One value of the parameter, read as an item of a query list of its
+    /// type is and refused as one, the refusal naming the parameter alone:
+    /// how a filter's value is read (D106), under `filter[field]`.
+    pub fn query_item<T: DeserializeOwned>(&self, item: &str) -> Result<T, ApiError> {
+        let value = decode_query_list_item(ParamLocation::Query, self, None, item)?;
+        typed(ParamLocation::Query, self, Some(value))
+    }
+
     /// An optional single `Generic.JSON` body parameter, whose null is a
     /// value apart from absent: `None` when absent, `Some(Value::Null)` for
     /// null.
@@ -411,6 +440,8 @@ fn typed<T: DeserializeOwned>(
         let reason = match spec.kind {
             ParamKind::Uuid => "expected a UUID".to_owned(),
             ParamKind::DateTime => "expected an RFC 3339 timestamp".to_owned(),
+            ParamKind::Date => EXPECTED_DATE.to_owned(),
+            ParamKind::Decimal => EXPECTED_DECIMAL.to_owned(),
             ParamKind::Enum => expected_one_of(spec),
             _ => "does not match the declared type".to_owned(),
         };
@@ -475,6 +506,11 @@ fn refuse_at(
     )
 }
 
+/// The reasons a `Date` and a `Decimal` value are refused with, as the
+/// TypeScript runtime's filter reader words them.
+const EXPECTED_DATE: &str = "expected a date";
+const EXPECTED_DECIMAL: &str = "expected a decimal number";
+
 fn expected_one_of(spec: &ParamSpec) -> String {
     format!("expected one of {}", spec.enum_values.join(", "))
 }
@@ -526,6 +562,8 @@ fn decode_scalar(
             "expected an RFC 3339 timestamp",
             path,
         ),
+        ParamKind::Date => parsed_scalar(location, spec, raw.trim(), EXPECTED_DATE, path),
+        ParamKind::Decimal => parsed_scalar(location, spec, raw.trim(), EXPECTED_DECIMAL, path),
         ParamKind::Enum => {
             if spec.enum_values.contains(&raw) {
                 Ok(Value::from(raw))
@@ -562,6 +600,25 @@ fn checked_scalar(
         }
     }
     Ok(value)
+}
+
+/// A date or a decimal: the canonical text the scalar's parse gives, or
+/// its errors under reason.
+fn parsed_scalar(
+    location: ParamLocation,
+    spec: &ParamSpec,
+    text: &str,
+    reason: &str,
+    path: Option<&str>,
+) -> Result<Value, ApiError> {
+    if text.is_empty() {
+        return Err(refuse(location, spec, reason, None, path));
+    }
+    match spec.parse.map(|parse| parse(text)) {
+        None => Ok(Value::from(text)),
+        Some(Ok(canonical)) => Ok(Value::from(canonical)),
+        Some(Err(errors)) => Err(refuse(location, spec, reason, Some(errors), path)),
+    }
 }
 
 /// A scalar's range, then the argument's own bounds.
@@ -708,7 +765,8 @@ pub fn decode_param(
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                decode_query_list_item(location, spec, &format!("{}[{index}]", spec.name), item)
+                let path = format!("{}[{index}]", spec.name);
+                decode_query_list_item(location, spec, Some(&path), item)
             })
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(Some(Value::Array(decoded)));
@@ -788,11 +846,13 @@ fn is_json_number(text: &str) -> bool {
 /// or integer item must be a finite JSON number and a boolean item a
 /// spelling Go's `strconv.ParseBool` accepts (`type` otherwise); any other
 /// item is its text, a JSON string. The value then passes the checks of its
-/// kind: the scalar's rules, then the argument's.
+/// kind: the scalar's rules, then the argument's. Without a path the
+/// refusal names the parameter alone, as a filter's value does
+/// ([`ParamSpec::query_item`]).
 fn decode_query_list_item(
     location: ParamLocation,
     spec: &ParamSpec,
-    path: &str,
+    path: Option<&str>,
     item: &str,
 ) -> Result<Value, ApiError> {
     match spec.kind {
@@ -806,8 +866,8 @@ fn decode_query_list_item(
                 .filter(|item| is_json_number(item))
                 .and_then(|item| serde_json::from_str::<Number>(item).ok())
                 .filter(|number| finite_number(number).is_some())
-                .ok_or_else(|| refuse_at(location, spec, Some(path), "type", message))?;
-            decode_json_value(location, spec, &Value::Number(number), Some(path))
+                .ok_or_else(|| refuse_at(location, spec, path, "type", message))?;
+            decode_json_value(location, spec, &Value::Number(number), path)
         }
         ParamKind::Boolean => match item {
             "1" | "t" | "T" | "TRUE" | "true" | "True" => Ok(Value::Bool(true)),
@@ -815,12 +875,12 @@ fn decode_query_list_item(
             _ => Err(refuse_at(
                 location,
                 spec,
-                Some(path),
+                path,
                 "type",
                 "expected a boolean",
             )),
         },
-        _ => decode_json_value(location, spec, &Value::from(item), Some(path)),
+        _ => decode_json_value(location, spec, &Value::from(item), path),
     }
 }
 
@@ -940,7 +1000,12 @@ fn decode_json_value(
             "type",
             "expected a boolean",
         )),
-        ParamKind::String | ParamKind::Uuid | ParamKind::DateTime | ParamKind::Enum => {
+        ParamKind::String
+        | ParamKind::Uuid
+        | ParamKind::DateTime
+        | ParamKind::Date
+        | ParamKind::Decimal
+        | ParamKind::Enum => {
             let Some(text) = item.as_str() else {
                 return Err(refuse_at(location, spec, path, "type", "expected a string"));
             };

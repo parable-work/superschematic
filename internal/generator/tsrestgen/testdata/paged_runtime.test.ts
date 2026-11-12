@@ -11,6 +11,14 @@ from the sort it was returned under, and binds the next it answers to the
 sort. A limit, sort or cursor the reader refuses is the 400 the vectors
 hold and never reaches the implementation, and a cursor the implementation
 cannot read is the vectors' refused-cursor 400.
+
+listParts also takes a filter (FilterBy, D106): the route reads the
+request's filters, filter[field]=value and filter[field][op]=value, after
+the query parameters and before the page, and hands the implementation
+args.filter, a member per field the request filters by with each value
+read as its field's type. A field or an operator the filter does not
+take, and a value its type refuses, are a 400 at filter[field] that never
+reaches the implementation.
 */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -23,7 +31,9 @@ if (!apiDir) throw new Error('API_DIR is required');
 const parityPath = process.env.PAGE_PARITY;
 if (!parityPath) throw new Error('PAGE_PARITY is required');
 const { buildRouter, operationSpecs } = await import(`${apiDir}/router.ts`);
-const { catalog, itemKey, items, recording, received, sortedItems, tags } = await import(`${apiDir}/paged_implementation.ts`);
+const { catalog, itemKey, items, partKey, parts, recording, received, sortedItems, sortedParts, suppliers, tags } = await import(
+  `${apiDir}/paged_implementation.ts`
+);
 
 interface Problem {
   readonly status: number;
@@ -201,6 +211,307 @@ describe('a paged list', () => {
     const response = await get(`/api/items/${items[2].id}`);
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual(items[2]);
+  });
+});
+
+describe('a filtered list', () => {
+  /** The parts as the wire carries them: a timestamp its text. */
+  const wire = (rows: readonly unknown[]) => JSON.parse(JSON.stringify(rows));
+  const named = (...names: string[]) => wire(parts.filter((row: { name: string }) => names.includes(row.name)));
+
+  /** Every part a query's filters keep, in the order of their names, and the filter the implementation took. */
+  async function kept(query: string) {
+    const { seen } = await walk(`/api/parts?limit=5&${query}`);
+    return { parts: seen, filter: received.at(-1)?.args.filter };
+  }
+
+  test('the operation table carries the filter: each field, its operators and the spec of one of its values', () => {
+    const { fields } = operationSpecs.listParts.filter;
+    expect(fields.map((field: { name: string }) => field.name)).toEqual([
+      'id',
+      'name',
+      'kind',
+      'quantity',
+      'weight',
+      'price',
+      'discontinued',
+      'madeAt',
+      'retiredOn',
+      'supplierId',
+    ]);
+    const byField = Object.fromEntries(fields.map((field: { name: string }) => [field.name, field]));
+    expect(byField.kind).toEqual({
+      name: 'kind',
+      kind: 'enum',
+      operators: ['eq', 'in'],
+      value: { name: 'filter[kind]', kind: 'enum', required: false, enumValues: ['bolt', 'nut', 'washer'] },
+    });
+    expect(byField.name.operators).toEqual(['eq', 'in', 'contains']);
+    expect(byField.quantity.operators).toEqual(['eq', 'in', 'gt', 'gte', 'lt', 'lte']);
+    expect(byField.retiredOn.operators).toEqual(['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull']);
+    expect(byField.supplierId).toEqual({
+      name: 'supplierId',
+      kind: 'uuid',
+      operators: ['eq', 'in', 'isNull'],
+      value: { name: 'filter[supplierId]', kind: 'uuid', required: false },
+    });
+    expect(byField.madeAt.value).toEqual({ name: 'filter[madeAt]', kind: 'datetime', required: false });
+    expect(fields.map((field: { kind: string }) => field.kind)).toEqual(['uuid', 'string', 'enum', 'int', 'float', 'decimal', 'bool', 'datetime', 'date', 'uuid']);
+    // The filter is no query parameter of the operation, and no other operation has one.
+    expect(operationSpecs.listParts.queryParams).toEqual([]);
+    expect('filter' in operationSpecs.listItems).toBe(false);
+  });
+
+  test('a request with no filter hands the implementation {} and lists every part', async () => {
+    const response = await get('/api/parts?limit=5');
+    expect(response.status).toBe(200);
+    expect(response.body.data.items).toEqual(wire(parts.slice(0, 5)));
+    const { args } = received.at(-1)!;
+    expect(args.filter).toEqual({});
+    expect(Object.keys(args.filter)).toEqual([]);
+    expect(args.page).toEqual({ limit: 5, sort: byName });
+  });
+
+  test('equality on a field of each kind, each value read as its type', async () => {
+    // A UUID in any of its forms is read as its canonical text.
+    expect(await kept(`filter[id]=${parts[2].id}`)).toEqual({ parts: named('Eye bolt'), filter: { id: { eq: parts[2].id } } });
+    expect(await kept('filter[id]=00000000-0000-4000-8000-000000000103')).toEqual({
+      parts: named('Eye bolt'),
+      filter: { id: { eq: parts[2].id } },
+    });
+    expect(await kept('filter[name]=Hex+nut')).toEqual({ parts: named('Hex nut'), filter: { name: { eq: 'Hex nut' } } });
+    expect(await kept('filter[kind]=bolt')).toEqual({ parts: named('Anchor bolt', 'Eye bolt'), filter: { kind: { eq: 'bolt' } } });
+    expect(await kept('filter[quantity]=40')).toEqual({ parts: named('Cap nut', 'Flat washer'), filter: { quantity: { eq: 40 } } });
+    expect(await kept('filter[weight]=0.5')).toEqual({ parts: named('Anchor bolt'), filter: { weight: { eq: 0.5 } } });
+    // A decimal and a date are their canonical text.
+    expect(await kept('filter[price]=0.30')).toEqual({ parts: named('Hex nut'), filter: { price: { eq: '0.3' } } });
+    expect(await kept('filter[retiredOn]=2026-3-1')).toEqual({ parts: named('Eye bolt'), filter: { retiredOn: { eq: '2026-03-01' } } });
+    expect(await kept('filter[discontinued]=true')).toEqual({
+      parts: named('Eye bolt', 'Hex nut'),
+      filter: { discontinued: { eq: true } },
+    });
+    expect(await kept(`filter[supplierId]=${suppliers[1]}`)).toEqual({
+      parts: named('Flat washer', 'Hex nut'),
+      filter: { supplierId: { eq: suppliers[1] } },
+    });
+    expect(await kept('filter[retiredOn]=2026-03-01')).toEqual({ parts: named('Eye bolt'), filter: { retiredOn: { eq: '2026-03-01' } } });
+
+    // A timestamp is a Date, whatever offset the caller wrote it at.
+    for (const text of ['2026-01-10T08:00:00Z', '2026-01-10T09:00:00%2B01:00']) {
+      const made = await kept(`filter[madeAt]=${text}`);
+      expect(made.parts).toEqual(named('Anchor bolt', 'Flat washer'));
+      expect(made.filter.madeAt.eq).toBeInstanceOf(Date);
+      expect(made.filter).toEqual({ madeAt: { eq: new Date('2026-01-10T08:00:00Z') } });
+    }
+    // The brackets may come percent-encoded, as a browser's form sends them.
+    expect((await kept('filter%5Bkind%5D=washer')).parts).toEqual(named('Flat washer'));
+    expect((await kept('filter[kind][eq]=washer')).filter).toEqual({ kind: { eq: 'washer' } });
+  });
+
+  test('in keeps the items whose field is one of its values, each trimmed', async () => {
+    expect(await kept('filter[kind][in]=bolt,washer')).toEqual({
+      parts: named('Anchor bolt', 'Eye bolt', 'Flat washer'),
+      filter: { kind: { in: ['bolt', 'washer'] } },
+    });
+    expect(await kept('filter[quantity][in]=0,+3+,,12')).toEqual({
+      parts: named('Anchor bolt', 'Eye bolt', 'Wing nut'),
+      filter: { quantity: { in: [0, 3, 12] } },
+    });
+    expect(await kept(`filter[id][in]=${parts[0].id},00000000-0000-4000-8000-000000000106`)).toEqual({
+      parts: named('Anchor bolt', 'Wing nut'),
+      filter: { id: { in: [parts[0].id, parts[5].id] } },
+    });
+    expect((await kept('filter[discontinued][in]=true,false')).parts).toEqual(wire(parts));
+  });
+
+  test('a range on a number, a decimal, a timestamp and a date', async () => {
+    expect(await kept('filter[quantity][gte]=7&filter[quantity][lt]=40')).toEqual({
+      parts: named('Anchor bolt', 'Hex nut'),
+      filter: { quantity: { gte: 7, lt: 40 } },
+    });
+    expect((await kept('filter[quantity][gt]=12&filter[quantity][lte]=40')).parts).toEqual(named('Cap nut', 'Flat washer'));
+    expect((await kept('filter[weight][lt]=0.03')).parts).toEqual(named('Cap nut', 'Flat washer'));
+    expect(await kept('filter[price][lte]=0.30')).toEqual({
+      parts: named('Cap nut', 'Flat washer', 'Hex nut'),
+      filter: { price: { lte: '0.3' } },
+    });
+    const made = await kept('filter[madeAt][gte]=2026-01-01T00:00:00Z&filter[madeAt][lt]=2026-02-01T00:00:00Z');
+    expect(made.parts).toEqual(named('Anchor bolt', 'Flat washer'));
+    expect(made.filter).toEqual({ madeAt: { gte: new Date('2026-01-01T00:00:00Z'), lt: new Date('2026-02-01T00:00:00Z') } });
+    // A null field passes no comparison.
+    expect((await kept('filter[retiredOn][gt]=2025-12-31')).parts).toEqual(named('Eye bolt'));
+    expect((await kept('filter[retiredOn][lte]=2026-03-01')).parts).toEqual(named('Eye bolt', 'Hex nut'));
+  });
+
+  test('contains keeps the items whose text holds the value, in any case', async () => {
+    expect(await kept('filter[name][contains]=NUT')).toEqual({
+      parts: named('Cap nut', 'Hex nut', 'Wing nut'),
+      filter: { name: { contains: 'NUT' } },
+    });
+    expect((await kept('filter[name][contains]=+b')).parts).toEqual(named('Anchor bolt', 'Eye bolt'));
+    expect((await kept('filter[name][contains]=nut&filter[name][in]=Hex+nut,Eye+bolt')).parts).toEqual(named('Hex nut'));
+  });
+
+  test('isNull keeps the items whose field is null, or the others', async () => {
+    expect(await kept('filter[retiredOn][isNull]=true')).toEqual({
+      parts: named('Anchor bolt', 'Cap nut', 'Flat washer', 'Wing nut'),
+      filter: { retiredOn: { isNull: true } },
+    });
+    expect(await kept('filter[retiredOn][isNull]=false')).toEqual({
+      parts: named('Eye bolt', 'Hex nut'),
+      filter: { retiredOn: { isNull: false } },
+    });
+    expect((await kept('filter[supplierId][isNull]=true')).parts).toEqual(named('Eye bolt', 'Wing nut'));
+    expect(await kept(`filter[supplierId][isNull]=false&filter[supplierId][in]=${suppliers[0]}`)).toEqual({
+      parts: named('Anchor bolt', 'Cap nut'),
+      filter: { supplierId: { in: [suppliers[0]], isNull: false } },
+    });
+  });
+
+  test('an item is kept when it matches every member, in the filter’s field order whatever the query’s', async () => {
+    const both = await kept('filter[discontinued]=false&filter[quantity][gt]=0&filter[kind]=nut');
+    expect(both.parts).toEqual(named('Cap nut'));
+    expect(both.filter).toEqual({ kind: { eq: 'nut' }, quantity: { gt: 0 }, discontinued: { eq: false } });
+    expect(Object.keys(both.filter)).toEqual(['kind', 'quantity', 'discontinued']);
+    expect((await kept('filter[kind]=washer&filter[discontinued]=true')).parts).toEqual([]);
+  });
+
+  test('with a sort and a cursor: every page is asked with the same filter, and each next is bound to the sort', async () => {
+    const descending = parseSort('-quantity')!;
+    const nuts = sortedParts(descending).filter((row: { kind: string }) => row.kind !== 'bolt');
+    expect(nuts.map((row: { name: string }) => row.name)).toEqual(['Flat washer', 'Cap nut', 'Hex nut', 'Wing nut']);
+    const before = received.length;
+    const path = '/api/parts?sort=-quantity&limit=3&filter[kind][in]=nut,washer';
+    const first = await get(path);
+    expect(first.body.data).toEqual({
+      items: wire(nuts.slice(0, 3)),
+      next: bindCursor(encodeCursor(partKey(nuts[2], descending)), descending),
+    });
+    const last = await get(`${path}&cursor=${first.body.data.next}`);
+    expect(last.body.data).toEqual({ items: wire(nuts.slice(3)), next: null });
+    expect(received.slice(before).map(({ operation, args }: { operation: string; args: unknown }) => ({ operation, args }))).toEqual([
+      { operation: 'listParts', args: { filter: { kind: { in: ['nut', 'washer'] } }, page: { limit: 3, sort: descending } } },
+      {
+        operation: 'listParts',
+        args: {
+          filter: { kind: { in: ['nut', 'washer'] } },
+          page: { cursor: encodeCursor(partKey(nuts[2], descending)), limit: 3, sort: descending },
+        },
+      },
+    ]);
+    // A cursor carries no filter: the next page under another filter is that filter's.
+    const other = await get(`/api/parts?sort=-quantity&limit=3&filter[kind]=bolt&cursor=${first.body.data.next}`);
+    expect(other.body.data).toEqual({ items: named('Eye bolt'), next: null });
+    // The default sort, two to a page.
+    const { seen, sizes } = await walk('/api/parts?filter[discontinued]=false');
+    expect(seen).toEqual(named('Anchor bolt', 'Cap nut', 'Flat washer', 'Wing nut'));
+    expect(sizes).toEqual([2, 2]);
+  });
+});
+
+describe('a refused filter', () => {
+  const fieldNames = 'id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId';
+
+  /** The 400 of a filter parameter, as filter_parity.json's vectors hold it. */
+  const refusal = (parameter: string, reason: string, errors?: unknown): Problem => ({
+    status: 400,
+    code: 'bad_request',
+    detail: `Invalid query parameter ${parameter}: ${reason}`,
+    details: { location: 'query', parameter, reason, ...(errors === undefined ? {} : { errors }) },
+  });
+
+  test('a field the filter does not name', async () => {
+    const reason = `is not a field this operation filters by; expected one of ${fieldNames}`;
+    expectProblem(await refused('/api/parts?filter[sku]=x'), refusal('filter[sku]', reason));
+    expectProblem(await refused('/api/parts?filter[Kind]=nut'), refusal('filter[Kind]', reason));
+    // An operation without a filter leaves filter keys alone, as any key it does not declare.
+    expect((await get('/api/items?filter[sku]=x')).status).toBe(200);
+  });
+
+  test('an operator the field does not take', async () => {
+    expectProblem(await refused('/api/parts?filter[kind][gt]=nut'), refusal('filter[kind]', 'takes no operator gt; expected one of eq, in'));
+    expectProblem(
+      await refused('/api/parts?filter[quantity][contains]=4'),
+      refusal('filter[quantity]', 'takes no operator contains; expected one of eq, in, gt, gte, lt, lte')
+    );
+    expectProblem(
+      await refused('/api/parts?filter[name][isNull]=true'),
+      refusal('filter[name]', 'takes no operator isNull; expected one of eq, in, contains')
+    );
+    expectProblem(await refused('/api/parts?filter[kind][neq]=nut'), refusal('filter[kind]', 'takes no operator neq; expected one of eq, in'));
+  });
+
+  test('a key that is no filter, an operator sent twice, and an operator’s own value', async () => {
+    const malformed = 'expected filter[field] or filter[field][operator]';
+    expectProblem(await refused('/api/parts?filter=nut'), refusal('filter', malformed));
+    expectProblem(await refused('/api/parts?filter[kind][in][0]=nut'), refusal('filter[kind][in][0]', malformed));
+    expectProblem(await refused('/api/parts?filter[kind]=nut&filter[kind][eq]=bolt'), refusal('filter[kind]', 'holds eq more than once'));
+    expectProblem(await refused('/api/parts?filter[kind][in]=,'), refusal('filter[kind]', 'in names no value'));
+    expectProblem(await refused('/api/parts?filter[name][contains]='), refusal('filter[name]', 'contains needs text'));
+    expectProblem(await refused('/api/parts?filter[retiredOn][isNull]=1'), refusal('filter[retiredOn]', 'isNull expects true or false'));
+    const many = Array.from({ length: 51 }, (_, i) => `filter[name]=n${i}`).join('&');
+    expectProblem(
+      await refused(`/api/parts?${many}`),
+      refusal('filter', 'must hold at most 50 filters', [{ validator: 'max', message: 'must hold at most 50 filters' }])
+    );
+  });
+
+  test('a value its field’s type refuses, at filter[field]', async () => {
+    const type = (message: string) => [{ validator: 'type', message }];
+    expectProblem(await refused('/api/parts?filter[quantity]=many'), refusal('filter[quantity]', 'expected an integer', type('expected an integer')));
+    expectProblem(await refused('/api/parts?filter[quantity][gte]=1.5'), refusal('filter[quantity]', 'expected an integer', type('expected an integer')));
+    expectProblem(await refused('/api/parts?filter[quantity][in]=1,two'), refusal('filter[quantity]', 'expected an integer', type('expected an integer')));
+    expectProblem(await refused('/api/parts?filter[weight][lt]=heavy'), refusal('filter[weight]', 'expected a number', type('expected a number')));
+    expectProblem(await refused('/api/parts?filter[kind]=gear'), refusal('filter[kind]', 'expected one of bolt, nut, washer'));
+    expectProblem(await refused('/api/parts?filter[kind][in]=nut,gear'), refusal('filter[kind]', 'expected one of bolt, nut, washer'));
+    expectProblem(
+      await refused('/api/parts?filter[discontinued]=maybe'),
+      refusal('filter[discontinued]', 'expected a boolean', type('expected a boolean'))
+    );
+    // A UUID, a timestamp, a date and a decimal carry the scalar library's
+    // own errors: a date and a decimal are checked as one, which a query
+    // parameter of their types is not.
+    for (const [path, parameter, reason] of [
+      ['/api/parts?filter[retiredOn]=yesterday', 'filter[retiredOn]', 'expected a date'],
+      ['/api/parts?filter[retiredOn][gte]=2026-02-30', 'filter[retiredOn]', 'expected a date'],
+      ['/api/parts?filter[price]=cheap', 'filter[price]', 'expected a decimal number'],
+      ['/api/parts?filter[price][in]=1.5,1e3', 'filter[price]', 'expected a decimal number'],
+      ['/api/parts?filter[id]=not-a-uuid', 'filter[id]', 'expected a UUID'],
+      ['/api/parts?filter[supplierId][in]=not-a-uuid', 'filter[supplierId]', 'expected a UUID'],
+      ['/api/parts?filter[madeAt]=yesterday', 'filter[madeAt]', 'expected an RFC 3339 timestamp'],
+      ['/api/parts?filter[madeAt][gte]=2026-01-10T08:00', 'filter[madeAt]', 'expected an RFC 3339 timestamp'],
+    ] as const) {
+      const body = await refused(path);
+      expect(body.detail).toBe(`Invalid query parameter ${parameter}: ${reason}`);
+      expect(body.details).toMatchObject({ location: 'query', parameter, reason });
+      expect(body.details.errors.length).toBeGreaterThan(0);
+    }
+    // The scalar library reads a UUID's base62 text too, so a word of
+    // letters and digits is a UUID, of no part.
+    const word = await get('/api/parts?filter[id]=nope');
+    expect(word.status).toBe(200);
+    expect(word.body.data).toEqual({ items: [], next: null });
+  });
+
+  test('a request with several faults is refused for its filter’s keys, then its filter’s values, then its page', async () => {
+    // The order every server refuses in: the operation's own query
+    // parameters (listParts declares none), the filter reader's 400, a
+    // filter value's, then the page's.
+    for (const [query, parameter] of [
+      ['filter[sku]=x&limit=0', 'filter[sku]'],
+      ['limit=0&filter[sku]=x', 'filter[sku]'],
+      ['filter[madeAt]=yesterday&limit=0', 'filter[madeAt]'],
+      ['filter[quantity]=many&sort=price', 'filter[quantity]'],
+      ['cursor=!&filter[kind]=gear', 'filter[kind]'],
+      // The reader's refusal of one field before a value's of another.
+      ['filter[madeAt]=yesterday&filter[sku]=x&limit=0', 'filter[sku]'],
+      ['filter[id]=not-a-uuid&filter[retiredOn][isNull]=maybe', 'filter[retiredOn]'],
+      // A filter that reads leaves the page's refusal.
+      ['filter[kind]=nut&limit=0', 'limit'],
+      ['filter[kind]=nut&sort=price', 'sort'],
+    ] as const) {
+      expect((await refused(`/api/parts?${query}`)).details).toMatchObject({ location: 'query', parameter });
+    }
   });
 });
 

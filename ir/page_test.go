@@ -12,10 +12,10 @@ import (
 
 // An operation without a page marshals without the key, so the IR of every
 // schema written before @paginated existed is the same bytes; one with a
-// page writes it right after filterable, both members, and reads back the
+// page writes it right after filter, both members, and reads back the
 // same through JSON and YAML.
 func TestOperationPage_KeyPositionOmissionAndRoundTrip(t *testing.T) {
-	op := &FieldDef{Name: "listItems", TypeRef: TypeRef{Name: "Item", IsArray: true}, Filterable: true, RequireOwnership: true, HTTPMethod: "GET"}
+	op := &FieldDef{Name: "listItems", TypeRef: TypeRef{Name: "Item", IsArray: true}, Filter: &OperationFilter{Argument: "filter", Fields: []*FilterField{{Name: "name"}}}, RequireOwnership: true, HTTPMethod: "GET"}
 	data, err := json.Marshal(op)
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func TestOperationPage_KeyPositionOmissionAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `"filterable":true,"page":{"defaultLimit":2,"maxLimit":5},"requireOwnership":true`; !bytes.Contains(data, []byte(want)) {
+	if want := `"filter":{"argument":"filter","fields":[{"name":"name"}]},"page":{"defaultLimit":2,"maxLimit":5},"requireOwnership":true`; !bytes.Contains(data, []byte(want)) {
 		t.Fatalf("marshaled operation = %s\nwant it to contain %s", data, want)
 	}
 

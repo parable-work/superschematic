@@ -383,7 +383,8 @@ func TestADerivedReferenceRoundTripsWithoutRefersTo(t *testing.T) {
 // TestARelationsKeyIsCheckedInTheTypeScriptForm: the reader flattens the
 // type a source's Relation names beside the source, so the key's type is
 // held to the related type's id even when no type of the API is @source of
-// it; and two types that are @source of it draw the loader's warning.
+// it; and two types that are @source of it, each listed by an operation,
+// draw the loader's warning.
 func TestARelationsKeyIsCheckedInTheTypeScriptForm(t *testing.T) {
 	_, err := LoadService(copyRefsKeys(t, "@source(Tenant)\n", "", "tenantId: Identity.UUID;", "tenantId: string;"))
 	if err == nil || !strings.Contains(err.Error(), "TenantUserView.tenantId reads the key of fixture-db.TenantUser.tenant, a Relation to Tenant, whose id is Identity.UUID, not string") {
@@ -394,7 +395,17 @@ func TestARelationsKeyIsCheckedInTheTypeScriptForm(t *testing.T) {
 	prev := WarningWriter
 	WarningWriter = &warnings
 	defer func() { WarningWriter = prev }()
-	if _, err := LoadService(copyRefsKeys(t, "export class Directory {", "@source(Tenant)\nexport abstract class TenantCard {\n  id: Identity.UUID;\n  name: Identity.Name;\n}\n\nexport class Directory {")); err != nil {
+	card := "@source(Tenant)\nexport abstract class TenantCard {\n  id: Identity.UUID;\n  name: Identity.Name;\n}\n\nexport class Directory {"
+	// A second view of the table that no operation lists is not one the
+	// key could name (D106): nothing is warned.
+	if _, err := LoadService(copyRefsKeys(t, "export class Directory {", card)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(warnings.String(), "refers to nothing") {
+		t.Fatalf("a view no operation lists drew the warning: %q", warnings.String())
+	}
+	listCards := card + "\n  @rest(HttpMethod.GET, \"tenant-cards\")\n  listTenantCards(): TenantCard[] {\n    throw new Error(\"schema declaration only\");\n  }\n"
+	if _, err := LoadService(copyRefsKeys(t, "export class Directory {", listCards)); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(warnings.String(), "TenantUserView.tenantId reads the key of fixture-db.TenantUser.tenant and refers to nothing: TenantCard and TenantView are both @source(fixture-db.Tenant); name one with RefersTo") {

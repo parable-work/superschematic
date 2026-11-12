@@ -96,6 +96,7 @@ func buildToolSchemas(t *testing.T, output *apigen.APIOutput) []toolSchema {
 			},
 			output.ToolKeys,
 			endpoint.Page,
+			endpoint.Filter,
 		)
 		encoded, err := json.Marshal(parameters)
 		if err != nil {

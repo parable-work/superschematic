@@ -44,6 +44,11 @@ func (impl *Catalog) GetItem(ctx context.Context, itemId types.IdentityUUID) (*t
 	return nil, api.NotImplementedError("Catalog.GetItem")
 }
 
+// ListParts handles GET /api/parts.
+func (impl *Catalog) ListParts(ctx context.Context, filter api.CatalogListPartsFilter, page paging.Request) (paging.Page[types.PartView], error) {
+	return paging.Page[types.PartView]{}, api.NotImplementedError("Catalog.ListParts")
+}
+
 // ListTags handles GET /api/tags.
 func (impl *Catalog) ListTags(ctx context.Context, page paging.Request) (paging.Page[string], error) {
 	return paging.Page[string]{}, api.NotImplementedError("Catalog.ListTags")

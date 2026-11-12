@@ -12,6 +12,7 @@ import (
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/jackc/pgx/v5/pgconn"
 	scalars "github.com/parable-work/superscalar/go"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 )
@@ -139,21 +140,18 @@ func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.Or
 
 // ListOrders answers a page of the caller's orders, or of every
 // customer's for staff, in the page's sort, by when each was placed or by
-// its total, with the given statuses, or of every status when there are
-// none. The ORM reads the page, with each order's lines. A cursor names
-// the order a page ends at, and the filter holds every page, so a
-// shopper's pages hold their own orders alone.
-func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error) {
-	filter, err := callersOrders(ctx)
+// its total, of the statuses the request's filter keeps (D106), or of
+// every status without one. The ORM reads the page, with each order's
+// lines. A cursor names the order a page ends at, and the caller's own
+// filter holds every page beside the request's, so a shopper's pages hold
+// their own orders alone.
+func (o *Orders) ListOrders(ctx context.Context, filter api.OrderListOrdersFilter, page paging.Request) (paging.Page[types.OrderView], error) {
+	where, err := callersOrders(ctx)
 	if err != nil {
 		return paging.Page[types.OrderView]{}, err
 	}
-	if len(statuses) > 0 {
-		in := make([]string, 0, len(statuses))
-		for _, status := range statuses {
-			in = append(in, string(status))
-		}
-		filter.Status = &orm.StringFilter{In: in}
+	if by := filter.Status; by != nil {
+		where.Status = statusFilter(by)
 	}
 	sort, err := orm.ParseOrderSort(page.Sort.String())
 	if err != nil {
@@ -163,7 +161,7 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, p
 	if err != nil {
 		return paging.Page[types.OrderView]{}, err
 	}
-	found, err := o.DB.GetOrderRepository().FindPage(ctx, filter, &orm.OrderPageOptions{
+	found, err := o.DB.GetOrderRepository().FindPage(ctx, where, &orm.OrderPageOptions{
 		Fields: withLines().Fields,
 		Sort:   sort,
 		After:  after,
@@ -173,6 +171,22 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, p
 		return paging.Page[types.OrderView]{}, pageError(err)
 	}
 	return pageOf(found.Rows, found.Next, orderView)
+}
+
+// statusFilter is the repository's filter of an order's status for the
+// request's: filter[status]=placed is its Eq, and filter[status][in] its
+// In, both when the request sent both. The repository holds a status as
+// its text.
+func statusFilter(by *filterparse.Equals[types.OrderStatus]) *orm.StringFilter {
+	out := &orm.StringFilter{}
+	if by.Eq != nil {
+		eq := string(*by.Eq)
+		out.Eq = &eq
+	}
+	for _, status := range by.In {
+		out.In = append(out.In, string(status))
+	}
+	return out
 }
 
 // CancelOrder cancels the caller's order, or any order for staff, while

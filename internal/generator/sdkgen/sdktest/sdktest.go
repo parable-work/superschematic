@@ -400,6 +400,78 @@ func AddShelfItemsOperation(schema *ir.Schema) error {
 	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
 }
 
+// AddFindPartsOperation adds Catalog.findParts to the loaded
+// fixture-paged-api schema: a GET of every part (parts/all) that does not
+// page and takes one argument, the filter of Catalog.listParts (D106)
+// under the name where. Its SDK methods take a filter and nothing else in
+// their query, which the fixture's own filtered operation does not, and
+// send it as filter[field], whatever the argument is called.
+func AddFindPartsOperation(schema *ir.Schema) error {
+	for _, set := range schema.OperationSets {
+		if set.Name != "Catalog" {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op.Name != "listParts" || op.Filter == nil {
+				continue
+			}
+			set.Operations = append(set.Operations, &ir.FieldDef{
+				Name:       "findParts",
+				Comment:    "Every part the caller's filters find.",
+				TypeRef:    ir.TypeRef{Name: "PartView", IsArray: true},
+				Required:   true,
+				HTTPMethod: "GET",
+				RestPath:   "parts/all",
+				Filter:     &ir.OperationFilter{Argument: "where", Fields: op.Filter.Fields},
+			})
+			return nil
+		}
+		return fmt.Errorf("schema %s has no Catalog.listParts with a filter", schema.Name)
+	}
+	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
+}
+
+// AddAuditPartsOperation adds Catalog.auditParts to the loaded
+// fixture-paged-api schema: a GET of every part (parts/audit) whose filter
+// holds the fields of Catalog.listParts's (D106) and three more, nameB,
+// quantityB and weightB, text and numbers as name, quantity and weight
+// are. Its fields take 58 operators between them, more than the 50
+// filters a request may hold, which the fixture's own filter cannot
+// reach, so an SDK is seen refusing a filter of too many; and nameB is a
+// second field of plain text, which the fixture's filter has one of.
+func AddAuditPartsOperation(schema *ir.Schema) error {
+	for _, set := range schema.OperationSets {
+		if set.Name != "Catalog" {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op.Name != "listParts" || op.Filter == nil {
+				continue
+			}
+			fields := append([]*ir.FilterField(nil), op.Filter.Fields...)
+			for _, field := range op.Filter.Fields {
+				if field.Name == "name" || field.Name == "quantity" || field.Name == "weight" {
+					more := *field
+					more.Name += "B"
+					fields = append(fields, &more)
+				}
+			}
+			set.Operations = append(set.Operations, &ir.FieldDef{
+				Name:       "auditParts",
+				Comment:    "Every part the caller's many filters find.",
+				TypeRef:    ir.TypeRef{Name: "PartView", IsArray: true},
+				Required:   true,
+				HTTPMethod: "GET",
+				RestPath:   "parts/audit",
+				Filter:     &ir.OperationFilter{Argument: "filter", Fields: fields},
+			})
+			return nil
+		}
+		return fmt.Errorf("schema %s has no Catalog.listParts with a filter", schema.Name)
+	}
+	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
+}
+
 // AddEntriesOperation adds the union Entry (ItemView | BasketView) and
 // Catalog.listEntries, a paged GET (D60, two to a page, up to five) of
 // Entry, to the loaded fixture-paged-api schema: the TypeScript schema

@@ -683,8 +683,8 @@ fn unsorted() -> ApiError {
 
 /// The 400 of a parameter a request carries, worded as `ParamSpec` words a
 /// string or integer query parameter's, with the broken rule when there is
-/// one.
-fn refuse(parameter: &str, reason: &str, validator: Option<&str>) -> ApiError {
+/// one. The filter reader refuses with it too (D106).
+pub(crate) fn refuse(parameter: &str, reason: &str, validator: Option<&str>) -> ApiError {
     let mut details = Map::new();
     details.insert("location".to_owned(), Value::from("query"));
     details.insert("parameter".to_owned(), Value::from(parameter));

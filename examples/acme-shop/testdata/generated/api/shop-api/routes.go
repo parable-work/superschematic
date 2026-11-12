@@ -16,6 +16,7 @@ import (
 	types "example.com/acme/types/go/shop-api"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
@@ -328,6 +329,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithStore(cfg.RateLimitStore, "shop-api", "account.changePassword")),
 			},
 		},
+		// The products, or with filter[inStock] the ones in stock, or out of it
+		// (D106).
 		{
 			Method:  "GET",
 			Path:    "/products",
@@ -388,10 +391,31 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // implementation method. This allows for dependency injection and testing.
 
 // createProductListProductsHandler creates a handler for GET /api/products
+//
+// The products, or with filter[inStock] the ones in stock, or out of it
+// (D106).
 func createProductListProductsHandler(impl ProductImplementation) gohttp.HandlerFunc {
+	// A filter's values (D106): each field's value as an item of a query
+	// list of its type, its error recorded at filter[field].
+	filterInStockArg := bodyargs.NewArg("filter[inStock]", bodyargs.Boolean)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract query parameters
-		InStock := parseBoolQueryParam(r, "inStock", false)
+		// Read the request's filters (FilterBy, D106): the bracket form,
+		// filter[field]=value and filter[field][op]=value, its own reader,
+		// whose refusal is the 400 every server answers at filter[field].
+		// Each value is then decoded as an item of a query list of its
+		// field's type.
+		filterRequest, ok := filterparse.Read(w, r, filterparse.Spec{Fields: []filterparse.FieldSpec{{Name: "inStock", Operators: []filterparse.Operator{"eq", "in"}}}})
+		if !ok {
+			return
+		}
+		filterErrors := types.NewValidationErrors()
+		filters := ProductListProductsFilter{
+			InStock: filterparse.DecodeEquals[bool](filterErrors, filterRequest, "inStock", filterInStockArg),
+		}
+		if filterErrors.HasErrors() {
+			RespondValidationErrors(w, r, filterErrors)
+			return
+		}
 
 		// Ensure request context is still valid before entering implementation logic.
 		if err := CheckContext(r.Context()); err != nil {
@@ -401,7 +425,7 @@ func createProductListProductsHandler(impl ProductImplementation) gohttp.Handler
 		}
 
 		// Call implementation
-		result, err := impl.ListProducts(callerContext(r.Context()), InStock)
+		result, err := impl.ListProducts(callerContext(r.Context()), filters)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

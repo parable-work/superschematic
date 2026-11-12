@@ -489,7 +489,9 @@ type API struct {
 	// @manualRouteRegistration operations, which the implementation's
 	// NewManualRoutes builds from Deps (D51); Behaviors when it serves a
 	// table's behavior operations, which run through the ORM of its
-	// database, so its Config takes the database too (D103).
+	// database, so its Config takes the database too (D103); and Tables
+	// when it serves table operations, which are served from the tables
+	// of its database through the same ORM (D106).
 	Config       bool
 	Public       bool
 	Encrypted    bool
@@ -497,6 +499,7 @@ type API struct {
 	Identity     bool
 	ManualRoutes bool
 	Behaviors    bool
+	Tables       bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -835,6 +838,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Identity = o.Auth.Identity
 			apis[i].ManualRoutes = o.HasManualRoutes()
 			apis[i].Behaviors = o.HasBehaviorEndpoints()
+			apis[i].Tables = o.HasTableEndpoints()
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -891,6 +895,14 @@ func Plan(in Input) (*Server, error) {
 		}
 		if api.Behaviors {
 			if err := checkBehaviorCallers(in, o); err != nil {
+				return nil, err
+			}
+		}
+		if api.Tables && api.Database == nil {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose table operations are served from the tables of its database through its ORM (D106), and it has no database", in.Stack, in.Server, o.SchemaName)
+		}
+		if api.Tables {
+			if err := checkTableCallers(in, o); err != nil {
 				return nil, err
 			}
 		}

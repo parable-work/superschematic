@@ -53,6 +53,12 @@ import { {{.ClassName}} } from './namespaces/{{lower .Name}}';
 
 // Re-export types and errors for convenience
 export * from './types';
+{{- range .Namespaces}}
+{{- $ns := .}}
+{{- range .FilteredEndpoints}}
+export type { {{.FilterType}} } from './namespaces/{{lower $ns.Name}}';
+{{- end}}
+{{- end}}
 export {
   // Re-export all types from the types package
   // Note: We explicitly don't re-export ValidationError to avoid conflicts

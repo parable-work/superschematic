@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence
 from urllib import error, parse, request
 
 try:
@@ -22,7 +22,7 @@ try:
 except ModuleNotFoundError:
     hashes = serialization = padding = rsa = AESGCM = None
 
-from .errors import APIError, AuthenticationError, AuthorizationError, NetworkError, RateLimitError, SDKError
+from .errors import APIError, AuthenticationError, AuthorizationError, NetworkError, RateLimitError, SDKError, ValidationError
 
 # Upper bound for Retry-After and fallback sleeps so a hostile or misconfigured server cannot stall a thread indefinitely.
 _MAX_RATE_LIMIT_SLEEP_SECONDS = 300
@@ -100,6 +100,162 @@ def filename_of(disposition: str | None) -> str | None:
         return re.sub(r"\\(.)", r"\1", quoted.group(1))
     token = re.search(r"(?:^|;)\s*filename\s*=\s*([^;\s]+)", disposition, re.IGNORECASE)
     return token.group(1) if token else None
+
+
+class FilterField(NamedTuple):
+    """One field of an operation's filter (D106): key, the filter's member;
+    name, the item's field as the wire names it; type_name, the type of
+    one value of it; and operators, the ones it takes, as the filter names
+    them."""
+
+    key: str
+    name: str
+    type_name: str
+    operators: tuple[str, ...]
+
+
+# The operators of a filter as a typed filter names them, in the order
+# they are written, each beside the wire's name for it.
+_FILTER_OPERATORS = (
+    ("eq", "eq"),
+    ("in", "in"),
+    ("gt", "gt"),
+    ("gte", "gte"),
+    ("lt", "lt"),
+    ("lte", "lte"),
+    ("contains", "contains"),
+    ("is_null", "isNull"),
+)
+# The most values an in may list, and the most filter parameters a request
+# may hold, as the route reads them.
+_FILTER_MAX_IN_VALUES = 100
+_FILTER_MAX_PARAMETERS = 50
+
+
+def _filter_text(value: Any) -> str:
+    """Return the text a filter's value is sent as: an enum member's
+    serialized value, true or false for a bool."""
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def filter_query_params(
+    value: Any,
+    argument: str,
+    fields: Sequence[FilterField],
+    validate: Callable[[Any, str, str], Any] | None = None,
+) -> dict[str, str]:
+    """Write a typed filter (D106) as the bracket form's query parameters.
+
+    value is the filter, a mapping with a member per field: a value, for
+    equality, or a mapping of the field's operators. Each operator set is
+    one parameter, in the fields' order and then the operators':
+    filter[field]=value for eq and filter[field][op]=value for any other,
+    an in's values joined by commas and is_null as isNull. A member or an
+    operator that is None, and an in of no value, is left out.
+
+    What the route would refuse is refused before the request, every
+    failure raised at once at argument[member] or argument[member][op]: a
+    member that is no field of the filter, an operator its field does not
+    take, an in of more than 100 values or of one the comma-separated
+    value cannot carry as it is, a contains of no text, an is_null that is
+    not a bool, and more than 50 parameters. validate checks one value as
+    the field's type at its path and returns it as it is sent.
+    """
+    if not isinstance(value, Mapping):
+        raise ValidationError(
+            {argument: [{"validator": "type", "message": f"{argument} must be a mapping of its fields"}]},
+        )
+
+    errors: dict[str, list[dict[str, str]]] = {}
+    params: dict[str, str] = {}
+
+    def refuse(path: str, validator: str, message: str) -> None:
+        errors.setdefault(path, []).append({"validator": validator, "message": f"{path} {message}"})
+
+    def text_of(item: Any, type_name: str, path: str) -> str | None:
+        if item is None:
+            refuse(path, "required", "is required")
+            return None
+        if validate is not None:
+            try:
+                item = validate(item, type_name, path)
+            except ValidationError as err:
+                for key, found in err.errors.items():
+                    errors.setdefault(key, []).extend(found)
+                return None
+        return _filter_text(item)
+
+    known = {field.key for field in fields}
+    for key in value:
+        if key not in known:
+            refuse(f"{argument}[{key}]", "invalid", "is not a field this operation filters by")
+
+    for field in fields:
+        member = value.get(field.key)
+        if member is None:
+            continue
+        member_path = f"{argument}[{field.key}]"
+        name = f"filter[{field.name}]"
+        if not isinstance(member, Mapping):
+            text = text_of(member, field.type_name, member_path)
+            if text is not None:
+                params[name] = text
+            continue
+        for operator in member:
+            if operator not in field.operators:
+                refuse(member_path, "invalid", f"takes no operator {operator}")
+        for operator, wire in _FILTER_OPERATORS:
+            operand = member.get(operator) if operator in field.operators else None
+            if operand is None:
+                continue
+            path = f"{member_path}[{operator}]"
+            if operator == "in":
+                if isinstance(operand, (str, bytes)) or not isinstance(operand, Sequence):
+                    refuse(path, "type", "must be a list")
+                    continue
+                if len(operand) > _FILTER_MAX_IN_VALUES:
+                    refuse(path, "listMax", f"must contain at most {_FILTER_MAX_IN_VALUES} items")
+                    continue
+                items: list[str] = []
+                for index, item in enumerate(operand):
+                    item_path = f"{path}[{index}]"
+                    text = text_of(item, field.type_name, item_path)
+                    if text is None:
+                        continue
+                    if text.strip() == "":
+                        refuse(item_path, "required", "is required")
+                    elif "," in text or text.strip() != text:
+                        refuse(item_path, "pattern", "must not contain a comma or surrounding space")
+                    else:
+                        items.append(text)
+                if items:
+                    params[f"{name}[in]"] = ",".join(items)
+            elif operator == "contains":
+                if not isinstance(operand, str):
+                    refuse(path, "type", "must be text")
+                elif operand == "":
+                    refuse(path, "minLength", "needs text")
+                else:
+                    params[f"{name}[contains]"] = operand
+            elif operator == "is_null":
+                if not isinstance(operand, bool):
+                    refuse(path, "type", "must be true or false")
+                else:
+                    params[f"{name}[isNull]"] = _filter_text(operand)
+            else:
+                text = text_of(operand, field.type_name, path)
+                if text is not None:
+                    params[name if operator == "eq" else f"{name}[{wire}]"] = text
+
+    if len(params) > _FILTER_MAX_PARAMETERS:
+        refuse(argument, "max", f"must hold at most {_FILTER_MAX_PARAMETERS} filters")
+    if errors:
+        raise ValidationError(errors)
+    return params
 
 
 class Logger(Protocol):

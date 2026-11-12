@@ -37,6 +37,26 @@ This crate provides:
   router's decode and an in-process call each unbind once and bind once,
   and a cursor sent with another sort is the 400 `SORTED_CURSOR_DETAIL`.
   `tests/page_parity.rs` runs `runtime/http/testdata/page_parity.json`
+- `filter`: the filters of a list operation (`FilterBy`, D106), the twin
+  of Go's `filterparse` and TypeScript's `filter.ts`. An operation's spec
+  is `FilterSpec::new(&[FieldSpec::new("stateId", &[Operator::Eq,
+  Operator::In])])`, and `FilterSpec::query` reads the bracket form,
+  `filter[field]=value` and `filter[field][op]=value`, into `Filter`s in
+  the spec's field order, with the 400 every runtime answers at
+  `filter[field]`. An implementation takes a field's filter typed,
+  `filter::Equals<T>`, `filter::Ordered<T>` or `filter::Text<T>` by its
+  operators (`eq`, `in_`, `gt`, `gte`, `lt`, `lte`, `contains`,
+  `is_null`), which `filter::decode_equals`, `decode_ordered` and
+  `decode_text` read from the request's filters, each value as
+  `ParamSpec::query_item` reads an item of a query list of the field's
+  type, refused at `filter[field]`; each type's `check` holds a filter an
+  in-process caller built to the same rules. A date's and a decimal's
+  value, which a query parameter takes as text, is a `ParamKind::Date` or
+  `ParamKind::Decimal`, read by the scalar's parse the generated router
+  hands its spec (`ParamSpec::parse`, a `ScalarParse`): the canonical text,
+  or the 400 `expected a date` or `expected a decimal number` with the
+  scalar core's errors. `tests/filter_parity.rs` runs
+  `runtime/http/testdata/filter_parity.json`
 - `input`, `required_input` and `input_refusal`: an operation's input
   parsed by its type's generated `parse_<type>`, with undeclared keys
   refused and field errors in the problem's `errors`; `body_fields` and

@@ -14,7 +14,9 @@ caller's verifier and credential sources (D37), which import nothing from
 node: so they run on Workers too, and the handlers' helpers of a generated
 router's behavior operations (behavior-routes.ts, D103), which build the
 behaviors' core's caller and answer its refusals, importing nothing of the
-repositories. It also holds what a generated server's
+repositories, and the handlers of its table operations (table-routes.ts,
+D106), which read and write a table's rows through the repositories they
+are handed. It also holds what a generated server's
 entrypoint reads (D51): the readers of the config fields a stack derives
 (stackconfig.ts), which map a loaded credential onto those sources, the
 JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
@@ -118,6 +120,20 @@ export {
   unbindCursor,
 } from './page.js';
 export type { Page, PageQuery, PageRequest, PageSort, PageSpec, SortSpec } from './page.js';
+export { FILTER_OPERATORS, FILTER_PARAM, MAX_FILTERS, MAX_FILTER_IN_VALUES, readFilter, readFilters } from './filter.js';
+export type {
+  EqualsFilter,
+  FieldFilter,
+  FilterFieldSpec,
+  FilterFields,
+  FilterKind,
+  FilterOperator,
+  FilterSpec,
+  OrderedFilter,
+  QueryFilter,
+  RequestFilter,
+  TextFilter,
+} from './filter.js';
 export { authorize, covers, hasAnyPermission } from './auth.js';
 export type { Authenticator, PermissionMatcher, Principal } from './auth.js';
 export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';
@@ -144,6 +160,8 @@ export type {
 } from './credentials.js';
 export { behaviorCaller, behaviorOperation, behaviorParams, behaviorPreconditions } from './behavior-routes.js';
 export type { BehaviorCaller } from './behavior-routes.js';
+export { tableCreate, tableDelete, tableFilter, tableList, tableRead, tableUpdate } from './table-routes.js';
+export type { TableOperation, TableOperationKind, TableRequest } from './table-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,

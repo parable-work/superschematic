@@ -16,6 +16,7 @@ import (
 	types "example.com/acme/types/go/shop-api"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/filterparse"
 	"go.uber.org/zap"
 )
 
@@ -110,7 +111,11 @@ func TestTheSDKCallsTheGeneratedServer(t *testing.T) {
 		t.Fatalf("CreateProduct returned %+v", created)
 	}
 
-	products, err := client.ProductNamespace.ListProducts(ctx, &namespaces.ProductListProductsQueryParams{InStock: true})
+	// The products in stock: filter[inStock]=true on the wire (D106).
+	inStock := true
+	products, err := client.ProductNamespace.ListProducts(ctx, &namespaces.ProductListProductsQueryParams{
+		Filter: &namespaces.ProductListProductsFilter{InStock: &filterparse.Equals[bool]{Eq: &inStock}},
+	})
 	if err != nil {
 		t.Fatalf("ListProducts: %v", err)
 	}

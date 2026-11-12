@@ -16,7 +16,7 @@ import (
 	gohttp "net/http"
 {{- end }}
 
-{{- if .HasFilterableEndpoints }}
+{{- if .HasFilteredEndpoints }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
 {{- end }}
 {{- if .HasPagedEndpoints }}
@@ -54,11 +54,12 @@ type {{ toGoName . }}Implementation interface {
 	// {{ $line }}
 {{- end }}
 {{- end }}
-{{- if .Filterable }}
+{{- if .Filter }}
 	//
-	// This endpoint accepts bracket-notation filter query parameters (filter[field]=value).
-	// The filters slice is parsed from the URL; field names match [a-zA-Z0-9_]+.
-	// Validate filter.Field against an allowlist before using it in queries.
+	// This endpoint filters its list (FilterBy, D106): {{ .Filter.Argument }} holds what the
+	// request filters by, a member per field, nil for a field it does not
+	// filter by, and each operator the request sent set on it. Every member
+	// set must hold at once.
 {{- end }}
 {{- if .Page }}
 	//
@@ -83,10 +84,26 @@ type {{ toGoName . }}Implementation interface {
 	//   - {{ .Name }} ({{ .ScalarType }}{{ if not .Required }}, optional{{ end }}): max {{ .MaxSize }} bytes, types: {{ join .AllowedTypes ", " }}
 {{- end }}
 {{- end }}
-	{{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error)
+	{{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filter }}, {{ .Filter.Argument }} {{ .GoFilterTypeName }}{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error)
 {{- end }}
 {{- end }}
 }
+{{- end }}
+
+{{- range .Endpoints }}
+{{- if .Filter }}
+
+// {{ .GoFilterTypeName }} is what a request of {{ .Filter.Operation }} filters by
+// (FilterBy, D106): a member per field, nil for a field the request does
+// not filter by, each operator the request sent set on it. Every member set
+// holds at once.
+type {{ .GoFilterTypeName }} struct {
+{{- range .Filter.Fields }}
+	// {{ .GoName }} filters by {{ .Name }}: {{ join .Operators ", " }}.
+	{{ .GoName }} *{{ .GoFilterType }}
+{{- end }}
+}
+{{- end }}
 {{- end }}
 
 // Implementations holds all namespace implementation interfaces.

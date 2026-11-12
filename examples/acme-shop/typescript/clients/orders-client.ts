@@ -4,7 +4,8 @@
 // shopper's bearer token, which shop-api's login issued: the Go and the
 // Rust server both read its session from shop-db's users.
 import { ApiError, ShopOrdersSDK } from '@acme/shop-orders-sdk';
-import type { Page } from '@acme/shop-orders-sdk';
+import type { OrderListOrdersFilter, Page } from '@acme/shop-orders-sdk';
+import { OrderStatus } from '@acme/shop-orders-types';
 import { parseIdentityNameStrict, parseIdentityUUIDStrict } from 'superscalar/scalars';
 
 // A scalar field's type is its brand (IdentityUUID, IdentityName), which a
@@ -89,6 +90,12 @@ const orders = await shopper.order.listOrders({ limit: 1 });
 console.log(`orders: ${orders.items.length}, ${lastPage(orders)}`);
 console.log(`every order: ${await count(shopper.order.listOrdersAll({ limit: 1 }))}`);
 console.log(`every order by total, largest first: ${await count(shopper.order.listOrdersAll({ sort: '-totalCents', limit: 1 }))}`);
+
+// The orders still on their way: a filter is typed, a member per field the
+// list filters by, and goes out as filter[status][in]=placed,fulfilled
+// with every page (D106).
+const onTheirWay: OrderListOrdersFilter = { status: { in: [OrderStatus.Placed, OrderStatus.Fulfilled] } };
+console.log(`orders on their way: ${await count(shopper.order.listOrdersAll({ filter: onTheirWay, limit: 1 }))}`);
 
 // e30 is the cursor of {}, a key that names no order.
 console.log(`orders after a cursor the server never returned: ${await status(() =>

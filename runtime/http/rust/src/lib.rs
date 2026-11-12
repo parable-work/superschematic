@@ -21,6 +21,9 @@ mod controls;
 // A site's CORS (D55), which a stack server answers for the APIs it serves.
 pub mod cors;
 mod error;
+// The filters of a list operation (FilterBy, D106): the router's reader,
+// and the typed filter an implementation takes.
+pub mod filter;
 // A bucket on Google Cloud Storage (D54), with the `gcs` feature.
 #[cfg(feature = "gcs")]
 pub mod gcs;
@@ -103,7 +106,7 @@ pub use operation::{
 };
 pub use params::{
     decode_json_param, decode_param, ObjectPrepare, ParamKind, ParamLocation, ParamSpec,
-    QueryValues, ScalarCheck, ScalarConstraints,
+    QueryValues, ScalarCheck, ScalarConstraints, ScalarParse,
 };
 pub use path::path_is_percent_encoded;
 pub use ratelimit::{client_key, ClientIp, RateLimiter, RateLimits};

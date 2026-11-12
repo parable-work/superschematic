@@ -4,11 +4,11 @@
 //! shopper's bearer token, which shop-api's login issued: the Go and the
 //! Rust server both read its session from shop-db's users.
 
-use acme_shop_orders_sdk::namespaces::order::ListOrdersQueryParams;
+use acme_shop_orders_sdk::namespaces::order::{ListOrdersFilter, ListOrdersQueryParams};
 use acme_shop_orders_sdk::namespaces::product_catalog::ListProductsQueryParams;
 use acme_shop_orders_sdk::namespaces::product_reviews::ListReviewsQueryParams;
-use acme_shop_orders_sdk::types::{IdentityUUID, PlaceOrderInput, PlaceOrderLine, ShippingAddress, WriteReviewInput};
-use acme_shop_orders_sdk::{ClientConfig, Page, Pager, SDKError, ShopOrdersSdk};
+use acme_shop_orders_sdk::types::{IdentityUUID, OrderStatus, PlaceOrderInput, PlaceOrderLine, ShippingAddress, WriteReviewInput};
+use acme_shop_orders_sdk::{ClientConfig, Equals, Page, Pager, SDKError, ShopOrdersSdk};
 
 #[cfg(test)]
 mod types_test;
@@ -118,6 +118,15 @@ async fn main() -> Result<(), SDKError> {
         "every order by total, largest first: {}",
         count(shopper.order.list_orders_all(Some(&largest), None)).await?
     );
+
+    // The orders still on their way: a filter is typed, a member per field
+    // the list filters by, and goes out as
+    // filter[status][in]=placed,fulfilled with every page (D106).
+    let on_their_way = ListOrdersFilter {
+        status: Some(Equals { one_of: vec![OrderStatus::Placed, OrderStatus::Fulfilled], ..Default::default() }),
+    };
+    let filtered = ListOrdersQueryParams { filter: Some(on_their_way), limit: Some(1), ..Default::default() };
+    println!("orders on their way: {}", count(shopper.order.list_orders_all(Some(&filtered), None)).await?);
 
     // e30 is the cursor of {}, a key that names no order.
     let forged = ListOrdersQueryParams { cursor: Some("e30".to_string()), ..Default::default() };

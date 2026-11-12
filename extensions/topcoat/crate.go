@@ -308,6 +308,12 @@ type operation struct {
 	// the page's next to it after, as the router does.
 	Paged  bool
 	Sorted bool
+	// Filter is the field of the operation's Args that holds its FilterBy
+	// (D106), empty for an operation without one. Its argument form builds
+	// the filter of its controls; every other call, a procedure's, a
+	// picker's and a page's without the form, sets it to its default,
+	// which filters by nothing.
+	Filter string
 	// NoCall is why the operation has no in-process call, and so no
 	// procedure; NoProcedure why one with a call has no procedure. Each is
 	// a reason (noCall, noProcedure), empty when the operation has the
@@ -337,6 +343,9 @@ func operationOf(e registry.RustEndpoint) operation {
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
+	}
+	if e.Filter != nil {
+		op.Filter = e.Filter.Field
 	}
 	return op
 }
@@ -708,7 +717,9 @@ func (c *crate) HasChoices() bool { return c.HasForms() || len(c.Views) > 0 }
 // argument forms; "noRows", "choosable"; "picks" for a search picker's
 // form, and "pickRows" for one with rows, whose removal numbers the
 // pickers' texts again; and what a rendered control needs ("checked",
-// "localDateTime", "showsAll", "showsRow", "showsRows").
+// "localDateTime", "showsAll", "showsRow", "showsRows"); and "filters"
+// for a form with a filter's controls (D106), "filterChoices" for one of
+// choices and "filterEqual" for one that reads an equality.
 func (c *crate) FormsUse(item string) bool {
 	return c.formUses()[item]
 }
@@ -771,6 +782,21 @@ func (c *crate) formUses() map[string]bool {
 				if a.Kind == kindRepeated {
 					uses["showsAll"] = true
 				}
+			}
+		}
+		// A filter's controls (D106): the bracket form's names, and what
+		// reads each control's values from them.
+		for _, c := range f.Filters {
+			uses["filters"], uses["first"] = true, true
+			switch c.Operator {
+			case filterIn:
+				uses["filterChoices"], uses["filterEqual"], uses["values"], uses["argsList"], uses["checked"] = true, true, true, true, true
+			case filterEq:
+				uses["filterEqual"], uses["argsSingle"] = true, true
+				uses["localDateTime"] = uses["localDateTime"] || c.Control == "datetime-local"
+			}
+			if c.Decoded() {
+				uses["read"], uses[c.Read] = true, true
 			}
 		}
 	}

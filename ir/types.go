@@ -582,10 +582,10 @@ type FieldDef struct {
 	// Empty means the field's name in snake case (with _id for a relation).
 	SQLName string `json:"sqlName,omitempty" yaml:"sqlName,omitempty"`
 
-	// Filterable marks this endpoint as accepting bracket-notation filter
-	// query parameters (@filterable). When true, the generated handler parses
-	// filter[field]=value and filter[field][op]=value params.
-	Filterable bool `json:"filterable,omitempty" yaml:"filterable,omitempty"`
+	// Filter is FilterBy (D106): the filters the operation's list takes,
+	// its argument's name and the fields a caller may filter by. Nil for
+	// every other operation and for data fields. See [OperationFilter].
+	Filter *OperationFilter `json:"filter,omitempty" yaml:"filter,omitempty"`
 
 	// Page is @paginated (D60): the operation's list result pages by an
 	// opaque cursor. Nil for every other operation and for data fields.
@@ -617,6 +617,12 @@ type FieldDef struct {
 	// authored operation. The data forms have no key for it. See
 	// [BehaviorOperation].
 	BehaviorOperation *BehaviorOperation `json:"behaviorOperation,omitempty" yaml:"behaviorOperation,omitempty" jsonschema:"-"`
+
+	// TableOperation is @tableOperation (D106): the operation reads or
+	// writes one table through its @source views, with a handler the build
+	// writes and no implementation method. Nil for every other operation.
+	// See [TableOperation].
+	TableOperation *TableOperation `json:"tableOperation,omitempty" yaml:"tableOperation,omitempty"`
 
 	// HTTPMethod is the explicit HTTP method for operation fields
 	// ("GET", "POST", "PUT", "PATCH", "DELETE"). There is no

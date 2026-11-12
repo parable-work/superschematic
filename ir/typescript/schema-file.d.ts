@@ -251,7 +251,7 @@ export interface FieldDef {
   extensions?: Extensions;
   fileDownload?: FileDownloadDef;
   fileUpload?: FileUploadConfig;
-  filterable?: boolean;
+  filter?: OperationFilter;
   hasMany?: boolean;
   hmacVerifiedProvider?: string;
   httpBinaryStream?: HTTPBinaryStreamDef;
@@ -287,6 +287,7 @@ export interface FieldDef {
   serviceCallers?: ServiceCallers;
   sourceMustProject?: boolean;
   sqlName?: string;
+  tableOperation?: TableOperation;
   temporalFormat?: string;
   title?: string;
   typeRef: TypeRef;
@@ -326,6 +327,13 @@ export interface FileUploadConfig {
   allowedTypes?: string[];
   category?: string;
   maxSize?: number;
+}
+
+export interface FilterField {
+  kind?: string;
+  name: string;
+  operators?: string[];
+  typeRef?: TypeRef;
 }
 
 export interface GraphMemberConfig {
@@ -441,6 +449,11 @@ export interface OperationDocsError {
   code: string;
   commonCorrection: string;
   description: string;
+}
+
+export interface OperationFilter {
+  argument: string;
+  fields: FilterField[];
 }
 
 export interface OperationMCP {
@@ -720,6 +733,21 @@ export interface StackDecl {
   deploy?: ServiceRef[];
   expose?: DeployableRef[];
   origins?: Origin[];
+}
+
+export interface TableOperation {
+  database?: string;
+  input?: string;
+  key?: string;
+  kind?: string;
+  parents?: TableOperationParent[];
+  projection?: boolean;
+  type?: string;
+}
+
+export interface TableOperationParent {
+  param: string;
+  relation: string;
 }
 
 export interface TraitConfigSchema {

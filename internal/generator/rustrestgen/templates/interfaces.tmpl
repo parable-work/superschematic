@@ -9,7 +9,7 @@
 
 #![allow(unused_imports)]
 
-{{ if .HasPages }}use crate::runtime;
+{{ if or .HasPages .HasFilters }}use crate::runtime;
 {{ end }}use crate::types;
 use async_trait::async_trait;
 {{- if or .WebhookProviders .ManualEndpoints }}
@@ -40,6 +40,13 @@ pub struct {{ .ArgsName }} {
     /// The `{{ .Name }}` query parameter.
     pub {{ .Field }}: {{ .RustType }},
 {{- end }}
+{{- with .Filter }}
+    /// What the request filters by (FilterBy, D106): the `filter[field]`
+    /// and `filter[field][operator]` query parameters, a member per field,
+    /// `None` for a field the request does not filter by. Every member set
+    /// holds at once. `{{ .TypeName }}::default()` filters by nothing.
+    pub {{ .Field }}: {{ .TypeName }},
+{{- end }}
 {{- if .Page }}
     /// The page asked for (D60): the `cursor` and `limit` query parameters,
     /// the limit's default filled in. `PageRequest::first(limit)` asks for
@@ -64,6 +71,20 @@ pub struct {{ .ArgsName }} {
     pub {{ .Field }}: {{ .RustType }},
 {{- end }}
 }
+{{- with .Filter }}
+
+/// What a request of {{ .Operation }} filters by (FilterBy, D106): a
+/// member per field, `None` for a field the request does not filter by,
+/// each operator the request sent set on it. Every member set holds at
+/// once. `check` holds one a caller built to the route's rules.
+#[derive(Debug, Clone, Default)]
+pub struct {{ .TypeName }} {
+{{- range .Fields }}
+    /// Filters by `{{ .Name }}`: {{ join .Operators ", " }}.
+    pub {{ .Field }}: {{ .RustType }},
+{{- end }}
+}
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -77,8 +98,16 @@ pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
     {{- if .Description }}
     /// {{ index (splitLines .Description) 0 }}
     {{- end }}
-    {{- if .Page }}
+    {{- if .Filter }}
     {{- if .Description }}
+    ///
+    {{- end }}
+    /// It filters its list (FilterBy, D106): keep the items every member
+    /// of `args.{{ .Filter.Field }}` that is set holds for, each operator set on a
+    /// member among them.
+    {{- end }}
+    {{- if .Page }}
+    {{- if or .Description .Filter }}
     ///
     {{- end }}
     {{- if .Page.Sort }}

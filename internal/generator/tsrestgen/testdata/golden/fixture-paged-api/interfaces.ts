@@ -9,15 +9,24 @@
 // A @paginated operation (D60) takes the page asked for as args.page and
 // returns a Page, {items, next}, next null after the last page:
 // pageFromRows builds one from up to limit + 1 rows.
+// A list with a filter (FilterBy, D106) takes the request's filters under
+// its filter argument, typed: a member per field the request filters by,
+// each holding the operators it sent with their values decoded, and {} for
+// a request that filters by none. An item is kept when it matches every
+// member.
 
-import type { OperationResult, Page, PageRequest, RequestContext } from '@superschematic/http-runtime';
+import type { EqualsFilter, OperationResult, OrderedFilter, Page, PageRequest, RequestContext, TextFilter } from '@superschematic/http-runtime';
 import type {
+  GenericDecimal,
   IdentityUUID,
+  TemporalDate,
 } from 'superscalar/scalars';
 import type {
   BasketInput,
   BasketView,
   ItemView,
+  PartKind,
+  PartView,
 } from '@schemas/fixture-paged-api-types/types';
 
 /** What an implementation method resolves to: the view itself, or the view with a chosen status. */
@@ -39,6 +48,42 @@ export interface ListItemsArgs {
 /** Arguments of catalog.getItem (GET /api/items/{itemId}). */
 export interface GetItemArgs {
   itemId: IdentityUUID;
+}
+
+/**
+ * The filter of catalog.listParts (FilterBy, D106): a member per field the
+ * request filters by, absent for a field it does not, each holding the
+ * operators the request sent. An item is kept when it matches them all.
+ */
+export interface ListPartsFilter {
+  /** By id: eq, in. */
+  readonly id?: EqualsFilter<IdentityUUID>;
+  /** By name: eq, in, contains. */
+  readonly name?: TextFilter<string>;
+  /** By kind: eq, in. */
+  readonly kind?: EqualsFilter<PartKind>;
+  /** By quantity: eq, in, gt, gte, lt, lte. */
+  readonly quantity?: OrderedFilter<number>;
+  /** By weight: eq, in, gt, gte, lt, lte. */
+  readonly weight?: OrderedFilter<number>;
+  /** By price: eq, in, gt, gte, lt, lte. */
+  readonly price?: OrderedFilter<GenericDecimal>;
+  /** By discontinued: eq, in. */
+  readonly discontinued?: EqualsFilter<boolean>;
+  /** By madeAt: eq, in, gt, gte, lt, lte. */
+  readonly madeAt?: OrderedFilter<Date>;
+  /** By retiredOn: eq, in, gt, gte, lt, lte, isNull. */
+  readonly retiredOn?: OrderedFilter<TemporalDate>;
+  /** By supplierId: eq, in, isNull. */
+  readonly supplierId?: EqualsFilter<IdentityUUID>;
+}
+
+/** Arguments of catalog.listParts (GET /api/parts). */
+export interface ListPartsArgs {
+  /** The request's filters (FilterBy, D106), by id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId: a member per field it filters by, {} when it filters by none. The router has read each value as its field's type; a cursor carries no filter, so each page is asked with the same ones. */
+  filter: ListPartsFilter;
+  /** The page asked for (D60): the cursor of the page before, absent for the first page; the limit, 1 to 5, 2 when the caller sends none; and the sort (D60, amended), by name, quantity, descending when desc, name when the caller sends none, ties broken by id. The cursor is the method's own key's: the router binds it to the sort and back. */
+  page: PageRequest;
 }
 
 /** Arguments of catalog.listTags (GET /api/tags). */
@@ -69,6 +114,16 @@ export interface CatalogImplementation {
    * GET /api/items/{itemId}
    */
   getItem(args: GetItemArgs, ctx: RequestContext): Promise<OperationOutcome<ItemView>>;
+  /**
+   * The parts, in order of their names unless the caller sorts them by
+   * quantity, kept to the ones the caller's filters find (D106): a filter
+   * on a field of each kind, beside a page and a sort.
+   *
+   * GET /api/parts
+   * Filtered (FilterBy): args.filter holds a member for each of id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId the request filters by, and an item is kept when it matches them all; {} for a request that filters by none.
+   * Paged (@paginated): answers the Page args.page asks for, whose next is null after the last page.
+   */
+  listParts(args: ListPartsArgs, ctx: RequestContext): Promise<OperationOutcome<Page<PartView>>>;
   /**
    * The tags items carry: a page of a primitive, with the default limits.
    *

@@ -453,8 +453,9 @@ fn sees_every_order(ctx: &RequestContext) -> bool {
 #[async_trait]
 impl OrderImplementation for Shop {
     /// The caller's orders, or every customer's for staff, in the page's
-    /// sort, by when each was placed or by its total, with the given
-    /// statuses, or of every status when there are none.
+    /// sort, by when each was placed or by its total, of the statuses the
+    /// request's filter keeps (D106): the one it names, one of those it
+    /// lists, or every status when it filters by none.
     async fn list_orders(
         &self,
         ctx: RequestContext,
@@ -467,9 +468,10 @@ impl OrderImplementation for Shop {
             .filter(|order| order.visible_to(&ctx))
             .map(|order| &order.view)
             .filter(|order| {
-                args.statuses
-                    .as_ref()
-                    .is_none_or(|statuses| statuses.is_empty() || statuses.contains(&order.status))
+                args.filter.status.as_ref().is_none_or(|by| {
+                    by.eq.is_none_or(|eq| eq == order.status)
+                        && (by.in_.is_empty() || by.in_.contains(&order.status))
+                })
             });
         order.page(
             listed.cloned(),

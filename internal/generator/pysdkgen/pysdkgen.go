@@ -41,15 +41,18 @@ var templatesFS embed.FS
 
 // SDKOutput contains all generated Python SDK metadata.
 type SDKOutput struct {
-	SchemaName             string
-	Author                 string // manifest author, from Naming.PackageAuthor
-	PackageName            string
-	TypesPackage           string
-	SDKClassName           string
-	Namespaces             []NamespaceInfo
-	HasAuth                bool
-	HasFilterableEndpoints bool // Gates FilterSpec in client.py to avoid dead code in non-filterable SDKs.
-	HasPathParams          bool // Gates path_segment in client.py, which encodes a path parameter value.
+	SchemaName    string
+	Author        string // manifest author, from Naming.PackageAuthor
+	PackageName   string
+	TypesPackage  string
+	SDKClassName  string
+	Namespaces    []NamespaceInfo
+	HasAuth       bool
+	HasPathParams bool // Gates path_segment in client.py, which encodes a path parameter value.
+	// HasFilteredEndpoints gates FilterField and filter_query_params in
+	// client.py, which write an operation's typed filter in the bracket
+	// form (D106).
+	HasFilteredEndpoints bool
 	// HasUnsetArgs gates the Unset type and its UNSET sentinel in client.py
 	// and __init__.py, the default of an argument that keeps null
 	// (ScalarArg.KeepsNull).
@@ -63,19 +66,21 @@ type SDKOutput struct {
 
 // NamespaceInfo represents a namespace with its endpoints for the Python SDK.
 type NamespaceInfo struct {
-	Name                   string
-	ModuleName             string
-	ClassName              string
-	AccessorName           string
-	IsScopedNS             bool
-	ScopeParamName         string
-	ScopeParamType         string
-	scopeParamOriginal     string
-	Endpoints              []EndpointInfo
-	Imports                []string
-	HasAuth                bool
-	HasEncryptedPayload    bool
-	HasFilterableEndpoints bool
+	Name                string
+	ModuleName          string
+	ClassName           string
+	AccessorName        string
+	IsScopedNS          bool
+	ScopeParamName      string
+	ScopeParamType      string
+	scopeParamOriginal  string
+	Endpoints           []EndpointInfo
+	Imports             []string
+	HasAuth             bool
+	HasEncryptedPayload bool
+	// HasFilteredEndpoints gates the imports of FilterField and
+	// filter_query_params, for an operation that takes a filter (D106).
+	HasFilteredEndpoints bool
 
 	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper
 	// and HasListOfListsModelOutput the _coerce_list_of_lists_response
@@ -207,7 +212,18 @@ type EndpointInfo struct {
 	FilesTypeName        string
 	MultipartStripKeys   []string
 	MethodParams         []MethodParam
-	Filterable           bool
+	// Filter is the operation's FilterBy (D106), nil for an operation
+	// without one. Its method takes the filter typed, by keyword alone
+	// under the argument's name: FilterTypeName (ListPartsFilter), a
+	// TypedDict with a member per field in FilterFields, each a value, for
+	// equality, or the field's operators. FilterFieldsName names the
+	// module's tuple of the fields (_LIST_PARTS_FILTER_FIELDS), by which
+	// filter_query_params writes the filter in the bracket form;
+	// <method>_all sends it with every page, since a cursor carries none.
+	Filter           *apigen.FilterInfo
+	FilterTypeName   string
+	FilterFieldsName string
+	FilterFields     []FilterField
 	// FileDownload marks a FileDownload result (D81): the method returns
 	// the client's DownloadedFile, the bytes and the filename.
 	FileDownload bool
@@ -240,6 +256,42 @@ type PathParam struct {
 	PyType string
 }
 
+// FilterField is one field of an operation's typed filter (D106).
+type FilterField struct {
+	// Name is the item's field, by its JSON name, as the wire names it in
+	// filter[<name>]; PyName is the filter's member.
+	Name   string
+	PyName string
+	// PyType is the type of one value of the field, as a query parameter
+	// of its type has it; each value is validated as it before the request.
+	PyType string
+	// OperatorsTypeName names the TypedDict of the field's operators
+	// (ListPartsFilterQuantity), and Operators are its members.
+	OperatorsTypeName string
+	Operators         []FilterOperator
+}
+
+// OperatorKeys is the tuple of the field's operators, as the filter names
+// them, as a Python literal: ("eq", "in", "is_null").
+func (f FilterField) OperatorKeys() string {
+	keys := make([]string, len(f.Operators))
+	for i, operator := range f.Operators {
+		keys[i] = strconv.Quote(operator.Key)
+	}
+	if len(keys) == 1 {
+		return "(" + keys[0] + ",)"
+	}
+	return "(" + strings.Join(keys, ", ") + ")"
+}
+
+// FilterOperator is one operator of a filter's field: Key is the member
+// of the field's operators, the wire's name but is_null for isNull, as the
+// SDK names a member in snake_case, and PyType the type of its value.
+type FilterOperator struct {
+	Key    string
+	PyType string
+}
+
 // QueryParam represents a query string parameter mapped to a Python identifier.
 type QueryParam struct {
 	Name     string
@@ -268,9 +320,16 @@ type QueryParam struct {
 	EmptyIsAbsent bool
 
 	// Paging marks a paged operation's sort (D60, amended), cursor and
-	// limit, which its method takes by keyword alone, after its own query
-	// parameters: a list that gains a sort keeps its callers' arguments.
+	// limit, and an operation's filter (D106), which its method takes by
+	// keyword alone, after its own query parameters: a list that gains a
+	// sort or a filter keeps its callers' arguments.
 	Paging bool
+
+	// FilterFieldsName marks the operation's filter (D106), the keyword
+	// named for the FilterBy argument: PyType is the filter's TypedDict,
+	// and this the module's tuple of its fields, by which the filter is
+	// written in the bracket form rather than as one value.
+	FilterFieldsName string
 }
 
 // ScalarArg represents a scalar input argument for an endpoint.
@@ -464,9 +523,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		if converted.HasEncryptedBody {
 			namespace.HasEncryptedPayload = true
 		}
-		if endpoint.Filterable {
-			namespace.HasFilterableEndpoints = true
-			output.HasFilterableEndpoints = true
+		if converted.Filter != nil {
+			namespace.HasFilteredEndpoints = true
+			output.HasFilteredEndpoints = true
 		}
 		for _, arg := range endpoint.ScalarArgs {
 			if _, isUnion := apiOutput.TypeUnions[arg.Type]; isUnion {
@@ -590,7 +649,17 @@ func collectNamespaceImports(target map[string]struct{}, endpoint apigen.Endpoin
 	if outputIsJSONValue(endpoint) {
 		target[pythonJSONType(endpoint.OutputType)] = struct{}{}
 	}
-	for _, params := range [][]apigen.Param{endpoint.PathParams, endpoint.QueryParams, endpoint.ScalarArgs} {
+	params := [][]apigen.Param{endpoint.PathParams, endpoint.QueryParams, endpoint.ScalarArgs}
+	if endpoint.Filter != nil {
+		// A filter's values are typed as query parameters of their fields'
+		// types are (D106).
+		values := make([]apigen.Param, len(endpoint.Filter.Fields))
+		for i, field := range endpoint.Filter.Fields {
+			values[i] = field.Value.Param
+		}
+		params = append(params, values)
+	}
+	for _, params := range params {
 		for _, param := range params {
 			if param.Type != "" && !isPythonBuiltinType(pythonParamType(param)) {
 				target[param.Type] = struct{}{}
@@ -635,6 +704,21 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			ValidateListMax:   param.ValidateListMax,
 			ValidatePattern:   param.ValidatePattern,
 			Paging:            param.Sort != nil,
+		})
+	}
+	// The filter (D106) is a keyword after the operation's own query
+	// parameters and its sort, before a page's cursor and limit.
+	filterTypeName := toPythonClassName(endpoint.Name) + "Filter"
+	filterFieldsName := "_" + strings.ToUpper(codegen.ToSnakeCase(filterTypeName)) + "_FIELDS"
+	var filterFields []FilterField
+	if endpoint.Filter != nil {
+		filterFields = convertFilterFields(endpoint.Filter, filterTypeName)
+		queryParams = append(queryParams, QueryParam{
+			Name:             endpoint.Filter.Argument,
+			PyName:           toPythonIdentifier(endpoint.Filter.Argument),
+			PyType:           filterTypeName,
+			Paging:           true,
+			FilterFieldsName: filterFieldsName,
 		})
 	}
 	if endpoint.Page != nil {
@@ -750,8 +834,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		FileUploadFields:     fileFields,
 		FilesTypeName:        toPythonClassName(endpoint.Name) + "Files",
 		MultipartStripKeys:   multipartStripKeys,
-		Filterable:           endpoint.Filterable,
-		MethodParams:         buildMethodParams(pathParams, endpoint.HasInput, endpoint.InputType, scalarArgs, queryParams, hasFileUpload, hasRequiredFileField, toPythonClassName(endpoint.Name)+"Files", hasEncryptedBody, endpoint.Filterable),
+		MethodParams:         buildMethodParams(pathParams, endpoint.HasInput, endpoint.InputType, scalarArgs, queryParams, hasFileUpload, hasRequiredFileField, toPythonClassName(endpoint.Name)+"Files", hasEncryptedBody),
 
 		OutputIsArrayOfArrays: endpoint.OutputIsArrayOfArrays,
 		OutputIsMap:           endpoint.OutputIsMap,
@@ -763,6 +846,12 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	if endpoint.FileDownload != nil {
 		converted.FileDownload = true
 		converted.OutputTypeHint = "DownloadedFile"
+	}
+	if endpoint.Filter != nil {
+		converted.Filter = endpoint.Filter
+		converted.FilterTypeName = filterTypeName
+		converted.FilterFieldsName = filterFieldsName
+		converted.FilterFields = filterFields
 	}
 	if endpoint.Page != nil {
 		converted.Paged = true
@@ -790,6 +879,49 @@ func setPageType(namespace *NamespaceInfo) {
 			endpoint.OutputTypeHint = namespace.PageType + "[" + endpoint.ItemTypeHint + "]"
 		}
 	}
+}
+
+// filterOperatorKey is the member of a field's operators for a wire
+// operator: the wire's name, but is_null for isNull, as the SDK names a
+// member in snake_case. in stays in: a member of a TypedDict is a string.
+func filterOperatorKey(op string) string {
+	if op == ir.FilterOpIsNull {
+		return "is_null"
+	}
+	return op
+}
+
+// convertFilterFields are the members of an operation's typed filter
+// (D106), in FilterBy's order: each field's value type, as a query
+// parameter of its type has it, and the TypedDict of its operators, named
+// for the filter and the field. eq and the comparisons take a value, in a
+// list of them, contains text and is_null a bool.
+func convertFilterFields(filter *apigen.FilterInfo, filterTypeName string) []FilterField {
+	fields := make([]FilterField, len(filter.Fields))
+	for i, field := range filter.Fields {
+		pyType := pythonParamType(field.Value.Param)
+		operators := make([]FilterOperator, len(field.Operators))
+		for j, op := range field.Operators {
+			operandType := pyType
+			switch op {
+			case ir.FilterOpIn:
+				operandType = pythonListType(pyType, 1)
+			case ir.FilterOpContains:
+				operandType = "str"
+			case ir.FilterOpIsNull:
+				operandType = "bool"
+			}
+			operators[j] = FilterOperator{Key: filterOperatorKey(op), PyType: operandType}
+		}
+		fields[i] = FilterField{
+			Name:              field.Name,
+			PyName:            toPythonIdentifier(field.Name),
+			PyType:            pyType,
+			OperatorsTypeName: filterTypeName + toPythonClassName(field.Name),
+			Operators:         operators,
+		}
+	}
+	return fields
 }
 
 // pageQueryParams are a paged operation's two query parameters (D60),
@@ -847,7 +979,6 @@ func buildMethodParams(
 	hasRequiredFileField bool,
 	filesTypeName string,
 	hasEncryptedBody bool,
-	isFilterable bool,
 ) []MethodParam {
 	methodParams := make([]MethodParam, 0, len(pathParams)+len(scalarArgs)+len(queryParams)+6)
 
@@ -910,8 +1041,9 @@ func buildMethodParams(
 		methodParams = append(methodParams, MethodParam{Name: arg.PyName, Declaration: declaration})
 	}
 
-	// A paged operation's sort, cursor and limit follow its own optional
-	// query parameters, by keyword alone (D60, amended).
+	// A paged operation's sort, cursor and limit, and an operation's filter
+	// (D106), follow its own optional query parameters, by keyword alone
+	// (D60, amended).
 	keywords := false
 	for _, paging := range []bool{false, true} {
 		for _, param := range queryParams {
@@ -925,13 +1057,6 @@ func buildMethodParams(
 			})
 			keywords = keywords || paging
 		}
-	}
-
-	if isFilterable {
-		methodParams = append(methodParams, MethodParam{
-			Name:        "filters",
-			Declaration: "filters: dict[str, str | FilterSpec] | None = None",
-		})
 	}
 
 	if hasEncryptedBody {

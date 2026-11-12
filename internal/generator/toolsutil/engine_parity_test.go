@@ -319,6 +319,7 @@ func TestEngineToolParametersParity(t *testing.T) {
 			func(name, _ string) string { return name },
 			variant.keys,
 			nil,
+			nil,
 		)
 		encoded, err := json.Marshal(parameters)
 		if err != nil {

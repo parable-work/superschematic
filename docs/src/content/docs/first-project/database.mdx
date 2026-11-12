@@ -124,7 +124,8 @@ pgx. Each table gets a repository:
   `GetProductRepository()` and its siblings hand out repositories, and
   `Transaction` runs a function with repositories bound to one transaction.
 - `FindMany` takes a `ProductFilter` with one filter per column, such as
-  `InStock: &orm.BoolFilter{Eq: &inStock}`, and `ProductFindOptions` for
+  `InStock: &orm.BoolFilter{Eq: &inStock}`, which `shop-api` builds from
+  its list's filter, and `ProductFindOptions` for
   the columns to read, the order and the page. It returns the rows and the
   total count of matching rows. Its options must name at least one column:
   `orm.ProductFields{}.All()` reads them all.
