@@ -37,7 +37,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself; a queue worker woken sooner than its next firing |
-| [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; `stack dev` | workers, jobs, buckets, memory stores, the user model and an engine in the binary; installing, signing and updating it |
+| [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; `stack dev` | jobs, buckets, memory stores, the user model and an engine in the binary; installing, signing and updating it |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
@@ -2466,9 +2466,9 @@ in with a cookie on the site's origin, with no `trustedOrigins`, no
 ## Build one binary
 
 An environment on the `embedded` target is one binary a person installs:
-every server of the environment in one process, each database a SQLite
-file under one data directory, and the site's built files inside the
-binary. Its servers are Rust, and each of its databases lists `sqlite`
+every server and worker of the environment in one process, each database
+a SQLite file under one data directory, and the site's built files inside
+the binary. Its servers are Rust, and each of its databases lists `sqlite`
 first. `examples/embedded-notes` is one.
 
 ```ts
@@ -2514,7 +2514,7 @@ is the site's, on one origin.
 | a Go or TypeScript server | refused: the binary runs Rust |
 | a database with no sqlite dialect | refused |
 | a job, a bucket, a memory store, an app, an engine | refused, each with its reason |
-| a worker that runs | refused for now; turn it off with `enabled: false` |
+| a `@worker` or a `@behaviorWorker` of one of its APIs | it runs inside the binary, claiming its queue on the database's file; a write the binary commits wakes it |
 | two APIs, one calling the other | the call is the SDK's, answered in the process, and a service clause holds |
 
 `stack deploy`, `plan` and `destroy` refuse the environment and name
@@ -2532,7 +2532,11 @@ settings: [{ of: NotesDb, adoption: { model: "plans/adopted.json", check: "SELEC
 ```
 
 A project with a process of its own links the crate's library in place
-of its `main.rs`: `Embedded::open`, `handle` and `close`.
+of its `main.rs`: `Embedded::open`, `handle` and `close`, and for each of
+`workers()` either `run`, the loop on tokio, or `drain`, which a host
+with no async runtime calls on a thread of its own with a connection from
+`connect`, the time and a limit, sleeping until the time it answers or
+until `wake` says the process wrote to the file.
 
 ## Generated CI
 

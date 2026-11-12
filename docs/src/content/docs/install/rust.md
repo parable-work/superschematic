@@ -658,7 +658,11 @@ disabled when its field is unset. The crate turns on the
 runtime's `postgres` feature for a
 database, `identity-postgres` beside the user model, so the identity
 store runs over `Deps.db` (`runtime::identity::PostgresPool`), and
-`http-client` for a callee.
+`http-client` for a callee. For a database whose DB service lists
+`sqlite` first it turns on `sqlite` and, beside the user model,
+`identity-sqlite`: the crate's `identity::store_on_file(&db)` builds the
+store on a connection of its own to the SQLite file `Deps.db` holds
+(D116).
 
 The implementation is a crate of its own at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_pathsrust)

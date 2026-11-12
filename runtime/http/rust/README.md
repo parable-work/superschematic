@@ -430,7 +430,10 @@ of the core user model. It does what the Go runtime's
   generated types' `IDENTITY_DESCRIPTOR`), which runs its SQL through a
   `Client`: `TokioPostgres` with `identity-postgres`, `Rusqlite` with
   `identity-sqlite`, or a binding of the service's own (a pool, another
-  driver). The store parses logins, display names and keys with the scalar
+  driver). `Rusqlite::open(path)` opens a connection of the store's own
+  to a SQLite file, in write-ahead logging with a five-second busy
+  timeout, which a server whose database is a SQLite file builds its
+  store over, beside the file's own connections (D116). The store parses logins, display names and keys with the scalar
   catalog the service passes as `Scalars`, superscalar's registry in a
   generated crate, since this crate does not link the scalar crate
 - `Service`, every session and administration operation with the Go

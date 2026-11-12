@@ -30,7 +30,8 @@ import (
 // EnvConfig, opens one Postgres pool per database, builds one SDK client
 // per API called with its credential source, opens one bucket per Bucket
 // service on GCS or its emulator (D54), calls each API's `create`
-// with its Deps, builds each API's identity service over its authDb's pool
+// with its Deps, builds each API's identity service over its authDb's pool,
+// or on a connection of its own to its authDb's SQLite file (D116),
 // and its service authenticator from its callers field, joins them with
 // the handlers through `Implementations::new`, and serves every API's
 // router beside /healthz and /readyz, under the site CORS of the APIs a
@@ -1684,7 +1685,14 @@ func (s *RustServer) RuntimeUses() []string {
 	}
 	uses := s.bucketUses(runtime)
 	if s.AnyIdentity() {
-		uses = append(uses, rustutil.UseLine(runtime+"::identity", []string{"PostgresPool", "Store"}))
+		// The identity store runs over a database's pool, and on a
+		// connection of its own to a database's SQLite file (D116), which
+		// the API crate's identity module opens.
+		identity := []string{"Store"}
+		if slices.ContainsFunc(s.Databases, func(d *RustDatabase) bool { return d.Store != "" }) {
+			identity = append(identity, "PostgresPool")
+		}
+		uses = append(uses, rustutil.UseLine(runtime+"::identity", identity))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.MCPConfirmationKey != "" }) {

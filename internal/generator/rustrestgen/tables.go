@@ -328,10 +328,10 @@ func (o *APIOutput) TablesInterfacesUse() string {
 }
 
 // checkSQLiteDeps refuses what a Rust server on a SQLite file does not run
-// yet (D116), each by name: its Deps.db is the file, where the identity
-// store and the engine are built over a Postgres pool. Its behaviors run
-// on the file, and its workers claim on it, a @worker's queue and a
-// @behaviorWorker's alike.
+// yet (D116), by name: its Deps.db is the file, where the engine is built
+// over a Postgres pool. Its identity store runs on the file, on a
+// connection of its own, its behaviors run on it, and its workers claim on
+// it, a @worker's queue and a @behaviorWorker's alike.
 func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 	if !deps.SQLite || deps.Database == "" {
 		return nil
@@ -339,10 +339,7 @@ func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 	refuse := func(what string) error {
 		return fmt.Errorf("rustrestgen: %s is a Rust API on %s, whose DB service lists sqlite first, and %s on Postgres alone so far (D116); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", o.SchemaName, deps.Database, what, deps.Database)
 	}
-	switch {
-	case o.Identity != nil:
-		return refuse("the Rust server builds its identity store")
-	case len(o.Derivers) > 0 || deps.Engine != nil:
+	if len(o.Derivers) > 0 || deps.Engine != nil {
 		return refuse("the Rust server opens an engine")
 	}
 	return nil

@@ -739,6 +739,11 @@ func (o *APIOutput) RuntimeFeatures() []string {
 	switch {
 	case o.Deps.Database != "" && o.Deps.SQLite:
 		features = append(features, "sqlite")
+		// The identity store runs on a connection of its own to the file
+		// (D116).
+		if o.Identity != nil {
+			features = append(features, "identity-sqlite")
+		}
 	case o.Deps.Database != "":
 		features = append(features, "postgres")
 		if o.Identity != nil {

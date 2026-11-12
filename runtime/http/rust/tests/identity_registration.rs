@@ -440,3 +440,52 @@ async fn registrations_at_once_make_one_administrator() {
         }
     }
 }
+
+/// A host with no async runtime drives the service's routes where they
+/// stand (D116): over a store on a connection of its own to a SQLite file,
+/// which another connection writes beside, a user registers, a password is
+/// hashed and verified on the calling thread, and the session a sign-in
+/// issues answers `me`.
+#[test]
+fn a_host_with_no_runtime_registers_and_signs_in_on_a_file() {
+    use superschematic_http_runtime::block_on;
+
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let dir = std::env::temp_dir().join(format!("identity-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("users.sqlite");
+    let db = support::sqlite_file(&path);
+    // The file is in write-ahead logging, so the API's own connection
+    // reads and writes it beside the store's.
+    let other = rusqlite::Connection::open(&path).unwrap();
+    let mode: String = other
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode, "wal");
+
+    let h = block_on(harness(db, Registration::default(), false));
+    let body = json!({"login": "ada@example.com", "name": "Ada", "password": NEW_PASSWORD});
+    let registered = block_on(h.send("POST", "/auth/register", Some(body.clone()), ""));
+    expect(&registered, 200, "");
+    let taken = block_on(h.send("POST", "/auth/register", Some(body), ""));
+    assert_eq!(taken.status, 409, "{}", taken.body);
+    let token = block_on(h.login("ada@example.com", NEW_PASSWORD));
+    let me = block_on(h.send("GET", "/auth/me", None, &token));
+    expect(&me, 200, "");
+    assert_eq!(me.data()["user"]["login"], "ada@example.com");
+    let refused = block_on(h.send(
+        "POST",
+        "/auth/login",
+        Some(json!({"login": "ada@example.com", "password": "not hers"})),
+        "",
+    ));
+    expect(&refused, 401, CODE_INVALID_CREDENTIALS);
+
+    // What the store committed, the other connection reads.
+    let users: i64 = other
+        .query_row("SELECT COUNT(*) FROM \"user\"", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(users, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

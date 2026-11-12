@@ -118,10 +118,15 @@ Each server takes the identity service, built over a store of the
 shows the Go wiring in `shop-orders`. The generated
 constructor hands the runtime how the API's `register` admits users
 (`IdentityRegistration`, `identityRegistration`, `registration()`), so a
-server wires nothing for it. A stack's Go and TypeScript
+server wires nothing for it. A stack's
 entrypoints build it for you, reading each API's config as JSON from
 `<API>_IDENTITY` (`SHOP_API_IDENTITY`); a job, which serves no request,
-builds none. On Cloudflare Workers a TypeScript server serves the user
+builds none. A Rust server whose `authDb` lists `sqlite` first keeps its
+users, their sessions and their API keys in the database's SQLite file
+(D116), as under `stack dev`: its entrypoint builds the store with the
+crate's `identity::store_on_file`, on a connection of the store's own to
+the file. A stack's Go or TypeScript server over the user model runs on
+Postgres. On Cloudflare Workers a TypeScript server serves the user
 model when its `authDb` is a Postgres database on Hyperdrive, and hashes
 passwords with the runtime's own argon2id, which writes the same hashes
 as `node:crypto`'s

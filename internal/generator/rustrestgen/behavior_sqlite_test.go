@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -244,35 +245,29 @@ func TestBehaviorsOnSQLiteAPICratesBuild(t *testing.T) {
 }
 
 // TestWhatARustAPIOnASQLiteFileDoesNotRunIsRefused: over a SQLite file a
-// Rust API's behaviors run and its workers claim (D116), and what the
-// runtime builds over a Postgres pool alone stays refused, by name: the
-// identity store, and an engine.
+// Rust API's behaviors run, its workers claim and its identity store is
+// built (D116), and what the runtime builds over a Postgres pool alone
+// stays refused, by name: an engine.
 func TestWhatARustAPIOnASQLiteFileDoesNotRunIsRefused(t *testing.T) {
 	output, deps := timersDeps(t)
 	deps.SQLite = true
 	if err := output.SetDeps(deps); err != nil {
 		t.Fatalf("the behaviors and the behavior worker of %s on a SQLite file: %v", timersFixture.api, err)
 	}
-	for name, tc := range map[string]struct {
-		refuse func(*APIOutput, *DepsInfo)
-		want   string
-	}{
-		"the identity store": {
-			func(o *APIOutput, _ *DepsInfo) { o.Identity = &IdentityInfo{AuthDB: timersFixture.db} },
-			"fixture-timers-api is a Rust API on fixture-timers-db, whose DB service lists sqlite first, and the Rust server builds its identity store on Postgres alone so far (D116); list postgres first in fixture-timers-db's outputs.sql.dialects, or serve the API in TypeScript",
-		},
-		"an engine": {
-			func(_ *APIOutput, d *DepsInfo) { d.Engine = &DepsEngine{Database: timersFixture.db} },
-			"and the Rust server opens an engine on Postgres alone so far (D116)",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			output, deps := timersDeps(t)
-			deps.SQLite = true
-			tc.refuse(output, &deps)
-			if err := output.SetDeps(deps); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("SetDeps = %v, want %q", err, tc.want)
-			}
-		})
+	output, deps = timersDeps(t)
+	deps.SQLite = true
+	output.Identity = &IdentityInfo{AuthDB: timersFixture.db}
+	if err := output.SetDeps(deps); err != nil {
+		t.Fatalf("an API over the user model on a SQLite file: %v", err)
+	}
+	if got := output.RuntimeFeatures(); !slices.Equal(got, []string{"identity", "sqlite", "identity-sqlite"}) {
+		t.Errorf("the runtime's features = %v, want its identity store on SQLite", got)
+	}
+	output, deps = timersDeps(t)
+	deps.SQLite = true
+	deps.Engine = &DepsEngine{Database: timersFixture.db}
+	want := "fixture-timers-api is a Rust API on fixture-timers-db, whose DB service lists sqlite first, and the Rust server opens an engine on Postgres alone so far (D116); list postgres first in fixture-timers-db's outputs.sql.dialects, or serve the API in TypeScript"
+	if err := output.SetDeps(deps); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("SetDeps = %v, want %q", err, want)
 	}
 }

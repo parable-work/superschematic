@@ -6450,8 +6450,16 @@ module, which the database's Rust types bind (D103, D116). Its behavior operatio
 through the same module in a transaction of the file's writing
 connection, and its jobs and workers open the file too: a worker, a
 `@worker`'s and a `@behaviorWorker`'s alike, is drained on connections of
-its own (section 8.8). The build refuses, by name, what it does not run
-there yet: the identity store and an engine, each of which the Rust
+its own (section 8.8). A Rust API over the user model keeps its users,
+their sessions and their API keys in the runtime's identity store on the
+file (D50, D116): its server's entrypoint builds the store with the API
+crate's `identity::store_on_file`, on a connection of the store's own to
+the file, since one of its transactions holds its connection across its
+statements, where the file's handle lends its writer to one piece of work
+at a time. The file is in write-ahead logging, so the store's reads never
+wait, and its writes take their turn with the file's writer, up to the
+busy timeout. The build refuses, by name, what it does not run
+there yet: an engine, which the Rust
 runtime builds over a Postgres pool so far, a worker whose queue's
 message SQLite has no storage for, and a Rust deriver, engine's runner or
 app.
@@ -7010,9 +7018,9 @@ sites and cron jobs, built beside them, have not run live either.
 ## 19. The embedded target
 
 An environment on the `embedded` target is one binary a person installs
-(D116): every server of the environment in one process, each database a
-SQLite file under one data directory, and the site's built files compiled
-into the binary. The target is `extensions/embedded`'s. It registers no
+(D116): every server and worker of the environment in one process, each
+database a SQLite file under one data directory, and the site's built
+files compiled into the binary. The target is `extensions/embedded`'s. It registers no
 provisioner, no state and no deploy seam: what it makes is a file, and it
 rolls nothing out.
 
@@ -7069,12 +7077,29 @@ fallback for a path that names no file. A file's ETag is its digest.
 `Embedded::close` lets go of every API and file. A project whose process
 is its own links the library and none of `main.rs`.
 
+`Embedded::workers` are the environment's workers that run, a `@worker`
+or a `@behaviorWorker` of an API of the binary, each its queues over the
+file the binary opened (the HTTP runtime's `SqliteWorker`). A `@worker`'s
+method is the implementation's, from `create_workers` with Deps of its
+own; a behavior worker's queues are the ones the API crate's behaviors
+module builds. `Worker::drain` takes a connection of the worker's own
+(`Worker::connect`), the time and a limit, claims and runs what is due,
+and answers how many messages it ran and when the next falls due. It
+reads no clock and starts no task, so a host with no async runtime calls
+it on a thread of its own and sleeps until that time, or until
+`Worker::wake` says the process committed a write to the file.
+`Worker::run` is the loop over it on tokio, on as many connections as the
+environment gives the worker concurrency.
+
 `main.rs` serves `handle` through axum. It listens on `127.0.0.1` at
 `$PORT`; `--listen <address>[:<port>]` names another address;
 `--every-interface` listens on every interface, and an unspecified
 address without it is refused. `--data <directory>` names the data
 directory, `data` under the working directory without it. A request's
 body is read up to 2 MiB.
+It runs each worker's loop beside the server; once the server has
+stopped, the workers claim no more and let their running drains finish
+for each one's grace.
 
 A call from one API of the binary to another is its SDK's, over the HTTP
 runtime's `in_process::transport`, which hands the request to the
@@ -7143,11 +7168,9 @@ the environment's port until Ctrl-C.
 
 ### 19.5 Not built
 
-- Workers: an environment whose worker runs is refused by name. The
-  runtime's `drain` exists; the crate does not call it yet, so the
-  library has no `drain`.
-- An API over the user model: the identity store on a SQLite file is not
-  opened for a Rust API.
+- An API over the user model: the binary does not open the identity
+  store on its file yet, which a Rust server's entrypoint does (section
+  18.6).
 - A memory store on the runtime's in-process store, a bucket on a local
   directory, a job in the process, and an engine on a SQLite file.
 - An operation that is `@manualRouteRegistration`: `handle` routes none,

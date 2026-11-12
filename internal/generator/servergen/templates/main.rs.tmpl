@@ -197,6 +197,18 @@ async fn run() -> Result<(), Failure> {
 {{- range .Files }}
 {{ rustLetCall .Var "open_file" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
 {{- end }}
+{{- range .Files }}
+{{- if .Store }}
+
+    // The identity store of the user model in {{ .Service }} (D50, D116), on a
+    // connection of its own to the file, for every API that authenticates
+    // its users against it.
+    let {{ .Store }}: Arc<dyn Store> = Arc::new(
+        {{ .StoreAPI }}::identity::store_on_file(&{{ .Var }})
+            .map_err(|err| format!("identity store of {{ .Service }}: {err}"))?,
+    );
+{{- end }}
+{{- end }}
 {{- end }}
 {{- range .Engines }}
 
