@@ -117,4 +117,16 @@ func TestSeededRolesWarnings(t *testing.T) {
 	if got := messages(r.Warnings); !slices.Equal(got, want) {
 		t.Errorf("warnings =\n%q\nwant\n%q", got, want)
 	}
+
+	// The permission that lifts a table operation's row rule (D108) is
+	// one the API checks, so a role that holds it covers something.
+	db = seededUsers(&ir.RoleSeed{Name: "moderator", Permissions: []string{"comments"}})
+	schema, sessions = api(&ir.UserSessionsConfig{})
+	schema.OperationSets[1].Operations = append(schema.OperationSets[1].Operations,
+		&ir.FieldDef{Name: "editComment", Permissions: []string{"orders.write"}, TableOperation: &ir.TableOperation{By: []string{"createdBy"}, OverridePermission: "comments.moderate"}})
+	r = &Result{}
+	checkSeededRoles(schema, db, sessions, "identity", r)
+	if got := messages(r.Warnings); len(got) != 0 {
+		t.Errorf("a role that holds a row rule's override permission: warnings %q", got)
+	}
 }

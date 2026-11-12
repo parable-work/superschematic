@@ -6,6 +6,7 @@ import {
   HttpMethod,
   SearchQuery,
   SortBy,
+  mcp,
   paginated,
   publicRoute,
   requirePermission,
@@ -204,7 +205,7 @@ export class Issues extends Authenticated {
     teamId: Identity.UUID,
     q: SearchQuery<Validate<string, { maxLength: 100 }>>,
     sort: SortBy<IssueView, ["createdAt", "priority", "title"]>,
-    filter: FilterBy<IssueView, ["status", "priority", "title", "estimate", "dueOn", "assigneeId", "createdAt"]>
+    filter: FilterBy<IssueView, ["status", "priority", "title", "estimate", "dueOn", "assigneeId", "createdAt", "createdBy"]>
   ): IssueView[] {
     throw new Error("schema declaration only");
   }
@@ -314,7 +315,9 @@ export class Notes extends Authenticated {
     throw new Error("schema declaration only");
   }
 
-  // Deletes a note the caller wrote.
+  // Deletes a note the caller wrote. It names its own tool and no @docs,
+  // which its declaration gives it (D111).
+  @mcp({ handle: "remove_note" })
   @rest(HttpMethod.DELETE, "notes/{id}")
   @tableOperation({ by: ["createdBy"], overridePermission: "notes.admin" })
   deleteNote(id: Identity.UUID): NoteView {

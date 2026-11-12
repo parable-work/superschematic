@@ -109,6 +109,8 @@ func TestTableOperationsAreFilledFromTheirDeclarations(t *testing.T) {
 		"dueOn":      "date eq,in,gt,gte,lt,lte,isNull",
 		"assigneeId": "uuid eq,in,isNull",
 		"createdAt":  "datetime eq,in,gt,gte,lt,lte",
+		// Who created a row filters as any id does (D110).
+		"createdBy": "uuid eq,in",
 	}
 	if !reflect.DeepEqual(kinds, wantKinds) {
 		t.Errorf("listIssues filter kinds = %v, want %v", kinds, wantKinds)
@@ -386,5 +388,158 @@ func TestACreateNamesTheStateItsRowStartsIn(t *testing.T) {
 		if _, got := check(tc.edit); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestTableOperationsDocumentThemselves: a @tableOperation that declares
+// no @docs and no @mcp is given both from its declaration (D111): a title
+// from its method's name, a description from its comment, a capability
+// from its set and its method, and a visible tool under its name; an
+// operation the project writes is given neither.
+func TestTableOperationsDocumentThemselves(t *testing.T) {
+	api, db := loadTracker(t)
+	type documented struct {
+		title, description, capability, replay, handle, invocation string
+	}
+	of := func(schema *ir.Schema, name string) documented {
+		op := trackerOperation(t, schema, name)
+		var d documented
+		if op.Docs != nil {
+			d.title, d.description, d.capability, d.replay = op.Docs.Title, op.Docs.Description, op.Docs.Capability, string(op.Docs.ReplayMode)
+			if err := ir.ValidateOperationDocs(op.Docs); err != nil {
+				t.Errorf("%s: its docs are not valid: %v", name, err)
+			}
+		}
+		if op.MCP != nil {
+			d.handle, d.invocation = op.MCP.Handle, op.MCP.Invocation.Key+"="+op.MCP.Invocation.Value
+			if op.MCP.Hidden {
+				d.handle = "hidden: " + op.MCP.HiddenReason
+			}
+		}
+		return d
+	}
+	for name, want := range map[string]documented{
+		"listTeams":        {"List teams", "The teams, a page at a time.", "teams.list-teams", "read_only", "list_teams", "invocationPolicy=auto"},
+		"getTeam":          {"Get team", "One team.", "teams.get-team", "read_only", "get_team", "invocationPolicy=auto"},
+		"createTeam":       {"Create team", "A new team; a key another team holds is a conflict.", "teams.create-team", "", "create_team", "invocationPolicy=auto"},
+		"getIssueForGuest": {"Get issue for guest", "One issue as anyone sees it: another view of the same table behind another guard.", "issues.get-issue-for-guest", "read_only", "get_issue_for_guest", "invocationPolicy=auto"},
+		"updateIssue":      {"Update issue", "Changes the members the body sets.", "issues.update-issue", "", "update_issue", "invocationPolicy=auto"},
+		// A @mcp of its own, and no @docs: the tool is the author's, and
+		// the docs are still given.
+		"deleteNote": {"Delete note", "Deletes a note the caller wrote. It names its own tool and no @docs, which its declaration gives it (D111).", "notes.delete-note", "", "remove_note", "invocationPolicy=auto"},
+		// An operation the project writes says its own.
+		"summarizeTeam": {},
+	} {
+		if got := of(api, name); got != want {
+			t.Errorf("%s:\n got %+v\nwant %+v", name, got, want)
+		}
+		if docs := trackerOperation(t, api, name).Docs; docs != nil && (docs.Lifecycle != ir.DocsLifecycleActive || docs.Visibility != ir.DocsVisibilityPublic || docs.MappingStatus != ir.DocsMappingStatusMapped) {
+			t.Errorf("%s: docs %+v, want active, public and mapped", name, docs)
+		}
+	}
+
+	// bare is a copy with every table operation's docs and tool taken off,
+	// as the reader left them, for a case to edit and the pass to fill.
+	bare := func(edit func(schema *ir.Schema, op func(string) *ir.FieldDef)) *ir.Schema {
+		schema := copyOf(t, api)
+		for _, set := range schema.OperationSets {
+			for _, op := range set.Operations {
+				if op.TableOperation != nil {
+					op.Docs, op.MCP = nil, nil
+				}
+			}
+		}
+		edit(schema, func(name string) *ir.FieldDef { return trackerOperation(t, schema, name) })
+		if errs := verify.CheckTableOperations(schema, verify.Input{Database: db}).Errors; len(errs) != 0 {
+			t.Fatalf("the edited API does not check: %v", errs)
+		}
+		return schema
+	}
+
+	// A method with no comment says what its kind does to its table.
+	schema := bare(func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+		for _, name := range []string{"listTeams", "getTeam", "createTeam", "updateIssue", "deleteIssue"} {
+			op(name).Comment = ""
+		}
+	})
+	for name, want := range map[string]string{
+		"listTeams":   "Lists the Team rows, a page at a time.",
+		"getTeam":     "Reads the Team its key names.",
+		"createTeam":  "Creates a Team.",
+		"updateIssue": "Updates the Issue its key names: a member left out stays as it is.",
+		"deleteIssue": "Deletes the Issue its key names.",
+	} {
+		if got := of(schema, name).description; got != want {
+			t.Errorf("%s with no comment: %q, want %q", name, got, want)
+		}
+	}
+
+	// What an operation declares is kept: its @docs, its @mcp, a hidden one
+	// among them. The other is still given.
+	schema = bare(func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+		op("getTeam").Docs = &ir.OperationDocs{Title: "A team", Description: "Reads a team.", Capability: "teams.read", Lifecycle: ir.DocsLifecycleDraft, Visibility: ir.DocsVisibilityInternal, MappingStatus: ir.DocsMappingStatusMapped}
+		op("createTeam").MCP = &ir.OperationMCP{Handle: "new_team", Invocation: ir.MCPInvocation{Key: "invocationPolicy", Value: "ask"}}
+		op("deleteIssue").MCP = &ir.OperationMCP{Hidden: true, HiddenReason: "Deleting is a person's to do."}
+	})
+	for name, want := range map[string]documented{
+		"getTeam":     {"A team", "Reads a team.", "teams.read", "", "get_team", "invocationPolicy=auto"},
+		"createTeam":  {"Create team", "A new team; a key another team holds is a conflict.", "teams.create-team", "", "new_team", "invocationPolicy=ask"},
+		"deleteIssue": {"Delete issue", "Deletes the issue, which is kept, and answers it as it was.", "issues.delete-issue", "", "hidden: Deleting is a person's to do.", "="},
+	} {
+		if got := of(schema, name); got != want {
+			t.Errorf("%s, declared in part:\n got %+v\nwant %+v", name, got, want)
+		}
+	}
+	if docs := trackerOperation(t, schema, "getTeam").Docs; docs.Lifecycle != ir.DocsLifecycleDraft || docs.Visibility != ir.DocsVisibilityInternal {
+		t.Errorf("getTeam's own docs were rewritten: %+v", docs)
+	}
+
+	// A name two sets share, or a handle or a title another operation
+	// declares, takes its set's before it, so the API's tools stay apart.
+	schema = bare(func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+		op("listMembers").Name = "listTeams"
+		op("getIssue").MCP = &ir.OperationMCP{Handle: "get_team", Invocation: ir.MCPInvocation{Key: "invocationPolicy", Value: "auto"}}
+		op("createIssue").Docs = &ir.OperationDocs{Title: "Create member", Description: "x", Capability: "issues.create", Lifecycle: ir.DocsLifecycleActive, Visibility: ir.DocsVisibilityPublic, MappingStatus: ir.DocsMappingStatusMapped}
+	})
+	named := map[string][2]string{}
+	for _, set := range schema.OperationSets {
+		for _, op := range set.Operations {
+			if op.MCP != nil && op.Docs != nil {
+				named[set.Name+"."+op.Name] = [2]string{op.MCP.Handle, op.Docs.Title}
+			}
+		}
+	}
+	for owner, want := range map[string][2]string{
+		"Teams.listTeams":      {"teams_list_teams", "Teams: list teams"},
+		"Members.listTeams":    {"members_list_teams", "Members: list teams"},
+		"Teams.getTeam":        {"teams_get_team", "Teams: get team"},
+		"Members.createMember": {"members_create_member", "Members: create member"},
+		"Teams.createTeam":     {"create_team", "Create team"},
+	} {
+		if named[owner] != want {
+			t.Errorf("%s: handle and title %q, want %q", owner, named[owner], want)
+		}
+	}
+	seen := map[string]string{}
+	for owner, name := range named {
+		for _, key := range []string{"handle " + name[0], "title " + strings.ToLower(name[1])} {
+			if other, twice := seen[key]; twice {
+				t.Errorf("%s and %s share the %s", owner, other, key)
+			}
+			seen[key] = owner
+		}
+	}
+
+	// An operation only a calling service reaches is no tool of an end
+	// user's agent, and neither is one whose payload is encrypted.
+	schema = bare(func(schema *ir.Schema, op func(string) *ir.FieldDef) {
+		op("createMember").ServiceCallers = &ir.ServiceCallers{Mode: ir.ServiceCallersRequire, From: []string{"billing"}}
+		op("createTeam").Encrypted = true
+	})
+	if got := of(schema, "createMember").handle; got != "hidden: Only the services that @requireService admits call it (D37)." {
+		t.Errorf("a service's operation: %q", got)
+	}
+	if got := of(schema, "createTeam").handle; got != "hidden: Its payload is encrypted, which only the SDK seals." {
+		t.Errorf("an encrypted operation: %q", got)
 	}
 }

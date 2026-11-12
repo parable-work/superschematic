@@ -19,9 +19,11 @@ import (
 //     a dependency's item works (D66);
 //   - each field holds one value a filter can compare (FilterFieldKind):
 //     not a list or a map, not Secret, not @decrypted, and on an item
-//     sourced from a table not @virtual and not an audit field the
-//     repositories keep no filter for, so a list filters by nothing its
-//     view does not show.
+//     sourced from a table not @virtual and neither deletedAt nor
+//     deletedBy, which no row a list holds has a value in, so a list
+//     filters by nothing its view does not show. createdBy and updatedBy
+//     filter as any id does, and createdAt and updatedAt as any time
+//     (D110).
 //
 // Each field's Kind, Operators and TypeRef are then the item's field's
 // (ir.FilterOperators); a data form that writes another kind, other
@@ -145,8 +147,11 @@ func FilterFieldKind(schema, itemSchema *ir.Schema, in Input, item *ir.TypeDef, 
 		return "", "which is @decrypted: its column holds ciphertext, which no filter compares"
 	case item.Source != nil && field.Virtual:
 		return "", "which is @virtual: no column of " + item.Source.Target + " holds it, so the table cannot filter by it"
-	case item.Source != nil && sqlutil.AuditField(field.Name) && field.Name != sqlutil.AuditCreatedAt && field.Name != sqlutil.AuditUpdatedAt:
-		return "", "an audit field the repositories keep no filter for"
+	case item.Source != nil && (field.Name == sqlutil.AuditDeletedAt || field.Name == sqlutil.AuditDeletedBy):
+		// Who created a row, who last wrote it and when are filtered by
+		// as any id and time are (D108, D110): the repositories keep their
+		// filters. A deleted row is left out of every read.
+		return "", "which says a row is deleted, and a list holds no deleted row to compare it on"
 	case field.JsonField:
 		return "", "which holds JSON; a filter compares one text, number, time or boolean"
 	}

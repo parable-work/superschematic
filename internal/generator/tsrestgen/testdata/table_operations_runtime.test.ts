@@ -508,6 +508,10 @@ describe('the table operations of fixture-tracker-api', () => {
     expect(await kept(`filter[assigneeId]=${ada.id}`)).toEqual(['100 percent', 'Crash on save']);
     expect(await kept(`filter[assigneeId][in]=${ada.id},${bob.id}`)).toEqual(where(issue => issue.assigneeId !== null));
     expect(await kept('filter[assigneeId][isNull]=true')).toEqual(['Slow search', 'snake_case names']);
+    // Who created a row, an audit field: eq and in (D110).
+    expect(await kept(`filter[createdBy]=${SAM_ID}`)).toEqual(where(() => true));
+    expect(await kept(`filter[createdBy]=${KIM_ID}`)).toEqual([]);
+    expect(await kept(`filter[createdBy][in]=${KIM_ID},${SAM_ID}&filter[assigneeId]=${ada.id}`)).toEqual(['100 percent', 'Crash on save']);
     // A timestamp: a range around one issue's.
     const at = issues[2].createdAt;
     expect(await kept(`filter[createdAt][lt]=${at}`)).toEqual(titles(issues.slice(0, 2)).sort());

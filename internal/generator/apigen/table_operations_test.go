@@ -73,6 +73,24 @@ func TestTableOperationEndpoints(t *testing.T) {
 	if !slices.Contains(output.IndirectModules, output.Deps.DatabaseTypes) {
 		t.Errorf("go.mod does not reach %s: %v", output.Deps.DatabaseTypes, output.IndirectModules)
 	}
+	// Each documents itself (D111): a title and a tool from its method,
+	// which the OpenAPI document and the tool documents then carry; the
+	// operation the project writes declares neither.
+	for _, ep := range output.Endpoints {
+		switch ep.Name {
+		case "listIssues":
+			if ep.Docs == nil || ep.Docs.Title != "List issues" || ep.Docs.Capability != "issues.list-issues" || ep.MCP == nil || ep.MCP.Hidden || ep.MCP.Handle != "list_issues" || ep.MCP.Name != "List issues" || ep.MCP.Invocation.Value != "auto" {
+				t.Errorf("listIssues: docs %+v, mcp %+v", ep.Docs, ep.MCP)
+			}
+		case "summarizeTeam":
+			if ep.Docs != nil || ep.MCP != nil {
+				t.Errorf("summarizeTeam, which the project writes: docs %+v, mcp %+v", ep.Docs, ep.MCP)
+			}
+		}
+	}
+	if !strings.Contains(output.OpenAPISpecRaw, `"summary": "List issues"`) || !strings.Contains(output.OpenAPISpecRaw, `"summary": "Delete note"`) {
+		t.Error("the OpenAPI document lacks the table operations' summaries")
+	}
 	// The documents hold every operation.
 	if len(output.Endpoints) != len(want)+1 || !strings.Contains(output.OpenAPISpecRaw, `"/api/teams/{teamId}/issues"`) || !strings.Contains(output.PermissionCatalogJSON, "issues.write") {
 		t.Errorf("the output holds %d endpoints", len(output.Endpoints))

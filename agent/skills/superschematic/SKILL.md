@@ -229,6 +229,13 @@ path for when the store is unavailable.
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors
   with `@behavior("Workflow", {...})` (`superschematic catalog behaviors`).
+- **A `@tableOperation` documents itself.** Without `@docs` it takes its
+  title from the method's name, its description from the method's
+  comment and its capability from the set and the method; without `@mcp`
+  it is a tool under the method's name in snake_case (`list_issues`).
+  Write the comment for the reader, add `@mcp({ invocationPolicy: "ask"
+  })` to a tool a person should confirm, and `@mcp({ hidden: true,
+  reason })` to keep one out.
 - **Tools for agents are declared too.** `@mcp` with `@docs` makes an
   operation an MCP tool, and `outputs.api.mcp` serves the tools from a
   TypeScript API. Mark a tool that moves money or changes data in bulk

@@ -417,6 +417,8 @@ type IssuesListIssuesFilter struct {
 	AssigneeId *filterparse.Equals[types.IdentityUUID]
 	// CreatedAt filters by createdAt: eq, in, gt, gte, lt, lte.
 	CreatedAt *filterparse.Ordered[types.TemporalDateTime]
+	// CreatedBy filters by createdBy: eq, in.
+	CreatedBy *filterparse.Equals[types.IdentityUUID]
 }
 
 // asCommentView is row, a row of Comment, as CommentView shows it: each field the
@@ -1149,6 +1151,9 @@ func tableIssuesListIssues(ctx context.Context, db orm.DatabaseInterface, TeamId
 		}
 		if filter := filters.CreatedAt; filter != nil {
 			where.CreatedAt = &orm.DateTimeFilter{Eq: tableTime(filter.Eq), In: tableTimes(filter.In), Gt: tableTime(filter.Gt), Gte: tableTime(filter.Gte), Lt: tableTime(filter.Lt), Lte: tableTime(filter.Lte)}
+		}
+		if filter := filters.CreatedBy; filter != nil {
+			where.CreatedBy = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}
 		}
 		options := &orm.IssuePageOptions{Fields: orm.IssueFields{}.All(), Limit: page.Limit, Sort: orm.IssueSort{Field: orm.IssueSortField(page.Sort.Field), Desc: page.Sort.Desc}}
 		if page.Cursor != "" {
