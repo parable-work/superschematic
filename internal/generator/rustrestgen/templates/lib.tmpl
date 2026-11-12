@@ -7,6 +7,9 @@ pub mod apps;
 {{ if .HasBehaviors -}}
 pub mod behaviors;
 {{ end -}}
+{{ if .HasTableOperations -}}
+pub mod tables;
+{{ end -}}
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}
@@ -32,7 +35,8 @@ pub use {{ .RuntimeCrateIdent }} as runtime;
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the messages its
 /// workers handle, and the descriptors of their queues, which a worker claims
-/// with and an implementation enqueues with (D65).
+/// with and an implementation enqueues with (D65){{ if .HasTableOperations }}, and the repositories its
+/// table operations are served from (D106, D116){{ end }}.
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- else if .HasDerivers }}
 

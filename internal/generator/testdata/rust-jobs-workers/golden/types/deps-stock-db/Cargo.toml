@@ -11,3 +11,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 superscalar = { path = "../../../../../third_party/superscalar/crates/core" }
 serde_json = { version = "1.0" }
 superschematic-schema-runtime = { path = "../../../../../runtime/schema/rust" }
+# The repositories (D79, D116): src/orm.rs runs each table through the HTTP
+# runtime's orm module, on the dialect each feature names.
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", default-features = false, optional = true }
+
+[features]
+postgres = ["dep:superschematic-http-runtime", "superschematic-http-runtime/postgres"]
+sqlite = ["dep:superschematic-http-runtime", "superschematic-http-runtime/sqlite"]

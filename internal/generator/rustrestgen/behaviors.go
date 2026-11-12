@@ -209,11 +209,12 @@ func (o *APIOutput) ImplementedEndpoints() []EndpointInfo {
 	return implemented(o.Endpoints)
 }
 
-// implemented is endpoints without the behavior operations.
+// implemented is endpoints without the behavior operations and the table
+// operations (D106), which the router serves itself.
 func implemented(endpoints []EndpointInfo) []EndpointInfo {
 	var out []EndpointInfo
 	for _, endpoint := range endpoints {
-		if endpoint.Behavior == nil {
+		if !endpoint.RouterServed() {
 			out = append(out, endpoint)
 		}
 	}

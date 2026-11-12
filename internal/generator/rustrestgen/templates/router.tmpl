@@ -545,6 +545,11 @@ async fn handle_{{ .SnakeName }}(
         Err(err) => return error_response(err),
     };
 {{- end }}
+{{- if and .Table .Table.Input }}
+    // The body as it was sent, which tells a member the request left out
+    // from one it sent as null, where the input type reads both as none.
+    let raw = body.clone();
+{{- end }}
 {{- if .HasArgs }}
     let args = match decode_{{ .SnakeName }}({{ .DecodeCall }}) {
         Ok(args) => args,
@@ -576,6 +581,25 @@ async fn handle_{{ .SnakeName }}(
     // runs it on a transaction of {{ .Behavior.Database }}'s pool, as the request's caller.
 {{- end }}
 {{ .BehaviorCall }}
+{{- else if .Table }}
+{{- if and .Page .Page.Sort }}
+    // The page's next names the sort it was read in (D60, amended).
+    let page = args.page.clone();
+{{- end }}
+    // {{ .Table.Type }}'s rows, {{ .Table.Article }} (D106): served from the table's
+    // repository in one transaction of {{ .Table.Database }}, as the request's caller.
+    let result = crate::tables::{{ .SnakeName }}(
+        &state.implementations.tables,
+        ctx.principal.clone(),
+{{- if .HasArgs }}
+        args,
+{{- end }}
+{{- if .Table.Input }}
+        raw,
+{{- end }}
+    )
+    .await{{ if and .Page .Page.Sort }}
+    .and_then(|listed| listed.bind(&page)){{ end }};
 {{- else }}
 {{- if and .Page .Page.Sort }}
     // The page's next names the sort it was read in (D60, amended).

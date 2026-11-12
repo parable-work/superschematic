@@ -16,7 +16,11 @@
 //! 1 or 0; a list and a JSON value as JSON text; a decimal through the
 //! column's NUMERIC affinity, and back as its text.
 
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{params_from_iter, Connection, ErrorCode};
@@ -24,18 +28,22 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
+pub use super::sqlite_file::{Database, DatabaseOptions};
+
 // The SQLite client the repositories run on, for a types crate's `orm`
 // module and its callers to name without a version of their own.
 pub use rusqlite;
 
 use super::plan::{Plan, Statement};
+use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{finish, Client, Runner};
 use super::{
     row, values, wire, Bound, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
     CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found, Marks, PageOptions,
     RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
 };
-use crate::error::chain;
+use crate::auth::Principal;
+use crate::error::{chain, ApiError};
 use crate::queue::sqlite::{column_value, member_value, utc_timestamp};
 use crate::queue::QueueField;
 use crate::uuid62::{parse_uuid, uuid_to_base62};
@@ -164,6 +172,109 @@ impl<'a> Repositories<'a> {
             repository: self.table(name)?,
             types: PhantomData,
         })
+    }
+}
+
+impl Repositories<'_> {
+    /// Runs a table operation (D106) on its table's repository, for the
+    /// route's caller, and answers the row's view or a page of views. The
+    /// repositories act as whom the caller of this names: a route's
+    /// caller, by [`routes::acting`].
+    pub fn table_operation(
+        &self,
+        operation: &TableOperation,
+        principal: Option<&Principal>,
+        request: &TableRequest,
+    ) -> Result<TableOutcome, ApiError> {
+        let repository = self.table(&operation.table)?;
+        let routes = Routes {
+            runner: repository.runner(),
+            operation,
+            principal,
+        };
+        let mut work = pin!(routes.serve(request));
+        match work.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(out) => out,
+            Poll::Pending => Err(ApiError::internal(
+                "the SQLite repository waited, which it never does",
+            )),
+        }
+    }
+}
+
+/// What a generated router serves its table operations from on a SQLite
+/// file (D106, D116): the file, the database's definition, and what its
+/// repositories seal with and run behaviors through.
+#[derive(Clone)]
+pub struct Tables {
+    database: Arc<Database>,
+    definition: fn() -> Result<&'static Definition, Error>,
+    keys: Option<Arc<dyn FieldKeys>>,
+    rules: Option<Arc<dyn Rules>>,
+}
+
+impl Tables {
+    /// The tables in the file `database` holds, of the definition
+    /// `definition` answers: a types crate's `orm::sqlite_definition`.
+    pub fn new(
+        database: Arc<Database>,
+        definition: fn() -> Result<&'static Definition, Error>,
+    ) -> Self {
+        Self {
+            database,
+            definition,
+            keys: None,
+            rules: None,
+        }
+    }
+
+    /// The tables with the keys of the database's `Encrypted<T>` fields.
+    #[must_use]
+    pub fn with_keys(mut self, keys: Arc<dyn FieldKeys>) -> Self {
+        self.keys = Some(keys);
+        self
+    }
+
+    /// The tables with what runs the behaviors of the tables that compose
+    /// them.
+    #[must_use]
+    pub fn with_rules(mut self, rules: Arc<dyn Rules>) -> Self {
+        self.rules = Some(rules);
+        self
+    }
+
+    /// The file the tables are in.
+    pub fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
+    /// Runs `operation` for `principal` in one transaction of the file: a
+    /// write's on the writing connection, which commits when the operation
+    /// answers and rolls back when it refuses, and a read's on a reading
+    /// one. On tokio the work runs on its blocking pool.
+    pub async fn serve(
+        &self,
+        operation: &'static TableOperation,
+        principal: Option<Principal>,
+        request: TableRequest,
+    ) -> Result<TableOutcome, ApiError> {
+        let tables = self.clone();
+        let work = move |connection: &Connection| {
+            let mut repositories = Repositories::new(connection, (tables.definition)()?)?
+                .acting(routes::acting(principal.as_ref()));
+            if let Some(keys) = tables.keys.as_deref() {
+                repositories = repositories.with_keys(keys);
+            }
+            if let Some(rules) = tables.rules.as_deref() {
+                repositories = repositories.with_rules(rules);
+            }
+            repositories.table_operation(operation, principal.as_ref(), &request)
+        };
+        if operation.writes() {
+            self.database.write_async(work).await
+        } else {
+            self.database.read_async(work).await
+        }
     }
 }
 
