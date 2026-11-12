@@ -1342,6 +1342,8 @@ pub const POSTGRES: &str = r#"{
     "null": "NULL"
   },
   "defaultLimit": 100,
+  "historyActorCTE": "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
+  "clearHistoryActor": "SELECT set_config('superschematic.history_actor_id', '', true)",
   "tables": [
     {
       "name": "Cover",
@@ -2809,6 +2811,7 @@ pub const POSTGRES: &str = r#"{
         "version": "SELECT _version FROM recipe_ref WHERE id = $1 AND deleted_at IS NULL"
       },
       "softDelete": true,
+      "historyActor": true,
       "uniqueKeys": {
         "id": {
           "conflict": "(id)",
@@ -3065,6 +3068,7 @@ pub const POSTGRES: &str = r#"{
         "deleteIfVersion": "DELETE FROM recipe_release USING history_actor WHERE id = $2 AND _version = $3",
         "version": "SELECT _version FROM recipe_release WHERE id = $1"
       },
+      "historyActor": true,
       "uniqueKeys": {
         "id": {
           "conflict": "(id)",
@@ -3534,6 +3538,7 @@ pub const POSTGRES: &str = r#"{
         "deleteIfVersion": "DELETE FROM step USING history_actor WHERE id = $2 AND _version = $3",
         "version": "SELECT _version FROM step WHERE id = $1"
       },
+      "historyActor": true,
       "uniqueKeys": {
         "entityKey,ref": {
           "conflict": "(entity_key, ref_id)",
@@ -4123,4 +4128,172 @@ pub fn postgres_definition() -> Result<&'static orm::Definition, orm::Error> {
         .get_or_init(|| orm::Definition::parse(POSTGRES).map_err(|err| err.to_string()))
         .as_ref()
         .map_err(|err| orm::Error::Definition(err.clone()))
+}
+
+/// The repositories on Postgres.
+#[cfg(feature = "postgres")]
+pub mod postgres {
+    use super::*;
+
+    pub use orm::postgres::{deadpool_postgres, tokio_postgres};
+    use deadpool_postgres::GenericClient;
+
+    /// The repository of `Cover` on a Postgres client.
+    pub type CoverRepository<'a, C> =
+        orm::postgres::Typed<'a, C, CoverRow, CoverCreate, CoverUpdate, CoverFilter, IdentityUUID>;
+
+    /// The repository of `Ingredient` on a Postgres client.
+    pub type IngredientRepository<'a, C> =
+        orm::postgres::Typed<'a, C, IngredientRow, IngredientCreate, IngredientUpdate, IngredientFilter, IdentityUUID>;
+
+    /// The repository of `Note` on a Postgres client.
+    pub type NoteRepository<'a, C> =
+        orm::postgres::Typed<'a, C, NoteRow, NoteCreate, NoteUpdate, NoteFilter, IdentityUUID>;
+
+    /// The repository of `Recipe` on a Postgres client.
+    pub type RecipeRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RecipeRow, RecipeCreate, RecipeUpdate, RecipeFilter, IdentityUUID>;
+
+    /// The repository of `RecipeCommit` on a Postgres client.
+    pub type RecipeCommitRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RecipeCommitRow, RecipeCommitCreate, RecipeCommitUpdate, RecipeCommitFilter, IdentityUUID>;
+
+    /// The repository of `RecipePatch` on a Postgres client.
+    pub type RecipePatchRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RecipePatchRow, RecipePatchCreate, RecipePatchUpdate, RecipePatchFilter, IdentityUUID>;
+
+    /// The repository of `RecipeRef` on a Postgres client.
+    pub type RecipeRefRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RecipeRefRow, RecipeRefCreate, RecipeRefUpdate, RecipeRefFilter, IdentityUUID>;
+
+    /// The repository of `RecipeRelease` on a Postgres client.
+    pub type RecipeReleaseRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RecipeReleaseRow, RecipeReleaseCreate, RecipeReleaseUpdate, RecipeReleaseFilter, IdentityUUID>;
+
+    /// The repository of `RecipeSnapshotEntry` on a Postgres client.
+    pub type RecipeSnapshotEntryRepository<'a, C> =
+        orm::postgres::Typed<'a, C, RecipeSnapshotEntryRow, RecipeSnapshotEntryCreate, RecipeSnapshotEntryUpdate, RecipeSnapshotEntryFilter, IdentityUUID>;
+
+    /// The repository of `Step` on a Postgres client.
+    pub type StepRepository<'a, C> =
+        orm::postgres::Typed<'a, C, StepRow, StepCreate, StepUpdate, StepFilter, IdentityUUID>;
+
+    /// The repository of `Tasting` on a Postgres client.
+    pub type TastingRepository<'a, C> =
+        orm::postgres::Typed<'a, C, TastingRow, TastingCreate, TastingUpdate, TastingFilter, IdentityUUID>;
+
+    /// The repository of `Utensil` on a Postgres client.
+    pub type UtensilRepository<'a, C> =
+        orm::postgres::Typed<'a, C, UtensilRow, UtensilCreate, UtensilUpdate, UtensilFilter, IdentityUUID>;
+
+    /// The repositories of `fixture-version-graph-db` on a Postgres client, acting as a
+    /// user or as no one.
+    pub struct Repositories<'a, C>(orm::postgres::Repositories<'a, C>);
+
+    impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
+        /// The repositories over `client`, the caller's: a connection of
+        /// its pool, or a transaction on one. They act as no one until
+        /// `acting` names a user.
+        pub fn new(client: &'a C) -> Result<Self, orm::Error> {
+            orm::postgres::Repositories::new(client, postgres_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::postgres::Rules<C>) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::postgres::Repositories<'a, C> {
+            &self.0
+        }
+
+        /// The repository of `Cover`.
+        pub fn cover(&self) -> Result<CoverRepository<'_, C>, orm::Error> {
+            self.0.typed("Cover")
+        }
+
+        /// The repository of `Ingredient`.
+        pub fn ingredient(&self) -> Result<IngredientRepository<'_, C>, orm::Error> {
+            self.0.typed("Ingredient")
+        }
+
+        /// The repository of `Note`.
+        pub fn note(&self) -> Result<NoteRepository<'_, C>, orm::Error> {
+            self.0.typed("Note")
+        }
+
+        /// The repository of `Recipe`.
+        pub fn recipe(&self) -> Result<RecipeRepository<'_, C>, orm::Error> {
+            self.0.typed("Recipe")
+        }
+
+        /// The repository of `RecipeCommit`.
+        pub fn recipe_commit(&self) -> Result<RecipeCommitRepository<'_, C>, orm::Error> {
+            self.0.typed("RecipeCommit")
+        }
+
+        /// The repository of `RecipePatch`.
+        pub fn recipe_patch(&self) -> Result<RecipePatchRepository<'_, C>, orm::Error> {
+            self.0.typed("RecipePatch")
+        }
+
+        /// The repository of `RecipeRef`.
+        pub fn recipe_ref(&self) -> Result<RecipeRefRepository<'_, C>, orm::Error> {
+            self.0.typed("RecipeRef")
+        }
+
+        /// The repository of `RecipeRelease`.
+        pub fn recipe_release(&self) -> Result<RecipeReleaseRepository<'_, C>, orm::Error> {
+            self.0.typed("RecipeRelease")
+        }
+
+        /// The repository of `RecipeSnapshotEntry`.
+        pub fn recipe_snapshot_entry(&self) -> Result<RecipeSnapshotEntryRepository<'_, C>, orm::Error> {
+            self.0.typed("RecipeSnapshotEntry")
+        }
+
+        /// The repository of `Step`.
+        pub fn step(&self) -> Result<StepRepository<'_, C>, orm::Error> {
+            self.0.typed("Step")
+        }
+
+        /// The repository of `Tasting`.
+        pub fn tasting(&self) -> Result<TastingRepository<'_, C>, orm::Error> {
+            self.0.typed("Tasting")
+        }
+
+        /// The repository of `Utensil`.
+        pub fn utensil(&self) -> Result<UtensilRepository<'_, C>, orm::Error> {
+            self.0.typed("Utensil")
+        }
+    }
 }

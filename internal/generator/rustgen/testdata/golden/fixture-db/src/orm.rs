@@ -248,6 +248,8 @@ pub const POSTGRES: &str = r#"{
     "null": "NULL"
   },
   "defaultLimit": 100,
+  "historyActorCTE": "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
+  "clearHistoryActor": "SELECT set_config('superschematic.history_actor_id', '', true)",
   "tables": [
     {
       "name": "Tenant",
@@ -674,6 +676,7 @@ pub const POSTGRES: &str = r#"{
         "version": "SELECT _version FROM tenant_user WHERE id = $1 AND deleted_at IS NULL"
       },
       "softDelete": true,
+      "historyActor": true,
       "uniqueKeys": {
         "id": {
           "conflict": "(id)",
@@ -706,4 +709,82 @@ pub fn postgres_definition() -> Result<&'static orm::Definition, orm::Error> {
         .get_or_init(|| orm::Definition::parse(POSTGRES).map_err(|err| err.to_string()))
         .as_ref()
         .map_err(|err| orm::Error::Definition(err.clone()))
+}
+
+/// The repositories on Postgres.
+#[cfg(feature = "postgres")]
+pub mod postgres {
+    use super::*;
+
+    pub use orm::postgres::{deadpool_postgres, tokio_postgres};
+    use deadpool_postgres::GenericClient;
+
+    /// The repository of `Tenant` on a Postgres client.
+    pub type TenantRepository<'a, C> =
+        orm::postgres::Typed<'a, C, TenantRow, TenantCreate, TenantUpdate, TenantFilter, IdentityUUID>;
+
+    /// The repository of `TenantUser` on a Postgres client.
+    pub type TenantUserRepository<'a, C> =
+        orm::postgres::Typed<'a, C, TenantUserRow, TenantUserCreate, TenantUserUpdate, TenantUserFilter, IdentityUUID>;
+
+    /// The repositories of `fixture-db` on a Postgres client, acting as a
+    /// user or as no one.
+    pub struct Repositories<'a, C>(orm::postgres::Repositories<'a, C>);
+
+    impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
+        /// The repositories over `client`, the caller's: a connection of
+        /// its pool, or a transaction on one. They act as no one until
+        /// `acting` names a user.
+        pub fn new(client: &'a C) -> Result<Self, orm::Error> {
+            orm::postgres::Repositories::new(client, postgres_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::postgres::Rules<C>) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::postgres::Repositories<'a, C> {
+            &self.0
+        }
+
+        /// The repository of `Tenant`.
+        pub fn tenant(&self) -> Result<TenantRepository<'_, C>, orm::Error> {
+            self.0.typed("Tenant")
+        }
+
+        /// The repository of `TenantUser`.
+        pub fn tenant_user(&self) -> Result<TenantUserRepository<'_, C>, orm::Error> {
+            self.0.typed("TenantUser")
+        }
+    }
 }
