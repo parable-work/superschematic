@@ -130,7 +130,7 @@ func TestOpenAPIFilterParameter(t *testing.T) {
 			var want map[string]any
 			description := apigen.FilterOperatorDescription(op)
 			switch op {
-			case ir.FilterOpIn:
+			case ir.FilterOpIn, ir.FilterOpNotIn:
 				want = map[string]any{"type": "array", "items": value, "minItems": float64(1), "maxItems": float64(ir.FilterMaxInValues)}
 				description += " The query string separates them with commas."
 			case ir.FilterOpContains:
@@ -156,8 +156,8 @@ func TestOpenAPIFilterParameter(t *testing.T) {
 	// The operators follow the kinds: isNull on the two fields that may be
 	// null, contains on text alone.
 	for name, want := range map[string]string{
-		"name": "contains eq in", "kind": "eq in", "quantity": "eq gt gte in lt lte",
-		"retiredOn": "eq gt gte in isNull lt lte", "supplierId": "eq in isNull",
+		"name": "contains eq in ne notIn", "kind": "eq in ne notIn", "quantity": "eq gt gte in lt lte ne notIn",
+		"retiredOn": "eq gt gte in isNull lt lte ne notIn", "supplierId": "eq in isNull ne notIn",
 	} {
 		operators := fields[name].(map[string]any)["properties"].(map[string]any)
 		if got := strings.Join(slices.Sorted(maps.Keys(operators)), " "); got != want {

@@ -271,10 +271,10 @@ describe('the router endpoint', () => {
     } as const satisfies OperationSpec;
     const filter = {
       fields: [
-        { name: 'name', operators: ['eq', 'in', 'contains'], value: { name: 'filter[name]', kind: 'string', required: false } },
+        { name: 'name', operators: ['eq', 'ne', 'in', 'notIn', 'contains'], value: { name: 'filter[name]', kind: 'string', required: false } },
         {
           name: 'quantity',
-          operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'],
+          operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte'],
           value: { name: 'filter[quantity]', kind: 'integer', required: false },
         },
         { name: 'discontinued', operators: ['eq', 'in'], value: { name: 'filter[discontinued]', kind: 'boolean', required: false } },
@@ -327,6 +327,13 @@ describe('the router endpoint', () => {
       const hundred = Array.from({ length: 100 }, (_, i) => i);
       const many = await list({ where: { quantity: { in: hundred }, name: { in: 'Hex nut' } } });
       expect(many.structuredContent.filter).toEqual({ name: { in: ['Hex nut'] }, quantity: { in: hundred } });
+      // ne is a value and notIn a list, as eq and in are (D112).
+      const negated = await list({ where: { name: { ne: 'x, y ', notIn: ['Hex nut', 'Wing nut'] }, quantity: { notIn: 7, ne: 3 } } });
+      expect(negated.structuredContent).toEqual({
+        filter: { name: { ne: 'x, y ', notIn: ['Hex nut', 'Wing nut'] }, quantity: { ne: 3, notIn: [7] } },
+        tag: null,
+        keys: ['filter[name][ne]', 'filter[name][notIn]', 'filter[quantity][notIn]', 'filter[quantity][ne]'],
+      });
     });
 
     test('absent, null or empty, the route reads no filter', async () => {
@@ -338,7 +345,9 @@ describe('the router endpoint', () => {
     test("a field, an operator or a value the route refuses is the route's 400 at filter[field]", async () => {
       for (const [where, detail] of [
         [{ secret: 1 }, 'Invalid query parameter filter[secret]: is not a field this operation filters by; expected one of name, quantity, discontinued, retiredOn'],
-        [{ name: { gt: 'a' } }, 'Invalid query parameter filter[name]: takes no operator gt; expected one of eq, in, contains'],
+        [{ name: { gt: 'a' } }, 'Invalid query parameter filter[name]: takes no operator gt; expected one of eq, ne, in, notIn, contains'],
+        [{ discontinued: { ne: true } }, 'Invalid query parameter filter[discontinued]: takes no operator ne; expected one of eq, in'],
+        [{ quantity: { notIn: [] } }, 'Invalid query parameter filter[quantity]: notIn names no value'],
         [{ quantity: 'many' }, 'Invalid query parameter filter[quantity]: expected an integer'],
         [{ quantity: { in: [] } }, 'Invalid query parameter filter[quantity]: in names no value'],
         [{ retiredOn: { isNull: 'yes' } }, 'Invalid query parameter filter[retiredOn]: isNull expects true or false'],
@@ -366,6 +375,10 @@ describe('the router endpoint', () => {
         [{ name: { in: 'c\u0085' } }, 'list_parts: where.name.in[0] must not be blank or hold a comma or a space at either end'],
         [{ quantity: { in: Array.from({ length: 101 }, (_, i) => i) } }, 'list_parts: where.quantity.in holds more than 100 values'],
         [{ name: { contains: '' } }, 'list_parts: where.name.contains must not be empty'],
+        [{ name: { ne: ['a'] } }, 'list_parts: where.name.ne is a value'],
+        [{ name: { notIn: { a: 1 } } }, 'list_parts: where.name.notIn is a list of values'],
+        [{ name: { notIn: ['Hex nut', 'Smith, John'] } }, 'list_parts: where.name.notIn[1] must not be blank or hold a comma or a space at either end'],
+        [{ quantity: { notIn: Array.from({ length: 101 }, (_, i) => i) } }, 'list_parts: where.quantity.notIn holds more than 100 values'],
       ] as const) {
         const result = await list({ where });
         expect(result.isError).toBe(true);

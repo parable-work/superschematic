@@ -17793,3 +17793,207 @@ Status: built. `TestTableOperationsDocumentThemselves`;
 summaries and whose endpoints the tools; `TestSchemaValidateChecksOperationMCP`;
 and `examples/tracker`, whose sixty-seven table operations carry no
 `@docs` and whose MCP endpoint lists their tools.
+
+## D112. A list sorts by a column that may be null, its nulls last in either direction, and a filter negates with `ne` and `notIn`, which keep a null (D60, D79, D106 amended)
+
+A tracker's list by due date is the list its users open most, and most
+issues have no due date. `SortBy` refused a `Nullable` field ("a page's
+order has no place for a null"), and both ORMs left a column that may be
+null out of their sort fields, because the keyset they share compares
+`(column, key)` as a row value with the row the page key names, and a row
+value that holds a null compares as unknown: the rows with no value fall
+out of every page after the first, and a key that lands on one reads
+nothing after it. D110 left it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A page orders a column that may be null with its nulls last, ascending and descending alike, and the rows that hold a null in key order among themselves, in the sort's direction. `sort=dueOn` reads the earliest date first, `sort=-dueOn` the latest, and each ends with the rows that have none. | The database's own order. Postgres puts a null after every value going up and before every value going down, so "latest first" would open with every undated issue, and SQLite does the reverse, so the statements both ORMs carry would read two orders. Nulls first, which makes the common list read worst. A `nulls` option on `SortBy`, a second thing to bind a cursor to, for a choice no list of the tracker wanted both ways. |
+| The page key stays the row's key alone (D60, amended), and the cursor is unchanged: `{"sort":"dueOn","key":{"id":...}}`. The keyset reads the key's row for its value, as it did, and now also for whether that value is null. | The value in the key, with a null marked. Every reader of a cursor, in three runtimes, and their parity vectors would change for a fact the row already holds, and a key that carries a value goes stale when the row changes, which D60 chose the key alone to avoid. |
+| `sqlutil.TableStatements` gains `PageAfterNulls` and `PageOrderNulls`, used for a column that may be null, and `PageAfter` and `PageOrder` stay as they were for one that may not. The keyset is `CASE (SELECT page_key.c IS NULL FROM t AS page_key WHERE page_key.id = $n) WHEN TRUE THEN t.c IS NULL AND t.id > $n WHEN FALSE THEN (t.c IS NULL OR (t.c, t.id) > ((SELECT page_key.c ...), $n)) END`, written from the two keysets there already were: after a null come the nulls past the key, and after a value come every null and the values past it. A key whose row is gone answers neither branch, so it places no row and is still `ErrPageKey`. The order is `ORDER BY t.c ASC NULLS LAST, t.id ASC`, with `DESC` both times going down. | One statement for every column. A column that is never null keeps a keyset Postgres seeks an index with, and a `CASE` is a condition on each row. `COALESCE` to a sentinel past every value, which needs one per type and is wrong for the value that equals it. A second query that reads the key's row first, a round trip per page. |
+| Both ORMs take the column's nullability from the table as sqlutil models it: the Go ORM's `<type>SortColumns` holds `nulls` beside each column's SQL, and the TypeScript runtime reads a sortable column that is not `required`. `sqlutil`'s `sortableColumn` no longer leaves out a column that may be null, so `updatedAt` sorts where it is `Nullable`, and so does a projection's column. Types written before this entry carry no such statement, and the TypeScript runtime says so by name instead of paging wrongly. | Sorting only the columns an API's `SortBy` names. The ORM's sort fields are the table's, whoever reads them. |
+| `SortBy` takes a `Nullable` field. `verify.checkSortFields` refuses a `Secret` field, a list, a map and a field that is no text, number or time, as before. An implementation that sorts its own rows reads the same order, so a list's pages mean one thing whoever serves them. | A warning on a hand-written list, which the loader cannot check the order of. |
+| The statements are SQL both Postgres and SQLite read: `NULLS LAST`, a row value and a searched `CASE`. The repositories run on Postgres alone (D79); `page.test.ts` fills the statements a table's types carry and runs them on SQLite, where a null orders before every value by default, and reads the same pages. | Leaving SQLite to the day a repository runs on it, with an order that would then differ silently. |
+
+### A filter that negates
+
+The tracker's two most used views are "not done" and "not mine", and
+`FilterBy` could say neither: D106 gave a field `eq` and `in` and left
+`neq` to the day both ORMs held one, and D110 left it again. A caller
+listed every state but the ones it did not want, and re-listed them when
+a state was added.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field takes `ne` and `notIn` wherever it takes `eq` and `in`, which is every kind: `filter[status][ne]=done` and `filter[status][notIn]=done,cancelled`. `ne` holds one value, read as `eq`'s is, a comma and its spaces kept; `notIn` holds 1 to 100, split at commas, trimmed and an empty one dropped, as `in`'s are, with `in`'s refusals under its own name (`notIn names no value`, `notIn must hold at most 100 values`). The operators' order, in a field's list and in a reader's answer, is `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte`, `contains`, `isNull` (`ir.FilterOperatorOrder`). | `neq`, which `filterparse` once parsed: every other operator is the repositories' name for it, and theirs is two letters. `not[field]=value`, a second bracket form for one more comparison. `notContains`, which no view of the tracker asked for. |
+| `ne` and `notIn` keep exactly the items `eq` and `in` leave out, so each pair divides a list in two, and an item whose field is null is on the negated side: "not assigned to Ada" holds the unassigned issues. A caller who wants only the items with a value adds `isNull=false`, which every field that may be null already takes. | SQL's reading, where `<>` and `NOT IN` drop a null. It is the answer a database gives and never the one a person means, and it makes "is" and "is not" together lose rows, which a UI that toggles between them shows as issues vanishing. A flag per request for which reading, a second thing to get wrong. |
+| The repositories hold the same two, with the same meaning (`Ne` and `NotIn` in Go, `ne` and `notIn` in TypeScript), on every kind of column that has `eq` and `in`; a duration, which has no `in`, takes `ne` alone. The clauses are `sqlutil`'s, one text for both ORMs: `column IS DISTINCT FROM $n` and `(column IN (...)) IS NOT TRUE`. An empty `notIn` adds no condition, as an empty `in` adds none. Types written before this entry carry neither clause, and the TypeScript runtime says so by name. | `column <> $n OR column IS NULL`, which names the column twice where every clause names it once, and `NOT IN`, which a null on either side turns to unknown. Leaving the ORMs' `ne` with SQL's meaning and adding the null in the handlers, two meanings for one name a layer apart. |
+| Each of the three readers reads them (`filterparse`, `filter.ts`, `filter.rs`), held to `filter_parity.json`, whose vectors gain the reads, the refusals and the written queries. The typed filter an implementation takes gains `Ne` and `NotIn` in each shape (`Equals`, `Ordered`, `Text`); Rust's are `ne` and `not_in`. The generated handlers of both servers copy them to the repository's filter as they copy `eq` and `in`. | A fourth shape for the negations, which would move every field to a new type for two members. |
+| The OpenAPI parameter, the tool schema and the four SDKs carry them as they carry `eq` and `in`: `ne` a value, `notIn` an array of 1 to 100. Each SDK and the MCP endpoint refuse, before a request, a `notIn` the route would read as another one: more than 100 values, and a value that is blank or holds a comma or a space at either end. Python's member is `not_in`, and Rust's SDK's is `not_in` beside `one_of`. | Leaving the tool schema closed to them, which would let a browser say what an agent cannot. |
+| A list written by hand must read the two new members. The router admits every operator a field's kind takes, whether or not the implementation reads it, so one that copies `Eq` and `In` alone answers `filter[status][ne]=done` as if no filter were sent, and nothing at the build can see it. acme-shop's three hand-written lists read all four. The guide says so where it shows the copy. | Giving the negations to generated lists alone, which is a second rule for what a field takes, by who serves it. Refusing them on a hand-written list until its declaration opts in, a flag on `FilterBy` whose only job is to describe the implementation. |
+
+Left: an index-served keyset over a column that may be null. The keyset
+is a condition on each row the order passes, so a deep page of a large
+table reads the rows before it; two seeks joined by `UNION ALL`, one over
+the values and one over the nulls, would seek, in both ORMs' page
+statements and their selections. A `nulls: "first"` option. A `@query`'s
+pages (D86), whose keyset is its own. "Or" between a filter's members:
+every member still holds at once, and `in` is the only "one or another",
+of one field's values. It did not fall out of this: the repositories have
+`anyOf` (D90), but the wire has no form for a group, and D106 declined an
+expression language in a query string; a list that needs one is written
+by hand over the repository's `anyOf`. A helper that copies a typed
+filter into a repository's whole, so an implementation written by hand
+need not name each operator and cannot miss a new one. A filter through
+a relation without a projection (D110). Topcoat's argument form has no
+control for a negation, as it has none for a range.
+
+Status: built. `TestTableStatementsOfALedger`, `TestTablesOfModelsALedger`
+and `TestViewsOfAProjection`; `TestSortVerifies`; `TestGenerateFindPage`
+and `TestSortableColumns`; on Postgres, the Go ORM's
+`TestGeneratedFindPageOnPostgres` and the TypeScript ORM's `page.test.ts`,
+each a walk by `updatedAt` a row at a time and by pages that end on a
+value, on a tie, on the last value before the nulls, on a null and on the
+last row, ascending and descending, with a filter and a search beside it
+and a key of no row refused; `page.test.ts` again on SQLite, through the
+statements; and over HTTP on both servers,
+`TestGeneratedTableOperationsEndToEnd` and
+`TestTableOperationsGoServerServesItsTables`, `fixture-tracker-api`'s
+`listIssues` by `dueOn` and `estimate`. The filters:
+`TestFilterOpsAndClauses`; `filterparse`'s `TestParityVectors`,
+`filter-parity.test.ts` and `tests/filter_parity.rs` over the vectors;
+`TestFilterFillsEachFieldsKindAndOperators`; `TestOpenAPIFilterParameter`
+and `TestFilterToolParameter`; the four SDKs' paged tests, each held to
+the vectors' `queries`; `mcp.test.ts`; the three servers over
+fixture-paged-api's `listParts`, a negation of every kind of field with a
+null kept; on Postgres, the TypeScript ORM's `ledger.test.ts` and
+`TestTableParityOfGoAndTypeScriptOnPostgres`, whose script sends `ne` and
+`notIn` on text, an enum, a key, a number and a date, and a page after a
+key by a column that may be null, through both ORMs as one statement
+each; and over HTTP on both servers, `listIssues` by `ne` and `notIn` of
+each field, each pair dividing the list in two.
+
+## D113. A table's Workflow names the states a transition leaves that still count as finished (`finished`), and Reactions reads them as it reads a terminal state (D16, D103, D104, D109 amended)
+
+A tracker's issue that is done may be reopened, so its Workflow lists
+`{ from: "done"; to: "todo" }`, and with that one line the issue never
+closes its parent. A state has an outcome only when no transition leaves
+it: `outcomes` naming `done` is refused ("which is not a terminal state: a
+transition leaves it, and only a terminal state has an outcome"), and
+`state_outcome`, the one function Reactions, Dependencies and Rollups ask
+whether a row is finished, answers none for it. D109 left this and said
+why it was more than a line: the rule is the engine's on purpose, and the
+engine, the core, both recorded corpora and the build's mirror hold it.
+
+Two designs were weighed. The first lets `outcomes` name a state a
+transition leaves, everywhere. The second adds a member a table's
+Workflow alone takes.
+
+Who reads the answer decides it:
+- On an engine type, Dependencies reads it to open a gate: a transition
+  into a gated state is refused while a blocker is unfinished, and a row
+  in a terminal gated state takes no open blocker. Both stand on a
+  finished instance staying finished. Rollups counts finished children.
+  A blocker that finished, let its dependent through and was reopened
+  would leave the dependent past a gate with an open blocker, a state the
+  behavior has no rule for.
+- On a table, the core has no Dependencies and no Rollups. Reactions
+  alone reads an outcome, and it promises nothing about what stays true:
+  a rule acts where it can, when a write is heard.
+- Lease, Retries and Reconcile read no outcome. Each asks whether a
+  transition leaves the state (`moves::is_terminal`): Lease to leave an
+  expiry uncounted, Retries for the states exhaustion moves a row from,
+  Reconcile for the rows an observation no longer moves.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A table's Workflow takes `finished`, a map as `outcomes` is: each key a state a transition leaves, each value its outcome (`success`, `failure` or `neutral`). `finished: { done: "success" }` beside `{ from: "done"; to: "todo" }` is a task that is done, counts as done, and may be reopened. | `outcomes` naming such a state, on a table and an engine type alike. It reverses a rule three engine behaviors stand on, for a case no engine type asked for, and changes what the recorded scenarios of the engine must answer. The same, on a table alone: one member with two rules by where it is written, which the core and the engine would then answer differently for the same config, and every replay of the engine's recordings through the core would need the two steps that record the refusal left out. A list of states with no outcomes, which cannot say that a cancelled issue that may be reopened is no success. |
+| `outcomes` keeps its rule and its words: it names terminal states, in the engine and the core alike. `finished` names the others: a key that is no state, and a key that is a terminal state, are each refused at define (`finished names "done", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome`). So each state's outcome is said in one place, and adding or removing a transition out of a state is answered with which member holds it now. | `finished` taking any state, terminal ones too, which gives a terminal state two places for its outcome and a rule for when they disagree. |
+| `finished` is a table's alone, as `by`, `overridePermission` and `repeat` are (D104): the shared declaration says so, the engine refuses it at define (`finished is a table's Workflow's ...: on an engine type a state a transition leaves has no outcome`), the build refuses it on an engine type first, and the core implements it. | Building it into the engine, which is a design of what Dependencies does when a blocker reopens: left below. |
+| `state_outcome` answers for a state `finished` names, and `is_terminal_state` is unchanged: no transition leaves it. So Reactions' `allTerminal` and `anyTerminal` count such a state with no change of their own, under the names they have. | `allFinished` and `anyFinished` beside them, two more rule forms that mean the same on every table without `finished`. Renaming the two, which the engine shares. |
+| Nothing else reads `finished`. The guard still refuses a transition out of a terminal state alone; a transition out of a finished state is made as any is, with its permission and its `by`. Lease's expiry, Retries' default `from` and Reconcile's settled rows ask whether a transition leaves a state, and still do. | Reading `finished` in the three. A lease that expires on a row that is done and may be reopened would then go uncounted, and Retries would no longer move such a row on exhaustion, each a change to a behavior that no table with a reopenable state asked for; a table that wants either says so in that behavior's own config (`from`). |
+| Reopening a row moves no other row back. A parent that a rule closed stays closed when a child is reopened: no `when` hears a row leave a state, and a `then` moves a row only along a transition its Workflow lists. A table that wants the parent taken up again says both: the parent lists the transition (`{ from: "done"; to: "active" }`, with `finished: { done: "success" }` of its own) and a rule makes it, the child's `{ when: { enters: "doing" }; then: { link: "project"; transition: "active" } }`. When the child is done again every child is done again, and `allTerminal` closes the parent again. | A rule that undoes a move when its condition stops holding. It needs the state the parent was in before, which no row keeps, and a parent a person closed by hand would be reopened by a child. `when: { leaves: state }`, a fifth form: `enters` on the state the child moves to says the same today. |
+| The build's mirror holds `finished` to the core's two rules, after the outcomes, by name (`verify.workflowRulesProblem`), and where the core refuses an outcome on a state a transition leaves, the build adds after the core's words that a table names such a state in `finished`. | Changing the core's message, which the engine shares and both corpora record. |
+
+Left: Dependencies and Rollups on a table, which the core does not have,
+and with them what a dependent does when its blocker is reopened; the
+same on an engine type, where `finished` is refused until that is
+designed. Lease, Retries and Reconcile reading `finished`. A rule that
+hears a row leave a state. The short form of a transition (D109) in a
+JSON or YAML schema file, unchanged by this.
+
+Status: built. In the core, `workflow.rs`'s parse and `state_outcome`
+with their unit tests, and `tests/reactions.rs`: every child done closes
+the parent, a reopened child leaves it, a child started again takes it up
+where it lists the transition, and done again closes it again. The engine
+refuses the member at define (`core_workflow_table_members.rs`, and the
+engine's TypeScript suite, recorded in the corpus). A hand-written
+scenario in `core-workflow-principals.json`, replayed by every adapter.
+`TestWorkflowRulesProblem` and
+`TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes`;
+`workflow.typecheck.ts`. On Postgres through the three servers and their
+workers, over fixture-reactions-db, whose task and project both leave
+`done`: `TestGeneratedReactionsEndToEnd`,
+`TestReactionsGoServerAndWorkerOnPostgres` and
+`TestRustReactionsOperationsAndWorkerOnPostgres`, a task done, reopened,
+started and done again, and its project closed, left closed, taken up and
+closed again. The core's transcripts and the engine's corpus are
+re-recorded, not edited. One thing the replayer of the core's transcripts
+now skips: a define the engine records as refused for a table-only member
+(its reason names the table form, `on a DB table, D104)`) is not compared with the core,
+which takes that member; the engine's own replay still holds the refusal.
+
+## D114. A user makes API keys: named, long-lived tokens of a table of their own that call as the user, with a subset of the user's permissions when the key names one (D33, D50, D81 amended)
+
+An agent that calls an API over MCP or HTTP signed in as a person and
+held that person's session: a token that ends in 14 days, or sooner by an
+idle timeout meant for a browser, that no list shows and nothing revokes
+but a logout made with the token itself, and that carries everything the
+person may do. The tracker's agents signed in again every two weeks.
+`examples/acme-schematic` showed the other way out, an auth provider of
+its own with a table of keys, which gives up the core user model to get
+one feature of it. D50 foresaw a credential kind beside the password
+getting "a table of its own joined to the user".
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API key is a row of a table of its own, `UserApiKey` (`user_api_key`), which the loader adds beside `Session` for a `User` table: `id`, `user` (cascade), `name`, `tokenHash` (unique, the SHA-256 of the token, never the token), `permissions` (a nullable list), `createdAt`, `expiresAt`, `lastUsedAt`, `revokedAt`, indexed on `user`. `UserApiKey` joins the names a schema with a `User` table may not use. | A `Session` row with a name and a lifetime of its own. It is one nullable column where this is one table, but every rule of a session would then need its exception: the idle timeout, `changePassword` and `setUserPassword` revoking "the user's sessions", `logout`. And the session's own read, the statement every authenticated request runs, would name the new column, so a server deployed before its migration would fail every request; a key in its own table fails only keys, and the disabling of a user, which revokes them. `ApiKey`, the name acme-schematic's own table has. |
+| The identity descriptor gains one optional member, `apiKey`, the table and its nine columns, and stays version 1. A descriptor written before this entry has none, and a store built from one has no API keys: a bearer key is the 401 of any unknown token, and the key operations answer 404 with what is missing. That 404 is not among the operations' documented errors, as the role operations' `The schema has no roles` is not: it is a server whose database types were built before its API. | Version 2. The runtimes refuse an unknown member already, which is the lockstep a version would add, and a required member would make every runtime refuse the descriptor of every project built before it. |
+| A key's token is `key_` and 43 characters of base64url, 32 random bytes, stored as the SHA-256 of the whole text. It travels as a session's does, `Authorization: Bearer`, and only so: a cookie holds session tokens alone. The prefix tells the runtime which table to read, one statement a request, and tells a person and a secret scanner what they are looking at. | A token shaped as a session's, found by reading both tables. A key in the cookie, a credential a browser would send by itself. |
+| A key lives until its `expiresAt`, which a create sets from `expiresInSeconds`, 1 to the config's `apiKeyMaxTtlSeconds`, or from that maximum when it names none: 31536000, 365 days, unless the config says otherwise. It has no idle rule. `lastUsedAt` is written as a session's `lastSeenAt` is, at most once in a touch interval. `sessionTtlSeconds` and `idleTimeoutSeconds` are sessions' alone. | A key that never expires, which is the credential nobody remembers making. One lifetime for sessions and keys. The idle timeout, which ends an agent's key over a quiet weekend. |
+| What ends a key: its expiry, a revocation, its user being disabled, which revokes the user's keys with the sessions and for good, and the user's deletion. A password change does not, the user's own or an administrator's: a key is no session of that password, and its user sees it in the list and revokes it there. | Revoking every key at a password change, as sessions are. It is the safer default against a key an intruder made, and it breaks every agent of a user who rotates a password; the guard against that key is that only a session makes one, and that the list shows it. |
+| The routes are opt-in. `@userSessions({ apiKeys: true })` adds `createApiKey` (`POST auth/keys`, answering the key and its token, once), `listApiKeys` (`GET auth/keys`, the caller's keys that are not revoked, newest first, never a token) and `revokeApiKey` (`DELETE auth/keys/{id}`). `@userAdministration({ apiKeys: true })` adds `listUserApiKeys` and `revokeUserApiKey` under `users/{id}/keys`, behind `users.read` and `users.write`. A key authenticates wherever the store has the table, whatever the routes. `apiKeys` needs the login, in a decorator and in a JSON or YAML schema file alike: a key is made by a caller signed in with a session. | The routes on every `@userSessions` class, a way to mint a year-long credential that an API gets by upgrading. An administrator creating a key for another user, which is signing in as them. |
+| The operations that act on the caller's own account need a session: `createApiKey`, `listApiKeys`, `revokeApiKey`, and `logout` and `changePassword` beside them. A caller authenticated by a key is the 403 `forbidden` for each. So a key that leaks cannot make another, revoke the others, or take the account. `me` and `capabilities` answer a key as they answer anyone. | A key that manages keys, for an agent that rotates its own: it is the same door for whoever holds a leaked one. |
+| A key carries every permission its user holds, or the subset it was made with: `permissions`, a list of permission names, each of which the caller must hold at the create, or it is a 403 and no key is made. At each request the key holds those of its names that its user still holds (a role's permission covers it), so a user who loses a role takes it from their keys, and a key never widens to part of what it names. A key with no list follows its user. The principal's roles are the user's, each narrowed to the key's names, so the role-based matcher of the Go runtime and the permission lists of the other two read one rule (`NarrowPermissions`, in the parity vectors). | Every key carrying everything, which is what an agent should not hold. Scopes of the key's own, apart from permissions, a second vocabulary for what a route already names. A key keeping a permission its user lost. |
+| What the subset costs: a column, a narrowing rule in three runtimes with its vectors, and a limit to say plainly. It narrows permissions, not routes: a route that asks only for a caller admits every key of every user, and a row rule (D108) sees the key's user. A project that wants an agent held to less gives the agent a user of its own with a role of its own. | Confining a key to named operations, which needs every route to name itself to the check, a different model of authorization from the one the routes declare. |
+| `createApiKey` is hidden from the tool documents, as the operations that carry a password are: its answer is a credential. `listApiKeys`, `revokeApiKey` and the two administration operations are tools. | A tool that hands a model a year-long token in its context. |
+| The three runtimes build it alike: the store's methods on Postgres and SQLite, the service's operations, the bearer path, the config member and the descriptor member, held to the vectors (`apiKeys`, `keyPermissions`, the `credentials` and `config` cases) and to mirrored tests of what the vectors cannot hold. A generated server mounts each operation by name from what its schema declares, so each runtime serves the handler of every key operation whatever its options; the options (`WithAPIKeys`, `WithAPIKeyAdministration` and their twins) gate only the runtime's own route table, for a server written by hand that mounts all of it. | A runtime that refuses the routes until built: the fallback this entry kept for one that could not be finished. |
+
+Left: a key's use log beyond `lastUsedAt`; a hint of the token (its last
+characters) in the list, for telling two keys of one name apart; rotation
+as one call, a new token for the same row; rate limits per key; a key
+bound to an origin or an address; `ask`-style confirmation of a tool call
+made with a key; Topcoat's account and administration pages, which show
+no keys; and the engine's own server (`engineApp` of
+`runtime/engine/typescript`), where a bearer key authenticates and the key
+routes are mounted only for a service built with the two options, which no
+test of the engine covers.
+
+Status: built, in the three runtimes. The loader adds the table and the
+operations (`TestExpandRoutesAPIKeys`, `TestLoadUserRoutesAPIKeysAreOptIn`,
+the reserved names and the refusals in `verify`, the readers and the
+writers of the three schema forms). The Go runtime is the reference
+(`runtime/http/go/identity`, `apikeys_test.go`), the TypeScript and Rust
+runtimes its ports (`apikeys.test.ts`; `tests/identity_store.rs` and
+`tests/identity_http.rs`), each on SQLite and Postgres and each held to
+`runtime/http/testdata/identity_parity.json`. fixture-user-routes-api
+turns both sets' routes on, and its goldens hold the OpenAPI document, the
+Go, TypeScript and Rust routers, the four SDKs and the tool schemas, with
+`createApiKey` hidden. End to end through each generated server, called
+with its SDK: a session makes a key with a subset and one without, the
+key calls as its user and holds what it names, gets 403 on the five
+operations of its own account, is listed without a token, is revoked by
+its user and by an administrator, and is then 401
+(`TestUserRoutesServerServesTheSDK` on SQLite and Postgres,
+`TestGeneratedUserRoutesEndToEnd` on bun:sqlite,
+`TestRustSDKCallsTheUserModelRoutes` on SQLite and Postgres). The 401's
+documented meaning is now "no usable session or API key".

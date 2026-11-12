@@ -21,8 +21,10 @@ import (
 // - GetUser: One user and the roles they hold. Requires authentication.
 // - GrantRole: Grants a user a role. The caller's own permissions must cover the role's. Requires authentication.
 // - ListRoles: Lists the roles and the permissions each grants. Requires authentication.
+// - ListUserApiKeys: Lists a user's API keys that are not revoked, newest first, each without its token. Requires authentication.
 // - ListUsers: Lists the users and the roles each holds. Requires authentication.
 // - RevokeRole: Revokes a role from a user. Requires authentication.
+// - RevokeUserApiKey: Revokes an API key of a user's, which authenticates no request after. It answers true. Requires authentication.
 // - SetUserPassword: Sets a user's password and ends their sessions. It answers true. Requires authentication.
 // - UpdateRole: Renames a role or replaces its permissions. The caller's own permissions must cover each permission given. Requires authentication.
 type AccountAdminNamespace struct {
@@ -268,6 +270,30 @@ func (n *AccountAdminNamespace) ListRoles(
 	return out, nil
 }
 
+// ListUserApiKeys Lists a user's API keys that are not revoked, newest first, each without its token.
+// Requires authentication.
+func (n *AccountAdminNamespace) ListUserApiKeys(
+	ctx context.Context,
+	Id string,
+) ([]types.ApiKey, error) {
+	path := fmt.Sprintf("/api/auth/admin/users/%v/keys", pathSegment(Id))
+
+	var requestBody any
+	var out []types.ApiKey
+	if err := n.client.DoJSON(
+		ctx,
+		"GET",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero []types.ApiKey
+		return zero, err
+	}
+	return out, nil
+}
+
 type AccountAdminListUsersInput struct {
 	Pending *bool `json:"pending,omitempty"`
 }
@@ -329,6 +355,31 @@ func (n *AccountAdminNamespace) RevokeRole(
 		&out,
 	); err != nil {
 		var zero types.IdentityUser
+		return zero, err
+	}
+	return out, nil
+}
+
+// RevokeUserApiKey Revokes an API key of a user's, which authenticates no request after. It answers true.
+// Requires authentication.
+func (n *AccountAdminNamespace) RevokeUserApiKey(
+	ctx context.Context,
+	Id string,
+	KeyId string,
+) (bool, error) {
+	path := fmt.Sprintf("/api/auth/admin/users/%v/keys/%v", pathSegment(Id), pathSegment(KeyId))
+
+	var requestBody any
+	var out bool
+	if err := n.client.DoJSON(
+		ctx,
+		"DELETE",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero bool
 		return zero, err
 	}
 	return out, nil

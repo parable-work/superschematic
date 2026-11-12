@@ -1,8 +1,8 @@
 /*
 The identity descriptor (internal/generator/identitydesc/README.md): the
-tables a schema's users, sessions, credentials, roles and role grants live
-in, and which column of each plays which part. The DB build writes it as
-identity/<schema>.json and the TypeScript types export it as
+tables a schema's users, sessions, credentials, API keys, roles and role
+grants live in, and which column of each plays which part. The DB build
+writes it as identity/<schema>.json and the TypeScript types export it as
 identityDescriptor; a store reads either, the JSON text or its value.
 */
 
@@ -46,6 +46,21 @@ export interface IdentityDescriptor {
       readonly pendingAt: string;
     };
   };
+  /** Absent in a descriptor written before the UserApiKey table (D114): its store has no API keys. */
+  readonly apiKey?: {
+    readonly table: string;
+    readonly columns: {
+      readonly id: string;
+      readonly user: string;
+      readonly name: string;
+      readonly tokenHash: string;
+      readonly permissions: string;
+      readonly createdAt: string;
+      readonly expiresAt: string;
+      readonly lastUsedAt: string;
+      readonly revokedAt: string;
+    };
+  };
   /** Absent when the schema has no UserRole table, and roleGrant with it. */
   readonly role?: {
     readonly type: string;
@@ -77,6 +92,7 @@ const SHAPE: Record<string, Shape> = {
   user: { type: 'name', table: 'name', columns: columns('key', 'login', 'name'), keyScalar: 'name', loginScalar: 'name', nameScalar: 'name' },
   session: { table: 'name', columns: columns('id', 'user', 'tokenHash', 'createdAt', 'expiresAt', 'lastSeenAt', 'revokedAt') },
   credential: { table: 'name', columns: columns('id', 'user', 'passwordHash', 'passwordChangedAt', 'disabledAt', 'pendingAt') },
+  apiKey: { table: 'name', columns: columns('id', 'user', 'name', 'tokenHash', 'permissions', 'createdAt', 'expiresAt', 'lastUsedAt', 'revokedAt') },
   role: { type: 'name', table: 'name', columns: columns('key', 'name', 'permissions'), keyScalar: 'name' },
   roleGrant: { table: 'name', columns: columns('id', 'user', 'role', 'grantedAt') },
 };
@@ -100,7 +116,8 @@ function check(value: unknown, shape: Shape, path: string): void {
  * Reads an identity descriptor, from its JSON text or its value. It refuses
  * any version but 1, unknown members, an empty name, a role table without
  * its grant table or the other way round, and a name holding a NUL, which
- * no quoting can carry.
+ * no quoting can carry. A descriptor without apiKey is one written before
+ * D114, and is read as it was.
  */
 export function parseIdentityDescriptor(input: string | unknown): IdentityDescriptor {
   let value: unknown = input;
@@ -120,11 +137,12 @@ export function parseIdentityDescriptor(input: string | unknown): IdentityDescri
   const hasRole = d.role !== undefined && d.role !== null;
   const hasGrant = d.roleGrant !== undefined && d.roleGrant !== null;
   if (hasRole !== hasGrant) throw new IdentityDescriptorError('role and roleGrant are present together or not at all');
-  for (const member of ['user', 'session', 'credential', ...(hasRole ? ['role', 'roleGrant'] : [])]) {
+  const hasApiKey = d.apiKey !== undefined && d.apiKey !== null;
+  for (const member of ['user', 'session', 'credential', ...(hasApiKey ? ['apiKey'] : []), ...(hasRole ? ['role', 'roleGrant'] : [])]) {
     check(d[member], SHAPE[member]!, member);
   }
-  const { role, roleGrant, ...rest } = d;
-  return (hasRole ? { ...rest, role, roleGrant } : rest) as unknown as IdentityDescriptor;
+  const { apiKey, role, roleGrant, ...rest } = d;
+  return { ...rest, ...(hasApiKey ? { apiKey } : {}), ...(hasRole ? { role, roleGrant } : {}) } as unknown as IdentityDescriptor;
 }
 
 /** Quotes an identifier as every dialect a store speaks reads it: the name in double quotes, each double quote doubled. */

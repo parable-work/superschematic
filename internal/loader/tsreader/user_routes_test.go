@@ -3,6 +3,7 @@ package tsreader
 import (
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,30 +29,36 @@ func TestUserRoutesAreRecorded(t *testing.T) {
 	want := &ir.UserSessionsConfig{
 		Register: true, Registration: ir.IdentityRegistrationApproval, DefaultRoles: []string{"member"},
 		FirstUser: &ir.IdentityFirstUser{Role: "admin", Permissions: []string{"identity"}},
+		APIKeys:   true,
 	}
 	if !reflect.DeepEqual(account.UserSessions, want) || account.UserAdministration != nil {
 		t.Errorf("Account = %+v, want UserSessions %+v", account, want)
 	}
-	if want := (&ir.UserAdministrationConfig{}); !reflect.DeepEqual(admin.UserAdministration, want) || admin.UserSessions != nil {
+	if want := (&ir.UserAdministrationConfig{APIKeys: true}); !reflect.DeepEqual(admin.UserAdministration, want) || admin.UserSessions != nil {
 		t.Errorf("AccountAdmin = %+v, want UserAdministration %+v", admin, want)
 	}
 	if len(account.Operations) != 0 || len(admin.Operations) != 0 {
 		t.Errorf("the reader added operations: %v, %v", account.Operations, admin.Operations)
 	}
-	if account.Comment != "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81)." {
+	if account.Comment != "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81). A signed-in user makes API keys (D114)." {
 		t.Errorf("Account.Comment = %q", account.Comment)
+	}
+	if admin.Comment != "Manages users, roles and the grants between them, and lists and revokes\nany user's API keys." {
+		t.Errorf("AccountAdmin.Comment = %q", admin.Comment)
 	}
 	if greeting.IsIdentityRoutes() || len(greeting.Operations) != 1 {
 		t.Errorf("GreetingQueries = %+v", greeting)
 	}
 	for name := range schema.Types {
-		if strings.HasSuffix(name, "Input") || name == ir.IdentityLoginResultType {
+		if strings.HasSuffix(name, "Input") || name == ir.IdentityLoginResultType || slices.Contains(ir.IdentityAPIKeyTypes, name) {
 			t.Errorf("the reader added the type %s", name)
 		}
 	}
 }
 
 // TestUserRoutesConfigs: each config form reads into the set's config.
+// apiKeys (D114) is each set's own, and false, its default, reads as the
+// key left out.
 func TestUserRoutesConfigs(t *testing.T) {
 	dir := decoratorTestService(t, "API", map[string]string{"src/a.schema.ts": `import { userAdministration, userSessions } from "@superschematic/api";
 @userSessions({ path: "account", login: false })
@@ -68,6 +75,44 @@ export class Admin {}
 	}
 	if got, want := schema.OperationSets[1].UserAdministration, (&ir.UserAdministrationConfig{Path: "staff/admin"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("Admin.UserAdministration = %+v, want %+v", got, want)
+	}
+
+	for _, tc := range []struct {
+		name, sessions, admin string
+		wantSessions          *ir.UserSessionsConfig
+		wantAdmin             *ir.UserAdministrationConfig
+	}{
+		{
+			name:     "the sessions' keys alone",
+			sessions: `{ path: "account", apiKeys: true }`, admin: `{ path: "staff/admin", apiKeys: false }`,
+			wantSessions: &ir.UserSessionsConfig{Path: "account", APIKeys: true},
+			wantAdmin:    &ir.UserAdministrationConfig{Path: "staff/admin"},
+		},
+		{
+			name:     "the administration's keys alone",
+			sessions: `{ apiKeys: false }`, admin: `{ apiKeys: true }`,
+			wantSessions: &ir.UserSessionsConfig{},
+			wantAdmin:    &ir.UserAdministrationConfig{APIKeys: true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := decoratorTestService(t, "API", map[string]string{"src/a.schema.ts": `import { userAdministration, userSessions } from "@superschematic/api";
+@userSessions(` + tc.sessions + `)
+export class Account {}
+@userAdministration(` + tc.admin + `)
+export class Admin {}
+`})
+			schema, _, err := LoadService(dir)
+			if err != nil {
+				t.Fatalf("LoadService: %v", err)
+			}
+			if got := schema.OperationSets[0].UserSessions; !reflect.DeepEqual(got, tc.wantSessions) {
+				t.Errorf("Account.UserSessions = %+v, want %+v", got, tc.wantSessions)
+			}
+			if got := schema.OperationSets[1].UserAdministration; !reflect.DeepEqual(got, tc.wantAdmin) {
+				t.Errorf("Admin.UserAdministration = %+v, want %+v", got, tc.wantAdmin)
+			}
+		})
 	}
 }
 
@@ -140,7 +185,34 @@ export class Account {}
 @userSessions({ roles: true })
 export class Account {}
 `,
-			want: []string{`a.schema.ts:3:15: @userSessions config has unknown key "roles"; it takes defaultRoles, firstUser, login, path, register and registration`},
+			want: []string{`a.schema.ts:3:15: @userSessions config has unknown key "roles"; it takes apiKeys, defaultRoles, firstUser, login, path, register and registration`},
+		},
+		{
+			name: "an unknown key of @userAdministration",
+			kind: "API",
+			source: imports + `// @ts-expect-error an unknown key
+@userAdministration({ register: true })
+export class Admin {}
+`,
+			want: []string{`a.schema.ts:3:21: @userAdministration config has unknown key "register"; it takes apiKeys and path`},
+		},
+		{
+			name: "apiKeys without the login",
+			kind: "API",
+			source: imports + `// @ts-expect-error apiKeys needs the login
+@userSessions({ login: false, apiKeys: true })
+export class Account {}
+`,
+			want: []string{`a.schema.ts:3:15: @userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false`},
+		},
+		{
+			name: "apiKeys that is not a boolean",
+			kind: "API",
+			source: imports + `// @ts-expect-error apiKeys is true or false
+@userAdministration({ apiKeys: "yes" })
+export class Admin {}
+`,
+			want: []string{`a.schema.ts:3:21: @userAdministration apiKeys must be true or false`},
 		},
 		{
 			name: "an Authenticated base",

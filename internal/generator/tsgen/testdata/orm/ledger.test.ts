@@ -133,6 +133,21 @@ describe.skipIf(dsn === '')('the ledger', () => {
     expect(await amounts({ memo: { ilike: 'COFFEE' } })).toEqual([-500, -80]);
     expect(await amounts({ transferId: { eq: other.id } })).toEqual([-1200]);
     expect(await amounts({ transferId: { isNull: false } })).toEqual([-1200]);
+    // ne and notIn keep the rows eq and in leave out (D112), a row whose
+    // column is null among them: one entry has no memo, and three no
+    // transfer.
+    expect(await amounts({ memo: { ne: 'Salary' } })).toEqual([-1200, -500, -80]);
+    expect(await amounts({ memo: { notIn: ['Salary', 'coffee beans'] } })).toEqual([-1200, -500]);
+    expect(await amounts({ memo: { ne: 'Salary', isNull: false } })).toEqual([-500, -80]);
+    expect(await amounts({ memo: { eq: 'Salary' } })).toEqual([2500]);
+    expect(await amounts({ kind: { ne: credit } })).toEqual([-1200, -500, -80]);
+    expect(await amounts({ kind: { notIn: [credit, debit] } })).toEqual([]);
+    expect(await amounts({ kind: { notIn: [] } })).toEqual([-1200, -500, -80, 2500]);
+    expect(await amounts({ amountCents: { ne: cents(-500), notIn: [cents(2500), cents(-80)] } })).toEqual([-1200]);
+    expect(await amounts({ bookedOn: { ne: day('2026-09-01') } })).toEqual([-1200, -80, 2500]);
+    expect(await amounts({ transferId: { ne: other.id } })).toEqual([-500, -80, 2500]);
+    expect(await amounts({ transferId: { notIn: [other.id, owner.id] } })).toEqual([-500, -80, 2500]);
+    expect(await amounts({ transferId: { ne: owner.id } })).toEqual([-1200, -500, -80, 2500]);
     // The search's words each match, in any case.
     expect(await amounts({ searchText: 'coffee corner' })).toEqual([-500]);
     expect(await amounts({ searchText: '   ' })).toEqual([-1200, -500, -80, 2500]);
@@ -174,7 +189,7 @@ describe.skipIf(dsn === '')('the ledger', () => {
     await orm.entry.hardDeleteOne(gone.id);
     await expect(orm.entry.findPage(filter, { sort: { field: 'amountCents' }, after: { id: gone.id } })).rejects.toBeInstanceOf(PageKeyError);
     await expect(orm.entry.findPage(filter, { after: { id: '' as never } })).rejects.toBeInstanceOf(PageKeyError);
-    await expect(orm.entry.findPage(filter, { sort: { field: 'memo' as never } })).rejects.toThrow('sorts by');
+    await expect(orm.entry.findPage(filter, { sort: { field: 'kind' as never } })).rejects.toThrow('sorts by');
   });
 
   test('updateOne stamps updatedAt and updatedBy, sets a column null with null, and refuses a key no live row holds', async () => {

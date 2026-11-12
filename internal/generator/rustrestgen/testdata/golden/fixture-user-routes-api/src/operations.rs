@@ -24,6 +24,51 @@ pub const ACCOUNT_CAPABILITIES: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// account.listApiKeys (`GET /api/auth/keys`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_LIST_API_KEYS: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "listApiKeys",
+    method: "GET",
+    path: "/api/auth/keys",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
+/// account.createApiKey (`POST /api/auth/keys`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_CREATE_API_KEY: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "createApiKey",
+    method: "POST",
+    path: "/api/auth/keys",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: Some(10),
+    service: None,
+};
+
+/// account.revokeApiKey (`DELETE /api/auth/keys/{id}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_REVOKE_API_KEY: OperationInfo = OperationInfo {
+    namespace: "account",
+    name: "revokeApiKey",
+    method: "DELETE",
+    path: "/api/auth/keys/{id}",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// account.login (`POST /api/auth/login`), which the identity
 /// runtime serves (D50).
 pub const ACCOUNT_LOGIN: OperationInfo = OperationInfo {
@@ -249,6 +294,36 @@ pub const ACCOUNT_ADMIN_ENABLE_USER: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// account-admin.listUserApiKeys (`GET /api/auth/admin/users/{id}/keys`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_LIST_USER_API_KEYS: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "listUserApiKeys",
+    method: "GET",
+    path: "/api/auth/admin/users/{id}/keys",
+    requires_auth: true,
+    permissions: &["identity.users.read"],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
+/// account-admin.revokeUserApiKey (`DELETE /api/auth/admin/users/{id}/keys/{keyId}`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_REVOKE_USER_API_KEY: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "revokeUserApiKey",
+    method: "DELETE",
+    path: "/api/auth/admin/users/{id}/keys/{keyId}",
+    requires_auth: true,
+    permissions: &["identity.users.write"],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// account-admin.setUserPassword (`PUT /api/auth/admin/users/{id}/password`), which the identity
 /// runtime serves (D50).
 pub const ACCOUNT_ADMIN_SET_USER_PASSWORD: OperationInfo = OperationInfo {
@@ -311,6 +386,9 @@ pub const GREETING_GREET: OperationInfo = OperationInfo {
 /// Every operation, mounted and manual, the user model's among them.
 pub const ALL: &[OperationInfo] = &[
     ACCOUNT_CAPABILITIES,
+    ACCOUNT_LIST_API_KEYS,
+    ACCOUNT_CREATE_API_KEY,
+    ACCOUNT_REVOKE_API_KEY,
     ACCOUNT_LOGIN,
     ACCOUNT_LOGOUT,
     ACCOUNT_ME,
@@ -326,6 +404,8 @@ pub const ALL: &[OperationInfo] = &[
     ACCOUNT_ADMIN_APPROVE_USER,
     ACCOUNT_ADMIN_DISABLE_USER,
     ACCOUNT_ADMIN_ENABLE_USER,
+    ACCOUNT_ADMIN_LIST_USER_API_KEYS,
+    ACCOUNT_ADMIN_REVOKE_USER_API_KEY,
     ACCOUNT_ADMIN_SET_USER_PASSWORD,
     ACCOUNT_ADMIN_REVOKE_ROLE,
     ACCOUNT_ADMIN_GRANT_ROLE,

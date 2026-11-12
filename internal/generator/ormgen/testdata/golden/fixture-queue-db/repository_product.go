@@ -34,10 +34,14 @@ var ProductQuotedFields = map[string]string{
 // productSortColumns are the columns of Product's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var productSortColumns = map[ProductSortField]struct{ sql, key string }{
-	ProductSortById:   {`product.id`, `page_key.id`},
-	ProductSortByName: {`product."name"`, `page_key."name"`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var productSortColumns = map[ProductSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	ProductSortById:   {`product.id`, `page_key.id`, false},
+	ProductSortByName: {`product."name"`, `page_key."name"`, false},
 }
 
 // buildProductOrderByClause builds an ORDER BY clause for Product.
@@ -587,14 +591,23 @@ func (r *ProductRepository) FindPage(ctx context.Context, filter *ProductFilter,
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`product.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`product.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, product.id) %s ((SELECT %s FROM product AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, product.id) %s ((SELECT %s FROM product AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM product AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -602,6 +615,9 @@ func (r *ProductRepository) FindPage(ctx context.Context, filter *ProductFilter,
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, product.id %s`, direction)
 	}

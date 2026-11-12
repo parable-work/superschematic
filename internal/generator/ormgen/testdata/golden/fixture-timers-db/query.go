@@ -15,8 +15,12 @@ import (
 
 // UUIDFilter provides filtering operations for UUID fields
 type UUIDFilter struct {
-	Eq     *types.IdentityUUID
-	In     []types.IdentityUUID
+	Eq *types.IdentityUUID
+	In []types.IdentityUUID
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne     *types.IdentityUUID
+	NotIn  []types.IdentityUUID
 	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
@@ -32,7 +36,11 @@ type StringFilter struct {
 	// An empty or nil slice adds no condition, so a caller narrowing a result
 	// set must treat "no allowed values" as its own case rather than passing
 	// the empty slice and getting every row back.
-	In    []string
+	In []string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *string
+	NotIn []string
 	ILike *string // Case-insensitive LIKE
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
@@ -40,7 +48,11 @@ type StringFilter struct {
 
 // Int64Filter provides filtering operations for integer fields
 type Int64Filter struct {
-	Eq      *int64
+	Eq *int64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *int64
+	NotIn   []int64
 	Gt      *int64
 	Gte     *int64
 	Lt      *int64
@@ -61,7 +73,11 @@ type Int64Range struct {
 
 // FloatFilter provides filtering operations for float fields
 type FloatFilter struct {
-	Eq      *float64
+	Eq *float64
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *float64
+	NotIn   []float64
 	Gt      *float64
 	Gte     *float64
 	Lt      *float64
@@ -83,6 +99,10 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne    *bool
+	NotIn []bool
 	// In matches any value in the set; an empty or nil slice adds no
 	// condition (D89).
 	In []bool
@@ -92,7 +112,11 @@ type BoolFilter struct {
 
 // DateTimeFilter provides filtering operations for DateTime fields
 type DateTimeFilter struct {
-	Eq      *time.Time
+	Eq *time.Time
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *time.Time
+	NotIn   []time.Time
 	Gt      *time.Time
 	Gte     *time.Time
 	Lt      *time.Time
@@ -112,7 +136,11 @@ type DateTimeRange struct {
 
 // DateFilter provides filtering operations for Date fields
 type DateFilter struct {
-	Eq      *string
+	Eq *string
+	// Ne and NotIn keep the rows Eq and In leave out (D112), a row whose
+	// column is NULL among them; an empty or nil NotIn adds no condition.
+	Ne      *string
+	NotIn   []string
 	Gt      *string
 	Gte     *string
 	Lt      *string
@@ -136,7 +164,10 @@ type DateRange struct {
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
 type DurationFilter struct {
-	Eq      *time.Duration
+	Eq *time.Duration
+	// Ne keeps the rows Eq leaves out (D112), a row whose column is NULL
+	// among them.
+	Ne      *time.Duration
 	Gt      *time.Duration
 	Gte     *time.Duration
 	Lt      *time.Duration
@@ -321,10 +352,12 @@ type InvoiceFindOptions struct {
 type InvoiceSortField string
 
 const (
-	InvoiceSortById      InvoiceSortField = "id"
-	InvoiceSortByNumber  InvoiceSortField = "number"
-	InvoiceSortByStatus  InvoiceSortField = "status"
-	InvoiceSortByPayment InvoiceSortField = "payment"
+	InvoiceSortById               InvoiceSortField = "id"
+	InvoiceSortByNumber           InvoiceSortField = "number"
+	InvoiceSortByStatus           InvoiceSortField = "status"
+	InvoiceSortByStatusEnteredAt  InvoiceSortField = "statusEnteredAt"
+	InvoiceSortByPayment          InvoiceSortField = "payment"
+	InvoiceSortByPaymentEnteredAt InvoiceSortField = "paymentEnteredAt"
 )
 
 // InvoiceSort is the order FindPage reads Invoice rows in: Field,
@@ -340,10 +373,10 @@ type InvoiceSort struct {
 func ParseInvoiceSort(text string) (InvoiceSort, error) {
 	parsed := InvoiceSort{Field: InvoiceSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case InvoiceSortById, InvoiceSortByNumber, InvoiceSortByStatus, InvoiceSortByPayment:
+	case InvoiceSortById, InvoiceSortByNumber, InvoiceSortByStatus, InvoiceSortByStatusEnteredAt, InvoiceSortByPayment, InvoiceSortByPaymentEnteredAt:
 		return parsed, nil
 	}
-	return InvoiceSort{}, fmt.Errorf("orm: Invoice sorts by id, number, status and payment, not %q", text)
+	return InvoiceSort{}, fmt.Errorf("orm: Invoice sorts by id, number, status, statusEnteredAt, payment and paymentEnteredAt, not %q", text)
 }
 
 // InvoiceUniqueKey names a unique key of Invoice that UpsertOne and
@@ -525,9 +558,11 @@ type TicketFindOptions struct {
 type TicketSortField string
 
 const (
-	TicketSortById     TicketSortField = "id"
-	TicketSortByTitle  TicketSortField = "title"
-	TicketSortByStatus TicketSortField = "status"
+	TicketSortById              TicketSortField = "id"
+	TicketSortByTitle           TicketSortField = "title"
+	TicketSortByVisitAt         TicketSortField = "visitAt"
+	TicketSortByStatus          TicketSortField = "status"
+	TicketSortByStatusEnteredAt TicketSortField = "statusEnteredAt"
 )
 
 // TicketSort is the order FindPage reads Ticket rows in: Field,
@@ -543,10 +578,10 @@ type TicketSort struct {
 func ParseTicketSort(text string) (TicketSort, error) {
 	parsed := TicketSort{Field: TicketSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case TicketSortById, TicketSortByTitle, TicketSortByStatus:
+	case TicketSortById, TicketSortByTitle, TicketSortByVisitAt, TicketSortByStatus, TicketSortByStatusEnteredAt:
 		return parsed, nil
 	}
-	return TicketSort{}, fmt.Errorf("orm: Ticket sorts by id, title and status, not %q", text)
+	return TicketSort{}, fmt.Errorf("orm: Ticket sorts by id, title, visitAt, status and statusEnteredAt, not %q", text)
 }
 
 // TicketUniqueKey names a unique key of Ticket that UpsertOne and
@@ -696,6 +731,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`invoice.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -704,6 +744,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -719,6 +768,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`invoice.number = $%d`, paramNum))
 			*args = append(*args, *f.Number.Eq)
 		}
+		if f.Number.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice.number IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Number.Ne)
+		}
 		if len(f.Number.In) > 0 {
 			placeholders := make([]string, len(f.Number.In))
 			for i, value := range f.Number.In {
@@ -727,6 +781,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice.number IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Number.NotIn) > 0 {
+			placeholders := make([]string, len(f.Number.NotIn))
+			for i, value := range f.Number.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice.number IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Number.ILike != nil {
 			paramNum++
@@ -747,6 +810,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`invoice.status = $%d`, paramNum))
 			*args = append(*args, *f.Status.Eq)
 		}
+		if f.Status.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice.status IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Status.Ne)
+		}
 		if len(f.Status.In) > 0 {
 			placeholders := make([]string, len(f.Status.In))
 			for i, value := range f.Status.In {
@@ -755,6 +823,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice.status IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Status.NotIn) > 0 {
+			placeholders := make([]string, len(f.Status.NotIn))
+			for i, value := range f.Status.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice.status IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Status.ILike != nil {
 			paramNum++
@@ -774,6 +851,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`invoice.status_entered_at = $%d`, paramNum))
 			*args = append(*args, *f.StatusEnteredAt.Eq)
+		}
+		if f.StatusEnteredAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice.status_entered_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Ne)
 		}
 		if f.StatusEnteredAt.Gt != nil {
 			paramNum++
@@ -812,6 +894,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice.status_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.StatusEnteredAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.StatusEnteredAt.NotIn))
+			for i, value := range f.StatusEnteredAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice.status_entered_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.StatusEnteredAt.IsNull != nil {
 			if *f.StatusEnteredAt.IsNull {
 				conditions = append(conditions, `invoice.status_entered_at IS NULL`)
@@ -826,6 +917,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`invoice.payment = $%d`, paramNum))
 			*args = append(*args, *f.Payment.Eq)
 		}
+		if f.Payment.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice.payment IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Payment.Ne)
+		}
 		if len(f.Payment.In) > 0 {
 			placeholders := make([]string, len(f.Payment.In))
 			for i, value := range f.Payment.In {
@@ -834,6 +930,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice.payment IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Payment.NotIn) > 0 {
+			placeholders := make([]string, len(f.Payment.NotIn))
+			for i, value := range f.Payment.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice.payment IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Payment.ILike != nil {
 			paramNum++
@@ -853,6 +958,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`invoice.payment_entered_at = $%d`, paramNum))
 			*args = append(*args, *f.PaymentEnteredAt.Eq)
+		}
+		if f.PaymentEnteredAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice.payment_entered_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.PaymentEnteredAt.Ne)
 		}
 		if f.PaymentEnteredAt.Gt != nil {
 			paramNum++
@@ -891,6 +1001,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice.payment_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.PaymentEnteredAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.PaymentEnteredAt.NotIn))
+			for i, value := range f.PaymentEnteredAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice.payment_entered_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.PaymentEnteredAt.IsNull != nil {
 			if *f.PaymentEnteredAt.IsNull {
 				conditions = append(conditions, `invoice.payment_entered_at IS NULL`)
@@ -904,6 +1023,11 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`invoice._version = $%d`, paramNum))
 			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`invoice._version IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Version.Ne)
 		}
 		if f.Version.Gt != nil {
 			paramNum++
@@ -941,6 +1065,15 @@ func (f *InvoiceFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`invoice._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Version.NotIn) > 0 {
+			placeholders := make([]string, len(f.Version.NotIn))
+			for i, value := range f.Version.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(invoice._version IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Version.IsNull != nil {
 			if *f.Version.IsNull {
@@ -1082,6 +1215,11 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`ticket.id = $%d`, paramNum))
 			*args = append(*args, f.Id.Eq.ToUUID())
 		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ticket.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
 		if len(f.Id.In) > 0 {
 			placeholders := make([]string, len(f.Id.In))
 			for i, id := range f.Id.In {
@@ -1090,6 +1228,15 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 				*args = append(*args, id.ToUUID())
 			}
 			conditions = append(conditions, fmt.Sprintf(`ticket.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ticket.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Id.IsNull != nil {
 			if *f.Id.IsNull {
@@ -1105,6 +1252,11 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`ticket.title = $%d`, paramNum))
 			*args = append(*args, *f.Title.Eq)
 		}
+		if f.Title.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ticket.title IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Title.Ne)
+		}
 		if len(f.Title.In) > 0 {
 			placeholders := make([]string, len(f.Title.In))
 			for i, value := range f.Title.In {
@@ -1113,6 +1265,15 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`ticket.title IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Title.NotIn) > 0 {
+			placeholders := make([]string, len(f.Title.NotIn))
+			for i, value := range f.Title.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ticket.title IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Title.ILike != nil {
 			paramNum++
@@ -1132,6 +1293,11 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ticket.visit_at = $%d`, paramNum))
 			*args = append(*args, *f.VisitAt.Eq)
+		}
+		if f.VisitAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ticket.visit_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.VisitAt.Ne)
 		}
 		if f.VisitAt.Gt != nil {
 			paramNum++
@@ -1170,6 +1336,15 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			}
 			conditions = append(conditions, fmt.Sprintf(`ticket.visit_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.VisitAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.VisitAt.NotIn))
+			for i, value := range f.VisitAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ticket.visit_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.VisitAt.IsNull != nil {
 			if *f.VisitAt.IsNull {
 				conditions = append(conditions, `ticket.visit_at IS NULL`)
@@ -1184,6 +1359,11 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`ticket.status = $%d`, paramNum))
 			*args = append(*args, *f.Status.Eq)
 		}
+		if f.Status.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ticket.status IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Status.Ne)
+		}
 		if len(f.Status.In) > 0 {
 			placeholders := make([]string, len(f.Status.In))
 			for i, value := range f.Status.In {
@@ -1192,6 +1372,15 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`ticket.status IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Status.NotIn) > 0 {
+			placeholders := make([]string, len(f.Status.NotIn))
+			for i, value := range f.Status.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ticket.status IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Status.ILike != nil {
 			paramNum++
@@ -1211,6 +1400,11 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ticket.status_entered_at = $%d`, paramNum))
 			*args = append(*args, *f.StatusEnteredAt.Eq)
+		}
+		if f.StatusEnteredAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ticket.status_entered_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.StatusEnteredAt.Ne)
 		}
 		if f.StatusEnteredAt.Gt != nil {
 			paramNum++
@@ -1249,6 +1443,15 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			}
 			conditions = append(conditions, fmt.Sprintf(`ticket.status_entered_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
+		if len(f.StatusEnteredAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.StatusEnteredAt.NotIn))
+			for i, value := range f.StatusEnteredAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ticket.status_entered_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
 		if f.StatusEnteredAt.IsNull != nil {
 			if *f.StatusEnteredAt.IsNull {
 				conditions = append(conditions, `ticket.status_entered_at IS NULL`)
@@ -1262,6 +1465,11 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ticket._version = $%d`, paramNum))
 			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ticket._version IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Version.Ne)
 		}
 		if f.Version.Gt != nil {
 			paramNum++
@@ -1299,6 +1507,15 @@ func (f *TicketFilter) conditions(args *[]interface{}, paramOffset int) []string
 				*args = append(*args, value)
 			}
 			conditions = append(conditions, fmt.Sprintf(`ticket._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Version.NotIn) > 0 {
+			placeholders := make([]string, len(f.Version.NotIn))
+			for i, value := range f.Version.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(ticket._version IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
 		}
 		if f.Version.IsNull != nil {
 			if *f.Version.IsNull {

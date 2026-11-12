@@ -382,6 +382,7 @@ func TestServerOverTheUserModel(t *testing.T) {
 		t.Run(string(dialect), func(t *testing.T) {
 			t.Run("sessions", func(t *testing.T) { testSessions(t, newServer(t, dialect, db(t))) })
 			t.Run("administration", func(t *testing.T) { testAdministration(t, newServer(t, dialect, db(t))) })
+			t.Run("apiKeys", func(t *testing.T) { testAPIKeys(t, newServer(t, dialect, db(t))) })
 			t.Run("cookies", func(t *testing.T) { testCookies(t, newServer(t, dialect, db(t))) })
 			t.Run("firstUser", func(t *testing.T) {
 				s, _ := newEmptyServer(t, dialect, db(t))
@@ -502,13 +503,21 @@ func testSessions(t *testing.T, s *server) {
 		"AccountAdminListUsersHandler": false,
 		"AccountAdminListRolesHandler": true,
 		"AccountAdminCreateRoleHandler": false,
+		// The API key routes (D114): her own need a caller alone, and an
+		// administrator's need users.read and users.write, which member
+		// lacks.
+		"AccountCreateApiKeyHandler":          true,
+		"AccountListApiKeysHandler":           true,
+		"AccountRevokeApiKeyHandler":          true,
+		"AccountAdminListUserApiKeysHandler":  false,
+		"AccountAdminRevokeUserApiKeyHandler": false,
 	} {
 		if got, ok := capabilities.Operations[operation]; !ok || got != want {
 			t.Errorf("capabilities[%s] = %v (listed %v), want %v", operation, got, ok, want)
 		}
 	}
-	if len(capabilities.Operations) != 20 {
-		t.Errorf("capabilities lists %d operations, want 20", len(capabilities.Operations))
+	if len(capabilities.Operations) != 25 {
+		t.Errorf("capabilities lists %d operations, want 25", len(capabilities.Operations))
 	}
 
 	greeting, err := ada.GreetingNamespace.Greet(ctx)
@@ -610,6 +619,125 @@ func testAdministration(t *testing.T, s *server) {
 	}
 	_, err = s.client(t).AccountNamespace.Login(ctx, types.LoginInput{Login: "grace@example.com", Password: "reset password"})
 	expect(t, "a disabled user's login", err, 401, "invalid_credentials")
+}
+
+// testAPIKeys: a session makes an API key (D114) with a subset of its
+// user's permissions, and one with none. The key calls as its user, holding
+// what it names, and acts on no account of its own; the list never holds a
+// token; its user and an administrator revoke it, and a revoked key is the
+// 401 of any unknown token.
+func testAPIKeys(t *testing.T, s *server) {
+	ctx := context.Background()
+	admin := s.client(t)
+	login(t, admin, adminLogin, adminPassword)
+	adminUser, err := admin.AccountNamespace.Me(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminID := adminUser.User.Id.String()
+	named := func(permissions ...string) types.InputField[[]string] {
+		return types.InputField[[]string]{Set: true, Value: permissions}
+	}
+
+	// A key names only what its user holds: the admin holds identity and
+	// not orders.read.
+	_, err = admin.AccountNamespace.CreateApiKey(ctx, types.CreateApiKeyInput{Name: "orders", Permissions: named("orders.read")})
+	expect(t, "createApiKey with a permission the admin does not hold", err, 403, "forbidden")
+	_, err = admin.AccountNamespace.CreateApiKey(ctx, types.CreateApiKeyInput{Name: "bad", Permissions: named("not a permission")})
+	expect(t, "createApiKey with a malformed permission", err, 422, "invalid_permission")
+	made, err := admin.AccountNamespace.CreateApiKey(ctx, types.CreateApiKeyInput{
+		Name:             "  triage agent ",
+		ExpiresInSeconds: types.InputField[types.GenericInt64]{Set: true, Value: 3600},
+		Permissions:      named("identity.users.read"),
+	})
+	if err != nil || !strings.HasPrefix(made.Token, "key_") || len(made.Token) != 47 || made.Name != "triage agent" ||
+		!slices.Equal(made.Permissions, []string{"identity.users.read"}) || time.Time(made.ExpiresAt).Sub(time.Time(made.CreatedAt)) != time.Hour {
+		t.Fatalf("createApiKey: %+v, %v", made, err)
+	}
+	whole, err := admin.AccountNamespace.CreateApiKey(ctx, types.CreateApiKeyInput{Name: "everything"})
+	if err != nil || whole.Permissions != nil || time.Time(whole.ExpiresAt).Before(time.Now().Add(364*24*time.Hour)) {
+		t.Fatalf("createApiKey without permissions: %+v, %v", whole, err)
+	}
+
+	// The key calls as its user, holding the permissions it names.
+	agent := s.client(t)
+	agent.SetToken(made.Token)
+	greeting, err := agent.GreetingNamespace.Greet(ctx)
+	if err != nil || greeting.Message != "Hello, Admin" {
+		t.Fatalf("greet with a key: %+v, %v", greeting, err)
+	}
+	me, err := agent.AccountNamespace.Me(ctx)
+	if err != nil || me.User.Login != adminLogin || !slices.Equal(me.Permissions, []string{"identity.users.read"}) {
+		t.Fatalf("me with a key: %+v, %v", me, err)
+	}
+	users, err := agent.AccountAdminNamespace.ListUsers(ctx, namespaces.AccountAdminListUsersInput{})
+	if err != nil || len(users) != 1 {
+		t.Fatalf("listUsers with a key naming identity.users.read: %+v, %v", users, err)
+	}
+	_, err = agent.AccountAdminNamespace.CreateRole(ctx, types.RoleInput{Name: "reader", Permissions: []string{"identity.users.read"}})
+	expect(t, "createRole with a key that does not name identity.roles.write", err, 403, "forbidden")
+	capabilities, err := agent.AccountNamespace.Capabilities(ctx)
+	if err != nil || !capabilities.Operations["AccountAdminListUserApiKeysHandler"] || capabilities.Operations["AccountAdminRevokeUserApiKeyHandler"] {
+		t.Fatalf("capabilities with a key naming identity.users.read: %+v, %v", capabilities, err)
+	}
+	everything := s.client(t)
+	everything.SetToken(whole.Token)
+	me, err = everything.AccountNamespace.Me(ctx)
+	if err != nil || !slices.Equal(me.Permissions, []string{"identity"}) {
+		t.Fatalf("me with a key that names no permission: %+v, %v", me, err)
+	}
+
+	// A key does not act on its own account, so a leaked one makes no key,
+	// revokes none, signs no one out and changes no password.
+	_, err = agent.AccountNamespace.CreateApiKey(ctx, types.CreateApiKeyInput{Name: "another"})
+	expect(t, "createApiKey with a key", err, 403, "forbidden")
+	_, err = agent.AccountNamespace.ListApiKeys(ctx)
+	expect(t, "listApiKeys with a key", err, 403, "forbidden")
+	_, err = agent.AccountNamespace.RevokeApiKey(ctx, whole.Id.String())
+	expect(t, "revokeApiKey with a key", err, 403, "forbidden")
+	_, err = agent.AccountNamespace.Logout(ctx)
+	expect(t, "logout with a key", err, 403, "forbidden")
+	_, err = everything.AccountNamespace.ChangePassword(ctx, types.ChangePasswordInput{Current: adminPassword, Password: "a new password"})
+	expect(t, "changePassword with a key", err, 403, "forbidden")
+
+	// The list holds both keys, each used, and the SDK's type has no token.
+	listed, err := admin.AccountNamespace.ListApiKeys(ctx)
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("listApiKeys: %+v, %v", listed, err)
+	}
+	for _, key := range listed {
+		if key.Id != made.Id && key.Id != whole.Id {
+			t.Fatalf("listApiKeys holds a key no one made: %+v", key)
+		}
+	}
+	ofUser, err := admin.AccountAdminNamespace.ListUserApiKeys(ctx, adminID)
+	if err != nil || len(ofUser) != 2 {
+		t.Fatalf("listUserApiKeys: %+v, %v", ofUser, err)
+	}
+
+	// An administrator revokes a user's key and the user their own.
+	revoked, err := admin.AccountAdminNamespace.RevokeUserApiKey(ctx, adminID, whole.Id.String())
+	if err != nil || !revoked {
+		t.Fatalf("revokeUserApiKey: %v, %v", revoked, err)
+	}
+	_, err = everything.GreetingNamespace.Greet(ctx)
+	expect(t, "greet with a key an administrator revoked", err, 401, "")
+	revoked, err = admin.AccountNamespace.RevokeApiKey(ctx, made.Id.String())
+	if err != nil || !revoked {
+		t.Fatalf("revokeApiKey: %v, %v", revoked, err)
+	}
+	_, err = agent.GreetingNamespace.Greet(ctx)
+	expect(t, "greet with a revoked key", err, 401, "")
+	_, err = admin.AccountNamespace.RevokeApiKey(ctx, made.Id.String())
+	expect(t, "revoking a revoked key", err, 404, "not_found")
+	listed, err = admin.AccountNamespace.ListApiKeys(ctx)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("listApiKeys once both are revoked: %+v, %v", listed, err)
+	}
+	// The session that made them lives on.
+	if _, err := admin.AccountNamespace.Me(ctx); err != nil {
+		t.Fatalf("me on the session that made the keys: %v", err)
+	}
 }
 
 // testCookies: over plain HTTP, a cookie login sets the session cookie and

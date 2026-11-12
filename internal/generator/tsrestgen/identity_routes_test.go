@@ -93,13 +93,13 @@ func TestGenerateUserRoutes(t *testing.T) {
 	if len(output.Namespaces) != 1 || output.Namespaces[0].Name != "greeting" || len(output.ManualEndpoints) != 0 {
 		t.Errorf("namespaces %+v, manual endpoints %+v; want greeting alone", output.Namespaces, output.ManualEndpoints)
 	}
-	if output.Identity == nil || *output.Identity != (IdentityInfo{AuthDB: userModelDB, DescriptorModule: "@schemas/fixture-user-model-db-types/identity", HasRoles: true, Routes: 19,
+	if output.Identity == nil || *output.Identity != (IdentityInfo{AuthDB: userModelDB, DescriptorModule: "@schemas/fixture-user-model-db-types/identity", HasRoles: true, Routes: 24,
 		Registration: "{ approval: true, defaultRoles: ['member'], firstUser: { role: 'admin', permissions: ['identity'] } }"}) {
 		t.Errorf("identity = %+v", output.Identity)
 	}
 	byName := endpointsByName(output)
-	if len(byName) != 20 {
-		t.Errorf("%d endpoints, want the 19 operations of the user model and greet", len(byName))
+	if len(byName) != 25 {
+		t.Errorf("%d endpoints, want the 24 operations of the user model and greet", len(byName))
 	}
 	for name, want := range map[string]struct {
 		rateLimit int
@@ -111,6 +111,12 @@ func TestGenerateUserRoutes(t *testing.T) {
 		"changePassword": {rateLimit: ir.IdentityChangePasswordRateLimit},
 		"me":             {},
 		"grantRole":      {perms: "identity.roles.write"},
+		// The API key routes (D114).
+		"createApiKey":     {rateLimit: ir.IdentityCreateAPIKeyRateLimit},
+		"listApiKeys":      {},
+		"revokeApiKey":     {},
+		"listUserApiKeys":  {perms: "identity.users.read"},
+		"revokeUserApiKey": {perms: "identity.users.write"},
 	} {
 		ep := byName[name]
 		rateLimit := 0
@@ -123,6 +129,21 @@ func TestGenerateUserRoutes(t *testing.T) {
 	}
 	if grant := byName["grantRole"]; len(grant.PathParams) != 2 || grant.PathParams[0].SpecLiteral != "{ name: 'id', kind: 'uuid', required: true }" || grant.PathParams[1].Name != "roleId" {
 		t.Errorf("grantRole path params = %+v", grant.PathParams)
+	}
+	// A key's id is a UUID in the path: the caller's own key by id, and a
+	// user's by the user's id and keyId.
+	if revoke := byName["revokeApiKey"]; len(revoke.PathParams) != 1 || revoke.PathParams[0].SpecLiteral != "{ name: 'id', kind: 'uuid', required: true }" {
+		t.Errorf("revokeApiKey path params = %+v", revoke.PathParams)
+	}
+	if list := byName["listUserApiKeys"]; len(list.PathParams) != 1 || list.PathParams[0].SpecLiteral != "{ name: 'id', kind: 'uuid', required: true }" {
+		t.Errorf("listUserApiKeys path params = %+v", list.PathParams)
+	}
+	if revoke := byName["revokeUserApiKey"]; len(revoke.PathParams) != 2 || revoke.PathParams[0].SpecLiteral != "{ name: 'id', kind: 'uuid', required: true }" ||
+		revoke.PathParams[1].SpecLiteral != "{ name: 'keyId', kind: 'uuid', required: true }" {
+		t.Errorf("revokeUserApiKey path params = %+v", revoke.PathParams)
+	}
+	if len(byName["createApiKey"].PathParams) != 0 || len(byName["listApiKeys"].PathParams) != 0 {
+		t.Errorf("createApiKey and listApiKeys path params = %+v, %+v", byName["createApiKey"].PathParams, byName["listApiKeys"].PathParams)
 	}
 	if len(output.ScalarImports) != 0 || len(output.ValidatorImports) != 0 {
 		t.Errorf("the user model's operations add imports: scalars %v, validators %+v", output.ScalarImports, output.ValidatorImports)
@@ -143,7 +164,7 @@ func TestGenerateUserRoutes(t *testing.T) {
 		return string(data)
 	}
 	interfaces := read("interfaces.ts")
-	for _, absent := range []string{"login(", "changePassword", "AccountAdmin", "LoginInput"} {
+	for _, absent := range []string{"login(", "changePassword", "AccountAdmin", "LoginInput", "ApiKey"} {
 		if strings.Contains(interfaces, absent) {
 			t.Errorf("interfaces.ts mentions %s, which the identity runtime serves", absent)
 		}
@@ -151,6 +172,15 @@ func TestGenerateUserRoutes(t *testing.T) {
 	router := read("router.ts")
 	for _, want := range []string{
 		"identityHandler(runtime.identity, 'changePassword')",
+		"mountManualOperation(router, operationSpecs.createApiKey, identityHandler(runtime.identity, 'createApiKey'), runtime, {",
+		"mountManualOperation(router, operationSpecs.listApiKeys, identityHandler(runtime.identity, 'listApiKeys'), runtime, {",
+		"mountManualOperation(router, operationSpecs.revokeApiKey, identityHandler(runtime.identity, 'revokeApiKey'), runtime, {",
+		"mountManualOperation(router, operationSpecs.listUserApiKeys, identityHandler(runtime.identity, 'listUserApiKeys'), runtime, {",
+		"mountManualOperation(router, operationSpecs.revokeUserApiKey, identityHandler(runtime.identity, 'revokeUserApiKey'), runtime, {",
+		// createApiKey's entry of the operation table: a caller, no
+		// permission, and its rate limit.
+		"    path: '/api/auth/keys',\n    pathParams: [],\n    queryParams: [],\n    bodyParams: [],\n    auth: { public: false, required: true, permissions: [] },\n    rateLimitPerMinute: 10,\n    manual: true,\n",
+		"    path: '/api/auth/admin/users/{id}/keys/{keyId}',\n    pathParams: [{ name: 'id', kind: 'uuid', required: true }, { name: 'keyId', kind: 'uuid', required: true }],\n    queryParams: [],\n    bodyParams: [],\n    auth: { public: false, required: true, permissions: ['identity.users.write'] },\n    manual: true,\n",
 		"const runtime = identityRouterOptions(options);",
 		"const cors = identityCorsRoutes(router, runtime.identity);",
 		"for (const spec of Object.values(operationSpecs)) cors(spec);",
@@ -161,12 +191,12 @@ func TestGenerateUserRoutes(t *testing.T) {
 			t.Errorf("router.ts has no %s", want)
 		}
 	}
-	if strings.Contains(router, "LoginInput") || strings.Contains(router, "parseLoginInput") {
+	if strings.Contains(router, "LoginInput") || strings.Contains(router, "parseLoginInput") || strings.Contains(router, "CreateApiKeyInput") {
 		t.Error("router.ts parses the user model's inputs, which the identity runtime decodes")
 	}
 
 	alone := generateFixture(t, userRoutesFixture(t, routeSetsAlone))
-	if len(alone.Endpoints) != 19 || len(alone.Namespaces) != 0 || alone.Identity == nil || alone.Identity.Routes != 19 {
+	if len(alone.Endpoints) != 24 || len(alone.Namespaces) != 0 || alone.Identity == nil || alone.Identity.Routes != 24 {
 		t.Errorf("the route sets alone: endpoints %d, namespaces %+v, identity %+v", len(alone.Endpoints), alone.Namespaces, alone.Identity)
 	}
 }

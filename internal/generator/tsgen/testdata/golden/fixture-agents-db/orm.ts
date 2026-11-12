@@ -114,7 +114,7 @@ export interface AccountFilter {
 export type AccountOrderField = "id" | "name" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Account by (D60, amended); ties break by id. */
-export type AccountSortField = "id" | "name" | "status";
+export type AccountSortField = "id" | "name" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type AccountUniqueKey = readonly ["id"];
@@ -268,12 +268,12 @@ export const accountTable: TableDefinition = {
   table: "account",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "account.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "workspaceId", column: "workspace_id", field: "workspace", qualified: "account.workspace_id", uuid: true, required: true, relation: "Workspace", filter: ["eq", "in", "isNull"] },
-    { name: "status", column: "status", field: "status", qualified: "account.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "account.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "account._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "account.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "workspaceId", column: "workspace_id", field: "workspace", qualified: "account.workspace_id", uuid: true, required: true, relation: "Workspace", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "status", column: "status", field: "status", qualified: "account.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "account.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "account._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"name\", \"workspace_id\", \"status\", \"status_entered_at\", \"_version\"",
@@ -291,7 +291,9 @@ export const accountTable: TableDefinition = {
     page: "SELECT %s FROM account%s%s LIMIT %d",
     pageAfterKey: "account.id %s %s",
     pageAfter: "(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", account.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM account WHERE account.id = $1)",
     insert: "INSERT INTO account (%s) VALUES (%s) RETURNING %s",
@@ -397,7 +399,7 @@ export interface JobFilter {
 export type JobOrderField = "id" | "title" | "revision" | "leaseHolder" | "leaseToken" | "leaseAcquiredAt" | "leaseRenewedAt" | "leaseExpiresAt" | "leaseExpiries" | "leaseEnded" | "retriesTotal" | "retriesClassAttempts" | "retriesBestScore" | "retriesExhausted" | "retriesStuck" | "retriesRetryAt" | "retriesFailingSince" | "retriesKeyedBy" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Job by (D60, amended); ties break by id. */
-export type JobSortField = "id" | "title" | "revision" | "status";
+export type JobSortField = "id" | "title" | "revision" | "leaseHolder" | "leaseToken" | "leaseAcquiredAt" | "leaseRenewedAt" | "leaseExpiresAt" | "leaseExpiries" | "retriesTotal" | "retriesBestScore" | "retriesRetryAt" | "retriesFailingSince" | "retriesKeyedBy" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type JobUniqueKey = readonly ["id"];
@@ -523,27 +525,27 @@ export const jobTable: TableDefinition = {
   table: "job",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "job.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "title", column: "title", field: "title", qualified: "job.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "revision", column: "revision", field: "revision", qualified: "job.revision", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "leaseHolder", column: "lease_holder", field: "leaseHolder", qualified: "job.lease_holder", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "leaseToken", column: "lease_token", field: "leaseToken", qualified: "job.lease_token", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "leaseAcquiredAt", column: "lease_acquired_at", field: "leaseAcquiredAt", qualified: "job.lease_acquired_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "leaseRenewedAt", column: "lease_renewed_at", field: "leaseRenewedAt", qualified: "job.lease_renewed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "leaseExpiresAt", column: "lease_expires_at", field: "leaseExpiresAt", qualified: "job.lease_expires_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "leaseExpiries", column: "lease_expiries", field: "leaseExpiries", qualified: "job.lease_expiries", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "leaseEnded", column: "lease_ended", field: "leaseEnded", qualified: "job.lease_ended", json: true, filter: ["eq", "in", "isNull"] },
-    { name: "retriesTotal", column: "retries_total", field: "retriesTotal", qualified: "job.retries_total", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "retriesClassAttempts", column: "retries_class_attempts", field: "retriesClassAttempts", qualified: "job.retries_class_attempts", json: true, filter: ["eq", "in", "isNull"] },
-    { name: "retriesBestScore", column: "retries_best_score", field: "retriesBestScore", qualified: "job.retries_best_score", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "retriesExhausted", column: "retries_exhausted", field: "retriesExhausted", qualified: "job.retries_exhausted", boolean: true, filter: ["eq", "in", "isNull"] },
-    { name: "retriesStuck", column: "retries_stuck", field: "retriesStuck", qualified: "job.retries_stuck", boolean: true, filter: ["eq", "in", "isNull"] },
-    { name: "retriesRetryAt", column: "retries_retry_at", field: "retriesRetryAt", qualified: "job.retries_retry_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "retriesFailingSince", column: "retries_failing_since", field: "retriesFailingSince", qualified: "job.retries_failing_since", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "retriesKeyedBy", column: "retries_keyed_by", field: "retriesKeyedBy", qualified: "job.retries_keyed_by", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "status", column: "status", field: "status", qualified: "job.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "job.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "job._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "job.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "job.title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "revision", column: "revision", field: "revision", qualified: "job.revision", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "leaseHolder", column: "lease_holder", field: "leaseHolder", qualified: "job.lease_holder", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "leaseToken", column: "lease_token", field: "leaseToken", qualified: "job.lease_token", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "leaseAcquiredAt", column: "lease_acquired_at", field: "leaseAcquiredAt", qualified: "job.lease_acquired_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "leaseRenewedAt", column: "lease_renewed_at", field: "leaseRenewedAt", qualified: "job.lease_renewed_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "leaseExpiresAt", column: "lease_expires_at", field: "leaseExpiresAt", qualified: "job.lease_expires_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "leaseExpiries", column: "lease_expiries", field: "leaseExpiries", qualified: "job.lease_expiries", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "leaseEnded", column: "lease_ended", field: "leaseEnded", qualified: "job.lease_ended", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "retriesTotal", column: "retries_total", field: "retriesTotal", qualified: "job.retries_total", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "retriesClassAttempts", column: "retries_class_attempts", field: "retriesClassAttempts", qualified: "job.retries_class_attempts", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "retriesBestScore", column: "retries_best_score", field: "retriesBestScore", qualified: "job.retries_best_score", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "retriesExhausted", column: "retries_exhausted", field: "retriesExhausted", qualified: "job.retries_exhausted", boolean: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "retriesStuck", column: "retries_stuck", field: "retriesStuck", qualified: "job.retries_stuck", boolean: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "retriesRetryAt", column: "retries_retry_at", field: "retriesRetryAt", qualified: "job.retries_retry_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "retriesFailingSince", column: "retries_failing_since", field: "retriesFailingSince", qualified: "job.retries_failing_since", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "retriesKeyedBy", column: "retries_keyed_by", field: "retriesKeyedBy", qualified: "job.retries_keyed_by", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "job.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "job.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "job._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"title\", \"revision\", \"lease_holder\", \"lease_token\", \"lease_acquired_at\", \"lease_renewed_at\", \"lease_expires_at\", \"lease_expiries\", \"lease_ended\", \"retries_total\", \"retries_class_attempts\", \"retries_best_score\", \"retries_exhausted\", \"retries_stuck\", \"retries_retry_at\", \"retries_failing_since\", \"retries_keyed_by\", \"status\", \"status_entered_at\", \"_version\"",
@@ -561,7 +563,9 @@ export const jobTable: TableDefinition = {
     page: "SELECT %s FROM job%s%s LIMIT %d",
     pageAfterKey: "job.id %s %s",
     pageAfter: "(%s, job.id) %s ((SELECT %s FROM job AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM job AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", job.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM job WHERE job.id = $1)",
     insert: "INSERT INTO job (%s) VALUES (%s) RETURNING %s",
@@ -638,7 +642,7 @@ export interface SessionFilter {
 export type SessionOrderField = "id" | "device" | "agent" | "presenceDeadline" | "presenceLastBeatAt" | "presenceMissed" | "presenceReleased" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Session by (D60, amended); ties break by id. */
-export type SessionSortField = "id" | "device" | "agent" | "status";
+export type SessionSortField = "id" | "device" | "agent" | "presenceDeadline" | "presenceLastBeatAt" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type SessionUniqueKey = readonly ["id"];
@@ -704,16 +708,16 @@ export const sessionTable: TableDefinition = {
   table: "\"session\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"session\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "device", column: "device", field: "device", qualified: "\"session\".device", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "agent", column: "agent", field: "agent", qualified: "\"session\".agent", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "presenceDeadline", column: "presence_deadline", field: "presenceDeadline", qualified: "\"session\".presence_deadline", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "presenceLastBeatAt", column: "presence_last_beat_at", field: "presenceLastBeatAt", qualified: "\"session\".presence_last_beat_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "presenceMissed", column: "presence_missed", field: "presenceMissed", qualified: "\"session\".presence_missed", boolean: true, filter: ["eq", "in", "isNull"] },
-    { name: "presenceReleased", column: "presence_released", field: "presenceReleased", qualified: "\"session\".presence_released", json: true, filter: ["eq", "in", "isNull"] },
-    { name: "status", column: "status", field: "status", qualified: "\"session\".status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "\"session\".status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "\"session\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "\"session\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "device", column: "device", field: "device", qualified: "\"session\".device", uuid: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "agent", column: "agent", field: "agent", qualified: "\"session\".agent", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "presenceDeadline", column: "presence_deadline", field: "presenceDeadline", qualified: "\"session\".presence_deadline", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "presenceLastBeatAt", column: "presence_last_beat_at", field: "presenceLastBeatAt", qualified: "\"session\".presence_last_beat_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "presenceMissed", column: "presence_missed", field: "presenceMissed", qualified: "\"session\".presence_missed", boolean: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "presenceReleased", column: "presence_released", field: "presenceReleased", qualified: "\"session\".presence_released", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "status", column: "status", field: "status", qualified: "\"session\".status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "\"session\".status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "\"session\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"device\", \"agent\", \"presence_deadline\", \"presence_last_beat_at\", \"presence_missed\", \"presence_released\", \"status\", \"status_entered_at\", \"_version\"",
@@ -731,7 +735,9 @@ export const sessionTable: TableDefinition = {
     page: "SELECT %s FROM \"session\"%s%s LIMIT %d",
     pageAfterKey: "\"session\".id %s %s",
     pageAfter: "(%s, \"session\".id) %s ((SELECT %s FROM \"session\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"session\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"session\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"session\" WHERE \"session\".id = $1)",
     insert: "INSERT INTO \"session\" (%s) VALUES (%s) RETURNING %s",
@@ -936,9 +942,9 @@ export const workspaceTable: TableDefinition = {
   table: "workspace",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "workspace.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "workspace.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "_version", column: "_version", field: "_version", qualified: "workspace._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "workspace.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "workspace.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "workspace._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"name\", \"_version\"",
@@ -956,7 +962,9 @@ export const workspaceTable: TableDefinition = {
     page: "SELECT %s FROM workspace%s%s LIMIT %d",
     pageAfterKey: "workspace.id %s %s",
     pageAfter: "(%s, workspace.id) %s ((SELECT %s FROM workspace AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM workspace AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", workspace.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM workspace WHERE workspace.id = $1)",
     insert: "INSERT INTO workspace (%s) VALUES (%s) RETURNING %s",
@@ -2251,12 +2259,14 @@ export const fixtureAgentsDbRules: RulesLayout = {
 export const fixtureAgentsDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

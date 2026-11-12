@@ -1,9 +1,9 @@
 // Package identity expands the core user model's traits (D50) of a
 // verified schema into ordinary tables, as the version graph expansion does
 // for a version graph. A schema whose User table holds the project's users
-// gets the Session and UserCredential tables beside it and, when it also
-// has a UserRole table, UserRoleGrant. ir/identity.go names every table and
-// field.
+// gets the Session, UserCredential and UserApiKey (D114) tables beside it
+// and, when it also has a UserRole table, UserRoleGrant. ir/identity.go
+// names every table and field.
 //
 // The sql, orm and types generators emit the result with no identity
 // specific code. Every type, field and index the expansion adds carries
@@ -17,7 +17,7 @@ import (
 
 // Tables are the tables the expansion can add, in the order it adds them.
 // A schema with a User table reserves every name, UserRoleGrant included.
-var Tables = []string{ir.IdentitySessionTable, ir.IdentityCredentialTable, ir.IdentityRoleGrantTable}
+var Tables = []string{ir.IdentitySessionTable, ir.IdentityCredentialTable, ir.IdentityAPIKeyTable, ir.IdentityRoleGrantTable}
 
 // Scalars the added fields use.
 const (
@@ -54,6 +54,16 @@ func sessionUserIndex() ir.IndexDef {
 	}
 }
 
+// apiKeyUserIndex indexes UserApiKey by its user, as Session is: a user's
+// keys are listed and revoked by it.
+func apiKeyUserIndex() ir.IndexDef {
+	return ir.IndexDef{
+		Keys:   []string{ir.IdentityAPIKeyUserField},
+		Name:   "user",
+		Origin: ir.OriginIdentity,
+	}
+}
+
 // GeneratedIndex is an index the expansion adds: the type whose table
 // holds it, and the index.
 type GeneratedIndex struct {
@@ -67,7 +77,7 @@ func Indexes(schema *ir.Schema) []GeneratedIndex {
 	if schema.UserTable() == nil {
 		return nil
 	}
-	indexes := []GeneratedIndex{{ir.IdentitySessionTable, sessionUserIndex()}}
+	indexes := []GeneratedIndex{{ir.IdentitySessionTable, sessionUserIndex()}, {ir.IdentityAPIKeyTable, apiKeyUserIndex()}}
 	if schema.UserRoleTable() != nil {
 		indexes = append(indexes, GeneratedIndex{ir.IdentityRoleGrantTable, grantIndex()})
 	}
@@ -86,6 +96,7 @@ func Expand(schema *ir.Schema) []string {
 	m := &model{schema: schema, user: user}
 	m.addSession()
 	m.addCredential()
+	m.addAPIKey()
 	if role := schema.UserRoleTable(); role != nil {
 		m.addRoleGrant(role)
 	}
@@ -153,6 +164,49 @@ func (m *model) addCredential() {
 			dateTime(ir.IdentityCredentialDisabledAtField, false, "When the user was disabled; a disabled user cannot sign in."),
 			dateTime(ir.IdentityCredentialPendingAtField, false, "When the user registered to wait for an administrator's approval; a pending user cannot sign in (D81)."),
 		},
+	})
+}
+
+// addAPIKey adds UserApiKey (D114): one row per API key, a named token a
+// user makes for a program that calls as them. The database keeps the
+// SHA-256 of the key's token, as a session's. A key ends at expiresAt or
+// when revokedAt is set, and has no idle rule. permissions, when it holds a
+// list, is the subset of its user's permissions the key was made with.
+func (m *model) addAPIKey() {
+	maxLength := ir.IdentityAPIKeyNameMaxLength
+	minLength := 1
+	m.addType(&ir.TypeDef{
+		Name:    ir.IdentityAPIKeyTable,
+		Comment: "An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.",
+		Fields: []*ir.FieldDef{
+			keyFieldDef(),
+			relation(ir.IdentityAPIKeyUserField, m.user.Name, "The user the key calls as."),
+			{
+				Name:              ir.IdentityAPIKeyNameField,
+				Comment:           "What its user calls the key.",
+				TypeRef:           ir.TypeRef{Name: "string"},
+				Required:          true,
+				ValidateMinLength: &minLength,
+				ValidateMaxLength: &maxLength,
+			},
+			{
+				Name:     ir.IdentityAPIKeyTokenHashField,
+				Comment:  "The SHA-256 of the key's token, which only its holder has.",
+				TypeRef:  ir.TypeRef{Name: sha256Scalar},
+				Required: true,
+				Unique:   true,
+			},
+			{
+				Name:    ir.IdentityAPIKeyPermissionsField,
+				Comment: "The permissions the key was made with, each held while its user holds it; null for every permission its user holds.",
+				TypeRef: ir.TypeRef{Name: "string", IsArray: true},
+			},
+			dateTime(ir.IdentityAPIKeyCreatedAtField, true, ""),
+			dateTime(ir.IdentityAPIKeyExpiresAtField, true, "When the key ends."),
+			dateTime(ir.IdentityAPIKeyLastUsedAtField, false, "When the key last authenticated a request, written at most once a minute."),
+			dateTime(ir.IdentityAPIKeyRevokedAtField, false, "When the key was revoked, by its user, by an administrator, or when its user was disabled."),
+		},
+		Indexes: []ir.IndexDef{apiKeyUserIndex()},
 	})
 }
 

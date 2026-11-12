@@ -6,12 +6,15 @@
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
 /// The steps of `core-workflow.json` the replayer maps and compares: all of
-/// its 158 but four, each of which tests the engine's store. The test's raw
+/// its 159 but five, four of which test the engine's store. The test's raw
 /// SQL write of Workflow's `enteredAt` column is applied to the row and not
 /// compared, since its result is SQLite's; the two writes of an own field
 /// `status` the type does not have are the store's own-field validation,
 /// which is the table's and never reaches the core; and test.Dispatch's
-/// `forceStatus` is its SQL against the store's guard. The 19 `open`
+/// `forceStatus` is its SQL against the store's guard. The fifth is the
+/// define the engine refuses for `finished`, a table's Workflow's alone
+/// (D113), which the core takes: the hand-written
+/// `core-workflow-principals.json` holds its cases. The 19 `open`
 /// steps count but compare nothing, and the recordings of
 /// `isTerminalState` and `stateOutcome` hold only their define, create and
 /// `schemas.behaviors` steps: those two functions are held by

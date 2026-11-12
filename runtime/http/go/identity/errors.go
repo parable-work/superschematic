@@ -19,21 +19,25 @@ const (
 	// password, that does not verify, for whatever reason. 401.
 	CodeInvalidCredentials = "invalid_credentials"
 	// CodeUnauthorized: a route that needs a caller, without a usable
-	// session: none, an unusable Authorization header, or a session that is
-	// unknown, expired, revoked or idle, or whose user is disabled. 401.
+	// session or API key: none, an unusable Authorization header, a session
+	// that is unknown, expired, revoked or idle, an API key that is
+	// unknown, expired or revoked, or a user who is disabled. 401.
 	CodeUnauthorized = "unauthorized"
-	// CodeForbidden: the caller lacks the route's permission, or grants
-	// what they do not hold. 403.
+	// CodeForbidden: the caller lacks the route's permission, grants what
+	// they do not hold, or is an API key on a route that acts on its own
+	// account. 403.
 	CodeForbidden = "forbidden"
 	// CodeCrossOrigin: a cookie request, or a cookie login, the
 	// cross-origin check refuses. 403.
 	CodeCrossOrigin = "cross_origin"
-	// CodeNotFound: no user or role has the id. 404.
+	// CodeNotFound: no user or role has the id, the user has no live API
+	// key with it, or the database holds no API key table. 404.
 	CodeNotFound = "not_found"
 	// CodeConflict: the login or the role name is taken. 409.
 	CodeConflict = "conflict"
-	// CodeInvalidPermission: a role's permission is not dotted segments of
-	// letters, digits, '_' and '-'. 422, with the permissions in details.
+	// CodeInvalidPermission: a role's permission, or one an API key names,
+	// is not dotted segments of letters, digits, '_' and '-', or an API key
+	// names one twice. 422, with the permissions in details.
 	CodeInvalidPermission = "invalid_permission"
 	// CodePendingApproval: a login whose password verifies for a user who
 	// waits for an administrator's approval (D81). 403.
@@ -66,6 +70,25 @@ func unauthenticated(cause error) *apperror.AppError {
 // notCoveredMessage is the 403 of a write to a user who holds a permission
 // the caller does not (Service.covers).
 const notCoveredMessage = "No one administers a user holding a permission they do not hold"
+
+// The refusals of the API key operations (D114), the same text in every
+// runtime.
+const (
+	// sessionOnlyMessage is the 403 of a caller an API key authenticated on
+	// a route that acts on its own account: the key routes of the session
+	// set, logout and changePassword.
+	sessionOnlyMessage = "An API key does not act on its own account: sign in with a session"
+	// apiKeyNotHeldMessage is the 403 of a createApiKey naming a permission
+	// the caller does not hold.
+	apiKeyNotHeldMessage = "An API key names only permissions its user holds"
+	// noAPIKeysMessage is the 404 of an API key operation over a store
+	// whose descriptor names no API key table.
+	noAPIKeysMessage = "API keys are not available: this database's types hold no API key table"
+)
+
+func noAPIKeys() *apperror.AppError {
+	return problem(apperror.ErrCodeNotFound, CodeNotFound, noAPIKeysMessage, ErrNoAPIKeys)
+}
 
 func forbidden(message string, details any) *apperror.AppError {
 	e := problem(apperror.ErrCodeForbidden, CodeForbidden, message, nil)

@@ -75,6 +75,19 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         .apply(identity_handler(&identity_service, identity::OP_CAPABILITIES));
     router = router.route("/api/auth/capabilities", route);
     let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_LIST_API_KEYS));
+    router = router.route("/api/auth/keys", route);
+    let route = RouteControls::new()
+        .rate_limiter(limits.of(&crate::operations::ACCOUNT_CREATE_API_KEY))
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_CREATE_API_KEY));
+    router = router.route("/api/auth/keys", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_REVOKE_API_KEY));
+    router = router.route("/api/auth/keys/{id}", route);
+    let route = RouteControls::new()
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_LOGIN))
         .apply(identity_handler(&identity_service, identity::OP_LOGIN));
     router = router.route("/api/auth/login", route);
@@ -135,6 +148,14 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_ENABLE_USER));
     router = router.route("/api/auth/admin/users/{id}/enable", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_LIST_USER_API_KEYS));
+    router = router.route("/api/auth/admin/users/{id}/keys", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_REVOKE_USER_API_KEY));
+    router = router.route("/api/auth/admin/users/{id}/keys/{keyId}", route);
     let route = RouteControls::new()
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_SET_USER_PASSWORD));

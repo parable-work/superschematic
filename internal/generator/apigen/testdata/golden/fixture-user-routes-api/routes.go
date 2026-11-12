@@ -259,6 +259,24 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
+		// Lists a user's API keys that are not revoked, newest first, each without its token.
+		{
+			Method:  "GET",
+			Path:    "/auth/admin/users/{id}/keys",
+			Handler: identityHandler(cfg.Identity, "listUserApiKeys"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Revokes an API key of a user's, which authenticates no request after. It answers true.
+		{
+			Method:  "DELETE",
+			Path:    "/auth/admin/users/{id}/keys/{keyId}",
+			Handler: identityHandler(cfg.Identity, "revokeUserApiKey"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
 		// Sets a user's password and ends their sessions. It answers true.
 		{
 			Method:  "PUT",
@@ -291,6 +309,27 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Method:  "GET",
 			Path:    "/auth/capabilities",
 			Handler: identityHandler(cfg.Identity, "capabilities"),
+		},
+		// Lists the caller's API keys that are not revoked, newest first, each without its token.
+		{
+			Method:  "GET",
+			Path:    "/auth/keys",
+			Handler: identityHandler(cfg.Identity, "listApiKeys"),
+		},
+		// Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key.
+		{
+			Method:  "POST",
+			Path:    "/auth/keys",
+			Handler: identityHandler(cfg.Identity, "createApiKey"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+			},
+		},
+		// Revokes an API key of the caller's, which authenticates no request after. It answers true.
+		{
+			Method:  "DELETE",
+			Path:    "/auth/keys/{id}",
+			Handler: identityHandler(cfg.Identity, "revokeApiKey"),
 		},
 		// Ends the caller's session and clears the session cookie. It answers true.
 		{

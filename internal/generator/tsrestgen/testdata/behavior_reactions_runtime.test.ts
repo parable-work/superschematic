@@ -171,6 +171,36 @@ describe('Reactions on fixture-reactions-api', () => {
     expect(await projectStatus(p)).toBe('done');
   });
 
+  test('a task that is done, reopened and done again closes its project each time, and starting it again takes the project up', async () => {
+    // Done is a state a transition leaves, which finished names (D113): it
+    // counts as finished, so the project closes though each task may be
+    // reopened.
+    const p = await project('Refit', true);
+    const first = await task('Strip', p);
+    const second = await task('Coat', p);
+    for (const t of [first, second]) {
+      await orm.task.status.transition(t, { to: 'doing' });
+      await orm.task.status.transition(t, { to: 'done' });
+    }
+    await workUntil(async () => (await projectStatus(p)) === 'done');
+    expect(await projectStatus(p)).toBe('done');
+    // A reopened task moves nothing by itself: no rule hears a task that
+    // leaves done, and the project stays done with a task to do.
+    expect(await sdk(SAM).task.status.transition(second, { to: 'todo' })).toEqual({ from: 'done', to: 'todo' });
+    await workUntil(drained);
+    expect(await projectStatus(p)).toBe('done');
+    // The task's own rule takes the project up when the task starts again,
+    // along the transition the project lists from done.
+    await sdk(SAM).task.status.transition(second, { to: 'doing' });
+    await workUntil(async () => (await projectStatus(p)) === 'active');
+    expect(await projectStatus(p)).toBe('active');
+    // Done again, every task is done again, and the project closes again.
+    await sdk(SAM).task.status.transition(second, { to: 'done' });
+    await workUntil(async () => (await projectStatus(p)) === 'done');
+    expect(await projectStatus(p)).toBe('done');
+    expect((await orm.task.getOne(first)).status).toBe('done');
+  });
+
   test('a task that fails moves its project to failed', async () => {
     const p = await project('Dig', true);
     const t = await task('Drill', p);

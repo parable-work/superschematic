@@ -267,6 +267,63 @@
     }
   },
   {
+    "name": "account-admin.listUserApiKeys",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "array",
+      "description": "Array of ApiKey",
+      "items": {
+        "type": "object",
+        "description": "ApiKey object"
+      }
+    }
+  },
+  {
+    "name": "account-admin.revokeUserApiKey",
+    "inputSchemaDigest": "sha256:6bb5af2db2a454913f0f0d7a2da8e245d4abf88ca3ef6edd849f4ffdb10ed73a",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "keyId": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "keyId parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id",
+        "keyId"
+      ]
+    },
+    "returns": {
+      "type": "boolean",
+      "description": "A boolean value (true or false)"
+    }
+  },
+  {
     "name": "account-admin.setUserPassword",
     "inputSchemaDigest": "sha256:7cd2c492d5fb2a70dcf1a61d9cb47f7a9bb6a1ac4faa4c00994e89fa9f0ce7af",
     "parameters": {
@@ -368,6 +425,90 @@
     "returns": {
       "type": "object",
       "description": "Capabilities object"
+    }
+  },
+  {
+    "name": "account.listApiKeys",
+    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "returns": {
+      "type": "array",
+      "description": "Array of ApiKey",
+      "items": {
+        "type": "object",
+        "description": "ApiKey object"
+      }
+    }
+  },
+  {
+    "name": "account.createApiKey",
+    "inputSchemaDigest": "sha256:aed6c6b7c9e496d40c648350870a1e0c00711c9421709b615aaabdf5b0acec07",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "expiresInSeconds": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "permissions": {
+          "description": "Array of string values",
+          "items": {
+            "type": "string",
+            "description": "A string value"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "CreatedApiKey object"
+    }
+  },
+  {
+    "name": "account.revokeApiKey",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "boolean",
+      "description": "A boolean value (true or false)"
     }
   },
   {

@@ -24,6 +24,7 @@ import (
 var behaviorReactionsCases = []string{
 	"a task that starts moves its project to active",
 	"a project whose tasks are all done moves to done",
+	"a task that is done, reopened and done again closes its project each time",
 	"a task that fails moves its project to failed",
 	"a raw SQL write of a task's status is heard and moves its project",
 	"a raw SQL write of a task's priority to urgent starts it, which moves its project",
@@ -343,6 +344,45 @@ func TestReactions(t *testing.T) {
 		drive(t, func() bool { return status(t, "project", pColumn) == "done" })
 		if got := status(t, "project", pColumn); got != "done" {
 			t.Fatalf("the project is %s, want done", got)
+		}
+	})
+
+	t.Run("a task that is done, reopened and done again closes its project each time", func(t *testing.T) {
+		// Done is a state a transition leaves, which finished names (D113):
+		// it counts as finished, so the project closes though each task may
+		// be reopened.
+		p, pColumn := project(t, "Refit")
+		moveProject(t, p, types.ProjectStatusState_Active)
+		first, _ := task(t, "Strip", p)
+		second, _ := task(t, "Coat", p)
+		for _, k := range []string{first, second} {
+			moveTask(t, k, types.TaskStatusState_Doing)
+			moveTask(t, k, types.TaskStatusState_Done)
+		}
+		is := func(want string) func() bool {
+			return func() bool { return status(t, "project", pColumn) == want }
+		}
+		drive(t, is("done"))
+		if got := status(t, "project", pColumn); got != "done" {
+			t.Fatalf("the project is %s with every task done, want done", got)
+		}
+		// A reopened task moves nothing by itself.
+		moveTask(t, second, types.TaskStatusState_Todo)
+		drive(t, drained)
+		if got := status(t, "project", pColumn); got != "done" {
+			t.Fatalf("the project is %s with a task reopened, want done still", got)
+		}
+		// The task's own rule takes the project up when it starts again,
+		// along the transition the project lists from done.
+		moveTask(t, second, types.TaskStatusState_Doing)
+		drive(t, is("active"))
+		if got := status(t, "project", pColumn); got != "active" {
+			t.Fatalf("the project is %s with the task started again, want active", got)
+		}
+		moveTask(t, second, types.TaskStatusState_Done)
+		drive(t, is("done"))
+		if got := status(t, "project", pColumn); got != "done" {
+			t.Fatalf("the project is %s with the task done again, want done", got)
 		}
 	})
 

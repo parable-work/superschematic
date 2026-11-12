@@ -1,7 +1,7 @@
 //! The user model's operations over a [`Store`], a [`Config`] and a clock:
-//! signing users in and out, resolving a request's session to its
-//! principal, and managing users, roles and grants. Each returns the
-//! problem the Go runtime answers with, as an [`ApiError`].
+//! signing users in and out, resolving a request's session or API key to
+//! its principal, and managing users, roles, grants and API keys. Each
+//! returns the problem the Go runtime answers with, as an [`ApiError`].
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -19,20 +19,26 @@ use crate::{has_any_permission, ApiError, Principal};
 use super::config::{Config, ConfigError};
 use super::cross_origin::{check_cross_origin, request_host};
 use super::errors::{
-    cross_origin, field_refusal, forbidden, internal, invalid_credentials, invalid_permissions,
-    not_covered, not_held, pending_approval, store_error, unauthenticated, FieldErrors,
-    CODE_UNAUTHORIZED,
+    api_key_not_held, cross_origin, field_refusal, forbidden, internal, invalid_credentials,
+    invalid_permissions, no_api_keys, not_covered, not_held, pending_approval, session_only,
+    store_error, unauthenticated, FieldErrors, CODE_UNAUTHORIZED,
 };
 use super::json;
 use super::password::{
     check_password, dummy_hash, hash_password, verify_password, Argon2Params, Verified,
 };
 use super::permissions::{
-    capabilities_of, effective_permissions, uncovered, uncovered_user, valid_permission, Route,
+    capabilities_of, effective_permissions, narrow_roles, uncovered, uncovered_user,
+    valid_permission, Route,
 };
-use super::store::{FirstUser, NewSession, NewUser, NewUserGrants, Role, Store, StoreError, User};
+use super::store::{
+    ApiKey, FirstUser, NewApiKey, NewSession, NewUser, NewUserGrants, Role, Store, StoreError, User,
+};
 use super::time::format_rfc3339;
-use super::token::{extract_credential, hash_token, new_token, CredentialOutcome, Transport};
+use super::token::{
+    extract_credential, hash_token, is_api_key, new_api_key, new_token, CredentialOutcome,
+    Transport,
+};
 
 /// The administration routes' permissions, under the naming key
 /// `identity_permission_prefix` (`identity` by default): the prefix, a
@@ -45,9 +51,15 @@ pub const PERMISSION_ROLES_WRITE: &str = "roles.write";
 /// `identity_permission_prefix`'s default.
 pub const DEFAULT_PERMISSION_PREFIX: &str = "identity";
 
-/// The latest a session ends, in seconds after the Unix epoch:
-/// 9999-12-31T23:59:59Z, the last time every store and the wire's RFC 3339
-/// write, however long the config's `sessionTtlSeconds`.
+/// The bounds of `createApiKey`'s input (D114): the most characters a
+/// key's name holds, and the most permissions a key names.
+pub const API_KEY_NAME_MAX_LENGTH: usize = 100;
+pub const API_KEY_MAX_PERMISSIONS: usize = 100;
+
+/// The latest a session or an API key ends, in seconds after the Unix
+/// epoch: 9999-12-31T23:59:59Z, the last time every store and the wire's
+/// RFC 3339 write, however long the config's `sessionTtlSeconds` or
+/// `apiKeyMaxTtlSeconds`.
 const LATEST_EXPIRY_SECONDS: u64 = 253_402_300_799;
 
 /// The clock sessions are created, expired and touched by.
@@ -70,6 +82,8 @@ pub struct Service {
     params: Argon2Params,
     dummy: String,
     registration: Registration,
+    api_keys: bool,
+    api_key_administration: bool,
 }
 
 /// How `register` admits a user (D81), as the API's `@userSessions({
@@ -128,29 +142,37 @@ impl fmt::Debug for Service {
 }
 
 /// An authenticated caller: the user, their roles and permissions, and the
-/// session the request carried.
+/// session or the API key the request carried.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdentityPrincipal {
     pub id: String,
     pub login: String,
     pub name: String,
-    /// The user's roles, by name.
+    /// The user's roles, by name. An API key made with permissions holds
+    /// them narrowed to those ([`narrow_roles`]).
     pub roles: Vec<Role>,
     /// The roles' permissions, without repeats ([`effective_permissions`]).
     pub permissions: Vec<String>,
+    /// The session's id, and empty for an API key's principal.
     pub session_id: String,
+    /// The API key's id (D114), and empty for a session's principal.
+    pub api_key_id: String,
     pub transport: Transport,
 }
 
 impl IdentityPrincipal {
     /// The router's [`Principal`]: the user's id as its subject, the roles'
     /// permissions, and claims carrying the login, the name, the session
-    /// id, the transport and the roles.
+    /// id, the transport and the roles, and for an API key's principal the
+    /// key's id (`apiKeyId`) beside an empty session id.
     pub fn to_principal(&self) -> Principal {
         let mut claims = Map::new();
         claims.insert("login".to_owned(), Value::from(self.login.clone()));
         claims.insert("name".to_owned(), Value::from(self.name.clone()));
         claims.insert("sessionId".to_owned(), Value::from(self.session_id.clone()));
+        if !self.api_key_id.is_empty() {
+            claims.insert("apiKeyId".to_owned(), Value::from(self.api_key_id.clone()));
+        }
         claims.insert("transport".to_owned(), Value::from(self.transport.as_str()));
         let roles: Vec<Value> = self
             .roles
@@ -192,13 +214,19 @@ impl IdentityPrincipal {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
+        let session_id = text("sessionId")?;
+        let api_key_id = text("apiKeyId").unwrap_or_default();
+        if session_id.is_empty() && api_key_id.is_empty() {
+            return None;
+        }
         Some(IdentityPrincipal {
             id: principal.subject.clone(),
             login: text("login")?,
             name: text("name")?,
             roles,
             permissions: principal.permissions.clone(),
-            session_id: text("sessionId").filter(|id| !id.is_empty())?,
+            session_id,
+            api_key_id,
             transport,
         })
     }
@@ -248,6 +276,18 @@ pub struct SetPasswordInput {
 pub struct RoleInput {
     pub name: String,
     pub permissions: Vec<String>,
+}
+
+/// `createApiKey`'s input (D114).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CreateApiKeyInput {
+    pub name: String,
+    /// How long the key lasts. `None` means the config's
+    /// `apiKeyMaxTtlSeconds`, which also bounds it.
+    pub expires_in_seconds: Option<i64>,
+    /// The permissions the key names. `None` means every permission its
+    /// user holds.
+    pub permissions: Option<Vec<String>>,
 }
 
 /// Reads an input from its JSON body as every identity runtime reads one:
@@ -339,6 +379,22 @@ impl Input for RoleInput {
     }
 }
 
+impl Input for CreateApiKeyInput {
+    fn from_json(value: &Value) -> Result<Self, String> {
+        let [name, expires, permissions] =
+            input_members(value, ["name", "expiresInSeconds", "permissions"])?;
+        Ok(CreateApiKeyInput {
+            name: string_member(name, "name")?,
+            expires_in_seconds: expires
+                .map(|v| json::int64(v, "expiresInSeconds"))
+                .transpose()?,
+            permissions: permissions
+                .map(|v| json::strings(v, "permissions"))
+                .transpose()?,
+        })
+    }
+}
+
 /// `register`'s result under approval (D81): pending and no session, or a
 /// session as [`LoginResult`] has one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -411,6 +467,41 @@ pub struct IdentityRole {
     pub permissions: Vec<String>,
 }
 
+/// An API key as the lists answer one (D114), the contract's `ApiKey`:
+/// never its token or its hash.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityApiKey {
+    pub id: String,
+    pub name: String,
+    /// Absent, never null, for a key that holds every permission its user
+    /// does; a list, an empty one included, is written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    /// RFC 3339, in UTC, as [`LoginResult`]'s `expires_at` is, and so are
+    /// the times after it.
+    pub created_at: String,
+    pub expires_at: String,
+    /// Absent until the key's first request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+}
+
+/// `createApiKey`'s result (D114), the contract's `CreatedApiKey`: the one
+/// time the key's token is shown.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedApiKey {
+    pub id: String,
+    pub name: String,
+    /// Absent as [`IdentityApiKey`]'s is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    pub created_at: String,
+    pub expires_at: String,
+    pub token: String,
+}
+
 /// A session `login` or `register` created: the result the route answers,
 /// and the token and transport the cookie is set from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -449,6 +540,46 @@ fn identity_role(role: Role) -> IdentityRole {
         name: role.name,
         permissions: role.permissions,
     }
+}
+
+fn identity_api_key(key: ApiKey) -> IdentityApiKey {
+    IdentityApiKey {
+        id: key.id,
+        name: key.name,
+        permissions: key.permissions,
+        created_at: format_rfc3339(key.created_at),
+        expires_at: format_rfc3339(key.expires_at),
+        last_used_at: key.last_used_at.map(format_rfc3339),
+    }
+}
+
+/// Refuses a caller an API key authenticated, with 403 `forbidden` (D114).
+/// A key does not act on its own account: it neither makes, lists nor
+/// revokes keys, signs out nor changes the password, so a leaked one does
+/// none of them.
+fn require_session(caller: &IdentityPrincipal) -> Result<(), ApiError> {
+    if caller.api_key_id.is_empty() {
+        Ok(())
+    } else {
+        Err(session_only())
+    }
+}
+
+/// When what starts at `now` and lasts `ttl` ends: no later than
+/// [`LATEST_EXPIRY_SECONDS`].
+fn expiry(now: SystemTime, ttl: Duration) -> SystemTime {
+    let latest = UNIX_EPOCH + Duration::from_secs(LATEST_EXPIRY_SECONDS);
+    now.checked_add(ttl).map_or(latest, |t| t.min(latest))
+}
+
+/// `t` to the millisecond, which both dialects keep, so an answer is what
+/// the row holds.
+fn to_millisecond(t: SystemTime) -> SystemTime {
+    let beyond = t
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |after| after.subsec_nanos() % 1_000_000);
+    t.checked_sub(Duration::from_nanos(u64::from(beyond)))
+        .unwrap_or(t)
 }
 
 /// A login's transport: bearer when empty.
@@ -514,6 +645,8 @@ impl Service {
             params,
             dummy,
             registration: Registration::default(),
+            api_keys: false,
+            api_key_administration: false,
         })
     }
 
@@ -544,6 +677,40 @@ impl Service {
     /// How `register` admits users.
     pub fn registration(&self) -> &Registration {
         &self.registration
+    }
+
+    /// The service with the session set's API key operations turned on
+    /// (D114), as the API's `@userSessions({ apiKeys: true })` declares
+    /// them: `createApiKey`, `listApiKeys` and `revokeApiKey`, which
+    /// [`Service::routes`] leaves out without it. A request authenticates
+    /// with an API key whether they are on or not, whenever the store has
+    /// the table.
+    #[must_use]
+    pub fn with_api_keys(mut self) -> Service {
+        self.api_keys = true;
+        self
+    }
+
+    /// The service with the administration set's API key operations turned
+    /// on (D114), as the API's `@userAdministration({ apiKeys: true })`
+    /// declares them: `listUserApiKeys` and `revokeUserApiKey`, which
+    /// [`Service::routes`] leaves out without it.
+    #[must_use]
+    pub fn with_api_key_administration(mut self) -> Service {
+        self.api_key_administration = true;
+        self
+    }
+
+    /// Whether the session set's API key operations are turned on
+    /// ([`Service::with_api_keys`]).
+    pub fn api_keys(&self) -> bool {
+        self.api_keys
+    }
+
+    /// Whether the administration set's API key operations are turned on
+    /// ([`Service::with_api_key_administration`]).
+    pub fn api_key_administration(&self) -> bool {
+        self.api_key_administration
     }
 
     /// The service with the clock sessions are created, expired and touched
@@ -577,7 +744,8 @@ impl Service {
     }
 
     /// The service with the route requirements of every operation of the
-    /// API, which `capabilities` answers for.
+    /// API, which `capabilities` answers for. A server lists the API key
+    /// operations among them only when its API declares them.
     #[must_use]
     pub fn with_routes(mut self, routes: Vec<Route>) -> Service {
         self.routes = routes;
@@ -735,10 +903,7 @@ impl Service {
     async fn issue(&self, user: &User, transport: Transport) -> Result<IssuedSession, ApiError> {
         let token = new_token().map_err(|err| internal(&err))?;
         let now = self.now();
-        let latest = UNIX_EPOCH + Duration::from_secs(LATEST_EXPIRY_SECONDS);
-        let expires_at = now
-            .checked_add(self.config.session_ttl())
-            .map_or(latest, |t| t.min(latest));
+        let expires_at = expiry(now, self.config.session_ttl());
         let session = self
             .store
             .create_session(NewSession {
@@ -784,14 +949,16 @@ impl Service {
     }
 
     /// The caller of a request, from its head: `None` when it carries no
-    /// credential. The credential is the `Authorization` bearer token, or
-    /// the session cookie without an `Authorization` header. A cookie
-    /// request with a method other than `GET`, `HEAD` or `OPTIONS` passes
-    /// the cross-origin check first (403 `cross_origin`). Then the session
-    /// must exist, be neither revoked, expired nor idle, and belong to a
-    /// user who is not disabled; every other outcome is 401 `unauthorized`,
-    /// which for the session cookie carries the `Set-Cookie` that clears
-    /// it.
+    /// credential. The credential is the `Authorization` bearer token, a
+    /// session's or an API key, or the session cookie without an
+    /// `Authorization` header. A cookie request with a method other than
+    /// `GET`, `HEAD` or `OPTIONS` passes the cross-origin check first (403
+    /// `cross_origin`). Then the session must exist, be neither revoked,
+    /// expired nor idle, and belong to a user who is not disabled; every
+    /// other outcome is 401 `unauthorized`, which for the session cookie
+    /// carries the `Set-Cookie` that clears it. An API key is held to the
+    /// same rules but the idle one, and its `lastUsedAt` is written as
+    /// `lastSeenAt` is (D114).
     pub async fn authenticate(&self, parts: &Parts) -> Result<Option<IdentityPrincipal>, ApiError> {
         self.authenticate_head(&parts.method, &request_host(parts), &parts.headers)
             .await
@@ -839,12 +1006,17 @@ impl Service {
     }
 
     /// The caller a session token signs in, as `authenticate` resolves one
-    /// once it has read the token from a request.
+    /// once it has read the token from a request. A token that is an API
+    /// key is resolved as one with the bearer transport, the only one that
+    /// carries it (D114).
     pub async fn authenticate_token(
         &self,
         token: &str,
         transport: Transport,
     ) -> Result<IdentityPrincipal, ApiError> {
+        if transport == Transport::Bearer && is_api_key(token.as_bytes()) {
+            return self.authenticate_api_key(token).await;
+        }
         let record = match self.store.find_session(&hash_token(token)).await {
             Ok(record) => record,
             Err(StoreError::NotFound) => return Err(unauthenticated()),
@@ -888,12 +1060,71 @@ impl Service {
             roles,
             permissions,
             session_id: session.id.clone(),
+            api_key_id: String::new(),
             transport,
         })
     }
 
-    /// Revokes the caller's session.
+    /// The caller an API key signs in (D114). In this order, the key must
+    /// exist, be neither revoked nor expired, and belong to a user who is
+    /// neither disabled nor pending; every other outcome is the 401
+    /// `unauthorized` a session's is. No idle timeout ends a key. Its
+    /// `lastUsedAt` is written when it is null or older than the touch
+    /// interval, as a session's `lastSeenAt` is. A key made with
+    /// permissions holds its user's roles narrowed to them
+    /// ([`narrow_roles`]); one made with none holds them whole, as a
+    /// session does.
+    async fn authenticate_api_key(&self, token: &str) -> Result<IdentityPrincipal, ApiError> {
+        let record = match self.store.find_api_key(&hash_token(token)).await {
+            Ok(record) => record,
+            Err(StoreError::NotFound) => return Err(unauthenticated()),
+            Err(err) => return Err(internal(&err)),
+        };
+        let now = self.now();
+        let key = &record.api_key;
+        if key.revoked_at.is_some()
+            || now >= key.expires_at
+            || record.user.disabled
+            || record.user.pending
+        {
+            return Err(unauthenticated());
+        }
+        let interval = self.config.touch_interval();
+        if key
+            .last_used_at
+            .is_none_or(|used| since(now, used) >= interval)
+        {
+            let stale_before = now.checked_sub(interval).unwrap_or(UNIX_EPOCH);
+            self.store
+                .touch_api_key(&key.id, now, stale_before)
+                .await
+                .map_err(|err| internal(&err))?;
+        }
+        let mut roles = self
+            .store
+            .user_roles(&record.user.id)
+            .await
+            .map_err(|err| internal(&err))?;
+        if let Some(named) = &key.permissions {
+            roles = narrow_roles(&roles, named);
+        }
+        let permissions = effective_permissions(roles.iter().map(|r| r.permissions.as_slice()));
+        Ok(IdentityPrincipal {
+            id: record.user.id,
+            login: record.user.login,
+            name: record.user.name,
+            roles,
+            permissions,
+            session_id: String::new(),
+            api_key_id: key.id.clone(),
+            transport: Transport::Bearer,
+        })
+    }
+
+    /// Revokes the caller's session. An API key's principal has none to
+    /// revoke and is 403 `forbidden`.
     pub async fn logout(&self, caller: &IdentityPrincipal) -> Result<(), ApiError> {
+        require_session(caller)?;
         if caller.session_id.is_empty() {
             return Err(unauthenticated());
         }
@@ -928,12 +1159,14 @@ impl Service {
 
     /// Sets the caller's password once `current` verifies (401
     /// `invalid_credentials` otherwise), and revokes the user's other
-    /// sessions.
+    /// sessions. The user's API keys live on. An API key's principal is
+    /// 403 `forbidden`.
     pub async fn change_password(
         &self,
         caller: &IdentityPrincipal,
         input: &ChangePasswordInput,
     ) -> Result<(), ApiError> {
+        require_session(caller)?;
         let mut errors = FieldErrors::default();
         check_password_field(&mut errors, "current", &input.current);
         check_password_field(&mut errors, "password", &input.password);
@@ -1049,8 +1282,9 @@ impl Service {
             .map_err(|err| store_error(err, "User"))
     }
 
-    /// Disables a user and revokes their sessions (`users.write`). The
-    /// caller's permissions must cover each of the user's.
+    /// Disables a user and revokes their sessions and their API keys
+    /// (`users.write`). The caller's permissions must cover each of the
+    /// user's.
     pub async fn disable_user(
         &self,
         caller: &IdentityPrincipal,
@@ -1059,8 +1293,9 @@ impl Service {
         self.set_disabled(caller, id, true).await
     }
 
-    /// Enables a disabled user (`users.write`). The caller's permissions
-    /// must cover each of the user's.
+    /// Enables a disabled user (`users.write`), which brings back neither
+    /// a session nor an API key the disable revoked. The caller's
+    /// permissions must cover each of the user's.
     pub async fn enable_user(
         &self,
         caller: &IdentityPrincipal,
@@ -1085,7 +1320,8 @@ impl Service {
     }
 
     /// Sets a user's password and revokes their sessions (`users.write`).
-    /// The caller's permissions must cover each of the user's.
+    /// The user's API keys live on. The caller's permissions must cover
+    /// each of the user's.
     pub async fn set_user_password(
         &self,
         caller: &IdentityPrincipal,
@@ -1259,5 +1495,197 @@ impl Service {
             .await
             .map_err(|err| store_error(err, "User or role"))?;
         self.user(user_id).await
+    }
+
+    /// Admits the caller of an API key operation of the session set
+    /// (D114): an authenticated one (401) signed in with a session, not an
+    /// API key (403), over a store that has API keys (404).
+    fn own_api_keys(&self, caller: &IdentityPrincipal) -> Result<(), ApiError> {
+        if caller.id.is_empty() {
+            return Err(unauthenticated());
+        }
+        require_session(caller)?;
+        self.have_api_keys()
+    }
+
+    /// The 404 of an API key operation over a store whose descriptor names
+    /// no API key table, and `Ok` over one that has it.
+    fn have_api_keys(&self) -> Result<(), ApiError> {
+        if self.store.has_api_keys() {
+            Ok(())
+        } else {
+            Err(no_api_keys())
+        }
+    }
+
+    /// Makes the caller an API key (D114) and answers its token, this
+    /// once. The caller is signed in with a session. The name, trimmed of
+    /// surrounding white space, is 1 to [`API_KEY_NAME_MAX_LENGTH`]
+    /// characters; `expires_in_seconds`, when present, is 1 to the config's
+    /// `apiKeyMaxTtlSeconds`, which is also the lifetime without it;
+    /// `permissions`, when present, are 1 to [`API_KEY_MAX_PERMISSIONS`] of
+    /// them (400). Each has a permission's form and is named once (422),
+    /// and the caller holds a permission covering it (403: a key names
+    /// only what its user holds).
+    pub async fn create_api_key(
+        &self,
+        caller: &IdentityPrincipal,
+        input: &CreateApiKeyInput,
+    ) -> Result<CreatedApiKey, ApiError> {
+        self.own_api_keys(caller)?;
+        let mut errors = FieldErrors::default();
+        let name = input.name.trim();
+        match name.chars().count() {
+            0 => errors.add("name", "required", "name is required"),
+            n if n > API_KEY_NAME_MAX_LENGTH => errors.add(
+                "name",
+                "maxLength",
+                format!("name must be at most {API_KEY_NAME_MAX_LENGTH} characters"),
+            ),
+            _ => {}
+        }
+        let mut seconds = self.config.api_key_max_ttl_seconds;
+        match input.expires_in_seconds {
+            Some(given) if given < 1 => errors.add(
+                "expiresInSeconds",
+                "min",
+                "expiresInSeconds must be at least 1",
+            ),
+            Some(given) if given > seconds => errors.add(
+                "expiresInSeconds",
+                "max",
+                format!("expiresInSeconds must be at most {seconds}"),
+            ),
+            Some(given) => seconds = given,
+            None => {}
+        }
+        match input.permissions.as_ref().map(Vec::len) {
+            Some(0) => errors.add(
+                "permissions",
+                "listMin",
+                "permissions must contain at least 1 items",
+            ),
+            Some(n) if n > API_KEY_MAX_PERMISSIONS => errors.add(
+                "permissions",
+                "listMax",
+                format!("permissions must contain at most {API_KEY_MAX_PERMISSIONS} items"),
+            ),
+            _ => {}
+        }
+        errors.check()?;
+        // A permission that has not a permission's form, and each one that
+        // repeats an earlier one, in the order given.
+        let named = input.permissions.as_deref().unwrap_or_default();
+        let mut seen = HashSet::new();
+        let refused: Vec<String> = named
+            .iter()
+            .filter(|p| {
+                let repeated = !seen.insert(p.as_str());
+                repeated || !valid_permission(p)
+            })
+            .cloned()
+            .collect();
+        if !refused.is_empty() {
+            return Err(invalid_permissions(refused));
+        }
+        let missing = uncovered(&caller.permissions, named);
+        if !missing.is_empty() {
+            return Err(api_key_not_held(missing));
+        }
+        let token = new_api_key().map_err(|err| internal(&err))?;
+        // To the millisecond, as the row keeps a time.
+        let now = to_millisecond(self.now());
+        let lifetime = Duration::from_secs(u64::try_from(seconds).unwrap_or(0));
+        let created = self
+            .store
+            .create_api_key(NewApiKey {
+                user_id: caller.id.clone(),
+                name: name.to_owned(),
+                token_hash: hash_token(&token),
+                permissions: input.permissions.clone(),
+                created_at: now,
+                expires_at: expiry(now, lifetime),
+            })
+            .await;
+        let key = match created {
+            Ok(key) => key,
+            Err(StoreError::NotFound) => return Err(unauthenticated()),
+            Err(err) => return Err(store_error(err, "User")),
+        };
+        Ok(CreatedApiKey {
+            id: key.id,
+            name: key.name,
+            permissions: key.permissions,
+            created_at: format_rfc3339(key.created_at),
+            expires_at: format_rfc3339(key.expires_at),
+            token,
+        })
+    }
+
+    /// The caller's API keys that are not revoked, expired ones included,
+    /// newest first (D114). The caller is signed in with a session.
+    pub async fn list_api_keys(
+        &self,
+        caller: &IdentityPrincipal,
+    ) -> Result<Vec<IdentityApiKey>, ApiError> {
+        self.own_api_keys(caller)?;
+        self.api_keys_of(&caller.id).await
+    }
+
+    async fn api_keys_of(&self, user_id: &str) -> Result<Vec<IdentityApiKey>, ApiError> {
+        let keys = self
+            .store
+            .list_api_keys(user_id)
+            .await
+            .map_err(|err| store_error(err, "User"))?;
+        Ok(keys.into_iter().map(identity_api_key).collect())
+    }
+
+    /// Revokes the caller's API key with `key_id` (D114). A key that does
+    /// not exist, is another user's or is revoked already is 404. The
+    /// caller is signed in with a session.
+    pub async fn revoke_api_key(
+        &self,
+        caller: &IdentityPrincipal,
+        key_id: &str,
+    ) -> Result<(), ApiError> {
+        self.own_api_keys(caller)?;
+        self.store
+            .revoke_api_key(&caller.id, key_id, self.now())
+            .await
+            .map_err(|err| store_error(err, "API key"))
+    }
+
+    /// A user's API keys, as [`Service::list_api_keys`] lists the caller's
+    /// (`users.read`, D114). A user that does not exist is 404.
+    pub async fn list_user_api_keys(
+        &self,
+        caller: &IdentityPrincipal,
+        user_id: &str,
+    ) -> Result<Vec<IdentityApiKey>, ApiError> {
+        self.require(caller, PERMISSION_USERS_READ)?;
+        self.have_api_keys()?;
+        self.store
+            .get_user(user_id)
+            .await
+            .map_err(|err| store_error(err, "User"))?;
+        self.api_keys_of(user_id).await
+    }
+
+    /// Revokes a user's API key with `key_id` (`users.write`, D114). A key
+    /// that does not exist, is another user's or is revoked already is
+    /// 404.
+    pub async fn revoke_user_api_key(
+        &self,
+        caller: &IdentityPrincipal,
+        user_id: &str,
+        key_id: &str,
+    ) -> Result<(), ApiError> {
+        self.require(caller, PERMISSION_USERS_WRITE)?;
+        self.have_api_keys()?;
+        self.store
+            .revoke_api_key(user_id, key_id, self.now())
+            .await
+            .map_err(|err| store_error(err, "API key"))
     }
 }

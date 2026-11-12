@@ -142,8 +142,8 @@ pub struct {{.FilesStructName}} {
 {{- if .Filter}}
     ///
     /// `query.{{.FilterFieldName}}` keeps the items its members find (D106): each
-    /// member is a field's operators (`eq`, `one_of`, and the ones its type
-    /// adds), and all of them hold at once.{{if .Page}} A cursor carries no filter:
+    /// member is a field's operators (`eq`, `ne`, `one_of`, `not_in`, and the
+    /// ones its type adds), and all of them hold at once.{{if .Page}} A cursor carries no filter:
     /// the next page is asked with the same one, as `{{.AllMethodName}}` does.{{end}}
 {{- end}}
 {{- if .HasEncryptedBody}}
@@ -630,8 +630,9 @@ out (a required one is refused), and each item is checked: that the value
 carries its text as it is, and the argument's rules, which the route
 checks per item. The operation's filter (D106) is written in the bracket
 form instead, a pair for each operator a member sets, and refused before
-the request for what the route's reader would refuse: an isNull on a
-field that is never null, and more filters than a request may hold. */}}
+the request for what the route's reader would refuse: an in or a notIn
+of too many values or of one the value cannot carry, an isNull on a field
+that is never null, and more filters than a request may hold. */}}
 {{- define "queryParam"}}
 {{- if .FilterFields}}
             // The filter is written in the bracket form (D106):

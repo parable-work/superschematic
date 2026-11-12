@@ -10,15 +10,19 @@ import (
 // A field's filter as an implementation takes it and an SDK sends it
 // (D106): a member per operator, each nil, or empty, when the request
 // holds none. Which type a field's is follows its operators: Equals for
-// eq and in alone (a UUID, an enum, a boolean), Ordered for a number, a
-// date and a time, which add gt, gte, lt and lte, and Text for text, which
-// adds contains. IsNull is set only on a field that may be null: true
-// keeps the rows whose field is null, false the others.
+// eq, ne, in and notIn alone (a UUID, an enum, a boolean), Ordered for a
+// number, a date and a time, which add gt, gte, lt and lte, and Text for
+// text, which adds contains. Ne and NotIn keep the rows Eq and In leave
+// out (D112), a row whose field is null among them. IsNull is set only on
+// a field that may be null: true keeps the rows whose field is null, false
+// the others.
 
 // Equals is the filter of a field compared for equality alone.
 type Equals[T any] struct {
 	Eq     *T
+	Ne     *T
 	In     []T
+	NotIn  []T
 	IsNull *bool
 }
 
@@ -26,7 +30,9 @@ type Equals[T any] struct {
 // a date or a time.
 type Ordered[T any] struct {
 	Eq     *T
+	Ne     *T
 	In     []T
+	NotIn  []T
 	Gt     *T
 	Gte    *T
 	Lt     *T
@@ -38,7 +44,9 @@ type Ordered[T any] struct {
 // holds, in any case.
 type Text[T any] struct {
 	Eq       *T
+	Ne       *T
 	In       []T
+	NotIn    []T
 	Contains *string
 	IsNull   *bool
 }
@@ -46,11 +54,11 @@ type Text[T any] struct {
 // decoded is one field's filters of every shape, which each Decode
 // function narrows to its type.
 type decoded[T any] struct {
-	any                  bool
-	eq, gt, gte, lt, lte *T
-	in                   []T
-	contains             *string
-	isNull               *bool
+	any                      bool
+	eq, ne, gt, gte, lt, lte *T
+	in, notIn                []T
+	contains                 *string
+	isNull                   *bool
 }
 
 // decodeField reads the request's filters of one field: each value as an
@@ -63,6 +71,13 @@ func decodeField[T any](errs validate.ValidationErrors, request Request, field s
 		v := bodyargs.QueryItem[T](errs, arg, arg.Name(), text)
 		return &v
 	}
+	list := func(texts []string) []T {
+		values := make([]T, len(texts))
+		for i, text := range texts {
+			values[i] = *value(text)
+		}
+		return values
+	}
 	for _, filter := range request.Of(field) {
 		if len(filter.Values) == 0 {
 			continue
@@ -72,11 +87,12 @@ func decodeField[T any](errs validate.ValidationErrors, request Request, field s
 		switch filter.Operator {
 		case OperatorEq:
 			out.eq = value(first)
+		case OperatorNe:
+			out.ne = value(first)
 		case OperatorIn:
-			out.in = make([]T, len(filter.Values))
-			for i, text := range filter.Values {
-				out.in[i] = *value(text)
-			}
+			out.in = list(filter.Values)
+		case OperatorNotIn:
+			out.notIn = list(filter.Values)
 		case OperatorGT:
 			out.gt = value(first)
 		case OperatorGTE:
@@ -103,7 +119,7 @@ func DecodeEquals[T any](errs validate.ValidationErrors, request Request, field 
 	if !d.any {
 		return nil
 	}
-	return &Equals[T]{Eq: d.eq, In: d.in, IsNull: d.isNull}
+	return &Equals[T]{Eq: d.eq, Ne: d.ne, In: d.in, NotIn: d.notIn, IsNull: d.isNull}
 }
 
 // DecodeOrdered reads the request's filters of an ordered field, or nil
@@ -113,7 +129,7 @@ func DecodeOrdered[T any](errs validate.ValidationErrors, request Request, field
 	if !d.any {
 		return nil
 	}
-	return &Ordered[T]{Eq: d.eq, In: d.in, Gt: d.gt, Gte: d.gte, Lt: d.lt, Lte: d.lte, IsNull: d.isNull}
+	return &Ordered[T]{Eq: d.eq, Ne: d.ne, In: d.in, NotIn: d.notIn, Gt: d.gt, Gte: d.gte, Lt: d.lt, Lte: d.lte, IsNull: d.isNull}
 }
 
 // DecodeText reads the request's filters of a field of text, or nil when
@@ -123,7 +139,7 @@ func DecodeText[T any](errs validate.ValidationErrors, request Request, field st
 	if !d.any {
 		return nil
 	}
-	return &Text[T]{Eq: d.eq, In: d.in, Contains: d.contains, IsNull: d.isNull}
+	return &Text[T]{Eq: d.eq, Ne: d.ne, In: d.in, NotIn: d.notIn, Contains: d.contains, IsNull: d.isNull}
 }
 
 // text is a value as the query carries it: a JSON string's text, and any
@@ -148,8 +164,9 @@ func one[T any](filters []Filter, field string, operator Operator, value *T) []F
 	return append(filters, Filter{Field: field, Operator: operator, Values: []string{text(*value)}})
 }
 
-// many is the filter of an in's values, or none for an empty list.
-func many[T any](filters []Filter, field string, values []T) []Filter {
+// many is the filter of an in's or a notIn's values, or none for an empty
+// list.
+func many[T any](filters []Filter, field string, operator Operator, values []T) []Filter {
 	if len(values) == 0 {
 		return filters
 	}
@@ -157,7 +174,16 @@ func many[T any](filters []Filter, field string, values []T) []Filter {
 	for i, value := range values {
 		texts[i] = text(value)
 	}
-	return append(filters, Filter{Field: field, Operator: OperatorIn, Values: texts})
+	return append(filters, Filter{Field: field, Operator: operator, Values: texts})
+}
+
+// equality are the filters of the four members every shape holds, in the
+// order of Operators: eq, ne, in and notIn.
+func equality[T any](field string, eq, ne *T, in, notIn []T) []Filter {
+	filters := one(nil, field, OperatorEq, eq)
+	filters = one(filters, field, OperatorNe, ne)
+	filters = many(filters, field, OperatorIn, in)
+	return many(filters, field, OperatorNotIn, notIn)
 }
 
 // null is the isNull filter, or none when it is unset.
@@ -174,9 +200,7 @@ func (f *Equals[T]) Filters(field string) []Filter {
 	if f == nil {
 		return nil
 	}
-	filters := one(nil, field, OperatorEq, f.Eq)
-	filters = many(filters, field, f.In)
-	return null(filters, field, f.IsNull)
+	return null(equality(field, f.Eq, f.Ne, f.In, f.NotIn), field, f.IsNull)
 }
 
 // Filters are the filters the members set, of field, in the order of
@@ -185,8 +209,7 @@ func (f *Ordered[T]) Filters(field string) []Filter {
 	if f == nil {
 		return nil
 	}
-	filters := one(nil, field, OperatorEq, f.Eq)
-	filters = many(filters, field, f.In)
+	filters := equality(field, f.Eq, f.Ne, f.In, f.NotIn)
 	filters = one(filters, field, OperatorGT, f.Gt)
 	filters = one(filters, field, OperatorGTE, f.Gte)
 	filters = one(filters, field, OperatorLT, f.Lt)
@@ -200,8 +223,7 @@ func (f *Text[T]) Filters(field string) []Filter {
 	if f == nil {
 		return nil
 	}
-	filters := one(nil, field, OperatorEq, f.Eq)
-	filters = many(filters, field, f.In)
+	filters := equality(field, f.Eq, f.Ne, f.In, f.NotIn)
 	filters = one(filters, field, OperatorContains, f.Contains)
 	return null(filters, field, f.IsNull)
 }

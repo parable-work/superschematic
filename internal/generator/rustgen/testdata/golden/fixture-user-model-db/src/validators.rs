@@ -405,6 +405,110 @@ pub fn parse_user(value: Value, unknown_fields: rt::UnknownFields) -> Result<cra
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `UserApiKey` declares, by their wire names.
+pub const USER_API_KEY_FIELDS: &[&str] = &["id", "user", "name", "tokenHash", "permissions", "createdAt", "expiresAt", "lastUsedAt", "revokedAt"];
+
+static USER_API_KEY_NAME_RULES: &[rt::Rule] = &[rt::Rule::MaxLength(100, "must be at most 100 characters"), rt::Rule::MinLength(1, "must be at least 1 characters")];
+
+/// Validates a JSON value as `UserApiKey`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_user_api_key(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("user");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "user".to_owned(), nested, validate_user);
+        }
+        if rt::is_absent(field) {
+            errors.push("user", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("name");
+        if rt::is_absent(field) {
+            errors.push("name", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "name", field);
+        if let Some(value) = field {
+            rt::check_value_rules(&mut errors, "name", value, USER_API_KEY_NAME_RULES);
+        }
+    }
+    {
+        let field = value.get("tokenHash");
+        errors.set_result("tokenHash", scalars::validate_crypto_sha256_required(field));
+    }
+    {
+        let field = value.get("permissions");
+        rt::expect_list(&mut errors, "permissions", field);
+        if let Some(items) = rt::as_array(field) {
+            for (index, item) in items.iter().enumerate() {
+                rt::expect_string(&mut errors, &rt::index_path("permissions", index), Some(item));
+            }
+        }
+        if let Some(items) = rt::as_array(field) {
+            rt::require_elements(&mut errors, "permissions", items);
+        }
+    }
+    {
+        let field = value.get("createdAt");
+        errors.set_result("createdAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("expiresAt");
+        errors.set_result("expiresAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("lastUsedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("lastUsedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("revokedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("revokedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    errors
+}
+
+/// Validates a `UserApiKey` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_user_api_key_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_user_api_key)
+}
+
+/// Prepares a JSON value as `UserApiKey`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_user_api_key` decodes.
+pub fn prepare_user_api_key(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, USER_API_KEY_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_user_api_key(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `UserApiKey`: `prepare_user_api_key`, then decodes it.
+pub fn parse_user_api_key(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::UserApiKey, rt::ParseError> {
+    let value = prepare_user_api_key(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `UserCredential` declares, by their wire names.
 pub const USER_CREDENTIAL_FIELDS: &[&str] = &["id", "user", "passwordHash", "passwordChangedAt", "disabledAt", "pendingAt"];
 

@@ -5,30 +5,41 @@ import { parseIdentityConfig, type Argon2Params, type IdentityConfig } from './c
 import { clearCookie, sessionCookie } from './cookie.js';
 import { crossOriginAllowed, type CrossOriginRequest } from './crossorigin.js';
 import {
+  API_KEY_NOT_HELD_MESSAGE,
   FieldErrors,
+  SESSION_ONLY_MESSAGE,
   crossOrigin,
   identityConflict,
   identityForbidden,
   identityNotFound,
   invalidCredentials,
   invalidPermissions,
+  noApiKeys,
   notCovered,
   notPending,
   pendingApproval,
   unauthenticated,
 } from './errors.js';
 import { dummyHash, hashPassword, passwordProblem, verifyPassword } from './password.js';
-import { capabilitiesOf, effectivePermissions, uncovered, uncoveredUser, validPermission, type IdentityRoute } from './permissions.js';
-import { IdentityStoreError, isStoreError, type IdentityStore, type NewUser, type StoredRole, type StoredUser } from './store.js';
-import { extractCredential, hashToken, newToken, type Transport } from './token.js';
+import { capabilitiesOf, effectivePermissions, narrowRoles, uncovered, uncoveredUser, validPermission, type IdentityRoute } from './permissions.js';
+import {
+  IdentityStoreError,
+  isStoreError,
+  type IdentityStore,
+  type NewUser,
+  type StoredApiKey,
+  type StoredRole,
+  type StoredUser,
+} from './store.js';
+import { extractCredential, hashToken, isApiKey, newApiKey, newToken, type Transport } from './token.js';
 
 /*
 The user model's logic over a store, a config and a clock (D50), as the Go
 runtime's identity.Service has it: signing users in and out, resolving a
-request's session to a principal, and managing users, roles and grants. Its
-methods throw HttpProblems with the Go runtime's statuses and codes (400
-bad_request with field errors for a refused input), which the handlers
-answer as problem documents.
+request's session or API key to a principal, and managing users, roles,
+grants and API keys (D114). Its methods throw HttpProblems with the Go
+runtime's statuses and codes (400 bad_request with field errors for a
+refused input), which the handlers answer as problem documents.
 */
 
 /** The administration routes' permissions, under the naming key identity_permission_prefix: the prefix, a dot, and one of these. */
@@ -40,16 +51,23 @@ export const PERMISSION_ROLES_WRITE = 'roles.write';
 /** identity_permission_prefix's default. */
 export const DEFAULT_PERMISSION_PREFIX = 'identity';
 
-/** An authenticated caller: the user and their roles, and the session the request carried. */
+/** The bounds of createApiKey's input (D114): the most characters a key's name holds, and the most permissions a key names. */
+export const API_KEY_NAME_MAX_LENGTH = 100;
+export const API_KEY_MAX_PERMISSIONS = 100;
+
+/** An authenticated caller: the user and their roles, and the session or the API key the request carried. */
 export interface IdentityPrincipal {
   readonly id: string;
   readonly login: string;
   readonly name: string;
-  /** The user's roles, by name. */
+  /** The user's roles, by name. An API key made with permissions holds them narrowed to those (narrowRoles). */
   readonly roles: readonly StoredRole[];
   /** The roles' permissions, without repeats. */
   readonly permissions: readonly string[];
+  /** The session's id, and empty for an API key's principal. */
   readonly sessionId: string;
+  /** The API key's id (D114), and empty for a session's principal. */
+  readonly apiKeyId: string;
   readonly transport: Transport;
 }
 
@@ -142,6 +160,38 @@ export interface IdentityRole {
   readonly permissions: readonly string[];
 }
 
+/** The contract's CreateApiKeyInput (D114). */
+export interface CreateApiKeyInput {
+  readonly name: string;
+  /** How long the key lasts. Absent means the config's apiKeyMaxTtlSeconds, which also bounds it. */
+  readonly expiresInSeconds?: number;
+  /** The permissions the key names. Absent means every permission its user holds. */
+  readonly permissions?: readonly string[];
+}
+
+/** The contract's ApiKey (D114): an API key as the lists show one, never its token or its hash. */
+export interface IdentityApiKey {
+  readonly id: string;
+  readonly name: string;
+  /** Absent, never null, for a key that holds every permission its user does; a list, an empty one included, otherwise. */
+  readonly permissions?: readonly string[];
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  /** Absent until the key's first request. */
+  readonly lastUsedAt?: string;
+}
+
+/** The contract's CreatedApiKey (D114): createApiKey's answer, the one time the key's token is shown. */
+export interface CreatedApiKey {
+  readonly id: string;
+  readonly name: string;
+  /** Absent as IdentityApiKey's is. */
+  readonly permissions?: readonly string[];
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly token: string;
+}
+
 /** A session login or register created: the result the route answers, and what the HTTP layer sets the cookie from. */
 export interface IssuedSession {
   readonly result: LoginResult;
@@ -185,7 +235,7 @@ export interface IdentityServiceOptions {
   readonly config?: unknown;
   /** The clock sessions are created, expired and touched by. */
   readonly now?: () => Date;
-  /** Where session tokens' random bytes come from (node:crypto's by default), for tests. */
+  /** Where the random bytes of session tokens and API keys come from (node:crypto's by default), for tests. */
   readonly random?: (size: number) => Uint8Array;
   /** The matcher capabilities and the administration routes admit callers by; hasAnyPermission by default, as the router's. */
   readonly permissionMatcher?: PermissionMatcher;
@@ -197,6 +247,21 @@ export interface IdentityServiceOptions {
   readonly capabilities?: (principal: IdentityPrincipal) => Readonly<Record<string, boolean>> | Promise<Readonly<Record<string, boolean>>>;
   /** How register admits users (D81); open registration with no roles when absent. */
   readonly registration?: RegistrationOptions;
+  /**
+   * Turns on the session set's API key operations (D114), as the API's
+   * @userSessions({ apiKeys: true }) declares them: createApiKey,
+   * listApiKeys and revokeApiKey, which identityRoutes leaves out without
+   * it. A request authenticates with an API key whether they are on or
+   * not, whenever the store has the table.
+   */
+  readonly apiKeys?: boolean;
+  /**
+   * Turns on the administration set's API key operations (D114), as the
+   * API's @userAdministration({ apiKeys: true }) declares them:
+   * listUserApiKeys and revokeUserApiKey, which identityRoutes leaves out
+   * without it.
+   */
+  readonly apiKeyAdministration?: boolean;
 }
 
 /** Go's RFC 3339 with the fraction's trailing zeros dropped, in UTC: how the Go runtime writes a time. */
@@ -218,6 +283,33 @@ function identityUserOf(user: StoredUser): IdentityUser {
 
 function identityRoleOf(role: StoredRole): IdentityRole {
   return { id: role.id, name: role.name, permissions: [...role.permissions] };
+}
+
+function identityApiKeyOf(key: StoredApiKey): IdentityApiKey {
+  return {
+    id: key.id,
+    name: key.name,
+    ...(key.permissions !== null ? { permissions: [...key.permissions] } : {}),
+    createdAt: formatDateTime(key.createdAt),
+    expiresAt: formatDateTime(key.expiresAt),
+    ...(key.lastUsedAt !== null ? { lastUsedAt: formatDateTime(key.lastUsedAt) } : {}),
+  };
+}
+
+// Unicode's White_Space, which Go's strings.TrimSpace trims a key's name
+// of. String.prototype.trim differs at two characters: it keeps U+0085 and
+// trims U+FEFF.
+const SPACE = '[\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
+const OUTER_SPACE = new RegExp(`^${SPACE}+|${SPACE}+$`, 'gu');
+
+/**
+ * Refuses a caller an API key authenticated, with 403 forbidden (D114). A
+ * key does not act on its own account: it neither makes, lists nor revokes
+ * keys, signs out nor changes the password, so a leaked one does none of
+ * them.
+ */
+function sessionOnly(p: IdentityPrincipal): void {
+  if ((p.apiKeyId ?? '') !== '') throw identityForbidden(SESSION_ONLY_MESSAGE);
 }
 
 /** A login's transport: bearer when absent. */
@@ -243,10 +335,11 @@ function checkPasswordField(f: FieldErrors, field: string, password: string): vo
   if (problem !== undefined) f.add(field, 'length', problem);
 }
 
-/** Turns a store's not-found, no-roles and role-name refusals into problems. */
+/** Turns a store's not-found, no-roles, no-API-keys and role-name refusals into problems. */
 function storeProblem(error: unknown, what: string): unknown {
   if (isStoreError(error, 'not_found')) return identityNotFound(what, error);
   if (isStoreError(error, 'no_roles')) return identityNotFound('The schema has no roles', error);
+  if (isStoreError(error, 'no_api_keys')) return noApiKeys(error);
   if (isStoreError(error, 'role_name_taken')) return identityConflict('The role name is taken');
   return error;
 }
@@ -289,6 +382,10 @@ export class IdentityService {
   private readonly dummy: Promise<string>;
   /** How register admits users. */
   readonly registration: RegistrationOptions;
+  /** Whether the session set's API key operations are turned on (IdentityServiceOptions.apiKeys). */
+  readonly apiKeys: boolean;
+  /** Whether the administration set's API key operations are turned on (IdentityServiceOptions.apiKeyAdministration). */
+  readonly apiKeyAdministration: boolean;
 
   /** Validates the config and starts hashing the dummy password an unknown login verifies against, at the config's cost. */
   constructor(options: IdentityServiceOptions) {
@@ -307,6 +404,8 @@ export class IdentityService {
     this.routes = [...(options.routes ?? [])];
     this.capabilitiesOf = options.capabilities;
     this.registration = checkRegistration(options.registration ?? {});
+    this.apiKeys = options.apiKeys === true;
+    this.apiKeyAdministration = options.apiKeyAdministration === true;
     this.params = this.config.password.argon2;
     this.dummy = dummyHash(this.params);
     // A failure surfaces on the first login that needs the hash.
@@ -441,21 +540,23 @@ export class IdentityService {
   }
 
   /**
-   * Resolves a request's session to its principal. The credential is the
-   * Authorization bearer token, or the session cookie without an
-   * Authorization header. A cookie request with a method other than GET,
-   * HEAD or OPTIONS passes the cross-origin check first (403
-   * cross_origin). Then the session must exist, be neither revoked,
-   * expired nor idle, and belong to a user who is not disabled; every other
-   * outcome is 401 unauthorized, and a refused cookie's 401 carries the
-   * Set-Cookie that clears it.
+   * Resolves a request's session or API key to its principal. The
+   * credential is the Authorization bearer token, a session's or an API
+   * key, or the session cookie without an Authorization header. A cookie
+   * request with a method other than GET, HEAD or OPTIONS passes the
+   * cross-origin check first (403 cross_origin). Then the session must
+   * exist, be neither revoked, expired nor idle, and belong to a user who
+   * is not disabled; every other outcome is 401 unauthorized, and a refused
+   * cookie's 401 carries the Set-Cookie that clears it. An API key is held
+   * to the same rules but the idle one, and its lastUsedAt is written as
+   * lastSeenAt is (D114).
    */
   async authenticate(request: IdentityRequest): Promise<IdentityPrincipal> {
     const credential = extractCredential(request.headers, this.cookieName);
     const clear = credential.transport === 'cookie' ? { 'set-cookie': this.clearCookie() } : undefined;
     if (credential.outcome === 'none') throw unauthenticated(new Error('the request carries no session'));
     if (credential.outcome === 'invalid') {
-      throw unauthenticated(new Error(`the ${credential.transport} credential is not a session token`), clear);
+      throw unauthenticated(new Error(`the ${credential.transport} credential is not a token the transport carries`), clear);
     }
     if (credential.transport === 'cookie' && !this.crossOriginAllowed(request)) throw crossOrigin();
     try {
@@ -468,8 +569,14 @@ export class IdentityService {
     }
   }
 
-  /** Resolves a session token to its principal, as authenticate does once it has read the token from a request. */
+  /**
+   * Resolves a session token to its principal, as authenticate does once it
+   * has read the token from a request. A token that is an API key is
+   * resolved as one with the bearer transport, the only one that carries it
+   * (D114).
+   */
   async authenticateToken(token: string, transport: Transport): Promise<IdentityPrincipal> {
+    if (transport === 'bearer' && isApiKey(token)) return this.authenticateApiKey(token);
     let rec;
     try {
       rec = await this.store.findSession(hashToken(token));
@@ -498,12 +605,56 @@ export class IdentityService {
       roles,
       permissions: effectivePermissions(roles),
       sessionId: session.id,
+      apiKeyId: '',
       transport,
     };
   }
 
-  /** Revokes the caller's session. */
+  /**
+   * Resolves an API key to its principal (D114). In this order, the key
+   * must exist, be neither revoked nor expired, and belong to a user who is
+   * neither disabled nor pending; every other outcome is the 401
+   * unauthorized a session's is. No idle timeout ends a key. Its lastUsedAt
+   * is written when it is null or older than the touch interval, as a
+   * session's lastSeenAt is. A key made with permissions holds its user's
+   * roles narrowed to them (narrowRoles); one made with none holds them
+   * whole, as a session does.
+   */
+  private async authenticateApiKey(token: string): Promise<IdentityPrincipal> {
+    let rec;
+    try {
+      rec = await this.store.findApiKey(hashToken(token));
+    } catch (error) {
+      if (isStoreError(error, 'not_found')) throw unauthenticated(new Error('no API key has the token'));
+      throw error;
+    }
+    const now = this.now().getTime();
+    const { apiKey: key, user } = rec;
+    if (key.revokedAt !== null) throw unauthenticated(new Error('the API key is revoked'));
+    if (now >= key.expiresAt.getTime()) throw unauthenticated(new Error('the API key is expired'));
+    if (user.disabled) throw unauthenticated(new Error('the user is disabled'));
+    if (user.pending) throw unauthenticated(new Error('the user waits for approval'));
+    const interval = this.config.touchIntervalSeconds * 1000;
+    if (key.lastUsedAt === null || now - key.lastUsedAt.getTime() >= interval) {
+      await this.store.touchApiKey(key.id, new Date(now), new Date(now - interval));
+    }
+    const held = await this.store.userRoles(user.id);
+    const roles = key.permissions === null ? held : narrowRoles(held, key.permissions);
+    return {
+      id: user.id,
+      login: user.login,
+      name: user.name,
+      roles,
+      permissions: effectivePermissions(roles),
+      sessionId: '',
+      apiKeyId: key.id,
+      transport: 'bearer',
+    };
+  }
+
+  /** Revokes the caller's session. An API key's principal has none to revoke and is 403 forbidden. */
   async logout(p: IdentityPrincipal): Promise<void> {
+    sessionOnly(p);
     if (p.sessionId === '') throw unauthenticated(new Error('the caller has no session'));
     await this.store.revokeSession(p.sessionId, this.now());
   }
@@ -519,8 +670,13 @@ export class IdentityService {
     return { operations: capabilitiesOf(this.routes, p.permissions, this.matcher) };
   }
 
-  /** Sets the caller's password once current verifies (401 invalid_credentials otherwise), and revokes the user's other sessions. */
+  /**
+   * Sets the caller's password once current verifies (401
+   * invalid_credentials otherwise), and revokes the user's other sessions.
+   * The user's API keys live on. An API key's principal is 403 forbidden.
+   */
   async changePassword(p: IdentityPrincipal, input: ChangePasswordInput): Promise<void> {
+    sessionOnly(p);
     const f = new FieldErrors();
     checkPasswordField(f, 'current', input.current);
     checkPasswordField(f, 'password', input.password);
@@ -580,12 +736,16 @@ export class IdentityService {
     }
   }
 
-  /** Disables a user and revokes their sessions (users.write). The caller's permissions must cover each of the user's. */
+  /** Disables a user and revokes their sessions and their API keys (users.write). The caller's permissions must cover each of the user's. */
   disableUser(p: IdentityPrincipal, id: string): Promise<IdentityUser> {
     return this.setDisabled(p, id, true);
   }
 
-  /** Enables a disabled user (users.write). The caller's permissions must cover each of the user's. */
+  /**
+   * Enables a disabled user (users.write), which brings back neither a
+   * session nor an API key the disable revoked. The caller's permissions
+   * must cover each of the user's.
+   */
   enableUser(p: IdentityPrincipal, id: string): Promise<IdentityUser> {
     return this.setDisabled(p, id, false);
   }
@@ -619,7 +779,11 @@ export class IdentityService {
     return this.storedUser(id);
   }
 
-  /** Sets a user's password and revokes their sessions (users.write). The caller's permissions must cover each of the user's. */
+  /**
+   * Sets a user's password and revokes their sessions (users.write). The
+   * user's API keys live on. The caller's permissions must cover each of
+   * the user's.
+   */
   async setUserPassword(p: IdentityPrincipal, id: string, input: SetPasswordInput): Promise<void> {
     this.require(p, PERMISSION_USERS_WRITE);
     const f = new FieldErrors();
@@ -751,5 +915,150 @@ export class IdentityService {
       throw storeProblem(error, 'User or role');
     }
     return this.storedUser(userId);
+  }
+
+  /**
+   * Admits the caller of an API key operation of the session set (D114): an
+   * authenticated one (401) signed in with a session, not an API key (403),
+   * over a store that has API keys (404).
+   */
+  private ownApiKeys(p: IdentityPrincipal): void {
+    if (p.id === '') throw unauthenticated(new Error('the caller is not authenticated'));
+    sessionOnly(p);
+    this.haveApiKeys();
+  }
+
+  /** Throws the 404 of an API key operation over a store whose descriptor names no API key table. */
+  private haveApiKeys(): void {
+    if (!this.store.hasApiKeys()) throw noApiKeys();
+  }
+
+  /**
+   * Makes the caller an API key (D114) and answers its token, this once.
+   * The caller is signed in with a session. The name, trimmed of
+   * surrounding white space, is 1 to API_KEY_NAME_MAX_LENGTH characters;
+   * expiresInSeconds, when present, is 1 to the config's
+   * apiKeyMaxTtlSeconds, which is also the lifetime without it;
+   * permissions, when present, are 1 to API_KEY_MAX_PERMISSIONS of them
+   * (400). Each has a permission's form and is named once (422), and the
+   * caller holds a permission covering it (403: a key names only what its
+   * user holds).
+   */
+  async createApiKey(p: IdentityPrincipal, input: CreateApiKeyInput): Promise<CreatedApiKey> {
+    this.ownApiKeys(p);
+    const f = new FieldErrors();
+    const name = input.name.replace(OUTER_SPACE, '');
+    // Characters are code points, as Go counts a string's runes.
+    const length = [...name].length;
+    if (length === 0) f.add('name', 'required', 'name is required');
+    else if (length > API_KEY_NAME_MAX_LENGTH) f.add('name', 'maxLength', `name must be at most ${API_KEY_NAME_MAX_LENGTH} characters`);
+    let seconds = this.config.apiKeyMaxTtlSeconds;
+    const given = input.expiresInSeconds ?? undefined;
+    if (given !== undefined) {
+      if (!Number.isInteger(given)) f.add('expiresInSeconds', 'integer', 'expiresInSeconds must be an integer');
+      else if (given < 1) f.add('expiresInSeconds', 'min', 'expiresInSeconds must be at least 1');
+      else if (given > seconds) f.add('expiresInSeconds', 'max', `expiresInSeconds must be at most ${seconds}`);
+      else seconds = given;
+    }
+    const named = input.permissions ?? null;
+    if (named !== null) {
+      if (named.length === 0) f.add('permissions', 'listMin', 'permissions must contain at least 1 items');
+      else if (named.length > API_KEY_MAX_PERMISSIONS) {
+        f.add('permissions', 'listMax', `permissions must contain at most ${API_KEY_MAX_PERMISSIONS} items`);
+      }
+    }
+    f.throwIfAny();
+    // A permission that has not a permission's form, and each one that
+    // repeats an earlier one, in the order given.
+    const refused: string[] = [];
+    const seen = new Set<string>();
+    for (const permission of named ?? []) {
+      if (!validPermission(permission) || seen.has(permission)) refused.push(permission);
+      seen.add(permission);
+    }
+    if (refused.length > 0) throw invalidPermissions(refused);
+    const missing = uncovered(p.permissions, named ?? []);
+    if (missing.length > 0) throw identityForbidden(API_KEY_NOT_HELD_MESSAGE, { permissions: missing });
+    const token = newApiKey(this.random);
+    const now = this.now();
+    let key: StoredApiKey;
+    try {
+      key = await this.store.createApiKey({
+        userId: p.id,
+        name,
+        tokenHash: hashToken(token),
+        permissions: named === null ? null : [...named],
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + seconds * 1000),
+      });
+    } catch (error) {
+      if (isStoreError(error, 'not_found')) throw unauthenticated(error);
+      throw storeProblem(error, 'User');
+    }
+    return {
+      id: key.id,
+      name: key.name,
+      ...(key.permissions !== null ? { permissions: [...key.permissions] } : {}),
+      createdAt: formatDateTime(key.createdAt),
+      expiresAt: formatDateTime(key.expiresAt),
+      token,
+    };
+  }
+
+  /**
+   * Lists the caller's API keys that are not revoked, expired ones
+   * included, newest first (D114). The caller is signed in with a session.
+   */
+  async listApiKeys(p: IdentityPrincipal): Promise<IdentityApiKey[]> {
+    this.ownApiKeys(p);
+    return this.storedApiKeys(p.id);
+  }
+
+  private async storedApiKeys(userId: string): Promise<IdentityApiKey[]> {
+    try {
+      return (await this.store.listApiKeys(userId)).map(identityApiKeyOf);
+    } catch (error) {
+      throw storeProblem(error, 'User');
+    }
+  }
+
+  /**
+   * Revokes the caller's API key with keyId (D114). A key that does not
+   * exist, is another user's or is revoked already is 404. The caller is
+   * signed in with a session.
+   */
+  async revokeApiKey(p: IdentityPrincipal, keyId: string): Promise<void> {
+    this.ownApiKeys(p);
+    try {
+      await this.store.revokeApiKey(p.id, keyId, this.now());
+    } catch (error) {
+      throw storeProblem(error, 'API key');
+    }
+  }
+
+  /** Lists a user's API keys as listApiKeys lists the caller's (users.read, D114). A user that does not exist is 404. */
+  async listUserApiKeys(p: IdentityPrincipal, userId: string): Promise<IdentityApiKey[]> {
+    this.require(p, PERMISSION_USERS_READ);
+    this.haveApiKeys();
+    try {
+      await this.store.getUser(userId);
+    } catch (error) {
+      throw storeProblem(error, 'User');
+    }
+    return this.storedApiKeys(userId);
+  }
+
+  /**
+   * Revokes a user's API key with keyId (users.write, D114). A key that
+   * does not exist, is another user's or is revoked already is 404.
+   */
+  async revokeUserApiKey(p: IdentityPrincipal, userId: string, keyId: string): Promise<void> {
+    this.require(p, PERMISSION_USERS_WRITE);
+    this.haveApiKeys();
+    try {
+      await this.store.revokeApiKey(userId, keyId, this.now());
+    } catch (error) {
+      throw storeProblem(error, 'API key');
+    }
   }
 }

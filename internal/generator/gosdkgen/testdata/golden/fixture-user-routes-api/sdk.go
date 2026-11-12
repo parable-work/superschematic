@@ -13,10 +13,13 @@ type FixtureUserRoutesApiSDK struct {
 	// Endpoints:
 	// - Capabilities: For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller. Requires authentication.
 	// - ChangePassword: Changes the caller's password, given their current one, and ends their other sessions. It answers true. Requires authentication.
+	// - CreateApiKey: Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key. Requires authentication.
+	// - ListApiKeys: Lists the caller's API keys that are not revoked, newest first, each without its token. Requires authentication.
 	// - Login: Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.
 	// - Logout: Ends the caller's session and clears the session cookie. It answers true. Requires authentication.
 	// - Me: The caller's user, the roles they hold and the permissions those roles grant. Requires authentication.
 	// - Register: Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
+	// - RevokeApiKey: Revokes an API key of the caller's, which authenticates no request after. It answers true. Requires authentication.
 	AccountNamespace *namespaces.AccountNamespace
 	// AccountAdminNamespace exposes account-admin namespace operations.
 	//
@@ -30,8 +33,10 @@ type FixtureUserRoutesApiSDK struct {
 	// - GetUser: One user and the roles they hold. Requires authentication.
 	// - GrantRole: Grants a user a role. The caller's own permissions must cover the role's. Requires authentication.
 	// - ListRoles: Lists the roles and the permissions each grants. Requires authentication.
+	// - ListUserApiKeys: Lists a user's API keys that are not revoked, newest first, each without its token. Requires authentication.
 	// - ListUsers: Lists the users and the roles each holds. Requires authentication.
 	// - RevokeRole: Revokes a role from a user. Requires authentication.
+	// - RevokeUserApiKey: Revokes an API key of a user's, which authenticates no request after. It answers true. Requires authentication.
 	// - SetUserPassword: Sets a user's password and ends their sessions. It answers true. Requires authentication.
 	// - UpdateRole: Renames a role or replaces its permissions. The caller's own permissions must cover each permission given. Requires authentication.
 	AccountAdminNamespace *namespaces.AccountAdminNamespace

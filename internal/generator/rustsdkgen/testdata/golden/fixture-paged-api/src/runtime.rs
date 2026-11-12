@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use crate::errors::SDKError;
 
-/// The most values a filter's `one_of` may list, and the most filter
-/// parameters a request may hold, as the route reads them (D106).
+/// The most values a filter's `one_of` or `not_in` may list, and the most
+/// filter parameters a request may hold, as the route reads them (D106).
 const FILTER_MAX_IN_VALUES: usize = 100;
 const FILTER_MAX_PARAMETERS: usize = 50;
 
@@ -26,12 +26,16 @@ const FILTER_MAX_PARAMETERS: usize = 50;
 /// enum or a boolean. Each member is an operator, `None` or empty when
 /// the filter does not use it, and the ones set hold at once. `one_of` is
 /// the wire's `in`: the field is one of the values, 1 to 100 of them.
-/// `is_null` is for a field that may be null: `true` keeps the items whose
-/// field is null, `false` the others.
+/// `ne` and `not_in`, the wire's `notIn`, negate `eq` and `one_of` (D112):
+/// each keeps the items the other leaves out, an item whose field is null
+/// among them. `is_null` is for a field that may be null: `true` keeps the
+/// items whose field is null, `false` the others.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Equals<T> {
     pub eq: Option<T>,
+    pub ne: Option<T>,
     pub one_of: Vec<T>,
+    pub not_in: Vec<T>,
     pub is_null: Option<bool>,
 }
 
@@ -40,7 +44,9 @@ pub struct Equals<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ordered<T> {
     pub eq: Option<T>,
+    pub ne: Option<T>,
     pub one_of: Vec<T>,
+    pub not_in: Vec<T>,
     pub gt: Option<T>,
     pub gte: Option<T>,
     pub lt: Option<T>,
@@ -53,7 +59,9 @@ pub struct Ordered<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Text<T> {
     pub eq: Option<T>,
+    pub ne: Option<T>,
     pub one_of: Vec<T>,
+    pub not_in: Vec<T>,
     pub contains: Option<String>,
     pub is_null: Option<bool>,
 }
@@ -64,7 +72,9 @@ impl<T> Default for Equals<T> {
     fn default() -> Self {
         Self {
             eq: None,
+            ne: None,
             one_of: Vec::new(),
+            not_in: Vec::new(),
             is_null: None,
         }
     }
@@ -74,7 +84,9 @@ impl<T> Default for Ordered<T> {
     fn default() -> Self {
         Self {
             eq: None,
+            ne: None,
             one_of: Vec::new(),
+            not_in: Vec::new(),
             gt: None,
             gte: None,
             lt: None,
@@ -88,7 +100,9 @@ impl<T> Default for Text<T> {
     fn default() -> Self {
         Self {
             eq: None,
+            ne: None,
             one_of: Vec::new(),
+            not_in: Vec::new(),
             contains: None,
             is_null: None,
         }
@@ -98,7 +112,9 @@ impl<T> Default for Text<T> {
 /// One field's operators, of any shape, as [`append_filter`] writes them.
 struct FilterOperators<'a, T> {
     eq: Option<&'a T>,
+    ne: Option<&'a T>,
     one_of: &'a [T],
+    not_in: &'a [T],
     gt: Option<&'a T>,
     gte: Option<&'a T>,
     lt: Option<&'a T>,
@@ -110,11 +126,11 @@ struct FilterOperators<'a, T> {
 /// Appends one field's filter to a request's query in the bracket form
 /// (D106), a pair for each operator set, in the operators' order:
 /// `filter[field]=value` for `eq` and `filter[field][op]=value` for any
-/// other, `one_of` as `in` with its values joined by commas. What the
-/// route would refuse is refused before the request: more values than an
-/// `in` may list, one of them that the comma-separated value cannot carry
-/// as it is, a `contains` of no text, and an `is_null` on a field that is
-/// never null.
+/// other, `one_of` as `in` and `not_in` as `notIn`, each with its values
+/// joined by commas. What the route would refuse is refused before the
+/// request: more values than an `in` or a `notIn` may list, one of them
+/// that the comma-separated value cannot carry as it is, a `contains` of
+/// no text, and an `is_null` on a field that is never null.
 fn append_filter<T: std::fmt::Display>(
     field: &str,
     nullable: bool,
@@ -125,21 +141,27 @@ fn append_filter<T: std::fmt::Display>(
     if let Some(value) = operators.eq {
         query_params.push((name.clone(), value.to_string()));
     }
-    if !operators.one_of.is_empty() {
-        let in_name = format!("{}[in]", name);
-        if operators.one_of.len() > FILTER_MAX_IN_VALUES {
+    if let Some(value) = operators.ne {
+        query_params.push((format!("{}[ne]", name), value.to_string()));
+    }
+    for (operator, values) in [("in", operators.one_of), ("notIn", operators.not_in)] {
+        if values.is_empty() {
+            continue;
+        }
+        let list_name = format!("{}[{}]", name, operator);
+        if values.len() > FILTER_MAX_IN_VALUES {
             return Err(SDKError::config(format!(
                 "{} must hold at most {} values",
-                in_name, FILTER_MAX_IN_VALUES
+                list_name, FILTER_MAX_IN_VALUES
             )));
         }
-        let mut items = Vec::with_capacity(operators.one_of.len());
-        for (index, value) in operators.one_of.iter().enumerate() {
+        let mut items = Vec::with_capacity(values.len());
+        for (index, value) in values.iter().enumerate() {
             let text = value.to_string();
-            check_query_list_item(&in_name, index, &text)?;
+            check_query_list_item(&list_name, index, &text)?;
             items.push(text);
         }
-        query_params.push((in_name, items.join(",")));
+        query_params.push((list_name, items.join(",")));
     }
     for (operator, value) in [
         ("gt", operators.gt),
@@ -179,7 +201,9 @@ impl<T: std::fmt::Display> Equals<T> {
     ) -> Result<(), SDKError> {
         let operators = FilterOperators {
             eq: self.eq.as_ref(),
+            ne: self.ne.as_ref(),
             one_of: &self.one_of,
+            not_in: &self.not_in,
             gt: None,
             gte: None,
             lt: None,
@@ -202,7 +226,9 @@ impl<T: std::fmt::Display> Ordered<T> {
     ) -> Result<(), SDKError> {
         let operators = FilterOperators {
             eq: self.eq.as_ref(),
+            ne: self.ne.as_ref(),
             one_of: &self.one_of,
+            not_in: &self.not_in,
             gt: self.gt.as_ref(),
             gte: self.gte.as_ref(),
             lt: self.lt.as_ref(),
@@ -225,7 +251,9 @@ impl<T: std::fmt::Display> Text<T> {
     ) -> Result<(), SDKError> {
         let operators = FilterOperators {
             eq: self.eq.as_ref(),
+            ne: self.ne.as_ref(),
             one_of: &self.one_of,
+            not_in: &self.not_in,
             gt: None,
             gte: None,
             lt: None,
@@ -274,7 +302,7 @@ pub fn path_segment(value: &impl std::fmt::Display) -> String {
 /// sent as one comma-separated value (?name=a,b). The route splits that
 /// value on commas, trims each item and refuses an empty one, so an item
 /// that is empty or blank, or holds a comma or surrounding space, cannot be
-/// sent as it is. A filter's `in` is read the same (D106).
+/// sent as it is. A filter's `in` and `notIn` are read the same (D106).
 pub fn check_query_list_item(name: &str, index: usize, text: &str) -> Result<(), SDKError> {
     if text.trim().is_empty() {
         return Err(SDKError::config(format!("{}[{}] is required", name, index)));

@@ -6,7 +6,7 @@ import importlib
 import re
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
 from ..errors import SDKError, ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
@@ -33,8 +33,11 @@ def _load_types_package() -> Any | None:
     return _TYPES_PACKAGE_MODULE
 if TYPE_CHECKING:
     from schemas_types_fixture_user_routes_api import (
+        ApiKey,
         Capabilities,
         ChangePasswordInput,
+        CreateApiKeyInput,
+        CreatedApiKey,
         CurrentUser,
         LoginInput,
         LoginResult,
@@ -414,6 +417,38 @@ class AccountNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "", False)
+    def create_api_key(self, input_data: CreateApiKeyInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> CreatedApiKey:
+        path = "/api/auth/keys"
+        if input_data is None:
+            raise ValidationError(
+                {"": [{"validator": "required", "message": "input is required"}]},
+            )
+        validated_input_data = self._validate_input_model(input_data, "CreateApiKeyInput")
+        query_params: dict[str, Any] | None = None
+        payload: Any = self._client.to_dict(validated_input_data)
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "CreatedApiKey", False)
+    def list_api_keys(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[ApiKey]:
+        path = "/api/auth/keys"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "ApiKey", True)
     def login(self, input_data: LoginInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> LoginResult:
         path = "/api/auth/login"
         if input_data is None:
@@ -478,3 +513,16 @@ class AccountNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "RegisterResult", False)
+    def revoke_api_key(self, id: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> bool:
+        path = f"/api/auth/keys/{path_segment(id)}"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="DELETE",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)

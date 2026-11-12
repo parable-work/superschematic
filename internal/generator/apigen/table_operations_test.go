@@ -269,8 +269,8 @@ func TestTableOperationsAPICompiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"where := &orm.IssueFilter{TeamID: &orm.UUIDFilter{Eq: &TeamId}}",
-		"where.AllOf = append(where.AllOf, orm.IssueFilter{TeamID: &orm.UUIDFilter{Eq: filter.Eq, In: filter.In}})",
-		"where.AssigneeID = &orm.UUIDFilter{Eq: filter.Eq, In: filter.In, IsNull: filter.IsNull}",
+		"where.AllOf = append(where.AllOf, orm.IssueFilter{TeamID: &orm.UUIDFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn}})",
+		"where.AssigneeID = &orm.UUIDFilter{Eq: filter.Eq, Ne: filter.Ne, In: filter.In, NotIn: filter.NotIn, IsNull: filter.IsNull}",
 	} {
 		if !strings.Contains(string(filtered), want) {
 			t.Errorf("tables.go holds no %q", want)

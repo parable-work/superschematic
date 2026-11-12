@@ -32,8 +32,9 @@ export type SearchQuery<T extends string = string> = (T & { readonly __queryPara
 /**
  * The order a paged list is read in (D60, amended): a field Fields names,
  * ascending, or after a "-", descending; ties break by the item's id in
- * the same direction. @paginated's defaultSort is the order when none is
- * sent. An operation takes one.
+ * the same direction. A field that may be null sorts its items with no
+ * value last, in either direction (D112). @paginated's defaultSort is the
+ * order when none is sent. An operation takes one.
  */
 export type SortBy<Item, Fields extends readonly (keyof Item & string)[]> =
   | ((Fields[number] | `-${Fields[number]}`) & { readonly __queryParam: true; readonly __sortBy: Fields })
@@ -45,8 +46,10 @@ export type SortBy<Item, Fields extends readonly (keyof Item & string)[]> =
  * "priority"]>`. On the wire each is `filter[field]=value` for equality
  * or `filter[field][op]=value` for an operator, and all of them hold at
  * once. A field's operators follow its type: `eq` and `in` on every
- * field, `gt`, `gte`, `lt` and `lte` on a number, a date and a time,
- * `contains` on text, and `isNull` on a field that may be null. An
+ * field, with `ne` and `notIn`, which keep the items those two leave out,
+ * an item whose field is null among them (D112); `gt`, `gte`, `lt` and
+ * `lte` on a number, a date and a time, `contains` on text, and `isNull`
+ * on a field that may be null. An
  * implementation takes the filter typed, a member per field. An operation
  * takes one.
  */

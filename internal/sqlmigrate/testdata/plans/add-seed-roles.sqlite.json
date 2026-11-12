@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "49b7866e0ba67c03f26f6a4711ebd6e175438a4e9720871194d49e33a683ab36",
-  "hash": "640f0967aa4d092403cad30ec8b37b93beee6ed7cbbb1b1943a0304500ae614d",
+  "from": "bc11ea827f5a60de59d3dea18f5f69e633253917cec34d754ebf3c11d9d860a1",
+  "hash": "23d85df8fef23a63c2c3e32ae1f92aae5d2f0461aeb9087d0dd00097bb52606a",
   "service": "fixture-user-model-db",
   "steps": [
     {
@@ -15,7 +15,7 @@
       "transactional": true
     }
   ],
-  "to": "f7e84ea694670e6241c12fcade6f5f053891cc1cf445717ac060cf90ed3178b7",
+  "to": "212a97022c14b216b8b9394aaa929c64aa57a57c2898f35d15ab09dab4ac8729",
   "toModel": null,
   "version": 1
 }

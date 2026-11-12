@@ -63,7 +63,7 @@ func (p *Products) GetProduct(ctx context.Context, id types.IdentityUUID) (*type
 func (p *Products) ListProducts(ctx context.Context, filter api.ProductListProductsFilter) ([]types.ProductView, error) {
 	var where *orm.ProductFilter
 	if by := filter.InStock; by != nil {
-		where = &orm.ProductFilter{InStock: &orm.BoolFilter{Eq: by.Eq, In: by.In}}
+		where = &orm.ProductFilter{InStock: &orm.BoolFilter{Eq: by.Eq, Ne: by.Ne, In: by.In, NotIn: by.NotIn}}
 	}
 	rows, _, err := p.DB.GetProductRepository().FindMany(ctx, where, &orm.ProductFindOptions{
 		Fields: orm.ProductFields{}.All(),

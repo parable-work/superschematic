@@ -105,8 +105,8 @@ export const roleTable: TableDefinition = {
   table: "role",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "role.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "role.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "role.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "role.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "permissions", column: "permissions", field: "permissions", qualified: "role.permissions", list: true, required: true },
   ],
   statements: {
@@ -125,7 +125,9 @@ export const roleTable: TableDefinition = {
     page: "SELECT %s FROM role%s%s LIMIT %d",
     pageAfterKey: "role.id %s %s",
     pageAfter: "(%s, role.id) %s ((SELECT %s FROM role AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM role AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", role.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM role WHERE role.id = $1)",
     insert: "INSERT INTO role (%s) VALUES (%s) RETURNING %s",
@@ -206,7 +208,7 @@ export interface SessionFilter {
 export type SessionOrderField = "id" | "tokenHash" | "createdAt" | "expiresAt" | "lastSeenAt" | "revokedAt";
 
 /** The members findPage orders rows of Session by (D60, amended); ties break by id. */
-export type SessionSortField = "id" | "tokenHash" | "createdAt" | "expiresAt";
+export type SessionSortField = "id" | "tokenHash" | "createdAt" | "expiresAt" | "lastSeenAt" | "revokedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type SessionUniqueKey = readonly ["id"] | readonly ["tokenHash"];
@@ -241,13 +243,13 @@ export const sessionTable: TableDefinition = {
   table: "\"session\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"session\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "userId", column: "user_id", field: "user", qualified: "\"session\".user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
-    { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "\"session\".token_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "\"session\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "userId", column: "user_id", field: "user", qualified: "\"session\".user_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "\"session\".token_hash", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
@@ -265,7 +267,9 @@ export const sessionTable: TableDefinition = {
     page: "SELECT %s FROM \"session\"%s%s LIMIT %d",
     pageAfterKey: "\"session\".id %s %s",
     pageAfter: "(%s, \"session\".id) %s ((SELECT %s FROM \"session\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"session\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"session\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"session\" WHERE \"session\".id = $1)",
     insert: "INSERT INTO \"session\" (%s) VALUES (%s) RETURNING %s",
@@ -321,6 +325,8 @@ export interface UserFilter {
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows a Session row's user points at, or none does. */
   referencedBySessionUser?: ReferencedByFilter;
+  /** The rows a UserApiKey row's user points at, or none does. */
+  referencedByUserApiKeyUser?: ReferencedByFilter;
   /** The rows a UserCredential row's user points at, or none does. */
   referencedByUserCredentialUser?: ReferencedByFilter;
   /** The rows a UserRoleGrant row's user points at, or none does. */
@@ -348,6 +354,7 @@ export interface UserPageKey {
 /** The relations a read of User includes (D90): each one's rows, their own relations, and how many a row has. */
 export interface UserRelations {
   readonly sessions: Related<SessionRow, SessionRelations, 'many'>;
+  readonly userApiKeys: Related<UserApiKeyRow, UserApiKeyRelations, 'many'>;
   readonly userCredentials: Related<UserCredentialRow, UserCredentialRelations, 'many'>;
   readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
 }
@@ -372,10 +379,10 @@ export const userTable: TableDefinition = {
   table: "\"user\"",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "\"user\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "email", column: "email", field: "email", qualified: "\"user\".email", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "displayName", column: "display_name", field: "displayName", qualified: "\"user\".display_name", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"user\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "\"user\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "email", column: "email", field: "email", qualified: "\"user\".email", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "displayName", column: "display_name", field: "displayName", qualified: "\"user\".display_name", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"user\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"email\", \"display_name\", \"created_at\"",
@@ -393,7 +400,9 @@ export const userTable: TableDefinition = {
     page: "SELECT %s FROM \"user\"%s%s LIMIT %d",
     pageAfterKey: "\"user\".id %s %s",
     pageAfter: "(%s, \"user\".id) %s ((SELECT %s FROM \"user\" AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM \"user\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", \"user\".id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM \"user\" WHERE \"user\".id = $1)",
     insert: "INSERT INTO \"user\" (%s) VALUES (%s) RETURNING %s",
@@ -415,13 +424,163 @@ export const userTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
+    { filter: "referencedByUserApiKeyUser", probe: "SELECT 1 FROM user_api_key WHERE user_api_key.user_id = \"user\".id" },
     { filter: "referencedByUserCredentialUser", probe: "SELECT 1 FROM user_credential WHERE user_credential.user_id = \"user\".id" },
     { filter: "referencedByUserRoleGrantUser", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id" },
   ],
   many: [
     { name: "sessions", target: "session", column: "userId" },
+    { name: "userApiKeys", target: "userApiKey", column: "userId" },
     { name: "userCredentials", target: "userCredential", column: "userId" },
     { name: "userRoleGrants", target: "userRoleGrant", column: "userId" },
+  ],
+};
+
+/**
+ * A row of UserApiKey, the user_api_key table: An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.
+ */
+export interface UserApiKeyRow {
+  id: T.IdentityUUID;
+  userId: T.IdentityUUID;
+  name: string;
+  tokenHash: T.CryptoSHA256;
+  permissions: string[] | null;
+  createdAt: T.TemporalDateTime;
+  expiresAt: T.TemporalDateTime;
+  lastUsedAt: T.TemporalDateTime | null;
+  revokedAt: T.TemporalDateTime | null;
+}
+
+/** What a create of a row of UserApiKey sets; a member left unset takes its column's default, or the schema's. */
+export interface UserApiKeyCreate {
+  id?: T.IdentityUUID | null;
+  userId: T.IdentityUUID;
+  name: string;
+  tokenHash: T.CryptoSHA256;
+  permissions?: string[] | null;
+  expiresAt: T.TemporalDateTime;
+  lastUsedAt?: T.TemporalDateTime | null;
+  revokedAt?: T.TemporalDateTime | null;
+}
+
+/** What an update of a row of UserApiKey sets: each member set, null setting a column that may be null to NULL. */
+export interface UserApiKeyUpdate {
+  userId?: T.IdentityUUID;
+  name?: string;
+  tokenHash?: T.CryptoSHA256;
+  permissions?: string[] | null;
+  expiresAt?: T.TemporalDateTime;
+  lastUsedAt?: T.TemporalDateTime | null;
+  revokedAt?: T.TemporalDateTime | null;
+}
+
+/** The rows of UserApiKey a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface UserApiKeyFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  userId?: UuidFilter<T.IdentityUUID>;
+  name?: StringFilter<string>;
+  tokenHash?: StringFilter<T.CryptoSHA256>;
+  createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  expiresAt?: DateTimeFilter<T.TemporalDateTime>;
+  lastUsedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly UserApiKeyFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserApiKeyFilter[];
+}
+
+/** The members findOne and findMany order rows of UserApiKey by. */
+export type UserApiKeyOrderField = "id" | "name" | "tokenHash" | "permissions" | "createdAt" | "expiresAt" | "lastUsedAt" | "revokedAt";
+
+/** The members findPage orders rows of UserApiKey by (D60, amended); ties break by id. */
+export type UserApiKeySortField = "id" | "name" | "tokenHash" | "createdAt" | "expiresAt" | "lastUsedAt" | "revokedAt";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type UserApiKeyUniqueKey = readonly ["id"] | readonly ["tokenHash"];
+
+/** The position of a row of UserApiKey in a findPage order: its id. */
+export interface UserApiKeyPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of UserApiKey includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserApiKeyRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+}
+
+/** The repository of UserApiKey. */
+export type UserApiKeyRepository = Repository<
+  UserApiKeyRow,
+  UserApiKeyCreate,
+  UserApiKeyUpdate,
+  UserApiKeyFilter,
+  UserApiKeyOrderField,
+  UserApiKeySortField,
+  UserApiKeyUniqueKey,
+  T.IdentityUUID,
+  UserApiKeyPageKey,
+  UserApiKeyRelations
+>;
+
+/** The user_api_key table, as the runtime reads and writes it. */
+export const userApiKeyTable: TableDefinition = {
+  name: "UserApiKey",
+  table: "user_api_key",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "user_api_key.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "userId", column: "user_id", field: "user", qualified: "user_api_key.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "name", column: "\"name\"", field: "name", qualified: "user_api_key.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "user_api_key.token_hash", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "permissions", column: "permissions", field: "permissions", qualified: "user_api_key.permissions", list: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "user_api_key.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "user_api_key.expires_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "lastUsedAt", column: "last_used_at", field: "lastUsedAt", qualified: "user_api_key.last_used_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "user_api_key.revoked_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+    qualifiedColumns: "\"user_api_key\".\"id\", \"user_api_key\".\"user_id\", \"user_api_key\".\"name\", \"user_api_key\".\"token_hash\", \"user_api_key\".\"permissions\", \"user_api_key\".\"created_at\", \"user_api_key\".\"expires_at\", \"user_api_key\".\"last_used_at\", \"user_api_key\".\"revoked_at\"",
+    selectColumn: "\"user_api_key\".\"%s\"",
+    getOne: "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_api_key WHERE id = $1",
+    getMany: "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM user_api_key%s%s LIMIT 1",
+    findMany: "SELECT %s FROM user_api_key%s%s%s",
+    count: "SELECT COUNT(*) FROM user_api_key%s",
+    page: "SELECT %s FROM user_api_key%s%s LIMIT %d",
+    pageAfterKey: "user_api_key.id %s %s",
+    pageAfter: "(%s, user_api_key.id) %s ((SELECT %s FROM user_api_key AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM user_api_key AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", user_api_key.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM user_api_key WHERE user_api_key.id = $1)",
+    insert: "INSERT INTO user_api_key (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO user_api_key (%s) VALUES %s RETURNING %s",
+    update: "UPDATE user_api_key SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+    updateMany: "UPDATE user_api_key SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO user_api_key (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM user_api_key WHERE id = $1",
+    deleteMany: "DELETE FROM user_api_key%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = user_api_key.id", rows: "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE (id) IN (%s)" },
+    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = user_api_key.token_hash", rows: "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE (token_hash) IN (%s)" },
+  },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_api_key.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
   ],
 };
 
@@ -476,7 +635,7 @@ export interface UserCredentialFilter {
 export type UserCredentialOrderField = "id" | "passwordHash" | "passwordChangedAt" | "disabledAt" | "pendingAt";
 
 /** The members findPage orders rows of UserCredential by (D60, amended); ties break by id. */
-export type UserCredentialSortField = "id" | "passwordChangedAt";
+export type UserCredentialSortField = "id" | "passwordChangedAt" | "disabledAt" | "pendingAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserCredentialUniqueKey = readonly ["id"] | readonly ["user"];
@@ -511,12 +670,12 @@ export const userCredentialTable: TableDefinition = {
   table: "user_credential",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "user_credential.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "userId", column: "user_id", field: "user", qualified: "user_credential.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
-    { name: "passwordHash", column: "password_hash", field: "passwordHash", qualified: "user_credential.password_hash", required: true, filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "user_credential.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "userId", column: "user_id", field: "user", qualified: "user_credential.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "passwordHash", column: "password_hash", field: "passwordHash", qualified: "user_credential.password_hash", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
@@ -534,7 +693,9 @@ export const userCredentialTable: TableDefinition = {
     page: "SELECT %s FROM user_credential%s%s LIMIT %d",
     pageAfterKey: "user_credential.id %s %s",
     pageAfter: "(%s, user_credential.id) %s ((SELECT %s FROM user_credential AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM user_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", user_credential.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM user_credential WHERE user_credential.id = $1)",
     insert: "INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s",
@@ -640,10 +801,10 @@ export const userRoleGrantTable: TableDefinition = {
   table: "user_role_grant",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "user_role_grant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "userId", column: "user_id", field: "user", qualified: "user_role_grant.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
-    { name: "roleId", column: "role_id", field: "role", qualified: "user_role_grant.role_id", uuid: true, required: true, relation: "Role", filter: ["eq", "in", "isNull"] },
-    { name: "grantedAt", column: "granted_at", field: "grantedAt", qualified: "user_role_grant.granted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "user_role_grant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "userId", column: "user_id", field: "user", qualified: "user_role_grant.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "roleId", column: "role_id", field: "role", qualified: "user_role_grant.role_id", uuid: true, required: true, relation: "Role", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "grantedAt", column: "granted_at", field: "grantedAt", qualified: "user_role_grant.granted_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
@@ -661,7 +822,9 @@ export const userRoleGrantTable: TableDefinition = {
     page: "SELECT %s FROM user_role_grant%s%s LIMIT %d",
     pageAfterKey: "user_role_grant.id %s %s",
     pageAfter: "(%s, user_role_grant.id) %s ((SELECT %s FROM user_role_grant AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM user_role_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", user_role_grant.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM user_role_grant WHERE user_role_grant.id = $1)",
     insert: "INSERT INTO user_role_grant (%s) VALUES (%s) RETURNING %s",
@@ -692,6 +855,7 @@ export interface FixtureUserModelDbRepositories {
   readonly role: RoleRepository;
   readonly session: SessionRepository;
   readonly user: UserRepository;
+  readonly userApiKey: UserApiKeyRepository;
   readonly userCredential: UserCredentialRepository;
   readonly userRoleGrant: UserRoleGrantRepository;
 }
@@ -706,12 +870,14 @@ export type FixtureUserModelDbTx = OrmTx<FixtureUserModelDbRepositories>;
 export const fixtureUserModelDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",
@@ -745,6 +911,7 @@ export const fixtureUserModelDbOrm: OrmDefinition = {
     role: roleTable,
     session: sessionTable,
     user: userTable,
+    userApiKey: userApiKeyTable,
     userCredential: userCredentialTable,
     userRoleGrant: userRoleGrantTable,
   },

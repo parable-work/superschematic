@@ -3207,7 +3207,7 @@
         },
         {
           "kind": "check",
-          "step": 8,
+          "step": 9,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
           "spec": {
@@ -3234,7 +3234,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600007,
+            "now": 1767225600008,
             "action": {
               "kind": "define"
             }
@@ -3262,7 +3262,7 @@
         },
         {
           "kind": "check",
-          "step": 9,
+          "step": 10,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
           "spec": {
@@ -3291,7 +3291,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600008,
+            "now": 1767225600009,
             "action": {
               "kind": "define"
             }
@@ -3319,7 +3319,7 @@
         },
         {
           "kind": "check",
-          "step": 10,
+          "step": 11,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
           "spec": {
@@ -3372,7 +3372,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600009,
+            "now": 1767225600010,
             "action": {
               "kind": "define"
             }
@@ -3400,7 +3400,7 @@
         },
         {
           "kind": "check",
-          "step": 11,
+          "step": 12,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
           "spec": {
@@ -3453,7 +3453,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600010,
+            "now": 1767225600011,
             "action": {
               "kind": "define"
             }
@@ -3481,7 +3481,7 @@
         },
         {
           "kind": "check",
-          "step": 12,
+          "step": 13,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
           "spec": {
@@ -3532,7 +3532,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600011,
+            "now": 1767225600012,
             "action": {
               "kind": "define"
             }
@@ -3560,7 +3560,7 @@
         },
         {
           "kind": "check",
-          "step": 13,
+          "step": 14,
           "call": "schemas.define",
           "database": "{{dir:1}}/engine.db",
           "spec": {
@@ -3583,7 +3583,7 @@
               "subject": "alice",
               "permissions": []
             },
-            "now": 1767225600012,
+            "now": 1767225600013,
             "action": {
               "kind": "define"
             }
@@ -3617,7 +3617,12 @@
           "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
-          "step": 14,
+          "step": 8,
+          "call": "schemas.define",
+          "reason": "the engine refuses a member that is a table's behavior's alone, which the core takes: the hand-written scenarios hold its cases (D104, D113)"
+        },
+        {
+          "step": 15,
           "call": "schemas.list",
           "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
         }

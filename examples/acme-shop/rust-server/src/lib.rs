@@ -455,7 +455,8 @@ impl OrderImplementation for Shop {
     /// The caller's orders, or every customer's for staff, in the page's
     /// sort, by when each was placed or by its total, of the statuses the
     /// request's filter keeps (D106): the one it names, one of those it
-    /// lists, or every status when it filters by none.
+    /// lists, none of those it rules out, or every status when it filters
+    /// by none.
     async fn list_orders(
         &self,
         ctx: RequestContext,
@@ -470,7 +471,9 @@ impl OrderImplementation for Shop {
             .filter(|order| {
                 args.filter.status.as_ref().is_none_or(|by| {
                     by.eq.is_none_or(|eq| eq == order.status)
+                        && by.ne.is_none_or(|ne| ne != order.status)
                         && (by.in_.is_empty() || by.in_.contains(&order.status))
+                        && !by.not_in.contains(&order.status)
                 })
             });
         order.page(

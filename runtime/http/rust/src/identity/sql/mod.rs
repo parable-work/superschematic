@@ -27,12 +27,13 @@ pub use client::{Client, ClientError, Conn, Dialect, SqlValue};
 use super::descriptor::{quote, Descriptor};
 use super::scalars::{KeyCodec, Scalars};
 use super::store::{
-    LoginRecord, NewSession, NewUser, NewUserGrants, Role, Session, SessionRecord, Store,
-    StoreError, User,
+    ApiKey, ApiKeyRecord, LoginRecord, NewApiKey, NewSession, NewUser, NewUserGrants, Role,
+    Session, SessionRecord, Store, StoreError, User,
 };
 use super::time::{format_sqlite, parse_timestamp};
 
-/// The key of every table the loader adds, `AutoGenerate<Identity.UUID>`.
+/// The key of every table the loader adds, the API key table among them:
+/// `AutoGenerate<Identity.UUID>`.
 const SESSION_KEY_SCALAR: &str = "Identity.UUID";
 
 /// The [`Store`] over a SQL [`Client`].
@@ -44,6 +45,7 @@ pub struct SqlStore {
     user_key: KeyCodec,
     role_key: Option<KeyCodec>,
     session_key: KeyCodec,
+    api_key_key: KeyCodec,
     name_is_login: bool,
     t: Names,
 }
@@ -77,6 +79,16 @@ struct Names {
     grant_user: String,
     grant_role: String,
     granted_at: String,
+    api_key: String,
+    api_key_id: String,
+    api_key_user: String,
+    api_key_name: String,
+    api_key_token_hash: String,
+    api_key_permissions: String,
+    api_key_created_at: String,
+    api_key_expires_at: String,
+    api_key_last_used_at: String,
+    api_key_revoked_at: String,
 }
 
 fn db(err: ClientError) -> StoreError {
@@ -182,19 +194,36 @@ fn time(row: &[SqlValue], i: usize) -> Result<SystemTime, StoreError> {
         .ok_or_else(|| StoreError::database(format!("column {i} is null, not a timestamp")))
 }
 
-/// A role's permissions: a Postgres `TEXT[]`, or a JSON array in text.
-fn permissions(row: &[SqlValue], i: usize, role: &str) -> Result<Vec<String>, StoreError> {
-    match row.get(i) {
-        Some(SqlValue::Null) => Ok(Vec::new()),
-        Some(SqlValue::TextList(list)) => Ok(list.clone()),
-        Some(SqlValue::Text(s)) if s.is_empty() => Ok(Vec::new()),
+/// A column of permissions: a Postgres `TEXT[]`, or a JSON array in text,
+/// an empty text read as an empty list. `None` when the column is null.
+fn permission_list(value: Option<&SqlValue>) -> Result<Option<Vec<String>>, String> {
+    match value {
+        Some(SqlValue::Null) => Ok(None),
+        Some(SqlValue::TextList(list)) => Ok(Some(list.clone())),
+        Some(SqlValue::Text(s)) if s.is_empty() => Ok(Some(Vec::new())),
         Some(SqlValue::Text(s)) => serde_json::from_str::<Option<Vec<String>>>(s)
-            .map(Option::unwrap_or_default)
-            .map_err(|err| StoreError::database(format!("read role {role}'s permissions: {err}"))),
-        other => Err(StoreError::database(format!(
-            "role {role}'s permissions are not a list: {other:?}"
-        ))),
+            .map(|list| Some(list.unwrap_or_default()))
+            .map_err(|err| err.to_string()),
+        other => Err(format!("not a list: {other:?}")),
     }
+}
+
+/// A role's permissions, none when the column is null.
+fn permissions(row: &[SqlValue], i: usize, role: &str) -> Result<Vec<String>, StoreError> {
+    permission_list(row.get(i))
+        .map(Option::unwrap_or_default)
+        .map_err(|err| StoreError::database(format!("read role {role}'s permissions: {err}")))
+}
+
+/// An API key's permissions. Null stays `None`, every permission its user
+/// holds; anything else is the list the key names.
+fn key_permissions(
+    row: &[SqlValue],
+    i: usize,
+    key: &str,
+) -> Result<Option<Vec<String>>, StoreError> {
+    permission_list(row.get(i))
+        .map_err(|err| StoreError::database(format!("read API key {key}'s permissions: {err}")))
 }
 
 /// Orders roles by name, in byte order, the same in every dialect and
@@ -255,6 +284,18 @@ impl SqlStore {
             t.grant_role = quote(&g.columns.role);
             t.granted_at = quote(&g.columns.granted_at);
         }
+        if let Some(k) = &descriptor.api_key {
+            t.api_key = quote(&k.table);
+            t.api_key_id = quote(&k.columns.id);
+            t.api_key_user = quote(&k.columns.user);
+            t.api_key_name = quote(&k.columns.name);
+            t.api_key_token_hash = quote(&k.columns.token_hash);
+            t.api_key_permissions = quote(&k.columns.permissions);
+            t.api_key_created_at = quote(&k.columns.created_at);
+            t.api_key_expires_at = quote(&k.columns.expires_at);
+            t.api_key_last_used_at = quote(&k.columns.last_used_at);
+            t.api_key_revoked_at = quote(&k.columns.revoked_at);
+        }
         Ok(SqlStore {
             dialect: client.dialect(),
             client: Box::new(client),
@@ -264,6 +305,7 @@ impl SqlStore {
                 .as_ref()
                 .map(|r| KeyCodec::new(&r.key_scalar, scalars.as_ref())),
             session_key: KeyCodec::new(SESSION_KEY_SCALAR, scalars.as_ref()),
+            api_key_key: KeyCodec::new(SESSION_KEY_SCALAR, scalars.as_ref()),
             name_is_login: u.columns.name == u.columns.login,
             scalars,
             t,
@@ -323,7 +365,7 @@ impl SqlStore {
         }
     }
 
-    /// A role's permissions as the dialect stores them.
+    /// A role's permissions, or an API key's, as the dialect stores them.
     fn permissions_arg(&self, permissions: &[String]) -> SqlValue {
         match self.dialect {
             Dialect::Postgres => SqlValue::TextList(permissions.to_vec()),
@@ -341,6 +383,12 @@ impl SqlStore {
 
     fn session_key(&self, id: &str) -> Result<String, StoreError> {
         self.session_key
+            .to_db(id, self.scalars.as_ref())
+            .ok_or(StoreError::NotFound)
+    }
+
+    fn api_key_key(&self, id: &str) -> Result<String, StoreError> {
+        self.api_key_key
             .to_db(id, self.scalars.as_ref())
             .ok_or(StoreError::NotFound)
     }
@@ -510,6 +558,61 @@ impl SqlStore {
             args.push(keep.into());
         }
         q.run(&self.sql(&query), &args).await.map(drop)
+    }
+
+    /// An API key's columns as `scan_api_key` reads them, of the table
+    /// aliased `k`: its id, user, name, permissions, `createdAt`,
+    /// `expiresAt`, `lastUsedAt` and `revokedAt`.
+    fn api_key_columns(&self) -> String {
+        let t = &self.t;
+        format!(
+            "k.{}, k.{}, k.{}, k.{}, k.{}, k.{}, k.{}, k.{}",
+            t.api_key_id,
+            t.api_key_user,
+            t.api_key_name,
+            t.api_key_permissions,
+            t.api_key_created_at,
+            t.api_key_expires_at,
+            t.api_key_last_used_at,
+            t.api_key_revoked_at
+        )
+    }
+
+    /// The API key the first columns of `row` hold, in `api_key_columns`'
+    /// order.
+    fn scan_api_key(&self, row: &[SqlValue]) -> Result<ApiKey, StoreError> {
+        let id = self.api_key_key.to_wire(&text(row, 0)?);
+        Ok(ApiKey {
+            user_id: self.user_key.to_wire(&text(row, 1)?),
+            name: text(row, 2)?,
+            permissions: key_permissions(row, 3, &id)?,
+            created_at: time(row, 4)?,
+            expires_at: time(row, 5)?,
+            last_used_at: optional_time(row, 6)?,
+            revoked_at: optional_time(row, 7)?,
+            id,
+        })
+    }
+
+    /// Revokes the live API keys of the user with the database key `key`,
+    /// when the descriptor names their table.
+    async fn revoke_user_api_keys_in(
+        &self,
+        q: &mut dyn Run,
+        key: &str,
+        at: SystemTime,
+    ) -> Result<(), StoreError> {
+        if !self.has_api_keys() {
+            return Ok(());
+        }
+        let t = &self.t;
+        let query = format!(
+            "UPDATE {} SET {} = ? WHERE {} = ? AND {} IS NULL",
+            t.api_key, t.api_key_revoked_at, t.api_key_user, t.api_key_revoked_at
+        );
+        q.run(&self.sql(&query), &[self.time_arg(at), key.into()])
+            .await
+            .map(drop)
     }
 
     async fn create_user_in(
@@ -712,7 +815,8 @@ impl SqlStore {
             &[key.into(), self.time_arg(at), self.time_arg(at)],
         )
         .await?;
-        self.revoke_user_sessions_in(q, key, None, at).await
+        self.revoke_user_sessions_in(q, key, None, at).await?;
+        self.revoke_user_api_keys_in(q, key, at).await
     }
 
     async fn update_role_in(
@@ -1116,6 +1220,179 @@ impl Store for SqlStore {
         let keep = except_session.map(|id| self.session_key(id)).transpose()?;
         self.revoke_user_sessions_in(&mut self.direct(), &key, keep.as_deref(), at)
             .await
+    }
+
+    fn has_api_keys(&self) -> bool {
+        self.descriptor.api_key.is_some()
+    }
+
+    async fn create_api_key(&self, new: NewApiKey) -> Result<ApiKey, StoreError> {
+        if !self.has_api_keys() {
+            return Err(StoreError::NoApiKeys);
+        }
+        let user = self.user_key(&new.user_id)?;
+        let t = &self.t;
+        // No permissions are written as null, which the statement names
+        // itself.
+        let mut args: Vec<SqlValue> = vec![
+            user.as_str().into(),
+            new.name.as_str().into(),
+            new.token_hash.as_str().into(),
+        ];
+        let permissions = match &new.permissions {
+            Some(permissions) => {
+                args.push(self.permissions_arg(permissions));
+                "?"
+            }
+            None => "NULL",
+        };
+        args.extend([self.time_arg(new.created_at), self.time_arg(new.expires_at)]);
+        let query = format!(
+            "INSERT INTO {} ({}, {}, {}, {}, {}, {}) VALUES (?, ?, ?, {permissions}, ?, ?) RETURNING {}",
+            t.api_key,
+            t.api_key_user,
+            t.api_key_name,
+            t.api_key_token_hash,
+            t.api_key_permissions,
+            t.api_key_created_at,
+            t.api_key_expires_at,
+            t.api_key_id
+        );
+        let rows = self.direct().rows(&self.sql(&query), &args).await?;
+        let id = rows
+            .first()
+            .map(|row| text(row, 0))
+            .transpose()?
+            .ok_or_else(|| StoreError::database("creating an API key returned no key"))?;
+        Ok(ApiKey {
+            id: self.api_key_key.to_wire(&id),
+            user_id: self.user_key.to_wire(&user),
+            name: new.name,
+            permissions: new.permissions,
+            created_at: new.created_at,
+            expires_at: new.expires_at,
+            last_used_at: None,
+            revoked_at: None,
+        })
+    }
+
+    async fn find_api_key(&self, token_hash: &str) -> Result<ApiKeyRecord, StoreError> {
+        if !self.has_api_keys() {
+            return Err(StoreError::NotFound);
+        }
+        let t = &self.t;
+        let query = format!(
+            "SELECT {}, u.{}, u.{}, c.{}, c.{} FROM {} k JOIN {} u ON u.{} = k.{} LEFT JOIN {} c ON c.{} = k.{} WHERE k.{} = ?",
+            self.api_key_columns(),
+            t.user_login,
+            t.user_name,
+            t.disabled,
+            t.pending,
+            t.api_key,
+            t.user,
+            t.user_key,
+            t.api_key_user,
+            t.credential,
+            t.credential_user,
+            t.api_key_user,
+            t.api_key_token_hash
+        );
+        let rows = self
+            .direct()
+            .rows(&self.sql(&query), &[token_hash.into()])
+            .await?;
+        let row = rows.first().ok_or(StoreError::NotFound)?;
+        let api_key = self.scan_api_key(row)?;
+        Ok(ApiKeyRecord {
+            user: User {
+                id: api_key.user_id.clone(),
+                login: text(row, 8)?,
+                name: text(row, 9)?,
+                disabled: optional_time(row, 10)?.is_some(),
+                pending: optional_time(row, 11)?.is_some(),
+                roles: Vec::new(),
+            },
+            api_key,
+        })
+    }
+
+    async fn touch_api_key(
+        &self,
+        key_id: &str,
+        at: SystemTime,
+        stale_before: SystemTime,
+    ) -> Result<(), StoreError> {
+        if !self.has_api_keys() {
+            return Err(StoreError::NoApiKeys);
+        }
+        let id = self.api_key_key(key_id)?;
+        let t = &self.t;
+        let query = format!(
+            "UPDATE {} SET {} = ? WHERE {} = ? AND ({} IS NULL OR {} < ?)",
+            t.api_key,
+            t.api_key_last_used_at,
+            t.api_key_id,
+            t.api_key_last_used_at,
+            t.api_key_last_used_at
+        );
+        self.direct()
+            .run(
+                &self.sql(&query),
+                &[self.time_arg(at), id.into(), self.time_arg(stale_before)],
+            )
+            .await
+            .map(drop)
+    }
+
+    async fn list_api_keys(&self, user_id: &str) -> Result<Vec<ApiKey>, StoreError> {
+        if !self.has_api_keys() {
+            return Err(StoreError::NoApiKeys);
+        }
+        let user = self.user_key(user_id)?;
+        let t = &self.t;
+        let query = format!(
+            "SELECT {} FROM {} k WHERE k.{} = ? AND k.{} IS NULL ORDER BY k.{} DESC, k.{} DESC",
+            self.api_key_columns(),
+            t.api_key,
+            t.api_key_user,
+            t.api_key_revoked_at,
+            t.api_key_created_at,
+            t.api_key_id
+        );
+        let rows = self
+            .direct()
+            .rows(&self.sql(&query), &[user.into()])
+            .await?;
+        rows.iter().map(|row| self.scan_api_key(row)).collect()
+    }
+
+    async fn revoke_api_key(
+        &self,
+        user_id: &str,
+        key_id: &str,
+        at: SystemTime,
+    ) -> Result<(), StoreError> {
+        if !self.has_api_keys() {
+            return Err(StoreError::NoApiKeys);
+        }
+        let user = self.user_key(user_id)?;
+        let id = self.api_key_key(key_id)?;
+        let t = &self.t;
+        let query = format!(
+            "UPDATE {} SET {} = ? WHERE {} = ? AND {} = ? AND {} IS NULL",
+            t.api_key, t.api_key_revoked_at, t.api_key_id, t.api_key_user, t.api_key_revoked_at
+        );
+        let revoked = self
+            .direct()
+            .run(
+                &self.sql(&query),
+                &[self.time_arg(at), id.into(), user.into()],
+            )
+            .await?;
+        if revoked == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     fn has_roles(&self) -> bool {

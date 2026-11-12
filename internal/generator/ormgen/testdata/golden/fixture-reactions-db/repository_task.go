@@ -313,11 +313,17 @@ var TaskQuotedFields = map[string]string{
 // taskSortColumns are the columns of Task's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var taskSortColumns = map[TaskSortField]struct{ sql, key string }{
-	TaskSortById:     {`task.id`, `page_key.id`},
-	TaskSortByTitle:  {`task.title`, `page_key.title`},
-	TaskSortByStatus: {`task.status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var taskSortColumns = map[TaskSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	TaskSortById:              {`task.id`, `page_key.id`, false},
+	TaskSortByTitle:           {`task.title`, `page_key.title`, false},
+	TaskSortByPriority:        {`task.priority`, `page_key.priority`, true},
+	TaskSortByStatus:          {`task.status`, `page_key.status`, false},
+	TaskSortByStatusEnteredAt: {`task.status_entered_at`, `page_key.status_entered_at`, true},
 }
 
 // buildTaskOrderByClause builds an ORDER BY clause for Task.
@@ -1204,7 +1210,7 @@ func (r *TaskRepository) FindPage(ctx context.Context, filter *TaskFilter, opts 
 	}
 	column, ok := taskSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Task sorts by id, title and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Task sorts by id, title, priority, status and statusEnteredAt, not %q", string(field))
 	}
 	byKey := field == TaskSortById
 
@@ -1234,14 +1240,23 @@ func (r *TaskRepository) FindPage(ctx context.Context, filter *TaskFilter, opts 
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`task.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`task.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, task.id) %s ((SELECT %s FROM task AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, task.id) %s ((SELECT %s FROM task AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM task AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -1249,6 +1264,9 @@ func (r *TaskRepository) FindPage(ctx context.Context, filter *TaskFilter, opts 
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, task.id %s`, direction)
 	}

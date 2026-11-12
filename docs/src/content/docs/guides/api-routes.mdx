@@ -245,6 +245,15 @@ other value is the 400 an enum parameter gets, `Invalid query parameter
 sort: expected one of name, -name, sku, -sku`. The router refuses a cursor's
 text first, then the limit, then the sort, then a cursor of another sort.
 
+A sort field may be `Nullable` (D112). An item that holds no value comes
+after every item that holds one, in either direction: `sort=dueOn` reads
+the earliest due date first and `sort=-dueOn` the latest, and each ends
+with the items that have none, in `id` order in the sort's direction. A
+caller who wants only the items with a value adds
+`filter[dueOn][isNull]=false`. The repositories' `findPage` reads that
+order, and an implementation that sorts its own rows reads the same, so
+a list's pages mean one thing whoever serves them.
+
 The implementation takes the sort only in its page request, its default
 filled in: Go's `page.Sort` (`paging.Sort{Field, Desc}`), TypeScript's
 `args.page.sort` (`{field, desc}`), and Rust's `args.page.sort`
@@ -361,19 +370,19 @@ type, and its kind gives its operators:
 
 | Kind | A field of | Operators |
 | --- | --- | --- |
-| `uuid` | a UUID, such as `Identity.UUID`, a relation's key among them | `eq`, `in` |
-| `enum` | an enum | `eq`, `in` |
-| `bool` | `boolean` | `eq`, `in` |
-| `string` | `string`, or a scalar of text | `eq`, `in`, `contains` |
-| `int` | a whole number, such as `Generic.Int64` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
-| `float` | `number` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
-| `decimal` | `Generic.Decimal` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
-| `datetime` | `Temporal.DateTime` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
-| `date` | `Temporal.Date` | `eq`, `in`, `gt`, `gte`, `lt`, `lte` |
+| `uuid` | a UUID, such as `Identity.UUID`, a relation's key among them | `eq`, `ne`, `in`, `notIn` |
+| `enum` | an enum | `eq`, `ne`, `in`, `notIn` |
+| `bool` | `boolean` | `eq`, `ne`, `in`, `notIn` |
+| `string` | `string`, or a scalar of text | `eq`, `ne`, `in`, `notIn`, `contains` |
+| `int` | a whole number, such as `Generic.Int64` | `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte` |
+| `float` | `number` | `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte` |
+| `decimal` | `Generic.Decimal` | `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte` |
+| `datetime` | `Temporal.DateTime` | `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte` |
+| `date` | `Temporal.Date` | `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte` |
 
 A field that may be null, a `Nullable` one, takes `isNull` as well, and no
-other field does. Here `status` is an enum, so the orders take `eq` and
-`in` of it. `shop-cart`'s catalog filters its products by `inStock`, a
+other field does. Here `status` is an enum, so the orders take `eq`,
+`ne`, `in` and `notIn` of it. `shop-cart`'s catalog filters its products by `inStock`, a
 boolean, and `priceCents`, a whole number, which takes the comparisons
 too.
 
@@ -383,19 +392,27 @@ names an operator.
 
 ```
 GET /api/orders?filter[status][in]=placed,shipped
+GET /api/orders?filter[status][notIn]=cancelled,refunded
 GET /api/catalog/products?filter[inStock]=true&filter[priceCents][gte]=500&filter[priceCents][lt]=2000
 ```
 
-- `eq`, `gt`, `gte`, `lt` and `lte` take one value of the field's type.
-- `in` takes 1 to 100 values separated by commas. Each is trimmed, and an
-  empty one is dropped.
+- `eq`, `ne`, `gt`, `gte`, `lt` and `lte` take one value of the field's
+  type.
+- `in` and `notIn` take 1 to 100 values separated by commas. Each is
+  trimmed, and an empty one is dropped.
+- `ne` and `notIn` negate `eq` and `in` (D112): each keeps exactly the
+  items the other leaves out. An item whose field is null is among them:
+  `filter[assigneeId][ne]=<id>` keeps the issues assigned to anyone else
+  and the ones assigned to no one, where SQL's `<>` would drop the
+  second. Add `filter[assigneeId][isNull]=false` for the first alone.
 - `contains` takes text, at least one character, and keeps the items whose
   field holds it, in any case.
 - `isNull` takes `true`, which keeps the items whose field is null, or
   `false`, which keeps the others.
 
 Every filter a request sends holds at once; there is no way to ask for one
-or another. A request holds at most 50 filter parameters, and each
+or another across fields, and `in` is "one or another" of one field's
+values. A request holds at most 50 filter parameters, and each
 operator of a field once: `filter[status]` and `filter[status][eq]` are
 the same one. Fields and operators are named exactly, so `filter[Status]`
 and `filter[status][IN]` are refused. A list without a `FilterBy` leaves a
@@ -412,11 +429,11 @@ the `location` (`query`), the `parameter` and the `reason`:
 {
   "status": 400,
   "code": "bad_request",
-  "detail": "Invalid query parameter filter[status]: takes no operator gt; expected one of eq, in",
+  "detail": "Invalid query parameter filter[status]: takes no operator gt; expected one of eq, ne, in, notIn",
   "details": {
     "location": "query",
     "parameter": "filter[status]",
-    "reason": "takes no operator gt; expected one of eq, in"
+    "reason": "takes no operator gt; expected one of eq, ne, in, notIn"
   }
 }
 ```
@@ -430,9 +447,9 @@ from every server, and refuses the first key that is, in this order:
 | --- | --- | --- |
 | not `filter[field]` or `filter[field][operator]` | the key | `expected filter[field] or filter[field][operator]` |
 | a field `Fields` does not name | `filter[field]` | `is not a field this operation filters by; expected one of status` |
-| an operator the field does not take | `filter[field]` | `takes no operator gt; expected one of eq, in` |
+| an operator the field does not take | `filter[field]` | `takes no operator gt; expected one of eq, ne, in, notIn` |
 | an operator sent twice | `filter[field]` | `holds eq more than once` |
-| a value the operator does not take | `filter[field]` | `isNull expects true or false`, `in names no value`, `in must hold at most 100 values` or `contains needs text` |
+| a value the operator does not take | `filter[field]` | `isNull expects true or false`, `in names no value`, `in must hold at most 100 values`, the same two of `notIn`, or `contains needs text` |
 
 The route then decodes each value as an item of a query list of its
 field's type, and a value the type refuses is a 400 at `filter[field]`
@@ -448,9 +465,9 @@ the request sent, its values decoded:
 
 | Server | The filter | A member |
 | --- | --- | --- |
-| Go | the method's `filter` argument, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`) | `*filterparse.Equals[T]`, `*filterparse.Ordered[T]` or `*filterparse.Text[T]`, nil for a field the request does not filter by: `Eq`, `Gt`, `Gte`, `Lt` and `Lte` a `*T`, `In` a `[]T`, `Contains` a `*string`, `IsNull` a `*bool` |
-| TypeScript | `args.filter`, a `ListOrdersFilter` (`<Operation>Filter`), `{}` when the request filters by nothing | `EqualsFilter<T>`, `OrderedFilter<T>` or `TextFilter<T>` of the HTTP runtime, absent for a field the request does not filter by: `eq`, `in`, `gt`, `gte`, `lt`, `lte`, `contains`, `isNull` |
-| Rust | `args.filter`, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`), whose `default()` filters by nothing | `Option<runtime::filter::Equals<T>>`, `Ordered<T>` or `Text<T>`: `eq`, `in_` (`in` is a keyword), `gt`, `gte`, `lt`, `lte`, `contains`, `is_null` |
+| Go | the method's `filter` argument, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`) | `*filterparse.Equals[T]`, `*filterparse.Ordered[T]` or `*filterparse.Text[T]`, nil for a field the request does not filter by: `Eq`, `Ne`, `Gt`, `Gte`, `Lt` and `Lte` a `*T`, `In` and `NotIn` a `[]T`, `Contains` a `*string`, `IsNull` a `*bool` |
+| TypeScript | `args.filter`, a `ListOrdersFilter` (`<Operation>Filter`), `{}` when the request filters by nothing | `EqualsFilter<T>`, `OrderedFilter<T>` or `TextFilter<T>` of the HTTP runtime, absent for a field the request does not filter by: `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte`, `contains`, `isNull` |
+| Rust | `args.filter`, an `OrderListOrdersFilter` (`<Namespace><Operation>Filter`), whose `default()` filters by nothing | `Option<runtime::filter::Equals<T>>`, `Ordered<T>` or `Text<T>`: `eq`, `ne`, `in_` (`in` is a keyword), `not_in`, `gt`, `gte`, `lt`, `lte`, `contains`, `is_null` |
 
 The member's type follows the field's operators: `Equals` for a UUID, an
 enum and a boolean, `Ordered` for a number, a date and a time, and `Text`
@@ -463,22 +480,29 @@ process, by a caller that builds the filter itself; the filter's
 field's operators and then its values by the field's type, with the 400
 the router answers.
 
+An implementation reads every member its field's type holds. The router
+admits each operator the field takes whether or not the implementation
+reads it, so one that copies `Eq` and `In` alone answers a request for
+`ne` as if it had sent no filter, and the build cannot see that. A list
+the build serves (`@tableOperation`) reads them all.
+
 The members are shaped as the Go ORM's filters are, so one copies across.
 `shop-api` lists its products by `inStock`, a `bool` on both sides:
 
 <Snippet file="go/shop-api/products.go" symbol="Products.ListProducts" />
 
 A number's member copies the same way, its `Gt`, `Gte`, `Lt` and `Lte`
-beside its `Eq` and `In`. An enum's or a scalar's values convert to the
+beside its `Eq`, `Ne`, `In` and `NotIn`. The ORM's `Ne` and `NotIn` keep
+a row whose column is null, as the filter's do. An enum's or a scalar's values convert to the
 column's on the way. `shop-orders` holds an order's status as its text,
 and sets the filter beside the one that keeps a shopper to their own
 orders:
 
 <Snippet file="go/shop-orders/orders.go" symbol="statusFilter" />
 
-The Rust server takes the same filter as `args.filter.status`, its `eq`
-and its `in_`, in memory (`rust-server/src/lib.rs`) and over SQLite
-(`rust-server/src/sqlite.rs`).
+The Rust server takes the same filter as `args.filter.status`, its `eq`,
+`ne`, `in_` and `not_in`, in memory (`rust-server/src/lib.rs`) and over
+SQLite (`rust-server/src/sqlite.rs`).
 
 `contains` is the ORM's `ILike` of the text between two `%`, with its
 `\`, `%` and `_` escaped so they match themselves. `FindPage` and
@@ -493,8 +517,8 @@ its `<operation>All` sends the filter with every page
 
 The OpenAPI document gives the filter as one query parameter, `filter`,
 with `style: deepObject` and `explode: true`: an object with a property
-per field, each an object of the field's operators, `in` an array of 1 to
-100 items. Its description gives the query string's form and the limit
+per field, each an object of the field's operators, `in` and `notIn` an
+array of 1 to 100 items. Its description gives the query string's form and the limit
 of 50 filters. An MCP tool takes the filter as an object
 ([MCP tools](/superschematic/reference/mcp-tools/#toolsschemajson)).
 
@@ -918,7 +942,7 @@ export class Issues extends Authenticated {
   listIssues(
     teamId: Identity.UUID,
     q: SearchQuery<Validate<string, { maxLength: 100 }>>,
-    sort: SortBy<IssueView, ["createdAt", "priority", "title"]>,
+    sort: SortBy<IssueView, ["createdAt", "priority", "title", "dueOn", "estimate"]>,
     filter: FilterBy<IssueView, ["status", "priority", "title", "assigneeId", "createdAt"]>
   ): IssueView[] {
     throw new Error("schema declaration only");
@@ -1119,14 +1143,16 @@ through the repository's `findPage`, never the whole table
 ([Pages](#pages)). It takes three kinds of argument beside its path's
 parents:
 
-- a `SortBy`, whose fields are columns the repository pages by. Without
+- a `SortBy`, whose fields are columns the repository pages by, one that
+  may be null among them, its nulls last in either direction. Without
   one, the list reads in the repository's own order, by key;
 - a `SearchQuery`, which needs a `@searchField` on the table, and keeps
   the rows whose search fields hold each word of the text
   ([References and search](/superschematic/reference/references-and-search/#searchquery-a-lists-search-text));
 - a `FilterBy`, which the handler turns into the repository's filter
-  member for member, `contains` as its case-insensitive `LIKE` of the
-  text with `\`, `%` and `_` escaped ([Filters](#filters)).
+  member for member, `ne` and `notIn` among them, `contains` as its
+  case-insensitive `LIKE` of the text with `\`, `%` and `_` escaped
+  ([Filters](#filters)).
 
 A `QueryParam` on a generated list fails the load, since nothing says
 what it compares: filter by the field with `FilterBy`, or write the list
@@ -1957,7 +1983,12 @@ export abstract class Task implements Reactions<Task, {
 
 `projectFlow` and `taskFlow` are Workflow configs declared `as const`,
 whose terminal states each name an `outcome` (`success`, `failure` or
-`neutral`), which `allTerminal` and `anyTerminal` read.
+`neutral`), which `allTerminal` and `anyTerminal` read. A state a
+transition leaves has an outcome when the table's Workflow names it in
+`finished` (D113), and counts in both rules as a terminal state does: a
+task whose `done` may be reopened still closes its project
+([A Workflow field's transitions](/superschematic/guides/database-tables/#a-workflow-fields-transitions)). In the
+table below, "a terminal state" includes such a state.
 
 | `when` | Fires when |
 | --- | --- |

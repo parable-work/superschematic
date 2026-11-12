@@ -362,16 +362,16 @@ impl CatalogListPartsArgs {
     /// `filter[field]` and `filter[field][operator]` query parameters into
     /// `filter`, and `check` holds a caller's `filter`.
     pub const FILTER: FilterSpec = FilterSpec::new(&[
-        FieldSpec::new("id", &[Operator::Eq, Operator::In]),
-        FieldSpec::new("name", &[Operator::Eq, Operator::In, Operator::Contains]),
-        FieldSpec::new("kind", &[Operator::Eq, Operator::In]),
-        FieldSpec::new("quantity", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
-        FieldSpec::new("weight", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
-        FieldSpec::new("price", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
-        FieldSpec::new("discontinued", &[Operator::Eq, Operator::In]),
-        FieldSpec::new("madeAt", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
-        FieldSpec::new("retiredOn", &[Operator::Eq, Operator::In, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte, Operator::IsNull]),
-        FieldSpec::new("supplierId", &[Operator::Eq, Operator::In, Operator::IsNull]),
+        FieldSpec::new("id", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn]),
+        FieldSpec::new("name", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Contains]),
+        FieldSpec::new("kind", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn]),
+        FieldSpec::new("quantity", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("weight", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("price", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("discontinued", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn]),
+        FieldSpec::new("madeAt", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte]),
+        FieldSpec::new("retiredOn", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::Gt, Operator::Gte, Operator::Lt, Operator::Lte, Operator::IsNull]),
+        FieldSpec::new("supplierId", &[Operator::Eq, Operator::Ne, Operator::In, Operator::NotIn, Operator::IsNull]),
     ]);
 
     /// The route's @paginated limits (D60): the router reads the `cursor`

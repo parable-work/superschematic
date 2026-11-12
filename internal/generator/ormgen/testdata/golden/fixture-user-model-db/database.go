@@ -27,6 +27,7 @@ type Database struct {
 	Role           *RoleRepository
 	Session        *SessionRepository
 	User           *UserRepository
+	UserApiKey     *UserApiKeyRepository
 	UserCredential *UserCredentialRepository
 	UserRoleGrant  *UserRoleGrantRepository
 }
@@ -41,6 +42,7 @@ type Tx struct {
 	Role           *RoleRepository
 	Session        *SessionRepository
 	User           *UserRepository
+	UserApiKey     *UserApiKeyRepository
 	UserCredential *UserCredentialRepository
 	UserRoleGrant  *UserRoleGrantRepository
 }
@@ -74,6 +76,7 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db.Role = &RoleRepository{db: db}
 	db.Session = &SessionRepository{db: db}
 	db.User = &UserRepository{db: db}
+	db.UserApiKey = &UserApiKeyRepository{db: db}
 	db.UserCredential = &UserCredentialRepository{db: db}
 	db.UserRoleGrant = &UserRoleGrantRepository{db: db}
 
@@ -98,6 +101,7 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db.Role = &RoleRepository{db: db}
 	db.Session = &SessionRepository{db: db}
 	db.User = &UserRepository{db: db}
+	db.UserApiKey = &UserApiKeyRepository{db: db}
 	db.UserCredential = &UserCredentialRepository{db: db}
 	db.UserRoleGrant = &UserRoleGrantRepository{db: db}
 
@@ -122,6 +126,11 @@ func (db *Database) GetSessionRepository() SessionRepositoryInterface {
 // GetUserRepository returns the User repository interface.
 func (db *Database) GetUserRepository() UserRepositoryInterface {
 	return db.User
+}
+
+// GetUserApiKeyRepository returns the UserApiKey repository interface.
+func (db *Database) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return db.UserApiKey
 }
 
 // GetUserCredentialRepository returns the UserCredential repository interface.
@@ -149,6 +158,11 @@ func (tx *Tx) GetUserRepository() UserRepositoryInterface {
 	return tx.User
 }
 
+// GetUserApiKeyRepository returns the UserApiKey transaction repository interface.
+func (tx *Tx) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return tx.UserApiKey
+}
+
 // GetUserCredentialRepository returns the UserCredential transaction repository interface.
 func (tx *Tx) GetUserCredentialRepository() UserCredentialRepositoryInterface {
 	return tx.UserCredential
@@ -172,6 +186,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper.Role = &RoleRepository{tx: tx, txDB: db}
 	txWrapper.Session = &SessionRepository{tx: tx, txDB: db}
 	txWrapper.User = &UserRepository{tx: tx, txDB: db}
+	txWrapper.UserApiKey = &UserApiKeyRepository{tx: tx, txDB: db}
 	txWrapper.UserCredential = &UserCredentialRepository{tx: tx, txDB: db}
 	txWrapper.UserRoleGrant = &UserRoleGrantRepository{tx: tx, txDB: db}
 

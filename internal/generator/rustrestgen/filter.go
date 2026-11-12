@@ -136,7 +136,9 @@ func (f FilterFieldInfo) Decode() string {
 // names.
 var operatorVariants = map[string]string{
 	"eq":       "Eq",
+	"ne":       "Ne",
 	"in":       "In",
+	"notIn":    "NotIn",
 	"gt":       "Gt",
 	"gte":      "Gte",
 	"lt":       "Lt",
@@ -146,7 +148,8 @@ var operatorVariants = map[string]string{
 }
 
 // SpecFields are the FieldSpec expressions of the filter's fields, one a
-// field: FieldSpec::new("kind", &[Operator::Eq, Operator::In]).
+// field: FieldSpec::new("kind", &[Operator::Eq, Operator::Ne,
+// Operator::In, Operator::NotIn]).
 func (f FilterInfo) SpecFields() []string {
 	fields := make([]string, len(f.Fields))
 	for i, field := range f.Fields {

@@ -36,11 +36,15 @@ var BankAccountQuotedFields = map[string]string{
 // bankAccountSortColumns are the columns of BankAccount's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var bankAccountSortColumns = map[BankAccountSortField]struct{ sql, key string }{
-	BankAccountSortById:   {`bank_account.id`, `page_key.id`},
-	BankAccountSortByCode: {`bank_account.code`, `page_key.code`},
-	BankAccountSortByName: {`bank_account."name"`, `page_key."name"`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var bankAccountSortColumns = map[BankAccountSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	BankAccountSortById:   {`bank_account.id`, `page_key.id`, false},
+	BankAccountSortByCode: {`bank_account.code`, `page_key.code`, false},
+	BankAccountSortByName: {`bank_account."name"`, `page_key."name"`, false},
 }
 
 // buildBankAccountOrderByClause builds an ORDER BY clause for BankAccount.
@@ -611,14 +615,23 @@ func (r *BankAccountRepository) FindPage(ctx context.Context, filter *BankAccoun
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`bank_account.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`bank_account.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, bank_account.id) %s ((SELECT %s FROM bank_account AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, bank_account.id) %s ((SELECT %s FROM bank_account AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM bank_account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -626,6 +639,9 @@ func (r *BankAccountRepository) FindPage(ctx context.Context, filter *BankAccoun
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, bank_account.id %s`, direction)
 	}

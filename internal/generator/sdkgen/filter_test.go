@@ -22,9 +22,10 @@ func filterParityFile(t *testing.T) string {
 // TestFilteredEndpointsTakeATypedFilter pins the TypeScript type of a
 // filtered endpoint's filter (D106): named for the namespace and the
 // operation, a member per field in FilterBy's order, each a value of the
-// field's kind or an object of the operators that kind takes, isNull on a
-// field that may be null alone. The method takes it in its query object,
-// under the argument's name, and withFilter writes it.
+// field's kind or an object of the operators that kind takes, ne and notIn
+// beside eq and in on every one (D112) and isNull on a field that may be
+// null alone. The method takes it in its query object, under the
+// argument's name, and withFilter writes it.
 func TestFilteredEndpointsTakeATypedFilter(t *testing.T) {
 	_, apiOutput, parseable := loadPagedAPI(t, sdktest.AddFindPartsOperation)
 	sdkOutput, err := Generate(apiOutput, parseable, nestedArraysClock)
@@ -40,8 +41,8 @@ func TestFilteredEndpointsTakeATypedFilter(t *testing.T) {
 	}
 
 	const (
-		ordered = "eq?: T; in?: T[]; gt?: T; gte?: T; lt?: T; lte?: T"
-		equals  = "eq?: T; in?: T[]"
+		equals  = "eq?: T; ne?: T; in?: T[]; notIn?: T[]"
+		ordered = equals + "; gt?: T; gte?: T; lt?: T; lte?: T"
 	)
 	member := func(value, operators string) string {
 		return value + " | { " + strings.ReplaceAll(operators, "T", value) + " }"

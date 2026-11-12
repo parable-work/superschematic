@@ -141,7 +141,7 @@ type ProductReviewsImplementation interface {
 // not filter by, each operator the request sent set on it. Every member set
 // holds at once.
 type OrderListOrdersFilter struct {
-	// Status filters by status: eq, in.
+	// Status filters by status: eq, ne, in, notIn.
 	Status *filterparse.Equals[types.OrderStatus]
 }
 

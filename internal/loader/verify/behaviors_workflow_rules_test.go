@@ -31,6 +31,17 @@ func TestWorkflowRulesProblem(t *testing.T) {
 			`outcomes names "closed", which is not one of its states (todo, done)`},
 		{"an outcome of a state a transition leaves", `{"outcomes":{"todo":"neutral"},"states":["todo","done"],"transitions":[{"from":"todo","to":"done"}]}`,
 			`outcomes names "todo", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome`},
+		// finished names states a transition leaves, each with its
+		// outcome (D113), after the outcomes, by name.
+		{"a finished state a transition leaves", `{"finished":{"done":"success"},"outcomes":{"canceled":"neutral"},"states":["todo","done","canceled"],"transitions":[{"from":"todo","to":"done"},{"from":"done","to":"todo"},{"from":"todo","to":"canceled"}]}`, ""},
+		{"a finished state that is no state", `{"finished":{"closed":"success"},"states":["todo","done"],"transitions":[{"from":"todo","to":"done"},{"from":"done","to":"todo"}]}`,
+			`finished names "closed", which is not one of its states (todo, done)`},
+		{"a finished state no transition leaves", `{"finished":{"done":"success"},"states":["todo","done"],"transitions":[{"from":"todo","to":"done"}]}`,
+			`finished names "done", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome`},
+		{"an outcome before a finished state", `{"finished":{"closed":"success"},"outcomes":{"todo":"neutral"},"states":["todo","done"],"transitions":[{"from":"todo","to":"done"}]}`,
+			`outcomes names "todo", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome`},
+		{"finished in name order", `{"finished":{"todo":"neutral","done":"success","closed":"success"},"states":["todo","done"],"transitions":[{"from":"todo","to":"done"}]}`,
+			`finished names "closed", which is not one of its states (todo, done)`},
 		// The first, in the core's order: the initial state, each
 		// transition as listed, then the outcomes by name.
 		{"the first of several", `{"initial":"open","outcomes":{"closed":"success"},"states":["todo","done"],"transitions":[{"from":"todo","to":"todo"}]}`,

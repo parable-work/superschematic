@@ -22,8 +22,9 @@ import (
 // sets the loader fills from fixture-user-model-db (D50).
 const userRoutesService = "fixture-user-routes-api"
 
-// loadUserRoutesAPI loads fixture-user-routes-api: the 19 operations of
-// the user model's route sets and the project's greeting.greet.
+// loadUserRoutesAPI loads fixture-user-routes-api: the 24 operations of
+// the user model's route sets, the five API key routes among them (D114),
+// and the project's greeting.greet.
 func loadUserRoutesAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, userRoutesService))
@@ -59,10 +60,16 @@ func writeUserRoutesSDK(t *testing.T, apiOutput *apigen.APIOutput, sdkDir, types
 // password, which the user model's sets hide from an agent.
 var userRoutesPasswordTools = []string{"login", "register", "changePassword", "createUser", "setUserPassword"}
 
+// userRoutesCredentialTools are the operations whose answer is a
+// credential, which the user model's sets hide from an agent with a reason
+// of their own (D114).
+var userRoutesCredentialTools = []string{"createApiKey"}
+
 // TestUserRoutesAreSDKMethodsAndTools: the Rust SDK treats the user
 // model's operations as any other, though the identity runtime serves
 // them (D50): each has a method, and each is a tool, those carrying a
-// password hidden with the user model's reason.
+// password hidden with the user model's reason, and createApiKey with the
+// reason of an operation that answers a credential.
 func TestUserRoutesAreSDKMethodsAndTools(t *testing.T) {
 	_, apiOutput := loadUserRoutesAPI(t)
 	root := t.TempDir()
@@ -79,10 +86,10 @@ func TestUserRoutesAreSDKMethodsAndTools(t *testing.T) {
 	want := []string{
 		"account-admin.approve_user", "account-admin.create_role", "account-admin.create_user", "account-admin.delete_role",
 		"account-admin.disable_user", "account-admin.enable_user", "account-admin.get_user",
-		"account-admin.grant_role", "account-admin.list_roles", "account-admin.list_users",
-		"account-admin.revoke_role", "account-admin.set_user_password", "account-admin.update_role",
-		"account.capabilities", "account.change_password", "account.login", "account.logout",
-		"account.me", "account.register",
+		"account-admin.grant_role", "account-admin.list_roles", "account-admin.list_user_api_keys", "account-admin.list_users",
+		"account-admin.revoke_role", "account-admin.revoke_user_api_key", "account-admin.set_user_password", "account-admin.update_role",
+		"account.capabilities", "account.change_password", "account.create_api_key", "account.list_api_keys", "account.login", "account.logout",
+		"account.me", "account.register", "account.revoke_api_key",
 		"greeting.greet",
 	}
 	if !slices.Equal(methods, want) {
@@ -107,18 +114,30 @@ func TestUserRoutesAreSDKMethodsAndTools(t *testing.T) {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatalf("tools/schema.json: %v", err)
 	}
-	var tools []string
+	var tools, hiddenTools []string
 	for _, tool := range document.Tools {
 		tools = append(tools, tool.Namespace+"."+tool.MethodName)
 		_, operation, _ := strings.Cut(tool.Name, ".")
 		hidden := tool.MCP != nil && tool.MCP.Hidden
-		if slices.Contains(userRoutesPasswordTools, operation) {
+		if hidden {
+			hiddenTools = append(hiddenTools, operation)
+		}
+		switch {
+		case slices.Contains(userRoutesPasswordTools, operation):
 			if !hidden || tool.MCP.HiddenReason != ir.IdentityPasswordToolReason {
 				t.Errorf("%s: mcp = %+v, want hidden with %q", tool.Name, tool.MCP, ir.IdentityPasswordToolReason)
 			}
-		} else if hidden {
+		case slices.Contains(userRoutesCredentialTools, operation):
+			if !hidden || tool.MCP.HiddenReason != ir.IdentityAPIKeyToolReason {
+				t.Errorf("%s: mcp = %+v, want hidden with %q", tool.Name, tool.MCP, ir.IdentityAPIKeyToolReason)
+			}
+		case hidden:
 			t.Errorf("%s is hidden: %+v", tool.Name, tool.MCP)
 		}
+	}
+	slices.Sort(hiddenTools)
+	if want := []string{"changePassword", "createApiKey", "createUser", "login", "register", "setUserPassword"}; !slices.Equal(hiddenTools, want) {
+		t.Errorf("hidden tools = %v, want %v", hiddenTools, want)
 	}
 	slices.Sort(tools)
 	if !slices.Equal(tools, want) {

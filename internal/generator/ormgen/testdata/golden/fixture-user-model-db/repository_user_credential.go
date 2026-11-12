@@ -43,10 +43,16 @@ var UserCredentialQuotedFields = map[string]string{
 // userCredentialSortColumns are the columns of UserCredential's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var userCredentialSortColumns = map[UserCredentialSortField]struct{ sql, key string }{
-	UserCredentialSortById:                {`user_credential.id`, `page_key.id`},
-	UserCredentialSortByPasswordChangedAt: {`user_credential.password_changed_at`, `page_key.password_changed_at`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var userCredentialSortColumns = map[UserCredentialSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	UserCredentialSortById:                {`user_credential.id`, `page_key.id`, false},
+	UserCredentialSortByPasswordChangedAt: {`user_credential.password_changed_at`, `page_key.password_changed_at`, false},
+	UserCredentialSortByDisabledAt:        {`user_credential.disabled_at`, `page_key.disabled_at`, true},
+	UserCredentialSortByPendingAt:         {`user_credential.pending_at`, `page_key.pending_at`, true},
 }
 
 // buildUserCredentialOrderByClause builds an ORDER BY clause for UserCredential.
@@ -917,7 +923,7 @@ func (r *UserCredentialRepository) FindPage(ctx context.Context, filter *UserCre
 	}
 	column, ok := userCredentialSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: UserCredential sorts by id and passwordChangedAt, not %q", string(field))
+		return nil, fmt.Errorf("orm: UserCredential sorts by id, passwordChangedAt, disabledAt and pendingAt, not %q", string(field))
 	}
 	byKey := field == UserCredentialSortById
 
@@ -947,14 +953,23 @@ func (r *UserCredentialRepository) FindPage(ctx context.Context, filter *UserCre
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`user_credential.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`user_credential.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, user_credential.id) %s ((SELECT %s FROM user_credential AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, user_credential.id) %s ((SELECT %s FROM user_credential AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM user_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -962,6 +977,9 @@ func (r *UserCredentialRepository) FindPage(ctx context.Context, filter *UserCre
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, user_credential.id %s`, direction)
 	}

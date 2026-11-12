@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,10 +34,20 @@ func TestLoadUserRoutesExpandsFromTheAuthDb(t *testing.T) {
 	for _, set := range schema.OperationSets {
 		counts[set.Name] = len(set.Operations)
 	}
-	if counts["Account"] != 6 || counts["AccountAdmin"] != 13 || counts["GreetingQueries"] != 1 {
-		t.Errorf("operations per set = %v, want 6, 13 and 1", counts)
+	// Account has login, logout, me, capabilities, changePassword and
+	// register, and createApiKey, listApiKeys and revokeApiKey with apiKeys
+	// (D114); AccountAdmin its thirteen, and listUserApiKeys and
+	// revokeUserApiKey.
+	if counts["Account"] != 9 || counts["AccountAdmin"] != 15 || counts["GreetingQueries"] != 1 {
+		t.Errorf("operations per set = %v, want 9, 15 and 1", counts)
 	}
-	for _, name := range []string{"Auth.Password", "Contact.Email", "Identity.Name", "Identity.UUID", "Temporal.DateTime"} {
+	for _, name := range ir.IdentityAPIKeyTypes {
+		if td := schema.Types[name]; td == nil || td.Origin != ir.OriginIdentity {
+			t.Errorf("the API key type %s was not added: %+v", name, td)
+		}
+	}
+	// Generic.Int64 is CreateApiKeyInput.expiresInSeconds's (D114).
+	for _, name := range []string{"Auth.Password", "Contact.Email", "Generic.Int64", "Identity.Name", "Identity.UUID", "Temporal.DateTime"} {
 		def := schema.Scalars[name]
 		if def == nil || def.Description == "" || def.TypeMappings["go"] == "" {
 			t.Errorf("%s was not hydrated: %+v", name, def)
@@ -185,24 +196,26 @@ func TestLoadUserRoutesInTheDataForms(t *testing.T) {
 	for _, tc := range []struct{ file, body string }{
 		{"src/account.schema.json", `{
   "operationSets": [
-    {"name": "Account", "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81).", "operations": [],
-     "userSessions": {"register": true, "registration": "approval", "defaultRoles": ["member"], "firstUser": {"role": "admin", "permissions": ["identity"]}}},
-    {"name": "AccountAdmin", "comment": "Manages users, roles and the grants between them.", "operations": [], "userAdministration": {}}
+    {"name": "Account", "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81). A signed-in user makes API keys (D114).", "operations": [],
+     "userSessions": {"register": true, "registration": "approval", "defaultRoles": ["member"], "firstUser": {"role": "admin", "permissions": ["identity"]}, "apiKeys": true}},
+    {"name": "AccountAdmin", "comment": "Manages users, roles and the grants between them, and lists and revokes\nany user's API keys.", "operations": [], "userAdministration": {"apiKeys": true}}
   ]
 }`},
 		{"src/account.schema.yaml", `operationSets:
   - name: Account
-    comment: "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81)."
+    comment: "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81). A signed-in user makes API keys (D114)."
     operations: []
     userSessions:
       register: true
       registration: approval
       defaultRoles: [member]
       firstUser: { role: admin, permissions: [identity] }
+      apiKeys: true
   - name: AccountAdmin
-    comment: Manages users, roles and the grants between them.
+    comment: "Manages users, roles and the grants between them, and lists and revokes\nany user's API keys."
     operations: []
-    userAdministration: {}
+    userAdministration:
+      apiKeys: true
 `},
 	} {
 		t.Run(filepath.Ext(tc.file), func(t *testing.T) {
@@ -215,6 +228,152 @@ func TestLoadUserRoutesInTheDataForms(t *testing.T) {
 			}
 			if schema.Types[ir.IdentityLoginInputType] == nil || schema.Enums[ir.IdentitySessionTransportEnum] == nil {
 				t.Error("the types were not added")
+			}
+			for _, name := range ir.IdentityAPIKeyTypes {
+				if schema.Types[name] == nil {
+					t.Errorf("the API key type %s was not added", name)
+				}
+			}
+		})
+	}
+}
+
+// TestLoadUserRoutesAPIKeysAreOptIn: the API key routes (D114) are each
+// set's own opt-in. A set without apiKeys has none of the five operations,
+// and an API none of whose sets has it gets none of the three types and may
+// declare a type named as one of them. With apiKeys on either set, the API
+// reserves all three names, so the authored type is refused.
+func TestLoadUserRoutesAPIKeysAreOptIn(t *testing.T) {
+	// The API's own ApiKey, beside the route sets with the configs given.
+	service := func(sessions, admin string) string {
+		return `{
+  "types": {"ApiKey": {"name": "ApiKey", "role": "EmbeddedStruct",
+    "fields": [{"name": "label", "typeRef": {"name": "string"}, "required": true}]}},
+  "operationSets": [
+    {"name": "Account", "operations": [], "userSessions": ` + sessions + `},
+    {"name": "AccountAdmin", "operations": [], "userAdministration": ` + admin + `}
+  ]
+}`
+	}
+	sessionOps := []string{"login", "logout", "me", "capabilities", "changePassword", "register"}
+	adminOps := []string{
+		"createUser", "listUsers", "getUser", "disableUser", "enableUser", "approveUser", "setUserPassword",
+		"listRoles", "createRole", "updateRole", "deleteRole", "grantRole", "revokeRole",
+	}
+	operations := func(schema *ir.Schema, set string) []string {
+		var names []string
+		for _, s := range schema.OperationSets {
+			if s.Name != set {
+				continue
+			}
+			for _, op := range s.Operations {
+				names = append(names, op.Name)
+			}
+		}
+		return names
+	}
+
+	schema, err := LoadService(userRoutesDataService(t, "src/account.schema.json", service(`{"register": true}`, `{}`)))
+	if err != nil {
+		t.Fatalf("an API without apiKeys that declares ApiKey: LoadService = %v", err)
+	}
+	if got := operations(schema, "Account"); !slices.Equal(got, sessionOps) {
+		t.Errorf("Account without apiKeys = %v, want %v", got, sessionOps)
+	}
+	if got := operations(schema, "AccountAdmin"); !slices.Equal(got, adminOps) {
+		t.Errorf("AccountAdmin without apiKeys = %v, want %v", got, adminOps)
+	}
+	if own := schema.Types[ir.IdentityAPIKeyType]; own == nil || own.Origin != "" || len(own.Fields) != 1 || own.Fields[0].Name != "label" {
+		t.Errorf("ApiKey = %+v, want the API's own type", own)
+	}
+	for _, name := range []string{ir.IdentityCreateAPIKeyInputType, ir.IdentityCreatedAPIKeyType} {
+		if schema.Types[name] != nil {
+			t.Errorf("the type %s was added without apiKeys", name)
+		}
+	}
+
+	const refusal = "src/account.schema.json: ApiKey: the user model's routes add a type named ApiKey, which the schema already defines; rename it"
+	for name, configs := range map[string][2]string{
+		"apiKeys on the sessions":       {`{"register": true, "apiKeys": true}`, `{}`},
+		"apiKeys on the administration": {`{"register": true}`, `{"apiKeys": true}`},
+	} {
+		_, err := LoadService(userRoutesDataService(t, "src/account.schema.json", service(configs[0], configs[1])))
+		if err == nil || err.Error() != refusal {
+			t.Errorf("%s: LoadService = %v, want %q", name, err, refusal)
+		}
+	}
+
+	// Without the authored type, a set without apiKeys adds no operation
+	// and no type of the API keys', and each set's apiKeys adds its own
+	// operations and the types they use, and none of the other set's.
+	routes := func(t *testing.T, sessions, admin string) *ir.Schema {
+		t.Helper()
+		body := `{"operationSets": [
+  {"name": "Account", "operations": [], "userSessions": ` + sessions + `},
+  {"name": "AccountAdmin", "operations": [], "userAdministration": ` + admin + `}
+]}`
+		schema, err := LoadService(userRoutesDataService(t, "src/account.schema.json", body))
+		if err != nil {
+			t.Fatalf("LoadService: %v", err)
+		}
+		return schema
+	}
+	sessionKeyOps := append(slices.Clone(sessionOps), "createApiKey", "listApiKeys", "revokeApiKey")
+	adminKeyOps := append(slices.Clone(adminOps), "listUserApiKeys", "revokeUserApiKey")
+	for _, tc := range []struct {
+		name, sessions, admin   string
+		wantSessions, wantAdmin []string
+		wantTypes               []string
+	}{
+		{
+			name:     "apiKeys on neither",
+			sessions: `{"register": true}`, admin: `{}`,
+			wantSessions: sessionOps, wantAdmin: adminOps,
+		},
+		{
+			name:     "apiKeys written as false",
+			sessions: `{"register": true, "apiKeys": false}`, admin: `{"apiKeys": false}`,
+			wantSessions: sessionOps, wantAdmin: adminOps,
+		},
+		{
+			name:     "apiKeys on the sessions alone",
+			sessions: `{"register": true, "apiKeys": true}`, admin: `{}`,
+			wantSessions: sessionKeyOps, wantAdmin: adminOps,
+			wantTypes: []string{"ApiKey", "CreateApiKeyInput", "CreatedApiKey"},
+		},
+		{
+			name:     "apiKeys on the administration alone",
+			sessions: `{"register": true}`, admin: `{"apiKeys": true}`,
+			wantSessions: sessionOps, wantAdmin: adminKeyOps,
+			wantTypes: []string{"ApiKey"},
+		},
+		{
+			name:     "apiKeys on both",
+			sessions: `{"register": true, "apiKeys": true}`, admin: `{"apiKeys": true}`,
+			wantSessions: sessionKeyOps, wantAdmin: adminKeyOps,
+			wantTypes: []string{"ApiKey", "CreateApiKeyInput", "CreatedApiKey"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := routes(t, tc.sessions, tc.admin)
+			if got := operations(schema, "Account"); !slices.Equal(got, tc.wantSessions) {
+				t.Errorf("Account = %v, want %v", got, tc.wantSessions)
+			}
+			if got := operations(schema, "AccountAdmin"); !slices.Equal(got, tc.wantAdmin) {
+				t.Errorf("AccountAdmin = %v, want %v", got, tc.wantAdmin)
+			}
+			var added []string
+			for _, name := range ir.IdentityAPIKeyTypes {
+				if td := schema.Types[name]; td != nil {
+					if td.Origin != ir.OriginIdentity {
+						t.Errorf("%s has origin %q, want the identity expansion's", name, td.Origin)
+					}
+					added = append(added, name)
+				}
+			}
+			slices.Sort(added)
+			if !slices.Equal(added, tc.wantTypes) {
+				t.Errorf("API key types = %v, want %v", added, tc.wantTypes)
 			}
 		})
 	}

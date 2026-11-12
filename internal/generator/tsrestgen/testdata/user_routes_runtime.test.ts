@@ -7,7 +7,8 @@ service identityService builds, and every call but the cross-origin
 refusals goes through the SDK, whose fetch hands each request to the app:
 a bearer session from register, under approval (D81), to logout, the
 administration routes under
-the grant rule, and a cookie session in a browser's place, which keeps the
+the grant rule, an API key (D114) from the session that makes it to its
+revocation, and a cookie session in a browser's place, which keeps the
 cookies the app sets and sends the credentials mode the SDK passes.
 */
 import { Database } from 'bun:sqlite';
@@ -218,6 +219,68 @@ describe('generated fixture-user-routes-api router with the identity runtime', (
     // Disabling a user ends their sessions.
     await admin.accountAdmin.disableUser(grace.id);
     expect(await refusal(asGrace.account.me())).toEqual([401, 'unauthorized']);
+  });
+
+  test('an API key: a session makes it, it calls as its user with the permissions it names, acts on no account of its own, and ends when revoked', async () => {
+    const served = await serve();
+    const anonymous = sdkFor(served);
+    const { token: adminToken } = await anonymous.account.login({ login: 'admin@example.com', password: ADMIN_PASSWORD });
+    const admin = sdkFor(served, { auth: { token: adminToken } });
+
+    // A key names only what its user holds: the administrator holds
+    // identity, and not greetings.read.
+    expect(await refusal(admin.account.createApiKey({ name: 'greeter', permissions: ['greetings.read'] }))).toEqual([403, 'forbidden']);
+    expect(await refusal(admin.account.createApiKey({ name: 'bad', permissions: ['not a permission'] }))).toEqual([422, 'invalid_permission']);
+    const made = await admin.account.createApiKey({ name: '  triage agent ', expiresInSeconds: 3600, permissions: ['identity.users.read'] });
+    expect(made.token).toMatch(/^key_[A-Za-z0-9_-]{43}$/);
+    expect(made).toMatchObject({ name: 'triage agent', permissions: ['identity.users.read'] });
+    expect(made.expiresAt.getTime() - made.createdAt.getTime()).toBe(3600_000);
+    const whole = await admin.account.createApiKey({ name: 'everything' });
+    expect(whole.permissions).toBeUndefined();
+
+    // The key calls as its user, holding the permissions it names.
+    const agent = sdkFor(served, { auth: { token: made.token } });
+    expect(await agent.greeting.greet()).toEqual({ message: 'Hello, Admin' });
+    const me = await agent.account.me();
+    expect({ login: me.user.login, permissions: me.permissions }).toEqual({ login: 'admin@example.com', permissions: ['identity.users.read'] });
+    expect((await agent.accountAdmin.listUsers()).map((user: { login: string }) => user.login)).toEqual(['admin@example.com']);
+    expect(await refusal(agent.accountAdmin.createRole({ name: 'viewer', permissions: ['identity.users.read'] }))).toEqual([403, 'forbidden']);
+    expect((await agent.account.capabilities()).operations).toMatchObject({
+      AccountAdminListUsersHandler: true,
+      AccountAdminListUserApiKeysHandler: true,
+      AccountAdminRevokeUserApiKeyHandler: false,
+      AccountAdminCreateRoleHandler: false,
+    });
+    // A key with no list holds what its user holds.
+    const everything = sdkFor(served, { auth: { token: whole.token } });
+    expect((await everything.account.me()).permissions).toEqual(['identity']);
+
+    // A key does not act on its own account, so a leaked one makes no key,
+    // revokes none and signs no one out.
+    expect(await refusal(agent.account.createApiKey({ name: 'another' }))).toEqual([403, 'forbidden']);
+    expect(await refusal(agent.account.listApiKeys())).toEqual([403, 'forbidden']);
+    expect(await refusal(agent.account.revokeApiKey(whole.id))).toEqual([403, 'forbidden']);
+    expect(await refusal(agent.account.logout())).toEqual([403, 'forbidden']);
+    expect(await refusal(everything.account.changePassword({ current: ADMIN_PASSWORD, password: 'a new password' }))).toEqual([403, 'forbidden']);
+
+    // The list holds each key and never a token, and says which was used.
+    const listed = await admin.account.listApiKeys();
+    expect(listed.map((key: { name: string }) => key.name).sort()).toEqual(['everything', 'triage agent']);
+    for (const key of listed) {
+      expect(Object.keys(key)).not.toContain('token');
+      expect(key.lastUsedAt).toBeInstanceOf(Date);
+    }
+
+    // An administrator lists and revokes a user's keys, and the user their own.
+    expect((await admin.accountAdmin.listUserApiKeys(served.adminId)).map((key: { id: string }) => key.id).sort()).toEqual([made.id, whole.id].sort());
+    expect(await admin.accountAdmin.revokeUserApiKey(served.adminId, whole.id)).toBe(true);
+    expect(await refusal(everything.greeting.greet())).toEqual([401, 'unauthorized']);
+    expect(await admin.account.revokeApiKey(made.id)).toBe(true);
+    expect(await refusal(agent.greeting.greet())).toEqual([401, 'unauthorized']);
+    expect(await refusal(admin.account.revokeApiKey(made.id))).toEqual([404, 'not_found']);
+    expect(await admin.account.listApiKeys()).toEqual([]);
+    // The session that made them is untouched.
+    expect((await admin.account.me()).user.login).toBe('admin@example.com');
   });
 
   test('a cookie session through the SDK: the browser keeps the cookie, the SDK sends no Authorization', async () => {

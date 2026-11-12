@@ -21,9 +21,10 @@ one that does not decode at all is.
 
 The catalog's parts sort by name or quantity the same way, and listParts
 keeps the ones args.filter's members all match, as a repository's filter
-would: eq and in by equality, gt, gte, lt and lte by the field's order,
-contains by the text a name holds in any case, and isNull by whether the
-field is null, which no other member matches.
+would: eq and in by equality, ne and notIn by its absence, gt, gte, lt
+and lte by the field's order, contains by the text a name holds in any
+case, and isNull by whether the field is null, which ne and notIn match
+too and no other member does (D112).
 */
 import {
   decodeCursor,
@@ -140,8 +141,9 @@ export function partKey(row: PartView, sort: PageSort): PartKey {
 
 /**
  * Whether a value passes an ordered field's filter: every member the
- * filter holds, by the field's order. A null value passes isNull: true
- * alone.
+ * filter holds, by the field's order. A null value passes isNull: true,
+ * and ne and notIn, which keep what eq and in leave out (D112), and no
+ * other member.
  */
 function ordered<T>(value: T | null, filter: OrderedFilter<T> | undefined, compare: (a: T, b: T) => number): boolean {
   if (filter === undefined) return true;
@@ -150,7 +152,9 @@ function ordered<T>(value: T | null, filter: OrderedFilter<T> | undefined, compa
     bound === undefined || (value !== null && test(compare(value, bound)));
   return (
     holds(filter.eq, order => order === 0) &&
+    (filter.ne === undefined || value === null || compare(value, filter.ne) !== 0) &&
     (filter.in === undefined || (value !== null && filter.in.some(item => compare(value, item) === 0))) &&
+    (filter.notIn === undefined || value === null || !filter.notIn.some(item => compare(value, item) === 0)) &&
     holds(filter.gt, order => order > 0) &&
     holds(filter.gte, order => order >= 0) &&
     holds(filter.lt, order => order < 0) &&

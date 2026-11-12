@@ -421,6 +421,20 @@ async fn cases(db: Arc<Database>) {
     lee.task.status.transition(t2b, to("done"), None).await.unwrap();
     db.wait_status("project", &p2_text, "done").await;
 
+    println!("a task that is done, reopened and done again closes its project each time");
+    // Done is a state a transition leaves, which finished names (D113): it
+    // counts as finished, so the project closed though each task may be
+    // reopened. A reopened task moves nothing by itself.
+    lee.task.status.transition(t2b, to("todo"), None).await.unwrap();
+    db.drained().await;
+    assert_eq!(db.status("project", &p2_text).await, "done", "a reopened task leaves its project done");
+    // The task's own rule takes the project up when it starts again, along
+    // the transition the project lists from done.
+    lee.task.status.transition(t2b, to("doing"), None).await.unwrap();
+    db.wait_status("project", &p2_text, "active").await;
+    lee.task.status.transition(t2b, to("done"), None).await.unwrap();
+    db.wait_status("project", &p2_text, "done").await;
+
     println!("a task that fails moves its project to failed");
     let (p3, p3_text) = db.project("p3").await;
     lee.project.status.transition(p3, to("active"), None).await.unwrap();

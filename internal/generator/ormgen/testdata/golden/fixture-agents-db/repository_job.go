@@ -849,12 +849,28 @@ var JobQuotedFields = map[string]string{
 // jobSortColumns are the columns of Job's sort fields, by
 // field, as FindPage's ORDER BY and keyset write them: qualified by the table,
 // and by page_key, the alias of the subquery that reads the key's row. They
-// are the only text of a sort that reaches its SQL (D60, amended).
-var jobSortColumns = map[JobSortField]struct{ sql, key string }{
-	JobSortById:       {`job.id`, `page_key.id`},
-	JobSortByTitle:    {`job.title`, `page_key.title`},
-	JobSortByRevision: {`job.revision`, `page_key.revision`},
-	JobSortByStatus:   {`job.status`, `page_key.status`},
+// are the only text of a sort that reaches its SQL (D60, amended). nulls is
+// a column that may be null, whose nulls a page orders last (D112).
+var jobSortColumns = map[JobSortField]struct {
+	sql, key string
+	nulls    bool
+}{
+	JobSortById:                  {`job.id`, `page_key.id`, false},
+	JobSortByTitle:               {`job.title`, `page_key.title`, false},
+	JobSortByRevision:            {`job.revision`, `page_key.revision`, false},
+	JobSortByLeaseHolder:         {`job.lease_holder`, `page_key.lease_holder`, true},
+	JobSortByLeaseToken:          {`job.lease_token`, `page_key.lease_token`, true},
+	JobSortByLeaseAcquiredAt:     {`job.lease_acquired_at`, `page_key.lease_acquired_at`, true},
+	JobSortByLeaseRenewedAt:      {`job.lease_renewed_at`, `page_key.lease_renewed_at`, true},
+	JobSortByLeaseExpiresAt:      {`job.lease_expires_at`, `page_key.lease_expires_at`, true},
+	JobSortByLeaseExpiries:       {`job.lease_expiries`, `page_key.lease_expiries`, true},
+	JobSortByRetriesTotal:        {`job.retries_total`, `page_key.retries_total`, true},
+	JobSortByRetriesBestScore:    {`job.retries_best_score`, `page_key.retries_best_score`, true},
+	JobSortByRetriesRetryAt:      {`job.retries_retry_at`, `page_key.retries_retry_at`, true},
+	JobSortByRetriesFailingSince: {`job.retries_failing_since`, `page_key.retries_failing_since`, true},
+	JobSortByRetriesKeyedBy:      {`job.retries_keyed_by`, `page_key.retries_keyed_by`, true},
+	JobSortByStatus:              {`job.status`, `page_key.status`, false},
+	JobSortByStatusEnteredAt:     {`job.status_entered_at`, `page_key.status_entered_at`, true},
 }
 
 // buildJobOrderByClause builds an ORDER BY clause for Job.
@@ -2301,7 +2317,7 @@ func (r *JobRepository) FindPage(ctx context.Context, filter *JobFilter, opts *J
 	}
 	column, ok := jobSortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Job sorts by id, title, revision and status, not %q", string(field))
+		return nil, fmt.Errorf("orm: Job sorts by id, title, revision, leaseHolder, leaseToken, leaseAcquiredAt, leaseRenewedAt, leaseExpiresAt, leaseExpiries, retriesTotal, retriesBestScore, retriesRetryAt, retriesFailingSince, retriesKeyedBy, status and statusEnteredAt, not %q", string(field))
 	}
 	byKey := field == JobSortById
 
@@ -2331,14 +2347,23 @@ func (r *JobRepository) FindPage(ctx context.Context, filter *JobFilter, opts *J
 		}
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
+		afterKey := fmt.Sprintf(`job.id %s %s`, comparison, placeholder)
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`job.id %s %s`, comparison, placeholder))
+			conditions = append(conditions, afterKey)
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, job.id) %s ((SELECT %s FROM job AS page_key WHERE page_key.id = %s), %s)`,
-				column.sql, comparison, column.key, placeholder, placeholder))
+			after := fmt.Sprintf(`(%s, job.id) %s ((SELECT %s FROM job AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder)
+			if column.nulls {
+				// Nulls come last in either direction (D112): after a
+				// null, the nulls past the key; after a value, every null
+				// and the values past it.
+				after = fmt.Sprintf(`CASE (SELECT %s IS NULL FROM job AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END`,
+					column.key, placeholder, column.sql, afterKey, column.sql, after)
+			}
+			conditions = append(conditions, after)
 		}
 	}
 	whereClause := ""
@@ -2346,6 +2371,9 @@ func (r *JobRepository) FindPage(ctx context.Context, filter *JobFilter, opts *J
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if column.nulls {
+		orderByClause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST", column.sql, direction)
+	}
 	if !byKey {
 		orderByClause += fmt.Sprintf(`, job.id %s`, direction)
 	}

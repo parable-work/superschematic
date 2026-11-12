@@ -66,6 +66,14 @@ func TestUserModelRoutes(t *testing.T) {
 			want: "Account: @userSessions: register needs the login; drop register: true or login: false",
 		},
 		{
+			name: "apiKeys without the login",
+			api: func(s *ir.Schema) {
+				cfg := sessions(s).UserSessions
+				cfg.NoLogin, cfg.Register, cfg.APIKeys = true, false, true
+			},
+			want: "Account: @userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false",
+		},
+		{
 			name: "an authored operation",
 			api: func(s *ir.Schema) {
 				admin(s).Operations = []*ir.FieldDef{{Name: "audit", TypeRef: ir.TypeRef{Name: "string"}, HTTPMethod: "GET"}}
@@ -200,6 +208,60 @@ func TestUserModelRoutes(t *testing.T) {
 			name: "a type the expansion added",
 			api: func(s *ir.Schema) {
 				s.Types["LoginInput"] = &ir.TypeDef{Name: "LoginInput", Role: ir.RoleAPIInput, Origin: ir.OriginIdentity}
+			},
+		},
+
+		// The API key routes' types (D114) are reserved only in an API one
+		// of whose sets has apiKeys, and then all three, whichever set has
+		// it.
+		{
+			name: "an authored type named ApiKey, without apiKeys",
+			api: func(s *ir.Schema) {
+				for _, name := range ir.IdentityAPIKeyTypes {
+					s.Types[name] = &ir.TypeDef{Name: name, Owner: "src/keys.schema.ts", Role: ir.RoleEmbeddedStruct}
+				}
+			},
+		},
+		{
+			name: "an authored type named ApiKey, with the sessions' apiKeys",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.APIKeys = true
+				s.Types["ApiKey"] = &ir.TypeDef{Name: "ApiKey", Owner: "src/keys.schema.ts", Role: ir.RoleEmbeddedStruct}
+			},
+			want: "src/keys.schema.ts: ApiKey: the user model's routes add a type named ApiKey, which the schema already defines; rename it",
+		},
+		{
+			name: "an authored type named ApiKey, with the administration's apiKeys",
+			api: func(s *ir.Schema) {
+				admin(s).UserAdministration.APIKeys = true
+				s.Types["ApiKey"] = &ir.TypeDef{Name: "ApiKey", Role: ir.RoleEmbeddedStruct}
+			},
+			want: "ApiKey: the user model's routes add a type named ApiKey, which the schema already defines; rename it",
+		},
+		{
+			name: "an authored type named as a key type the administration's apiKeys does not use",
+			api: func(s *ir.Schema) {
+				admin(s).UserAdministration.APIKeys = true
+				s.Types["CreatedApiKey"] = &ir.TypeDef{Name: "CreatedApiKey", Role: ir.RoleEmbeddedStruct}
+			},
+			want: "CreatedApiKey: the user model's routes add a type named CreatedApiKey, which the schema already defines; rename it",
+		},
+		{
+			name: "an authored enum named as a key type, with apiKeys",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.APIKeys = true
+				s.Enums["CreateApiKeyInput"] = &ir.EnumDef{Name: "CreateApiKeyInput"}
+			},
+			want: "CreateApiKeyInput: the user model's routes add a type named CreateApiKeyInput, which the schema already defines; rename it",
+		},
+		{
+			name: "the key types the expansion added",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.APIKeys = true
+				admin(s).UserAdministration.APIKeys = true
+				for _, name := range ir.IdentityAPIKeyTypes {
+					s.Types[name] = &ir.TypeDef{Name: name, Role: ir.RoleEmbeddedStruct, Origin: ir.OriginIdentity}
+				}
 			},
 		},
 

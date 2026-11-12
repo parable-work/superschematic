@@ -41,7 +41,7 @@ type SDKOutput struct {
 	// HasFilteredEndpoints reports whether an operation takes a filter
 	// (D106); src/runtime.rs then carries Equals, Ordered and Text, the
 	// shapes of a field's filter, with check_query_list_item for an in's
-	// values, and src/lib.rs exports the shapes.
+	// and a notIn's values, and src/lib.rs exports the shapes.
 	HasFilteredEndpoints bool
 	// ChecksQueryListItems reports whether a list query parameter's items
 	// are sent as text; src/runtime.rs then carries check_query_list_item.

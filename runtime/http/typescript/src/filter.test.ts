@@ -32,20 +32,20 @@ const UUID = parseIdentityUUID(HYPHENATED)!;
 /** A field of every kind a filter compares, as a generated router's operation table carries them. */
 const spec = {
   fields: [
-    { name: 'id', operators: ['eq', 'in'], value: { name: 'filter[id]', kind: 'uuid', required: false } },
+    { name: 'id', operators: ['eq', 'ne', 'in', 'notIn'], value: { name: 'filter[id]', kind: 'uuid', required: false } },
     {
       name: 'name',
-      operators: ['eq', 'in', 'contains'],
+      operators: ['eq', 'ne', 'in', 'notIn', 'contains'],
       value: { name: 'filter[name]', kind: 'string', required: false, maxLength: 8 },
     },
     {
       name: 'kind',
-      operators: ['eq', 'in'],
+      operators: ['eq', 'ne', 'in', 'notIn'],
       value: { name: 'filter[kind]', kind: 'enum', required: false, enumValues: ['bolt', 'nut', 'washer'] },
     },
     {
       name: 'quantity',
-      operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte'],
+      operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte'],
       value: { name: 'filter[quantity]', kind: 'integer', required: false },
     },
     {
@@ -73,12 +73,12 @@ const spec = {
     {
       name: 'retiredOn',
       kind: 'date',
-      operators: ['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'isNull'],
+      operators: ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'isNull'],
       value: { name: 'filter[retiredOn]', kind: 'string', required: false, scalar: { name: 'Temporal.Date', maxLength: 40 } },
     },
     {
       name: 'supplierId',
-      operators: ['eq', 'in', 'isNull'],
+      operators: ['eq', 'ne', 'in', 'notIn', 'isNull'],
       value: { name: 'filter[supplierId]', kind: 'uuid', required: false },
     },
   ],
@@ -158,6 +158,24 @@ describe('readFilter', () => {
     const madeAt = filter.madeAt as OrderedFilter<Date>;
     expect(madeAt.gte).toEqual(new Date('2026-01-01T00:00:00Z'));
     expect(madeAt.lt).toEqual(new Date('2026-01-31T23:00:00Z'));
+  });
+
+  test('ne is a value and notIn a list, each read as its field’s type, beside eq and in', () => {
+    expect(read(`filter[id][ne]=${HYPHENATED}`)).toEqual({ id: { ne: UUID } });
+    expect(read(`filter[supplierId][notIn]=${HYPHENATED.toUpperCase()},+${UUID}+,`)).toEqual({ supplierId: { notIn: [UUID, UUID] } });
+    // ne keeps its value whole, as eq does: a comma and a space are text.
+    expect(read('filter[name][ne]=+a,+b+')).toEqual({ name: { ne: ' a, b ' } });
+    expect(read('filter[kind][notIn]=bolt,washer&filter[kind][ne]=nut')).toEqual({ kind: { ne: 'nut', notIn: ['bolt', 'washer'] } });
+    const quantity = read('filter[quantity][notIn]=5,6&filter[quantity][in]=3,4&filter[quantity][ne]=7&filter[quantity]=3').quantity!;
+    expect(quantity).toEqual({ eq: 3, ne: 7, in: [3, 4], notIn: [5, 6] });
+    expect(Object.keys(quantity)).toEqual(['eq', 'ne', 'in', 'notIn']);
+    expect(read('filter[retiredOn][ne]=2026-3-1&filter[retiredOn][notIn]=2026-1-5')).toEqual({ retiredOn: { ne: '2026-03-01', notIn: ['2026-01-05'] } });
+    // A value its type refuses is a 400 at the field, whichever operator held it.
+    expect(problemOf('filter[quantity][ne]=many').detail).toBe('Invalid query parameter filter[quantity]: expected an integer');
+    expect(problemOf('filter[quantity][notIn]=1,many').detail).toBe('Invalid query parameter filter[quantity]: expected an integer');
+    expect(problemOf('filter[kind][notIn]=').detail).toBe('Invalid query parameter filter[kind]: notIn names no value');
+    // A field that takes only equality takes neither.
+    expect(problemOf('filter[discontinued][ne]=true').detail).toBe('Invalid query parameter filter[discontinued]: takes no operator ne; expected one of eq, in');
   });
 
   test('isNull is a boolean, beside the field’s other operators', () => {
@@ -257,7 +275,7 @@ describe('a value its type refuses', () => {
     // A field the spec does not name, behind a value its type refuses.
     expect(problemOf('filter[quantity]=many&filter[secret]=x').detail).toStartWith('Invalid query parameter filter[secret]: is not a field');
     expect(problemOf('filter[quantity]=many&filter[kind][gt]=nut').detail).toBe(
-      'Invalid query parameter filter[kind]: takes no operator gt; expected one of eq, in'
+      'Invalid query parameter filter[kind]: takes no operator gt; expected one of eq, ne, in, notIn'
     );
     expect(problemOf('filter[supplierId][isNull]=yes&filter[id]=not-a-uuid').detail).toBe(
       'Invalid query parameter filter[supplierId]: isNull expects true or false'
@@ -346,6 +364,6 @@ describe('readFilters', () => {
 
   test('its limits are the shared ones', () => {
     expect([MAX_FILTERS, MAX_FILTER_IN_VALUES]).toEqual([50, 100]);
-    expect(FILTER_OPERATORS).toEqual(['eq', 'in', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull']);
+    expect(FILTER_OPERATORS).toEqual(['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull']);
   });
 });

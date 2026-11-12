@@ -91,7 +91,7 @@
       "audience": "",
       "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
       "replay": null,
-      "inputSchemaDigest": "sha256:ba7e35f14c93f81ac6a61d7f0ddaf934d7eb50009db1a205e2dab40b54f7d891",
+      "inputSchemaDigest": "sha256:7a8dc3903e2402b814cc341a9c22e69d2d0b6bfd49e9a2f53d2cc2ee56925623",
       "bindingStatus": "ready"
     },
     {

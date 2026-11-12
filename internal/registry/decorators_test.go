@@ -407,6 +407,9 @@ func TestIdentityRoutesApply(t *testing.T) {
 		{map[string]any{"path": "account", "register": true}, ir.UserSessionsConfig{Path: "account", Register: true}},
 		{map[string]any{"login": true, "register": false}, ir.UserSessionsConfig{}},
 		{map[string]any{"login": false}, ir.UserSessionsConfig{NoLogin: true}},
+		// D114: apiKeys adds the API key routes, false when absent.
+		{map[string]any{"apiKeys": true}, ir.UserSessionsConfig{APIKeys: true}},
+		{map[string]any{"apiKeys": false, "register": true}, ir.UserSessionsConfig{Register: true}},
 		// D81: registration, defaultRoles and firstUser; "open" is the
 		// default and leaves Registration empty.
 		{map[string]any{"register": true, "registration": "open"}, ir.UserSessionsConfig{Register: true}},
@@ -437,6 +440,13 @@ func TestIdentityRoutesApply(t *testing.T) {
 	if err := apply("userAdministration", admin, map[string]any{"path": "admin"}); err != nil {
 		t.Fatal(err)
 	}
+	keyed := &ir.OperationSet{}
+	if err := apply("userAdministration", keyed, map[string]any{"apiKeys": true}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.UserAdministrationConfig{APIKeys: true}); !reflect.DeepEqual(keyed.UserAdministration, want) {
+		t.Errorf("userAdministration({apiKeys: true}) = %+v, want %+v", keyed.UserAdministration, want)
+	}
 	if want := (&ir.UserAdministrationConfig{Path: "admin"}); !reflect.DeepEqual(admin.UserAdministration, want) {
 		t.Errorf("userAdministration({ path }) = %+v, want %+v", admin.UserAdministration, want)
 	}
@@ -461,7 +471,8 @@ func TestIdentityRoutesApply(t *testing.T) {
 		want string
 	}{
 		{"userSessions", map[string]any{"login": false, "register": true}, "@userSessions: register needs the login; drop register: true or login: false"},
-		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes defaultRoles, firstUser, login, path, register and registration`},
+		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes apiKeys, defaultRoles, firstUser, login, path, register and registration`},
+		{"userSessions", map[string]any{"login": false, "apiKeys": true}, "@userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false"},
 		{"userSessions", map[string]any{"registration": "approval"}, "@userSessions: registration configures register, so it needs register: true"},
 		{"userSessions", map[string]any{"defaultRoles": []any{"member"}, "firstUser": map[string]any{"role": "admin", "permissions": []any{"identity"}}}, "@userSessions: defaultRoles and firstUser configure register, so they need register: true"},
 		{"userSessions", map[string]any{"register": true, "registration": "invite"}, `@userSessions registration must be "open" or "approval"`},
@@ -475,7 +486,7 @@ func TestIdentityRoutesApply(t *testing.T) {
 		{"userSessions", map[string]any{"login": "yes"}, "@userSessions login must be true or false"},
 		{"userSessions", map[string]any{"path": 1.0}, "@userSessions path must be a string literal"},
 		{"userSessions", "auth", "@userSessions config must be an object literal"},
-		{"userAdministration", map[string]any{"register": true}, `@userAdministration config has unknown key "register"; it takes path`},
+		{"userAdministration", map[string]any{"register": true}, `@userAdministration config has unknown key "register"; it takes apiKeys and path`},
 	} {
 		set := &ir.OperationSet{}
 		err := apply(tc.name, set, tc.arg)

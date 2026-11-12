@@ -526,7 +526,10 @@ describe('identity routes', () => {
     const plain = paths(identityRoutes(service, { sessions: {} }));
     expect(plain).toContain('POST /auth/login');
     expect(plain).not.toContain('register');
-    expect(identityRoutes(service, { sessions: { register: true }, administration: {} })).toHaveLength(identityOperations.length);
+    // The API key operations are routed only when turned on (D114).
+    const apiKeyOperations = identityOperations.filter(op => op.apiKeys).length;
+    expect(apiKeyOperations).toBe(5);
+    expect(identityRoutes(service, { sessions: { register: true }, administration: {} })).toHaveLength(identityOperations.length - apiKeyOperations);
     expect(paths(identityRoutes(service, { administration: { path: '/staff/' } }))).toStartWith('POST /staff/users, GET /staff/users');
     expect(identityOperations.find(op => op.name === 'grantRole')!.path).toBe('users/{id}/roles/{roleId}');
   });

@@ -4,8 +4,9 @@ import type { OperationSpec } from '../operation.js';
 /*
 Roles and permissions (D50): the form a role's permissions are checked for
 when it is written, a principal's permissions from its roles, the rule that
-no one grants what they do not hold, and capabilities, whether each route
-of the API admits a caller, by the router's own rule: the operation table's
+no one grants what they do not hold, what an API key made with permissions
+holds of its user's roles (D114), and capabilities, whether each route of
+the API admits a caller, by the router's own rule: the operation table's
 auth requirements and the permission matcher (hasAnyPermission unless the
 project passes another).
 */
@@ -69,6 +70,40 @@ export function uncovered(held: readonly string[], given: readonly string[]): st
  */
 export function uncoveredUser(held: readonly string[], roles: readonly PermissionsOf[]): string[] {
   return uncovered(held, effectivePermissions(roles));
+}
+
+/**
+ * The permissions of named that some permission of held covers, in named's
+ * order and without repeats. They are what an API key made with named holds
+ * of a role carrying held (D114): each permission it names while the role
+ * holds it, and never a part of one it names more broadly than the role
+ * does.
+ */
+export function narrowPermissions(held: readonly string[], named: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of named) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    if (held.some(h => covers(h, p))) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Roles as an API key made with named holds them (D114): each role with its
+ * permissions narrowed (narrowPermissions), in the order given, and a role
+ * left with no permission dropped. A key whose permissions are null names
+ * none and holds its user's roles as they are, so its roles are not
+ * narrowed.
+ */
+export function narrowRoles<R extends PermissionsOf>(roles: readonly R[], named: readonly string[]): R[] {
+  const out: R[] = [];
+  for (const role of roles) {
+    const permissions = narrowPermissions(role.permissions, named);
+    if (permissions.length > 0) out.push({ ...role, permissions });
+  }
+  return out;
 }
 
 /** What capabilities needs to know of one operation of the API. */

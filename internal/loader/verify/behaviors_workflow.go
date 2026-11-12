@@ -14,8 +14,8 @@ import (
 )
 
 // workflowTableMembers are the members of Workflow's config a table's
-// Workflow alone takes (D104): a transition's by, overridePermission and
-// repeat. An engine type's Workflow refuses each.
+// Workflow alone takes: a transition's by, overridePermission and repeat
+// (D104), and finished (D113). An engine type's Workflow refuses each.
 type workflowTableMembers struct {
 	Transitions []struct {
 		From string          `json:"from"`
@@ -24,6 +24,7 @@ type workflowTableMembers struct {
 	} `json:"transitions"`
 	OverridePermission json.RawMessage `json:"overridePermission"`
 	Repeat             json.RawMessage `json:"repeat"`
+	Finished           json.RawMessage `json:"finished"`
 }
 
 // subjectTypes are the IR types of a field that holds a subject, which a
@@ -39,8 +40,9 @@ func subjectTypesNamed() string {
 }
 
 // checkEngineWorkflowConfig refuses, on an engine type, each member of
-// Workflow's config that a table's Workflow alone takes (D104): each
-// transition's by, in config order, then overridePermission, then repeat.
+// Workflow's config that a table's Workflow alone takes (D104, D113): each
+// transition's by, in config order, then overridePermission, then repeat,
+// then finished.
 // The declaration is shared, so the configSchema accepts them; the
 // engine's Workflow refuses them too, and the build says so first, naming
 // the table form. A config the configSchema refuses is reported by
@@ -51,7 +53,7 @@ func checkEngineWorkflowConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 		return
 	}
 	refuse := func(member string) {
-		r.errorf(td.Owner, "type %s: @behavior Workflow names %s, which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission and repeat, so leave it out", td.Name, member)
+		r.errorf(td.Owner, "type %s: @behavior Workflow names %s, which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission, repeat and finished, so leave it out", td.Name, member)
 	}
 	for _, transition := range config.Transitions {
 		if len(transition.By) > 0 {
@@ -63,6 +65,9 @@ func checkEngineWorkflowConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 	}
 	if len(config.Repeat) > 0 {
 		refuse("repeat")
+	}
+	if len(config.Finished) > 0 {
+		refuse("finished")
 	}
 }
 
@@ -87,6 +92,12 @@ func checkEngineWorkflowConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 // left alone here.
 func checkWorkflowConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 	if reason := workflowRulesProblem(ref.Config); reason != "" {
+		// The core's words, then where a table says what the refused
+		// outcome meant: finished is a table's alone, so the rule the
+		// engine shares cannot name it.
+		if strings.Contains(reason, workflowOutcomeLeft) {
+			reason += "; a table's Workflow names a state a transition leaves that still counts as finished in finished (D113)"
+		}
 		r.errorf(td.Owner, "type %s: field %s: behavior Workflow config: %s", td.Name, ref.Field, reason)
 		return
 	}
@@ -133,11 +144,11 @@ func checkWorkflowConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, 
 // (superschematic_rules_behaviors::workflow) that read the config alone,
 // in its order and its words, the first only, as the core reports them.
 // The initial state is one of the states; each transition's from and to
-// are states, and it moves somewhere, once; and outcomes names states no
-// transition leaves. Without it a config that breaks one built, and the
-// core refused it at the table's first command, as every create's 422
-// (D107 met the same of Timers). A config the configSchema refuses is
-// left to it.
+// are states, and it moves somewhere, once; outcomes names states no
+// transition leaves; and finished names states a transition does leave
+// (D113). Without it a config that breaks one built, and the core refused
+// it at the table's first command, as every create's 422 (D107 met the
+// same of Timers). A config the configSchema refuses is left to it.
 func workflowRulesProblem(raw json.RawMessage) string {
 	var config struct {
 		States      []string `json:"states"`
@@ -147,6 +158,7 @@ func workflowRulesProblem(raw json.RawMessage) string {
 			To   string `json:"to"`
 		} `json:"transitions"`
 		Outcomes map[string]json.RawMessage `json:"outcomes"`
+		Finished map[string]json.RawMessage `json:"finished"`
 	}
 	if len(raw) == 0 || json.Unmarshal(raw, &config) != nil {
 		return ""
@@ -187,12 +199,34 @@ func workflowRulesProblem(raw json.RawMessage) string {
 		}
 		for _, transition := range config.Transitions {
 			if transition.From == state {
-				return "outcomes names " + quote(state) + ", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome"
+				return "outcomes names " + quote(state) + ", " + workflowOutcomeLeft
 			}
+		}
+	}
+	finished := make([]string, 0, len(config.Finished))
+	for state := range config.Finished {
+		finished = append(finished, state)
+	}
+	slices.Sort(finished)
+	for _, state := range finished {
+		if !has(state) {
+			return "finished names " + quote(state) + ", which is not one of its states (" + all + ")"
+		}
+		if !slices.ContainsFunc(config.Transitions, func(transition struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}) bool {
+			return transition.From == state
+		}) {
+			return "finished names " + quote(state) + ", which is a terminal state: no transition leaves it, and outcomes names a terminal state's outcome"
 		}
 	}
 	return ""
 }
+
+// workflowOutcomeLeft is the core's reason for an outcome on a state a
+// transition leaves, after the state's name.
+const workflowOutcomeLeft = "which is not a terminal state: a transition leaves it, and only a terminal state has an outcome"
 
 // byProblem is why entry, an entry of a Workflow transition's by on td,
 // names no field of td that holds a subject, or no seat of td's Seats, or

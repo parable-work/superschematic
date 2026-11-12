@@ -493,18 +493,26 @@ impl OrderImplementation for SqliteShop {
         }
         if let Some(by) = &args.filter.status {
             // Each operator the request sent is one condition:
-            // filter[status]=placed its eq, filter[status][in] its in_.
+            // filter[status]=placed its eq, filter[status][ne] its ne,
+            // filter[status][in] its in_ and filter[status][notIn] its
+            // not_in.
             if let Some(status) = by.eq {
                 query.condition("status = ?", [Value::Text(status.as_str().to_owned())]);
             }
-            if !by.in_.is_empty() {
-                // The statuses go in as one JSON array, which json_each reads.
-                let statuses: Vec<&str> = by.in_.iter().map(|status| status.as_str()).collect();
+            if let Some(status) = by.ne {
+                query.condition("status IS NOT ?", [Value::Text(status.as_str().to_owned())]);
+            }
+            // A list's statuses go in as one JSON array, which json_each reads.
+            for (statuses, condition) in [
+                (&by.in_, "status IN (SELECT value FROM json_each(?))"),
+                (&by.not_in, "status NOT IN (SELECT value FROM json_each(?))"),
+            ] {
+                if statuses.is_empty() {
+                    continue;
+                }
+                let statuses: Vec<&str> = statuses.iter().map(|status| status.as_str()).collect();
                 let statuses = serde_json::to_string(&statuses).map_err(internal)?;
-                query.condition(
-                    "status IN (SELECT value FROM json_each(?))",
-                    [Value::Text(statuses)],
-                );
+                query.condition(condition, [Value::Text(statuses)]);
             }
         }
         let conn = self.conn();

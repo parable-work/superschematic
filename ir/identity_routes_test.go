@@ -14,6 +14,7 @@ func TestIdentityOperationErrors(t *testing.T) {
 		IdentityOpCreateUser, IdentityOpListUsers, IdentityOpGetUser, IdentityOpDisableUser, IdentityOpEnableUser, IdentityOpApproveUser,
 		IdentityOpSetUserPassword,
 		IdentityOpListRoles, IdentityOpCreateRole, IdentityOpUpdateRole, IdentityOpDeleteRole, IdentityOpGrantRole, IdentityOpRevokeRole,
+		IdentityOpCreateAPIKey, IdentityOpListAPIKeys, IdentityOpRevokeAPIKey, IdentityOpListUserAPIKeys, IdentityOpRevokeUserAPIKey,
 	}
 	if len(identityOperationErrors) != len(ops) {
 		t.Errorf("the table has %d operations, want %d", len(identityOperationErrors), len(ops))
@@ -41,7 +42,22 @@ func TestIdentityOperationErrors(t *testing.T) {
 	if login := IdentityOperationErrors(IdentityOpLogin); login[len(login)-1].Code != IdentityCodePendingApproval {
 		t.Errorf("login's last error = %+v, want pending_approval", login[len(login)-1])
 	}
+	// An operation of a caller's own account refuses an API key (D114).
+	for _, op := range []string{IdentityOpLogout, IdentityOpChangePassword, IdentityOpCreateAPIKey, IdentityOpListAPIKeys, IdentityOpRevokeAPIKey} {
+		if !hasStatus(IdentityOperationErrors(op), 403) {
+			t.Errorf("%s has no 403 for a caller an API key authenticated", op)
+		}
+	}
 	if IdentityOperationErrors("greet") != nil {
 		t.Error("an operation of the project has the user model's errors")
 	}
+}
+
+func hasStatus(errs []IdentityRouteError, status int) bool {
+	for _, e := range errs {
+		if e.Status == status {
+			return true
+		}
+	}
+	return false
 }

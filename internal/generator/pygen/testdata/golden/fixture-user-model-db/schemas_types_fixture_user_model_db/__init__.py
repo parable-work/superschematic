@@ -39,6 +39,7 @@ from .types import (
     Role,
     Session,
     User,
+    UserApiKey,
     UserCredential,
     UserRoleGrant
 )
@@ -60,6 +61,7 @@ __all__ = [
     "Role",
     "Session",
     "User",
+    "UserApiKey",
     "UserCredential",
     "UserRoleGrant",
 

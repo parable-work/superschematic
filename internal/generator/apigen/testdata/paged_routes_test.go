@@ -164,15 +164,18 @@ type partKey struct {
 
 // keepEquals reports whether a field passes its filter (D106), as a
 // query's WHERE would: every member set holds at once, and a null field,
-// a nil value, passes no comparison, only isNull=true. A nil filter keeps
-// every row.
+// a nil value, passes no comparison, only isNull=true, and ne and notIn,
+// which keep what eq and in leave out (D112). A nil filter keeps every
+// row.
 func keepEquals[T comparable](filter *filterparse.Equals[T], value *T) bool {
 	if filter == nil {
 		return true
 	}
 	return keepNull(filter.IsNull, value) &&
 		(filter.Eq == nil || value != nil && *value == *filter.Eq) &&
-		(filter.In == nil || value != nil && slices.Contains(filter.In, *value))
+		(filter.Ne == nil || value == nil || *value != *filter.Ne) &&
+		(filter.In == nil || value != nil && slices.Contains(filter.In, *value)) &&
+		(filter.NotIn == nil || value == nil || !slices.Contains(filter.NotIn, *value))
 }
 
 // keepOrdered is keepEquals for an ordered field, whose values compare
@@ -190,7 +193,9 @@ func keepOrdered[T any](filter *filterparse.Ordered[T], value *T, compare func(a
 		holds(filter.Gte, func(order int) bool { return order >= 0 }) &&
 		holds(filter.Lt, func(order int) bool { return order < 0 }) &&
 		holds(filter.Lte, func(order int) bool { return order <= 0 }) &&
-		(filter.In == nil || value != nil && slices.ContainsFunc(filter.In, func(one T) bool { return compare(*value, one) == 0 }))
+		(filter.Ne == nil || value == nil || compare(*value, *filter.Ne) != 0) &&
+		(filter.In == nil || value != nil && slices.ContainsFunc(filter.In, func(one T) bool { return compare(*value, one) == 0 })) &&
+		(filter.NotIn == nil || value == nil || !slices.ContainsFunc(filter.NotIn, func(one T) bool { return compare(*value, one) == 0 }))
 }
 
 // keepText is keepEquals for a field of text, whose contains is the text a
@@ -201,7 +206,9 @@ func keepText(filter *filterparse.Text[string], value *string) bool {
 	}
 	return keepNull(filter.IsNull, value) &&
 		(filter.Eq == nil || value != nil && *value == *filter.Eq) &&
+		(filter.Ne == nil || value == nil || *value != *filter.Ne) &&
 		(filter.In == nil || value != nil && slices.Contains(filter.In, *value)) &&
+		(filter.NotIn == nil || value == nil || !slices.Contains(filter.NotIn, *value)) &&
 		(filter.Contains == nil || value != nil && strings.Contains(strings.ToLower(*value), strings.ToLower(*filter.Contains)))
 }
 
@@ -850,6 +857,23 @@ func TestListPartsFiltersByEachKind(t *testing.T) {
 		{"an in of booleans", "filter[discontinued][in]=true,false", []string{"Washer-M6", "bolt-m4", "bolt-m6", "nut-m4", "nut-m6", "washer-m4"}},
 		{"an in of dates leaves a null out", "filter[retiredOn][in]=2026-06-30,2026-09-01", []string{"nut-m4", "washer-m4"}},
 
+		// ne and notIn keep what eq and in leave out, a null among it (D112).
+		{"ne of an enum", "filter[kind][ne]=nut", []string{"Washer-M6", "bolt-m4", "bolt-m6", "washer-m4"}},
+		{"ne of an integer", "filter[quantity][ne]=40", []string{"Washer-M6", "bolt-m6", "nut-m6", "washer-m4"}},
+		{"ne of a decimal, by its value", "filter[price][ne]=0.1", []string{"Washer-M6", "bolt-m6", "nut-m4", "nut-m6", "washer-m4"}},
+		{"ne of a boolean", "filter[discontinued][ne]=true", []string{"bolt-m4", "bolt-m6", "nut-m6", "washer-m4"}},
+		{"ne of a string", "filter[name][ne]=bolt-m6", []string{"Washer-M6", "bolt-m4", "nut-m4", "nut-m6", "washer-m4"}},
+		{"ne of a datetime", "filter[madeAt][ne]=2026-03-01T00:00:00Z", []string{"Washer-M6", "bolt-m4", "bolt-m6", "nut-m6", "washer-m4"}},
+		{"ne of a date keeps a null", "filter[retiredOn][ne]=2026-06-30", []string{"Washer-M6", "bolt-m4", "bolt-m6", "nut-m6", "washer-m4"}},
+		{"ne of a uuid keeps a null", "filter[supplierId][ne]=" + acme, []string{"bolt-m6", "nut-m6", "washer-m4"}},
+		{"ne beside isNull false", "filter[supplierId][ne]=" + acme + "&filter[supplierId][isNull]=false", []string{"bolt-m6"}},
+		{"a notIn of enums", "filter[kind][notIn]=bolt,washer", []string{"nut-m4", "nut-m6"}},
+		{"a notIn of integers", "filter[quantity][notIn]=7,12,99", []string{"Washer-M6", "bolt-m4", "nut-m4", "washer-m4"}},
+		{"a notIn of uuids, trimmed", "filter[id][notIn]=" + bins[0].id + ",+" + bins[5].id + ",", []string{"bolt-m4", "bolt-m6", "nut-m4", "nut-m6"}},
+		{"a notIn of dates keeps a null", "filter[retiredOn][notIn]=2026-06-30,2026-09-01", []string{"Washer-M6", "bolt-m4", "bolt-m6", "nut-m6"}},
+		{"a notIn of uuids keeps a null", "filter[supplierId][notIn]=" + acme + "," + zenith, []string{"nut-m6", "washer-m4"}},
+		{"ne and notIn beside an in", "filter[kind][in]=bolt,nut&filter[kind][ne]=nut&filter[quantity][notIn]=12", []string{"bolt-m4"}},
+
 		// Ranges.
 		{"an integer range", "filter[quantity][gte]=7&filter[quantity][lt]=40", []string{"bolt-m6", "nut-m6"}},
 		{"an integer's bounds, both inside", "filter[quantity][gt]=7&filter[quantity][lte]=40", []string{"bolt-m4", "bolt-m6", "nut-m4"}},
@@ -1013,7 +1037,7 @@ func refusedFilter(parameter, reason string) map[string]any {
 func TestListPartsRefusesAFilterAsTheVectors(t *testing.T) {
 	server, impl := serve(t)
 	fields := "id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId"
-	ordered := "eq, in, gt, gte, lt, lte"
+	ordered := "eq, ne, in, notIn, gt, gte, lt, lte"
 	type refusal struct {
 		name, query string
 		want        map[string]any
@@ -1021,17 +1045,18 @@ func TestListPartsRefusesAFilterAsTheVectors(t *testing.T) {
 	cases := []refusal{
 		{"a field FilterBy does not name", "filter[secret]=x", refusedFilter("filter[secret]", "is not a field this operation filters by; expected one of "+fields)},
 		{"a field in another case", "filter[Kind]=nut", refusedFilter("filter[Kind]", "is not a field this operation filters by; expected one of "+fields)},
-		{"an operator no field takes", "filter[kind][neq]=nut", refusedFilter("filter[kind]", "takes no operator neq; expected one of eq, in")},
-		{"an order on an enum", "filter[kind][gt]=nut", refusedFilter("filter[kind]", "takes no operator gt; expected one of eq, in")},
-		{"an order on a uuid", "filter[id][lte]=" + bins[0].id, refusedFilter("filter[id]", "takes no operator lte; expected one of eq, in")},
-		{"an order on a boolean", "filter[discontinued][gte]=true", refusedFilter("filter[discontinued]", "takes no operator gte; expected one of eq, in")},
-		{"an order on text", "filter[name][lt]=m", refusedFilter("filter[name]", "takes no operator lt; expected one of eq, in, contains")},
+		{"an operator no field takes", "filter[kind][neq]=nut", refusedFilter("filter[kind]", "takes no operator neq; expected one of eq, ne, in, notIn")},
+		{"an order on an enum", "filter[kind][gt]=nut", refusedFilter("filter[kind]", "takes no operator gt; expected one of eq, ne, in, notIn")},
+		{"an order on a uuid", "filter[id][lte]=" + bins[0].id, refusedFilter("filter[id]", "takes no operator lte; expected one of eq, ne, in, notIn")},
+		{"an order on a boolean", "filter[discontinued][gte]=true", refusedFilter("filter[discontinued]", "takes no operator gte; expected one of eq, ne, in, notIn")},
+		{"an order on text", "filter[name][lt]=m", refusedFilter("filter[name]", "takes no operator lt; expected one of eq, ne, in, notIn, contains")},
 		{"contains on a number", "filter[quantity][contains]=4", refusedFilter("filter[quantity]", "takes no operator contains; expected one of "+ordered)},
 		{"contains on a date", "filter[retiredOn][contains]=2026", refusedFilter("filter[retiredOn]", "takes no operator contains; expected one of "+ordered+", isNull")},
 		{"isNull on a field that is never null", "filter[madeAt][isNull]=true", refusedFilter("filter[madeAt]", "takes no operator isNull; expected one of "+ordered)},
 		{"isNull that is no boolean", "filter[supplierId][isNull]=1", refusedFilter("filter[supplierId]", "isNull expects true or false")},
 		{"equality sent both ways", "filter[kind]=nut&filter[kind][eq]=bolt", refusedFilter("filter[kind]", "holds eq more than once")},
 		{"an in of no value", "filter[kind][in]=,", refusedFilter("filter[kind]", "in names no value")},
+		{"a notIn of no value", "filter[kind][notIn]=,", refusedFilter("filter[kind]", "notIn names no value")},
 		{"contains of no text", "filter[name][contains]=", refusedFilter("filter[name]", "contains needs text")},
 		// The reader refuses before any value is decoded, and before the
 		// page is read.

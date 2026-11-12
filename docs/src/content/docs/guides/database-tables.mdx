@@ -106,8 +106,8 @@ whose `Scan` and `Value` canonicalize it; TypeScript holds the text
 (`decodeRow`, and the pool's parser for a raw query, canonicalize it
 through superscalar); Python `decimal.Decimal`; Rust `superscalar::Decimal`.
 A decimal's filter, `DecimalFilter` in Go and `NumberFilter` in TypeScript,
-compares numbers: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In` and
-`IsNull`, each value a decimal's text. A `Finance.SignedMoney` is a
+compares numbers: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In`,
+`NotIn` and `IsNull`, each value a decimal's text. A `Finance.SignedMoney` is a
 `BIGINT` from -(2^53 - 1) to 2^53 - 1, a debit negative, which
 `@display({ currency })` shows in its currency as it does a
 `Finance.Money`.
@@ -127,7 +127,7 @@ precision of an `INTERVAL`, and drops a remainder of nanoseconds toward
 zero. It reads an `INTERVAL` with a day as 24 hours and a month as 30
 days, so one written by hand as `'1 mon 2 days 03:04:05'` reads as
 `771h4m5s`. A duration's filter, `DurationFilter`, takes `time.Duration`
-values: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
+values: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
 `Geo.Location`'s filter, `GeoPointFilter`, has `IsNull` only; [JSON-valued
 scalars](/superschematic/reference/json-scalars/) says why.
 
@@ -455,12 +455,20 @@ orders reads its pages through it:
 <Snippet file="go/shop-orders/orders.go" symbol="Orders.ListOrders" />
 
 A table sorts by its key, and by each column of the table's own that
-holds one value of text, a number, a time, a date or a UUID and is never
-null: `createdAt` among them, and `updatedAt` when it is required.
-`OrderSortByPlacedAt` names one, and
+holds one value of text, a number, a time, a date or a UUID: `createdAt`
+and `updatedAt` among them. `OrderSortByPlacedAt` names one, and
 `orm.OrderSort{Field: orm.OrderSortByPlacedAt, Desc: true}` reads the
-newest orders first. A column that may be null, or holds an enum, a
-boolean, JSON, a list, a map, a union or a point, is not a sort field.
+newest orders first. A column that may be null is a sort field too
+(D112): the rows that hold a null come after every row that holds a
+value, in either direction, in key order among themselves, so "latest
+first" never opens with the rows that have no date. The keyset reads
+whether the key's own row holds a null, so the page after a null holds
+only nulls past the key, and the page after a value the values past it
+and then every null. That keyset is a condition on each row the order
+passes, not a seek into an index, so a deep page by a column that may be
+null reads the rows before it; a page by a column that is never null
+seeks, as before. A column that holds an enum, a boolean, JSON, a list, a
+map, a union or a point is not a sort field.
 Neither is a relation's key, an audit actor (`createdBy`, `updatedBy`,
 `deletedBy`), internal metadata such as `_version`, or a `@secret`
 column, whose values an order by it would reveal. `ParseOrderSort` reads a sort as a
@@ -863,14 +871,20 @@ column opened. `decode` takes a list of fields too, as `decodeRow` does.
 
 A filter member per column holds its conditions, by the column's kind, as
 the Go ORM's filters do: `eq` and `in` (`in` with no values adds no
-condition), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
+condition), `ne` and `notIn`, which keep the rows those two leave out
+(D112), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
 a time, `ilike` on text, `eq` and `in` on a `Generic.JSON` column, which
 compare JSON values as JSONB does, an object whatever the order of its
 keys and the string `"1"` apart from the number 1, `isNull` on a column
 that may be null, and a relation's key by `<field>Id`; `in` takes a time
 and a boolean too. The Go filters take the same: `Int64Filter`,
 `FloatFilter`, `DateFilter`, `DateTimeFilter` and `BoolFilter` have `In`,
-and the filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
+and the filter of each kind of column has `IsNull`. `ne` and `notIn`
+(`Ne` and `NotIn` in Go) are on every kind that has `eq` and `in`, and
+keep a row whose column is null: `{ assigneeId: { ne: id } }` reads the
+rows assigned to anyone else and the rows assigned to no one, as `IS
+DISTINCT FROM` does and `<>` does not, and `notIn` is `(column IN (...))
+IS NOT TRUE`. Add `isNull: false` to leave the nulls out. A `Generic.JSON` column's Go
 filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
 alike, and whose `ILike` Postgres refuses on JSONB.
 
@@ -1122,8 +1136,49 @@ each.
 The build also holds a table's Workflow to the rules the behaviors' core
 holds it to at a row's first command, in the core's words: the initial
 state is one of the states, each transition's `from` and `to` are states,
-no transition leads to its own state or is listed twice, and `outcomes`
-names states no transition leaves.
+no transition leads to its own state or is listed twice, `outcomes`
+names states no transition leaves, and `finished` names states a
+transition does leave.
+
+A state no transition leaves is terminal, and a terminal state has an
+outcome, `success` unless `outcomes` names it `failure` or `neutral`.
+Other tables' Reactions read it: a project closes when every task is in a
+state with an outcome
+([A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)).
+A state a row may leave has none, so a task that may be reopened, with
+`{ from: "done"; to: "todo" }`, would never close its project. `finished`
+(D113) names the outcome of such a state:
+
+```ts
+status: Workflow<{
+  states: ["todo", "doing", "done", "dropped"];
+  transitions: [
+    { from: "todo"; to: "doing" },
+    { from: "doing"; to: ["done", "dropped"] },
+    { from: "done"; to: "todo" }
+  ];
+  outcomes: { dropped: "neutral" };
+  finished: { done: "success" };
+}>;
+```
+
+`done` counts as finished for the rules that read an outcome, as a
+terminal state does, and a row may still leave it. `outcomes` keeps the
+terminal states and `finished` the ones a transition leaves, so the build
+names the other when a transition is added or taken away. `finished`
+changes nothing else: a transition out of `done` is made as any is, and
+Lease, Retries and Reconcile, which ask whether a transition leaves a
+state, still ask that. It is a table's alone, as `by` is: an engine
+type's Workflow refuses it, since its blockers and rollups rely on a
+finished instance staying finished.
+
+Reopening a row moves no other row back. A project that closed when its
+last task was done stays done when a task is reopened, unless its own
+Workflow lists a transition back and a rule makes it: the task's
+`{ when: { enters: "doing" }; then: { link: "project"; transition:
+"active" } }` takes a done project up again once the project lists
+`{ from: "done"; to: "active" }`, and the project closes again when the
+task is done again.
 
 ```
 type Issue: field status: behavior Workflow config: the transition from "todo" to "closed" names "closed", which is not one of its states (backlog, todo, done)

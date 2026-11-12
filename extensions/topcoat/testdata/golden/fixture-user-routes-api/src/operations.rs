@@ -40,6 +40,30 @@ pub async fn can_account_capabilities(cx: &Cx) -> Result<Option<Principal>, ApiE
     crate::admit(cx, &operations::ACCOUNT_CAPABILITIES).await
 }
 
+/// Admits the caller of account.listApiKeys as its route does: 401 without one, 403
+/// never. The caller, for the implementation.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
+pub async fn can_account_list_api_keys(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ACCOUNT_LIST_API_KEYS).await
+}
+
+/// Admits the caller of account.createApiKey as its route does: 401 without one, 403
+/// never. The caller, for the implementation.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
+pub async fn can_account_create_api_key(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ACCOUNT_CREATE_API_KEY).await
+}
+
+/// Admits the caller of account.revokeApiKey as its route does: 401 without one, 403
+/// never. The caller, for the implementation.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
+pub async fn can_account_revoke_api_key(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ACCOUNT_REVOKE_API_KEY).await
+}
+
 /// Admits the caller of account.login as its route does: it needs none, so
 /// `Ok(None)`.
 /// It has no in-process call: the identity runtime serves it, as one of the
@@ -158,6 +182,22 @@ pub async fn can_account_admin_disable_user(cx: &Cx) -> Result<Option<Principal>
 /// user model's operations (D50).
 pub async fn can_account_admin_enable_user(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::ACCOUNT_ADMIN_ENABLE_USER).await
+}
+
+/// Admits the caller of account-admin.listUserApiKeys as its route does: 401 without one, 403
+/// without one of identity.users.read. The caller, for the implementation.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
+pub async fn can_account_admin_list_user_api_keys(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ACCOUNT_ADMIN_LIST_USER_API_KEYS).await
+}
+
+/// Admits the caller of account-admin.revokeUserApiKey as its route does: 401 without one, 403
+/// without one of identity.users.write. The caller, for the implementation.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
+pub async fn can_account_admin_revoke_user_api_key(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ACCOUNT_ADMIN_REVOKE_USER_API_KEY).await
 }
 
 /// Admits the caller of account-admin.setUserPassword as its route does: 401 without one, 403

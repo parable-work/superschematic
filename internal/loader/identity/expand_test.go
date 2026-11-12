@@ -92,6 +92,17 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 			{name: ir.IdentityCredentialDisabledAtField, typeName: "Temporal.DateTime"},
 			{name: ir.IdentityCredentialPendingAtField, typeName: "Temporal.DateTime"},
 		},
+		ir.IdentityAPIKeyTable: {
+			id,
+			{name: ir.IdentityAPIKeyUserField, typeName: "Account", required: true, onDelete: "CASCADE"},
+			{name: ir.IdentityAPIKeyNameField, typeName: "string", required: true},
+			{name: ir.IdentityAPIKeyTokenHashField, typeName: "Crypto.SHA256", required: true, unique: true},
+			{name: ir.IdentityAPIKeyPermissionsField, typeName: "string"},
+			{name: ir.IdentityAPIKeyCreatedAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityAPIKeyExpiresAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityAPIKeyLastUsedAtField, typeName: "Temporal.DateTime"},
+			{name: ir.IdentityAPIKeyRevokedAtField, typeName: "Temporal.DateTime"},
+		},
 		ir.IdentityRoleGrantTable: {
 			id,
 			{name: ir.IdentityRoleGrantUserField, typeName: "Account", required: true, onDelete: "CASCADE"},
@@ -113,7 +124,10 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 			if fd.Origin != ir.OriginIdentity {
 				t.Errorf("%s.%s has origin %q, want %q", name, fd.Name, fd.Origin, ir.OriginIdentity)
 			}
-			if fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.JsonField {
+			// A key's permissions are a list of text, one column as a
+			// role's are (D114); every other field holds one value.
+			list := name == ir.IdentityAPIKeyTable && fd.Name == ir.IdentityAPIKeyPermissionsField
+			if fd.TypeRef.IsArray != list || fd.TypeRef.IsMap || fd.JsonField {
 				t.Errorf("%s.%s is not one column", name, fd.Name)
 			}
 		}
@@ -135,7 +149,10 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 	if indexes := schema.Types[ir.IdentityCredentialTable].Indexes; len(indexes) != 0 {
 		t.Errorf("UserCredential has indexes %+v, want none", indexes)
 	}
-	wantGenerated := []GeneratedIndex{{ir.IdentitySessionTable, wantSessionIndex[0]}, {ir.IdentityRoleGrantTable, wantIndex[0]}}
+	if indexes := schema.Types[ir.IdentityAPIKeyTable].Indexes; !reflect.DeepEqual(indexes, wantSessionIndex) {
+		t.Errorf("UserApiKey indexes = %+v, want one on its user, %+v", indexes, wantSessionIndex)
+	}
+	wantGenerated := []GeneratedIndex{{ir.IdentitySessionTable, wantSessionIndex[0]}, {ir.IdentityAPIKeyTable, wantSessionIndex[0]}, {ir.IdentityRoleGrantTable, wantIndex[0]}}
 	if got := Indexes(schema); !reflect.DeepEqual(got, wantGenerated) {
 		t.Errorf("Indexes = %+v, want the indexes Expand adds, %+v", got, wantGenerated)
 	}
@@ -154,18 +171,18 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 }
 
 // TestExpandWithoutRoles: a User table without a UserRole table gets
-// Session and UserCredential, and no UserRoleGrant.
+// Session, UserCredential and UserApiKey, and no UserRoleGrant.
 func TestExpandWithoutRoles(t *testing.T) {
 	schema := userSchema(false)
 	Expand(schema)
-	if schema.Types[ir.IdentitySessionTable] == nil || schema.Types[ir.IdentityCredentialTable] == nil {
-		t.Fatal("Expand did not add Session and UserCredential")
+	if schema.Types[ir.IdentitySessionTable] == nil || schema.Types[ir.IdentityCredentialTable] == nil || schema.Types[ir.IdentityAPIKeyTable] == nil {
+		t.Fatal("Expand did not add Session, UserCredential and UserApiKey")
 	}
 	if schema.Types[ir.IdentityRoleGrantTable] != nil {
 		t.Error("Expand added UserRoleGrant to a schema without a UserRole table")
 	}
-	if got := Indexes(schema); len(got) != 1 || got[0].Type != ir.IdentitySessionTable {
-		t.Errorf("Indexes = %+v for a schema without a UserRole table, want Session's alone", got)
+	if got := Indexes(schema); len(got) != 2 || got[0].Type != ir.IdentitySessionTable || got[1].Type != ir.IdentityAPIKeyTable {
+		t.Errorf("Indexes = %+v for a schema without a UserRole table, want Session's and UserApiKey's alone", got)
 	}
 }
 

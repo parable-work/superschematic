@@ -83,23 +83,39 @@ func TestReadUserTraits(t *testing.T) {
 }
 
 // TestReadUserRoutes: an operation set carries the user model's route
-// sets (D50) as userSessions: { path?, noLogin?, register? } and
-// userAdministration: { path? }, which the JSON Schema closes.
+// sets (D50) as userSessions: { path?, noLogin?, register?, apiKeys? } and
+// userAdministration: { path?, apiKeys? }, which the JSON Schema closes.
+// apiKeys (D114) is a boolean of each config's own.
 func TestReadUserRoutes(t *testing.T) {
 	doc, err := Read([]byte(`{
 		"kind": "API",
 		"operationSets": [
 			{"name": "Account", "operations": [], "userSessions": {"path": "account", "register": true}},
 			{"name": "Me", "operations": [], "userSessions": {"noLogin": true}},
-			{"name": "AccountAdmin", "operations": [], "userAdministration": {}}
+			{"name": "AccountAdmin", "operations": [], "userAdministration": {}},
+			{"name": "Keyed", "operations": [], "userSessions": {"apiKeys": true}},
+			{"name": "KeyedAdmin", "operations": [], "userAdministration": {"path": "staff", "apiKeys": true}},
+			{"name": "Unkeyed", "operations": [], "userAdministration": {"apiKeys": false}}
 		]
 	}`), "account.schema.json")
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
 	sets := doc.OperationSets
-	if len(sets) != 3 {
+	if len(sets) != 6 {
 		t.Fatalf("operation sets = %+v", sets)
+	}
+	if sets[0].UserSessions.APIKeys || sets[1].UserSessions.APIKeys || sets[2].UserAdministration.APIKeys {
+		t.Errorf("a config without apiKeys has it: %+v, %+v, %+v", sets[0].UserSessions, sets[1].UserSessions, sets[2].UserAdministration)
+	}
+	if cfg := sets[3].UserSessions; cfg == nil || !cfg.APIKeys || cfg.Register || cfg.NoLogin || cfg.Path != "" {
+		t.Errorf("Keyed.UserSessions = %+v", cfg)
+	}
+	if cfg := sets[4].UserAdministration; cfg == nil || !cfg.APIKeys || cfg.Path != "staff" {
+		t.Errorf("KeyedAdmin.UserAdministration = %+v", cfg)
+	}
+	if cfg := sets[5].UserAdministration; cfg == nil || cfg.APIKeys {
+		t.Errorf("Unkeyed.UserAdministration = %+v", cfg)
 	}
 	if cfg := sets[0].UserSessions; cfg == nil || cfg.Path != "account" || !cfg.Register || cfg.NoLogin {
 		t.Errorf("Account.UserSessions = %+v", cfg)
@@ -115,6 +131,8 @@ func TestReadUserRoutes(t *testing.T) {
 		{`{"kind": "OperationSet", "name": "Account", "operations": [], "userSessions": {"login": false}}`, "'login' not allowed"},
 		{`{"kind": "OperationSet", "name": "Admin", "operations": [], "userAdministration": {"register": true}}`, "'register' not allowed"},
 		{`{"kind": "OperationSet", "name": "Account", "operations": [], "userSessions": true}`, "want object"},
+		{`{"kind": "OperationSet", "name": "Admin", "operations": [], "userAdministration": {"apiKeys": "yes"}}`, "want boolean"},
+		{`{"kind": "OperationSet", "name": "Account", "operations": [], "userSessions": {"apiKeys": 1}}`, "want boolean"},
 	} {
 		if _, err := Read([]byte(tc.payload), "account.schema.json"); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("Read(%s) error = %v, want one naming %s", tc.payload, err, tc.want)

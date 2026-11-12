@@ -99,7 +99,7 @@ export interface TenantFilter {
 export type TenantOrderField = "createdAt" | "updatedAt" | "id" | "name" | "slug" | "email" | "status" | "isActive" | "seatCount" | "metadata" | "_version";
 
 /** The members findPage orders rows of Tenant by (D60, amended); ties break by id. */
-export type TenantSortField = "id" | "createdAt" | "name" | "slug" | "email" | "seatCount";
+export type TenantSortField = "id" | "createdAt" | "updatedAt" | "name" | "slug" | "email" | "seatCount";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TenantUniqueKey = readonly ["id"] | readonly ["slug"];
@@ -134,17 +134,17 @@ export const tenantTable: TableDefinition = {
   table: "tenant",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "id", column: "id", field: "id", qualified: "tenant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "tenant.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "slug", column: "slug", field: "slug", qualified: "tenant.slug", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "email", column: "email", field: "email", qualified: "tenant.email", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "status", column: "status", field: "status", qualified: "tenant.status", required: true, default: "active", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "isActive", column: "is_active", field: "isActive", qualified: "tenant.is_active", boolean: true, required: true, default: true, filter: ["eq", "in", "isNull"] },
-    { name: "seatCount", column: "seat_count", field: "seatCount", qualified: "tenant.seat_count", required: true, default: 5, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "metadata", column: "metadata", field: "metadata", qualified: "tenant.metadata", json: true, required: true, filter: ["eq", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "tenant._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "tenant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "tenant.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "slug", column: "slug", field: "slug", qualified: "tenant.slug", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "email", column: "email", field: "email", qualified: "tenant.email", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "tenant.status", required: true, default: "active", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "isActive", column: "is_active", field: "isActive", qualified: "tenant.is_active", boolean: true, required: true, default: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "seatCount", column: "seat_count", field: "seatCount", qualified: "tenant.seat_count", required: true, default: 5, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "metadata", column: "metadata", field: "metadata", qualified: "tenant.metadata", json: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "_version", column: "_version", field: "_version", qualified: "tenant._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\"",
@@ -162,7 +162,9 @@ export const tenantTable: TableDefinition = {
     page: "SELECT %s FROM tenant%s%s LIMIT %d",
     pageAfterKey: "tenant.id %s %s",
     pageAfter: "(%s, tenant.id) %s ((SELECT %s FROM tenant AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM tenant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", tenant.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM tenant WHERE tenant.id = $1)",
     insert: "INSERT INTO tenant (%s) VALUES (%s) RETURNING %s",
@@ -238,7 +240,7 @@ export interface TenantUserFilter {
 export type TenantUserOrderField = "createdAt" | "updatedAt" | "id" | "displayName" | "deletedAt" | "deletedBy" | "_version";
 
 /** The members findPage orders rows of TenantUser by (D60, amended); ties break by id. */
-export type TenantUserSortField = "id" | "createdAt";
+export type TenantUserSortField = "id" | "createdAt" | "updatedAt" | "displayName";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TenantUserUniqueKey = readonly ["id"] | readonly ["tenant", "displayName"];
@@ -273,14 +275,14 @@ export const tenantUserTable: TableDefinition = {
   table: "tenant_user",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant_user.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant_user.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "id", column: "id", field: "id", qualified: "tenant_user.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "tenantId", column: "tenant_id", field: "tenant", qualified: "tenant_user.tenant_id", uuid: true, required: true, relation: "Tenant", filter: ["eq", "in", "isNull"] },
-    { name: "displayName", column: "display_name", field: "displayName", qualified: "tenant_user.display_name", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant_user.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant_user.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "id", column: "id", field: "id", qualified: "tenant_user.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "tenantId", column: "tenant_id", field: "tenant", qualified: "tenant_user.tenant_id", uuid: true, required: true, relation: "Tenant", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "displayName", column: "display_name", field: "displayName", qualified: "tenant_user.display_name", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "tenant_user.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "tenant_user.deleted_by", uuid: true, audit: "deletedBy" },
-    { name: "_version", column: "_version", field: "_version", qualified: "tenant_user._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "_version", column: "_version", field: "_version", qualified: "tenant_user._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\"",
@@ -298,7 +300,9 @@ export const tenantUserTable: TableDefinition = {
     page: "SELECT %s FROM tenant_user%s%s LIMIT %d",
     pageAfterKey: "tenant_user.id %s %s",
     pageAfter: "(%s, tenant_user.id) %s ((SELECT %s FROM tenant_user AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM tenant_user AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", tenant_user.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM tenant_user WHERE tenant_user.id = $1)",
     insert: "INSERT INTO tenant_user (%s) VALUES (%s) RETURNING %s",
@@ -341,12 +345,14 @@ export type FixtureDbTx = OrmTx<FixtureDbRepositories>;
 export const fixtureDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

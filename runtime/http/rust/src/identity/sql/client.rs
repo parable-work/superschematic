@@ -642,7 +642,8 @@ mod sqlite_binding {
 
     impl Rusqlite {
         /// Binds an open connection and turns its foreign keys on, so
-        /// deleting a user deletes their sessions, credential and grants.
+        /// deleting a user deletes their sessions, credential, API keys and
+        /// grants.
         pub fn new(connection: rusqlite::Connection) -> Result<Self, ClientError> {
             connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
             connection

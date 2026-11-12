@@ -42,10 +42,15 @@ export type OperationName =
   | 'approveUser'
   | 'disableUser'
   | 'enableUser'
+  | 'listUserApiKeys'
+  | 'revokeUserApiKey'
   | 'setUserPassword'
   | 'revokeRole'
   | 'grantRole'
   | 'capabilities'
+  | 'listApiKeys'
+  | 'createApiKey'
+  | 'revokeApiKey'
   | 'login'
   | 'logout'
   | 'me'
@@ -165,6 +170,28 @@ export const operationSpecs = {
     auth: { public: false, required: true, permissions: ['identity.users.write'] },
     manual: true,
   },
+  listUserApiKeys: {
+    name: 'listUserApiKeys',
+    namespace: 'account-admin',
+    method: 'GET',
+    path: '/api/auth/admin/users/{id}/keys',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: ['identity.users.read'] },
+    manual: true,
+  },
+  revokeUserApiKey: {
+    name: 'revokeUserApiKey',
+    namespace: 'account-admin',
+    method: 'DELETE',
+    path: '/api/auth/admin/users/{id}/keys/{keyId}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }, { name: 'keyId', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: ['identity.users.write'] },
+    manual: true,
+  },
   setUserPassword: {
     name: 'setUserPassword',
     namespace: 'account-admin',
@@ -204,6 +231,40 @@ export const operationSpecs = {
     method: 'GET',
     path: '/api/auth/capabilities',
     pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: [] },
+    manual: true,
+  },
+  listApiKeys: {
+    name: 'listApiKeys',
+    namespace: 'account',
+    method: 'GET',
+    path: '/api/auth/keys',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: [] },
+    manual: true,
+  },
+  createApiKey: {
+    name: 'createApiKey',
+    namespace: 'account',
+    method: 'POST',
+    path: '/api/auth/keys',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: [] },
+    rateLimitPerMinute: 10,
+    manual: true,
+  },
+  revokeApiKey: {
+    name: 'revokeApiKey',
+    namespace: 'account',
+    method: 'DELETE',
+    path: '/api/auth/keys/{id}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
     queryParams: [],
     bodyParams: [],
     auth: { public: false, required: true, permissions: [] },
@@ -385,6 +446,16 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     rateLimitPerMinute: options.rateLimits?.enableUser,
     timeoutSeconds: options.timeouts?.enableUser,
   });
+  mountManualOperation(router, operationSpecs.listUserApiKeys, identityHandler(runtime.identity, 'listUserApiKeys'), runtime, {
+    bodyLimitBytes: options.bodyLimits?.listUserApiKeys,
+    rateLimitPerMinute: options.rateLimits?.listUserApiKeys,
+    timeoutSeconds: options.timeouts?.listUserApiKeys,
+  });
+  mountManualOperation(router, operationSpecs.revokeUserApiKey, identityHandler(runtime.identity, 'revokeUserApiKey'), runtime, {
+    bodyLimitBytes: options.bodyLimits?.revokeUserApiKey,
+    rateLimitPerMinute: options.rateLimits?.revokeUserApiKey,
+    timeoutSeconds: options.timeouts?.revokeUserApiKey,
+  });
   mountManualOperation(router, operationSpecs.setUserPassword, identityHandler(runtime.identity, 'setUserPassword'), runtime, {
     bodyLimitBytes: options.bodyLimits?.setUserPassword,
     rateLimitPerMinute: options.rateLimits?.setUserPassword,
@@ -404,6 +475,21 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     bodyLimitBytes: options.bodyLimits?.capabilities,
     rateLimitPerMinute: options.rateLimits?.capabilities,
     timeoutSeconds: options.timeouts?.capabilities,
+  });
+  mountManualOperation(router, operationSpecs.listApiKeys, identityHandler(runtime.identity, 'listApiKeys'), runtime, {
+    bodyLimitBytes: options.bodyLimits?.listApiKeys,
+    rateLimitPerMinute: options.rateLimits?.listApiKeys,
+    timeoutSeconds: options.timeouts?.listApiKeys,
+  });
+  mountManualOperation(router, operationSpecs.createApiKey, identityHandler(runtime.identity, 'createApiKey'), runtime, {
+    bodyLimitBytes: options.bodyLimits?.createApiKey,
+    rateLimitPerMinute: options.rateLimits?.createApiKey,
+    timeoutSeconds: options.timeouts?.createApiKey,
+  });
+  mountManualOperation(router, operationSpecs.revokeApiKey, identityHandler(runtime.identity, 'revokeApiKey'), runtime, {
+    bodyLimitBytes: options.bodyLimits?.revokeApiKey,
+    rateLimitPerMinute: options.rateLimits?.revokeApiKey,
+    timeoutSeconds: options.timeouts?.revokeApiKey,
   });
   mountManualOperation(router, operationSpecs.login, identityHandler(runtime.identity, 'login'), runtime, {
     bodyLimitBytes: options.bodyLimits?.login,

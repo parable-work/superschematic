@@ -92,7 +92,9 @@ export interface WorkflowConfig {
   readonly transitions: readonly WorkflowTransition[];
   /**
    * The outcome of each terminal state it names. A terminal state it does
-   * not name is a success; a state a transition leaves has no outcome.
+   * not name is a success; a state a transition leaves has no outcome. A
+   * table's Workflow names the outcome of such a state in `finished`
+   * (@superschematic/db, D113), which an engine type refuses.
    */
   readonly outcomes?: Readonly<Record<string, WorkflowOutcome>>;
 }

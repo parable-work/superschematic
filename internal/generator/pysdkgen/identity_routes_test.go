@@ -19,8 +19,9 @@ import (
 const userRoutesService = "fixture-user-routes-api"
 
 // loadUserRoutesAPI loads fixture-user-routes-api: the user model's
-// account and account-admin operations, which the identity runtime serves,
-// and greeting.greet, which the project implements.
+// account and account-admin operations, the API key routes among them
+// (D114), which the identity runtime serves, and greeting.greet, which the
+// project implements.
 func loadUserRoutesAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, userRoutesService))
@@ -66,12 +67,12 @@ func TestTheSDKHasAMethodForEachUserRoute(t *testing.T) {
 		}
 	}
 	want := []string{
-		"account.capabilities", "account.change_password", "account.login",
-		"account.logout", "account.me", "account.register",
+		"account.capabilities", "account.change_password", "account.create_api_key", "account.list_api_keys", "account.login",
+		"account.logout", "account.me", "account.register", "account.revoke_api_key",
 		"account_admin.approve_user", "account_admin.create_role", "account_admin.create_user", "account_admin.delete_role",
 		"account_admin.disable_user", "account_admin.enable_user", "account_admin.get_user",
-		"account_admin.grant_role", "account_admin.list_roles", "account_admin.list_users",
-		"account_admin.revoke_role", "account_admin.set_user_password", "account_admin.update_role",
+		"account_admin.grant_role", "account_admin.list_roles", "account_admin.list_user_api_keys", "account_admin.list_users",
+		"account_admin.revoke_role", "account_admin.revoke_user_api_key", "account_admin.set_user_password", "account_admin.update_role",
 		"greeting.greet",
 	}
 	if !slices.Equal(methods, want) {

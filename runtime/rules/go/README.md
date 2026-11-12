@@ -390,8 +390,8 @@ expireHolder's commands without a row, and 115 checks);
 deadlines, and 52 checks); `core-budget.transcript.json`, 495 steps
 (331 commands and 164 checks); `core-retries.transcript.json`, 250 steps
 (196 commands and 54 checks); and the hand-written
-`core-workflow-principals.transcript.json` (D104), 92 steps (58 commands,
-each compared with its row's `expect.version`, and 34 checks),
+`core-workflow-principals.transcript.json` (D104, D113), 101 steps (63
+commands, each compared with its row's `expect.version`, and 38 checks),
 `core-freezes-and-sign-offs.transcript.json` (D104), 115 steps (75
 commands, each compared with its row's `expect.version`, and 40 checks),
 `core-retries-waits.transcript.json` (D104), 158 steps (118 commands, 9

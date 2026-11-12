@@ -120,8 +120,8 @@ describe('the list_parts tool', () => {
     const before = received.length;
     for (const [filter, parameter, reason] of [
       [{ sku: 'x' }, 'filter[sku]', 'is not a field this operation filters by; expected one of id, name, kind, quantity, weight, price, discontinued, madeAt, retiredOn, supplierId'],
-      [{ kind: { gt: 'nut' } }, 'filter[kind]', 'takes no operator gt; expected one of eq, in'],
-      [{ name: { isNull: true } }, 'filter[name]', 'takes no operator isNull; expected one of eq, in, contains'],
+      [{ kind: { gt: 'nut' } }, 'filter[kind]', 'takes no operator gt; expected one of eq, ne, in, notIn'],
+      [{ name: { isNull: true } }, 'filter[name]', 'takes no operator isNull; expected one of eq, ne, in, notIn, contains'],
       [{ quantity: 'many' }, 'filter[quantity]', 'expected an integer'],
       [{ kind: { in: ['nut', 'gear'] } }, 'filter[kind]', 'expected one of bolt, nut, washer'],
       [{ madeAt: 'yesterday' }, 'filter[madeAt]', 'expected an RFC 3339 timestamp'],

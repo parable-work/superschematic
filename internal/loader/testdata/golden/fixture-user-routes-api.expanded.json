@@ -38,6 +38,23 @@
       "hasCustomNormalize": true,
       "hasCustomValidate": true
     },
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
     "Identity.Name": {
       "name": "Identity.Name",
       "description": "An objects name",
@@ -87,6 +104,67 @@
     }
   },
   "types": {
+    "ApiKey": {
+      "name": "ApiKey",
+      "owner": "fixture-user-routes-api",
+      "comment": "An API key as its user and an administrator see it: never its token.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "comment": "What its user calls the key.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "permissions",
+          "comment": "The permissions the key was made with, each held while its user holds it; absent for a key that holds every permission of its user.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "createdAt",
+          "comment": "When the key was made.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "expiresAt",
+          "comment": "When the key ends.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "lastUsedAt",
+          "comment": "When the key last authenticated a request; absent until it has.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
     "Capabilities": {
       "name": "Capabilities",
       "owner": "fixture-user-routes-api",
@@ -135,6 +213,43 @@
       ],
       "origin": "identity"
     },
+    "CreateApiKeyInput": {
+      "name": "CreateApiKeyInput",
+      "owner": "fixture-user-routes-api",
+      "comment": "What createApiKey takes: the key's name, how long it lives, and the subset of the caller's permissions it holds.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "comment": "What the caller calls the key, 1 to 100 characters.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 100,
+          "origin": "identity"
+        },
+        {
+          "name": "expiresInSeconds",
+          "comment": "How long the key lives, in seconds, from 1 to the longest the API's identity config allows; that longest when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "permissions",
+          "comment": "The permissions the key holds, each of which the caller holds; every permission the caller holds, as their roles change, when absent.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
     "CreateUserInput": {
       "name": "CreateUserInput",
       "owner": "fixture-user-routes-api",
@@ -163,6 +278,69 @@
           "comment": "The new user's password.",
           "typeRef": {
             "name": "Auth.Password"
+          },
+          "required": true,
+          "secret": true,
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "CreatedApiKey": {
+      "name": "CreatedApiKey",
+      "owner": "fixture-user-routes-api",
+      "comment": "An API key just made, with its token, which is answered once.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "name",
+          "comment": "What its user calls the key.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "permissions",
+          "comment": "The permissions the key was made with, each held while its user holds it; absent for a key that holds every permission of its user.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "createdAt",
+          "comment": "When the key was made.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "expiresAt",
+          "comment": "When the key ends.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "token",
+          "comment": "The key's token, sent as Authorization: Bearer. It is answered this once; the database keeps its hash.",
+          "typeRef": {
+            "name": "string"
           },
           "required": true,
           "secret": true,
@@ -609,7 +787,7 @@
   "operationSets": [
     {
       "name": "Account",
-      "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81).",
+      "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81). A signed-in user makes API keys (D114).",
       "operations": [
         {
           "name": "login",
@@ -736,6 +914,71 @@
             "rateLimit": 5
           },
           "origin": "identity"
+        },
+        {
+          "name": "createApiKey",
+          "comment": "Makes an API key of the caller's: a named token a program calls as them with, sent as Authorization: Bearer. It answers the key and its token, this once. The caller is signed in with a session; a key makes no key.",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "It answers a credential, which an agent's context should not hold."
+          },
+          "typeRef": {
+            "name": "CreatedApiKey"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateApiKeyInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "identityOperation": "createApiKey",
+          "httpMethod": "POST",
+          "restPath": "auth/keys",
+          "middleware": {
+            "rateLimit": 10
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "listApiKeys",
+          "comment": "Lists the caller's API keys that are not revoked, newest first, each without its token.",
+          "typeRef": {
+            "name": "ApiKey",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "identityOperation": "listApiKeys",
+          "httpMethod": "GET",
+          "restPath": "auth/keys",
+          "origin": "identity"
+        },
+        {
+          "name": "revokeApiKey",
+          "comment": "Revokes an API key of the caller's, which authenticates no request after. It answers true.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "identityOperation": "revokeApiKey",
+          "httpMethod": "DELETE",
+          "restPath": "auth/keys/{id}",
+          "origin": "identity"
         }
       ],
       "userSessions": {
@@ -749,12 +992,13 @@
           "permissions": [
             "identity"
           ]
-        }
+        },
+        "apiKeys": true
       }
     },
     {
       "name": "AccountAdmin",
-      "comment": "Manages users, roles and the grants between them.",
+      "comment": "Manages users, roles and the grants between them, and lists and revokes\nany user's API keys.",
       "operations": [
         {
           "name": "createUser",
@@ -1096,9 +1340,67 @@
           "httpMethod": "DELETE",
           "restPath": "auth/admin/users/{id}/roles/{roleId}",
           "origin": "identity"
+        },
+        {
+          "name": "listUserApiKeys",
+          "comment": "Lists a user's API keys that are not revoked, newest first, each without its token.",
+          "typeRef": {
+            "name": "ApiKey",
+            "isArray": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.read"
+          ],
+          "identityOperation": "listUserApiKeys",
+          "httpMethod": "GET",
+          "restPath": "auth/admin/users/{id}/keys",
+          "origin": "identity"
+        },
+        {
+          "name": "revokeUserApiKey",
+          "comment": "Revokes an API key of a user's, which authenticates no request after. It answers true.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "keyId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.write"
+          ],
+          "identityOperation": "revokeUserApiKey",
+          "httpMethod": "DELETE",
+          "restPath": "auth/admin/users/{id}/keys/{keyId}",
+          "origin": "identity"
         }
       ],
-      "userAdministration": {}
+      "userAdministration": {
+        "apiKeys": true
+      }
     },
     {
       "name": "GreetingQueries",

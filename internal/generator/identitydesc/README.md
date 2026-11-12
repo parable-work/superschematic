@@ -72,6 +72,8 @@ The descriptor is version 1.
 | `session.columns` | `id`, the row's key. `user`, the session's user. `tokenHash`, unique: the lowercase hexadecimal SHA-256 of the session's token (`Crypto.SHA256`); the token itself is never stored. `createdAt` and `expiresAt`. `lastSeenAt`, nullable: when a request last used the session. `revokedAt`, null until logout or a revocation ends the session. |
 | `credential.table` | The `UserCredential` table the loader adds: a user's password, apart from the user row. |
 | `credential.columns` | `id`, the row's key. `user`, unique, so a user has at most one. `passwordHash`, the password's PHC string (`$argon2id$v=19$...`). `passwordChangedAt`. `disabledAt`, null unless the user is disabled. `pendingAt`, null unless the user registered under `registration: "approval"` and waits for an administrator (D81). |
+| `apiKey.table` | The `UserApiKey` table the loader adds (D114): one row per API key. A descriptor written before D114 has no `apiKey`, and a store built from one has no API keys. |
+| `apiKey.columns` | `id`, the row's key. `user`, the key's user. `name`, what its user calls it. `tokenHash`, unique: the lowercase hexadecimal SHA-256 of the key's token, `key_` and 43 characters of base64url; the token itself is never stored. `permissions`, nullable: the list of permissions the key was made with (`TEXT[]` in Postgres), null for a key that holds every permission of its user. `createdAt` and `expiresAt`. `lastUsedAt`, nullable: when a request last used the key. `revokedAt`, null until a revocation, or its user being disabled, ends the key. |
 | `role` | Absent when the schema has no `UserRole` table, and `roleGrant` with it. `type` and `table` name the type with the `UserRole` trait and its table. |
 | `role.columns` | `key`, the role table's key column. `name`, the role's unique name. `permissions`, a list of permission strings (`TEXT[]` in Postgres). |
 | `role.keyScalar` | The role table's key field's type, as `user.keyScalar` is the user table's. A role's id is a value of it. |
@@ -79,13 +81,14 @@ The descriptor is version 1.
 | `roleGrant.columns` | `id`, the row's key. `user`, the user. `role`, the role's key. `grantedAt`. The pair (`user`, `role`) is unique. |
 
 The members are always in this order, and every member but `role` and
-`roleGrant` is present. Every name is non-empty.
+`roleGrant` is present; a store also reads a descriptor without `apiKey`,
+which a build before D114 wrote. Every name is non-empty.
 
 The key of each table the loader adds is an `AutoGenerate<Identity.UUID>`,
 which the column's default fills in when a row is written without one. Every
 `user` and `role` column is a foreign key to the user or role table's key
 that cascades on delete: deleting a user deletes their sessions,
-credential and grants, and deleting a role deletes its grants. The
+credential, API keys and grants, and deleting a role deletes its grants. The
 timestamps are `Temporal.DateTime`, stored as `TIMESTAMPTZ` in Postgres.
 
 ## Names

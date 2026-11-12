@@ -1,15 +1,15 @@
 /*
 The identity runtime's storage (D50): the tables the core owns (sessions,
-credentials, role grants) and the project's user and role tables. Every id
-is in its key scalar's wire form: an Identity.UUID key is its base62 form,
-as the generated types write it. sqlstore.ts implements it over Postgres
-and SQLite from the schema's identity descriptor; a deployment may pass
-another.
+credentials, API keys, role grants) and the project's user and role tables.
+Every id is in its key scalar's wire form: an Identity.UUID key is its
+base62 form, as the generated types write it. sqlstore.ts implements it
+over Postgres and SQLite from the schema's identity descriptor; a
+deployment may pass another.
 */
 
 /** Why a store refused an operation, which the service turns into a problem. */
 export type IdentityStoreErrorKind =
-  /** No row has the id, token hash or login. */
+  /** No row has the id, token hash or login, or the user has no live API key with the id. */
   | 'not_found'
   /** Another user has the login, in the login column's case rule. */
   | 'login_taken'
@@ -17,6 +17,8 @@ export type IdentityStoreErrorKind =
   | 'role_name_taken'
   /** The schema has no UserRole table. */
   | 'no_roles'
+  /** The descriptor names no API key table (D114). */
+  | 'no_api_keys'
   /** The login scalar does not parse the login. */
   | 'invalid_login'
   /** The name scalar does not parse a display name the store would write. */
@@ -83,6 +85,28 @@ export interface SessionRecord {
   readonly user: StoredUser;
 }
 
+/** An API key row (D114). */
+export interface StoredApiKey {
+  readonly id: string;
+  readonly userId: string;
+  readonly name: string;
+  /**
+   * The permissions the key was made with. Null means every permission its
+   * user holds; a list, empty included, means the ones it names.
+   */
+  readonly permissions: readonly string[] | null;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+  readonly lastUsedAt: Date | null;
+  readonly revokedAt: Date | null;
+}
+
+/** An API key and its user. */
+export interface ApiKeyRecord {
+  readonly apiKey: StoredApiKey;
+  readonly user: StoredUser;
+}
+
 /** A user a store creates, with their credential. */
 export interface NewUser {
   /** The login as the caller gave it; the store parses it with the login scalar. */
@@ -112,11 +136,23 @@ export interface NewSession {
   readonly expiresAt: Date;
 }
 
+/** An API key a store creates (D114). newApiKey makes the key's text, whose hashToken is tokenHash. */
+export interface NewApiKeyRow {
+  readonly userId: string;
+  readonly name: string;
+  readonly tokenHash: string;
+  /** The permissions the key names, written as a role's are. Null writes null: every permission its user holds. */
+  readonly permissions: readonly string[] | null;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
 /**
  * The storage interface. Mutations the user model ties together run in one
  * transaction: setPassword with its revocations, setDisabled with the
- * revocations of a disable, createUser with the credential, and deleteRole
- * with the role's grants. A refusal is an IdentityStoreError.
+ * revocations of a disable, of sessions and API keys alike, createUser with
+ * the credential, and deleteRole with the role's grants. A refusal is an
+ * IdentityStoreError.
  */
 export interface IdentityStore {
   /** The user whose login equals login once the login scalar parses it, with their password hash. */
@@ -141,7 +177,11 @@ export interface IdentityStore {
   setPassword(userId: string, passwordHash: string, at: Date, keepSession: string): Promise<void>;
   /** Replaces the user's password hash when it is still oldHash, keeping passwordChangedAt: the same password at a new cost. */
   rehashPassword(userId: string, oldHash: string, newHash: string): Promise<void>;
-  /** Sets the credential's disabledAt to at, or clears it. Disabling also revokes the user's sessions. */
+  /**
+   * Sets the credential's disabledAt to at, or clears it. Disabling also
+   * revokes the user's sessions and their live API keys, which enabling
+   * does not bring back.
+   */
   setDisabled(userId: string, disabled: boolean, at: Date): Promise<void>;
 
   /** Creates a session; the database generates its key. */
@@ -154,6 +194,29 @@ export interface IdentityStore {
   revokeSession(sessionId: string, at: Date): Promise<void>;
   /** Revokes every live session of the user but exceptSession (none when empty). */
   revokeUserSessions(userId: string, exceptSession: string, at: Date): Promise<void>;
+
+  /**
+   * Whether the descriptor names an API key table (D114). Without one,
+   * findApiKey refuses not_found and the other API key methods no_api_keys.
+   */
+  hasApiKeys(): boolean;
+  /** Creates an API key; the database generates its key. */
+  createApiKey(key: NewApiKeyRow): Promise<StoredApiKey>;
+  /** The API key whose token hash is tokenHash, and its user. */
+  findApiKey(tokenHash: string): Promise<ApiKeyRecord>;
+  /** Sets lastUsedAt to at when it is null or before staleBefore, so concurrent requests write it once. */
+  touchApiKey(keyId: string, at: Date, staleBefore: Date): Promise<void>;
+  /**
+   * The user's API keys that are not revoked, expired ones included, newest
+   * first: by createdAt descending, then by the database's key descending.
+   */
+  listApiKeys(userId: string): Promise<StoredApiKey[]>;
+  /**
+   * Sets revokedAt on the user's API key with keyId when it is null. A key
+   * that does not exist, is another user's or is revoked already is
+   * not_found.
+   */
+  revokeApiKey(userId: string, keyId: string, at: Date): Promise<void>;
 
   /** Whether the schema has a UserRole table. Without one, userRoles answers none and the other role methods refuse no_roles. */
   hasRoles(): boolean;

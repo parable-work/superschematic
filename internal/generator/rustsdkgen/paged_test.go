@@ -276,6 +276,10 @@ func TestFilteredMethodTakesATypedFilter(t *testing.T) {
 			quantity.OneOf[1].Properties["in"].Type != "array" {
 			t.Errorf("the tool's filter of quantity = %+v", quantity)
 		}
+		// ne and notIn are eq's and in's (D112).
+		if quantity.OneOf[1].Properties["ne"].Type != "integer" || quantity.OneOf[1].Properties["notIn"].Type != "array" {
+			t.Errorf("the tool's filter of quantity has no ne and notIn: %+v", quantity)
+		}
 		if _, nullable := property.Properties["retiredOn"].OneOf[1].Properties["isNull"]; !nullable {
 			t.Errorf("the tool's filter of retiredOn has no isNull: %+v", property.Properties["retiredOn"])
 		}
@@ -348,7 +352,8 @@ func TestWriteSDKGoldenPaged(t *testing.T) {
 // server that pages as the runtimes do (D60), its cursors and pages held
 // to page_parity.json, and sorts listItems (D60, amended), so a pager is
 // seen keeping its sort. A typed filter (D106) is seen written in the
-// bracket form, each kind and operator, beside a sort and with every page
+// bracket form, each kind and operator, ne and notIn among them (D112),
+// beside a sort and with every page
 // either _all asks for, refused before the request for what the route
 // would refuse, and its writer sending the pairs of filter_parity.json's
 // queries. CARGO_TARGET_DIR is honored when set.
@@ -935,17 +940,23 @@ fn every_kind() -> ListPartsFilter {
         }),
         name: Some(Text {
             eq: Some("Part 1".to_string()),
+            ne: Some("Part 3, spare".to_string()),
             one_of: vec!["Part 1".to_string(), "Part 2".to_string()],
+            not_in: vec!["Part 4".to_string(), "Part 5".to_string()],
             contains: Some("art 1".to_string()),
             is_null: None,
         }),
         kind: Some(Equals {
             eq: Some(typed(json!("bolt"))),
+            ne: Some(typed(json!("nut"))),
+            not_in: vec![typed(json!("nut")), typed(json!("washer"))],
             ..Default::default()
         }),
         quantity: Some(Ordered {
             eq: Some(int(2)),
+            ne: Some(int(7)),
             one_of: vec![int(1), int(2), int(3)],
+            not_in: vec![int(5), int(6)],
             gt: Some(int(0)),
             gte: Some(int(1)),
             lt: Some(int(9)),
@@ -958,12 +969,14 @@ fn every_kind() -> ListPartsFilter {
             ..Default::default()
         }),
         price: Some(Ordered {
+            not_in: vec![typed(json!("1.25")), typed(json!("1.75"))],
             gt: Some(typed(json!("0.25"))),
             lte: Some(typed(json!("2.25"))),
             ..Default::default()
         }),
         discontinued: Some(Equals {
             eq: Some(false),
+            ne: Some(true),
             one_of: vec![true, false],
             ..Default::default()
         }),
@@ -974,11 +987,13 @@ fn every_kind() -> ListPartsFilter {
         }),
         retired_on: Some(Ordered {
             eq: Some(typed(json!("2026-06-30"))),
+            ne: Some(typed(json!("2026-09-30"))),
             is_null: Some(false),
             ..Default::default()
         }),
         supplier_id: Some(Equals {
             eq: Some(typed(json!(supplier_id(1)))),
+            not_in: vec![typed(json!(supplier_id(2)))],
             is_null: Some(true),
             ..Default::default()
         }),
@@ -992,8 +1007,9 @@ async fn a_filter_is_written_in_the_bracket_form() {
 
     // Each operator set is a pair, in the fields' order and then the
     // operators', between the sort and the page: an equality is
-    // filter[field]=value, one_of the wire's in, its values joined by
-    // commas, and is_null the wire's isNull. A value is the text a query
+    // filter[field]=value, one_of the wire's in and not_in its notIn,
+    // their values joined by commas, and is_null the wire's isNull. A ne
+    // is one value, its comma and all. A value is the text a query
     // parameter of its type is sent as.
     let query = ListPartsQueryParams {
         sort: Some("quantity".to_string()),
@@ -1013,26 +1029,36 @@ async fn a_filter_is_written_in_the_bracket_form() {
                 ("sort", "quantity"),
                 ("filter[id][in]", &ids),
                 ("filter[name]", "Part 1"),
+                ("filter[name][ne]", "Part 3, spare"),
                 ("filter[name][in]", "Part 1,Part 2"),
+                ("filter[name][notIn]", "Part 4,Part 5"),
                 ("filter[name][contains]", "art 1"),
                 ("filter[kind]", "bolt"),
+                ("filter[kind][ne]", "nut"),
+                ("filter[kind][notIn]", "nut,washer"),
                 ("filter[quantity]", "2"),
+                ("filter[quantity][ne]", "7"),
                 ("filter[quantity][in]", "1,2,3"),
+                ("filter[quantity][notIn]", "5,6"),
                 ("filter[quantity][gt]", "0"),
                 ("filter[quantity][gte]", "1"),
                 ("filter[quantity][lt]", "9"),
                 ("filter[quantity][lte]", "8"),
                 ("filter[weight][gte]", "0.5"),
                 ("filter[weight][lt]", "2.5"),
+                ("filter[price][notIn]", "1.25,1.75"),
                 ("filter[price][gt]", "0.25"),
                 ("filter[price][lte]", "2.25"),
                 ("filter[discontinued]", "false"),
+                ("filter[discontinued][ne]", "true"),
                 ("filter[discontinued][in]", "true,false"),
                 ("filter[madeAt][gte]", "2026-01-01T00:00:00Z"),
                 ("filter[madeAt][lt]", "2026-02-01T00:00:00Z"),
                 ("filter[retiredOn]", "2026-06-30"),
+                ("filter[retiredOn][ne]", "2026-09-30"),
                 ("filter[retiredOn][isNull]", "false"),
                 ("filter[supplierId]", &uuid_text(&json!(supplier_id(1)))),
+                ("filter[supplierId][notIn]", &uuid_text(&json!(supplier_id(2)))),
                 ("filter[supplierId][isNull]", "true"),
                 ("limit", "5"),
             ])
@@ -1144,6 +1170,13 @@ async fn a_filter_the_route_refuses_fails_before_the_request() {
         }),
         ..Default::default()
     };
+    let without = |not_in: Vec<&str>| ListPartsFilter {
+        name: Some(Text {
+            not_in: not_in.into_iter().map(str::to_string).collect(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
     for (filter, message) in [
         (
             ListPartsFilter {
@@ -1174,6 +1207,26 @@ async fn a_filter_the_route_refuses_fails_before_the_request() {
             "filter[name][in][0] must not contain a comma or surrounding space",
         ),
         (text(vec![""], None), "filter[name][in][0] is required"),
+        // A not_in is held as a one_of is (D112).
+        (
+            ListPartsFilter {
+                quantity: Some(Ordered {
+                    not_in: (0..101).map(int).collect(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            "filter[quantity][notIn] must hold at most 100 values",
+        ),
+        (
+            without(vec!["a", "b,c"]),
+            "filter[name][notIn][1] must not contain a comma or surrounding space",
+        ),
+        (
+            without(vec!["a", "b", "c "]),
+            "filter[name][notIn][2] must not contain a comma or surrounding space",
+        ),
+        (without(vec!["  "]), "filter[name][notIn][0] is required"),
         (text(vec![], Some("")), "filter[name][contains] needs text"),
     ] {
         let query = ListPartsQueryParams {
@@ -1190,6 +1243,32 @@ async fn a_filter_the_route_refuses_fails_before_the_request() {
     }
     assert_eq!(stub.count(), 0, "a refused filter must send no request");
 
+    // A not_in of 100 values is sent, and a ne has no such rule: it is one
+    // value, whatever its text.
+    let query = ListPartsQueryParams {
+        filter: Some(ListPartsFilter {
+            name: Some(Text {
+                ne: Some(" a, b ".to_string()),
+                ..Default::default()
+            }),
+            quantity: Some(Ordered {
+                not_in: (0..100).map(int).collect(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    sdk.catalog.list_parts(Some(&query), None).await.unwrap();
+    let hundred = (0..100).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+    assert_eq!(
+        stub.take(),
+        vec![(
+            "/api/parts".to_string(),
+            pairs(&[("filter[name][ne]", " a, b "), ("filter[quantity][notIn]", &hundred)])
+        )]
+    );
+
     // A request holds at most 50 filters, as the route's reader counts.
     assert!(SDK_CRATE::runtime::check_filter_count(50).is_ok());
     match SDK_CRATE::runtime::check_filter_count(51) {
@@ -1200,7 +1279,7 @@ async fn a_filter_the_route_refuses_fails_before_the_request() {
 
 /// The pairs the SDK's writer sends for a vector's filters: each field's,
 /// in the order the vector first names it, as the shape its operators
-/// give, isNull as is_null and in as one_of.
+/// give, isNull as is_null, in as one_of and notIn as not_in.
 fn written(filters: &[Value]) -> Vec<(String, String)> {
     let mut fields: Vec<&str> = Vec::new();
     for filter in filters {
@@ -1226,7 +1305,9 @@ fn written(filters: &[Value]) -> Vec<(String, String)> {
             is_ordered = is_ordered || ["gt", "gte", "lt", "lte"].contains(&operator);
             match operator {
                 "eq" => ordered.eq = Some(first),
+                "ne" => ordered.ne = Some(first),
                 "in" => ordered.one_of = values,
+                "notIn" => ordered.not_in = values,
                 "gt" => ordered.gt = Some(first),
                 "gte" => ordered.gte = Some(first),
                 "lt" => ordered.lt = Some(first),
@@ -1236,14 +1317,14 @@ fn written(filters: &[Value]) -> Vec<(String, String)> {
                 other => panic!("the vectors name an operator {other} the SDK does not write"),
             }
         }
-        let Ordered { eq, one_of, is_null, .. } = ordered.clone();
+        let Ordered { eq, ne, one_of, not_in, is_null, .. } = ordered.clone();
         if contains.is_some() {
-            let text = Text { eq, one_of, contains, is_null };
+            let text = Text { eq, ne, one_of, not_in, contains, is_null };
             text.append_query(field, true, &mut pairs).unwrap();
         } else if is_ordered {
             ordered.append_query(field, true, &mut pairs).unwrap();
         } else {
-            let equals = Equals { eq, one_of, is_null };
+            let equals = Equals { eq, ne, one_of, not_in, is_null };
             equals.append_query(field, true, &mut pairs).unwrap();
         }
     }
@@ -1254,7 +1335,7 @@ fn written(filters: &[Value]) -> Vec<(String, String)> {
 fn the_writer_sends_the_pairs_of_the_filter_vectors() {
     let vectors: Value = serde_json::from_str(&std::fs::read_to_string(FILTER_VECTORS).unwrap()).unwrap();
     let queries = vectors["queries"].as_array().unwrap();
-    assert!(queries.len() >= 5, "{} query vectors", queries.len());
+    assert!(queries.len() >= 6, "{} query vectors", queries.len());
     let mut operators = std::collections::BTreeSet::new();
     for vector in queries {
         let filters = vector["filters"].as_array().unwrap();
@@ -1268,6 +1349,6 @@ fn the_writer_sends_the_pairs_of_the_filter_vectors() {
         assert_eq!(written(filters), want, "{}", vector["name"]);
     }
     let every: Vec<&str> = operators.iter().map(String::as_str).collect();
-    assert_eq!(every, ["contains", "eq", "gt", "gte", "in", "isNull", "lt", "lte"]);
+    assert_eq!(every, ["contains", "eq", "gt", "gte", "in", "isNull", "lt", "lte", "ne", "notIn"]);
 }
 `

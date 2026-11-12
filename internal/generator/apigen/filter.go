@@ -138,8 +138,12 @@ func FilterOperatorDescription(op string) string {
 	switch op {
 	case ir.FilterOpEq:
 		return "The field equals the value."
+	case ir.FilterOpNe:
+		return "The field is not the value: every item eq leaves out, one whose field is null among them."
 	case ir.FilterOpIn:
 		return fmt.Sprintf("The field is one of the values, at most %d.", ir.FilterMaxInValues)
+	case ir.FilterOpNotIn:
+		return fmt.Sprintf("The field is none of the values, at most %d: every item in leaves out, one whose field is null among them.", ir.FilterMaxInValues)
 	case ir.FilterOpGt:
 		return "The field is greater than the value."
 	case ir.FilterOpGte:

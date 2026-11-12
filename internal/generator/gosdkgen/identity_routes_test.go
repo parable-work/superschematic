@@ -17,7 +17,8 @@ import (
 const userRoutesService = "fixture-user-routes-api"
 
 // loadUserRoutesAPI loads fixture-user-routes-api: the identity runtime's
-// eighteen operations beside the project's own greet.
+// twenty-four operations, the five API key routes among them (D114),
+// beside the project's own greet.
 func loadUserRoutesAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, userRoutesService))
@@ -85,21 +86,26 @@ func TestUserRoutesAreSDKMethods(t *testing.T) {
 			"Capabilities":   {"GET", "/api/auth/capabilities"},
 			"ChangePassword": {"POST", "/api/auth/password"},
 			"Register":       {"POST", "/api/auth/register"},
+			"CreateApiKey":   {"POST", "/api/auth/keys"},
+			"ListApiKeys":    {"GET", "/api/auth/keys"},
+			"RevokeApiKey":   {"DELETE", "/api/auth/keys/%v"},
 		},
 		"AccountAdminNamespace": {
-			"CreateUser":      {"POST", "/api/auth/admin/users"},
-			"ListUsers":       {"GET", "/api/auth/admin/users"},
-			"GetUser":         {"GET", "/api/auth/admin/users/%v"},
-			"DisableUser":     {"POST", "/api/auth/admin/users/%v/disable"},
-			"EnableUser":      {"POST", "/api/auth/admin/users/%v/enable"},
-			"ApproveUser":     {"POST", "/api/auth/admin/users/%v/approve"},
-			"SetUserPassword": {"PUT", "/api/auth/admin/users/%v/password"},
-			"ListRoles":       {"GET", "/api/auth/admin/roles"},
-			"CreateRole":      {"POST", "/api/auth/admin/roles"},
-			"UpdateRole":      {"PUT", "/api/auth/admin/roles/%v"},
-			"DeleteRole":      {"DELETE", "/api/auth/admin/roles/%v"},
-			"GrantRole":       {"PUT", "/api/auth/admin/users/%v/roles/%v"},
-			"RevokeRole":      {"DELETE", "/api/auth/admin/users/%v/roles/%v"},
+			"CreateUser":       {"POST", "/api/auth/admin/users"},
+			"ListUsers":        {"GET", "/api/auth/admin/users"},
+			"GetUser":          {"GET", "/api/auth/admin/users/%v"},
+			"DisableUser":      {"POST", "/api/auth/admin/users/%v/disable"},
+			"EnableUser":       {"POST", "/api/auth/admin/users/%v/enable"},
+			"ApproveUser":      {"POST", "/api/auth/admin/users/%v/approve"},
+			"SetUserPassword":  {"PUT", "/api/auth/admin/users/%v/password"},
+			"ListRoles":        {"GET", "/api/auth/admin/roles"},
+			"CreateRole":       {"POST", "/api/auth/admin/roles"},
+			"UpdateRole":       {"PUT", "/api/auth/admin/roles/%v"},
+			"DeleteRole":       {"DELETE", "/api/auth/admin/roles/%v"},
+			"GrantRole":        {"PUT", "/api/auth/admin/users/%v/roles/%v"},
+			"RevokeRole":       {"DELETE", "/api/auth/admin/users/%v/roles/%v"},
+			"ListUserApiKeys":  {"GET", "/api/auth/admin/users/%v/keys"},
+			"RevokeUserApiKey": {"DELETE", "/api/auth/admin/users/%v/keys/%v"},
 		},
 		"GreetingNamespace": {
 			"Greet": {"GET", "/api/greeting"},
@@ -138,7 +144,8 @@ func TestUserRoutesAreSDKMethods(t *testing.T) {
 
 // TestUserRoutesAreTools: in the Go SDK's tool schema every operation is a
 // tool, and those that carry a password are hidden from an agent with the
-// reason the identity runtime gives.
+// reason the identity runtime gives, as createApiKey is with its own: it
+// answers a credential (D114).
 func TestUserRoutesAreTools(t *testing.T) {
 	_, apiOutput := loadUserRoutesAPI(t)
 	_, sdkDir := writeUserRoutesSDK(t, apiOutput)
@@ -159,16 +166,22 @@ func TestUserRoutesAreTools(t *testing.T) {
 	if err := json.Unmarshal(raw, &document); err != nil {
 		t.Fatalf("tools/schema.json: %v", err)
 	}
-	const reason = "It carries a password, which an agent does not hold."
-	hidden := map[string]bool{
-		"account.login": true, "account.register": true, "account.changePassword": true,
-		"account-admin.createUser": true, "account-admin.setUserPassword": true,
+	const (
+		password   = "It carries a password, which an agent does not hold."
+		credential = "It answers a credential, which an agent's context should not hold."
+	)
+	hidden := map[string]string{
+		"account.login": password, "account.register": password, "account.changePassword": password,
+		"account-admin.createUser": password, "account-admin.setUserPassword": password,
+		"account.createApiKey": credential,
 	}
 	want := []string{
 		"account.login", "account.logout", "account.me", "account.capabilities", "account.changePassword", "account.register",
+		"account.createApiKey", "account.listApiKeys", "account.revokeApiKey",
 		"account-admin.createUser", "account-admin.listUsers", "account-admin.getUser", "account-admin.disableUser",
 		"account-admin.enableUser", "account-admin.approveUser", "account-admin.setUserPassword", "account-admin.listRoles", "account-admin.createRole",
 		"account-admin.updateRole", "account-admin.deleteRole", "account-admin.grantRole", "account-admin.revokeRole",
+		"account-admin.listUserApiKeys", "account-admin.revokeUserApiKey",
 		"greeting.greet",
 	}
 	seen := map[string]bool{}
@@ -177,8 +190,9 @@ func TestUserRoutesAreTools(t *testing.T) {
 		if tool.BindingStatus != "ready" {
 			t.Errorf("%s: bindingStatus = %q, want ready", tool.Name, tool.BindingStatus)
 		}
+		reason, isHidden := hidden[tool.Name]
 		switch {
-		case hidden[tool.Name]:
+		case isHidden:
 			if tool.MCP == nil || !tool.MCP.Hidden || tool.MCP.HiddenReason != reason {
 				t.Errorf("%s: mcp = %+v, want hidden because %q", tool.Name, tool.MCP, reason)
 			}

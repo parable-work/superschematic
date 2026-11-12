@@ -339,10 +339,11 @@ runtime's `identity` package, held to the same parity vectors
   `hashPassword` and `verifyPassword` write and read argon2id PHC strings
   (`node:crypto`'s `argon2`, so Node.js 24.7 or later, or Bun);
   `passwordProblem` is `Auth.Password`'s rule through superscalar;
-  `newToken`, `hashToken`, `extractCredential`, `sessionCookie`,
-  `clearCookie`, `crossOriginAllowed` (Go's
+  `newToken`, `newApiKey`, `hashToken`, `extractCredential`,
+  `sessionCookie`, `clearCookie`, `crossOriginAllowed` (Go's
   `net/http.CrossOriginProtection`), `validPermission`,
-  `effectivePermissions`, `uncovered` (the grant rule) and
+  `effectivePermissions`, `uncovered` (the grant rule),
+  `narrowPermissions` (what an API key holds of a role) and
   `capabilitiesOf` are the primitives the vectors pin. `routesOf` reads a
   generated operation table into the route requirements capabilities
   answers for, keyed by the OpenAPI operation id.
@@ -356,20 +357,42 @@ runtime's `identity` package, held to the same parity vectors
   `Identity.UUID` key base62 on the wire and hyphenated in the database.
   On SQLite every operation runs synchronously, its transaction included.
   The package imports no driver: `pg` is an optional peer dependency.
-- `IdentityService` holds every session and administration operation, with
-  the Go runtime's problems: 401 `invalid_credentials` and `unauthorized`,
-  403 `forbidden` and `cross_origin`, 404 `not_found`, 409 `conflict`, 422
-  `invalid_permission`, and 400 `bad_request` with field errors.
-  `identityAuthenticator(service)` is the router's `Authenticator`: the
-  principal's subject is the user's id, its permissions the roles', and its
-  claims carry the session id, login, name, transport and roles.
+  A descriptor with `apiKey` gives the store its API keys (`hasApiKeys`,
+  `createApiKey`, `findApiKey`, `touchApiKey`, `listApiKeys`,
+  `revokeApiKey`); one written before D114 has none, and its store refuses
+  them.
+- `IdentityService` holds every session, administration and API key
+  operation, with the Go runtime's problems: 401 `invalid_credentials` and
+  `unauthorized`, 403 `forbidden` and `cross_origin`, 404 `not_found`, 409
+  `conflict`, 422 `invalid_permission`, and 400 `bad_request` with field
+  errors. `identityAuthenticator(service)` is the router's
+  `Authenticator`: the principal's subject is the user's id, its
+  permissions the roles', and its claims carry the session id, login,
+  name, transport and roles.
+- An API key (D114) is `key_` and 43 characters of base64url, which a
+  request carries as its bearer token wherever a session token goes, never
+  in the cookie. It authenticates as its user whenever the store has the
+  table: until it expires (`apiKeyMaxTtlSeconds` at most, 365 days by
+  default), is revoked, or its user is disabled, with no idle timeout. A
+  key made with permissions holds its user's roles narrowed to them
+  (`narrowRoles`). Its principal has an empty `sessionId` and the key's id
+  as `apiKeyId` (`identityPrincipalOf`), and the routes that act on the
+  caller's own account (the session set's key routes, logout and
+  changePassword) refuse it with 403.
 - `identityHandler(service, op)` is the Hono handler of one operation of
   `ir/identity_routes.go`, in `ManualRouteHandler`'s shape;
   `identityRoutes` and `mountIdentityRoutes` lay them out as the Go
   runtime's `Service.Routes` does, and `identityCors` is the credentialed
   CORS middleware for the trusted origins. Every success is the `{data,
-  meta}` envelope; logout, changePassword, setUserPassword and deleteRole
-  answer `data: true`.
+  meta}` envelope; logout, changePassword, setUserPassword, deleteRole,
+  revokeApiKey and revokeUserApiKey answer `data: true`. The API key
+  operations (createApiKey, listApiKeys and revokeApiKey in the session
+  set; listUserApiKeys and revokeUserApiKey in the administration set) are
+  in `identityRoutes` only for a service built with `apiKeys: true` for
+  the first set and `apiKeyAdministration: true` for the second, as the
+  API's `@userSessions({ apiKeys: true })` and `@userAdministration({
+  apiKeys: true })` declare them; `identityHandler` answers each whatever
+  the service's options.
 - `identityCorsRoutes(app, service)` scopes that CORS to the app's own
   routes, for an app a server mounts beside others: the routers of the
   APIs a TypeScript server serves, or a router beside the engine's app.
@@ -385,11 +408,12 @@ runtime's `identity` package, held to the same parity vectors
   API that registers it.
 - `identityOperations` holds each operation's rule (public, a caller, or
   an administration permission) and rate limit (login 10, register 5,
-  changePassword 10 a minute per client). `identityOperationSpec` writes
-  an operation table entry from them, and `mountIdentityOperations` mounts
-  the routes through `mountManualOperation` with those entries, so the
-  request id, the rate limit, the gate and the timeout run first: for a
-  server whose router has no generated table, such as the engine.
+  changePassword 10 and createApiKey 10 a minute per client).
+  `identityOperationSpec` writes an operation table entry from them, and
+  `mountIdentityOperations` mounts the routes through
+  `mountManualOperation` with those entries, so the request id, the rate
+  limit, the gate and the timeout run first: for a server whose router has
+  no generated table, such as the engine.
 - `identityRouterOptions(options)` checks a router's options and returns
   them with `identityAuthenticator(options.identity)` as `authenticate`: it
   refuses options without `identity`, and an `authenticate` beside it.

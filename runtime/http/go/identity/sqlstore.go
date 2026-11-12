@@ -21,7 +21,7 @@ type Dialect string
 const (
 	// Postgres: $n placeholders, TIMESTAMPTZ timestamps, TEXT[] permissions
 	// (read and written as JSON through array_to_json and
-	// json_array_elements_text).
+	// json_array_elements_text), a role's and an API key's alike.
 	Postgres Dialect = "postgres"
 	// SQLite: ? placeholders, timestamps as TEXT in SQLiteTimeLayout, and
 	// permissions as a JSON array in TEXT, as sqlite/create.sql declares
@@ -35,8 +35,8 @@ const (
 // time order.
 const SQLiteTimeLayout = "2006-01-02T15:04:05.000Z"
 
-// sessionKeyScalar is the key of every table the loader adds,
-// AutoGenerate<Identity.UUID>.
+// sessionKeyScalar is the key of every table the loader adds, the API key
+// table among them: AutoGenerate<Identity.UUID>.
 const sessionKeyScalar = "Identity.UUID"
 
 // SQLStore is the Store over database/sql, built from a schema's identity
@@ -56,9 +56,9 @@ type SQLStore struct {
 	dialect Dialect
 	desc    Descriptor
 
-	userKey, roleKey, sessionKey keyCodec
-	loginScalar, nameScalar      string
-	nameIsLogin                  bool
+	userKey, roleKey, sessionKey, apiKeyKey keyCodec
+	loginScalar, nameScalar                 string
+	nameIsLogin                             bool
 
 	t names
 }
@@ -75,6 +75,9 @@ type names struct {
 	pending                                                               string
 	role, roleKey, roleName, rolePermissions                              string
 	grant, grantUser, grantRole, grantedAt                                string
+	apiKey, apiKeyID, apiKeyUser, apiKeyName, apiKeyTokenHash             string
+	apiKeyPermissions, apiKeyCreatedAt, apiKeyExpiresAt                   string
+	apiKeyLastUsedAt, apiKeyRevokedAt                                     string
 }
 
 // NewSQLStore builds a store over db from the identity descriptor's JSON.
@@ -98,6 +101,7 @@ func NewSQLStore(db *sql.DB, dialect Dialect, descriptor []byte, opts ...SQLStor
 		desc:        d,
 		userKey:     newKeyCodec(d.User.KeyScalar),
 		sessionKey:  newKeyCodec(sessionKeyScalar),
+		apiKeyKey:   newKeyCodec(sessionKeyScalar),
 		loginScalar: d.User.LoginScalar,
 		nameScalar:  d.User.NameScalar,
 		nameIsLogin: d.User.Columns.Name == d.User.Columns.Login,
@@ -119,6 +123,12 @@ func NewSQLStore(db *sql.DB, dialect Dialect, descriptor []byte, opts ...SQLStor
 	if r, g := d.Role, d.RoleGrant; r != nil {
 		s.t.role, s.t.roleKey, s.t.roleName, s.t.rolePermissions = quote(r.Table), quote(r.Columns.Key), quote(r.Columns.Name), quote(r.Columns.Permissions)
 		s.t.grant, s.t.grantUser, s.t.grantRole, s.t.grantedAt = quote(g.Table), quote(g.Columns.User), quote(g.Columns.Role), quote(g.Columns.GrantedAt)
+	}
+	if k := d.APIKey; k != nil {
+		s.t.apiKey, s.t.apiKeyID, s.t.apiKeyUser, s.t.apiKeyName = quote(k.Table), quote(k.Columns.ID), quote(k.Columns.User), quote(k.Columns.Name)
+		s.t.apiKeyTokenHash, s.t.apiKeyPermissions = quote(k.Columns.TokenHash), quote(k.Columns.Permissions)
+		s.t.apiKeyCreatedAt, s.t.apiKeyExpiresAt = quote(k.Columns.CreatedAt), quote(k.Columns.ExpiresAt)
+		s.t.apiKeyLastUsedAt, s.t.apiKeyRevokedAt = quote(k.Columns.LastUsedAt), quote(k.Columns.RevokedAt)
 	}
 	return s, nil
 }
@@ -225,10 +235,16 @@ func (s *SQLStore) timeArg(t time.Time) any {
 // permissionsRead is the expression that reads a role's permissions as a
 // JSON array, and permissionsWrite the one that writes them from one.
 func (s *SQLStore) permissionsRead(alias string) string {
+	return s.listRead(alias, s.t.rolePermissions)
+}
+
+// listRead is the expression that reads a column of permissions as a JSON
+// array, and as null when the column is.
+func (s *SQLStore) listRead(alias, column string) string {
 	if s.dialect == Postgres {
-		return "array_to_json(" + alias + "." + s.t.rolePermissions + ")::text"
+		return "array_to_json(" + alias + "." + column + ")::text"
 	}
-	return alias + "." + s.t.rolePermissions
+	return alias + "." + column
 }
 
 func (s *SQLStore) permissionsWrite() string {
@@ -681,7 +697,10 @@ func (s *SQLStore) SetDisabled(ctx context.Context, userID string, disabled bool
 			key, s.timeArg(at), s.timeArg(at)); err != nil {
 			return fmt.Errorf("identity: disable a user: %w", err)
 		}
-		return s.revokeUserSessions(ctx, tx, key, "", at)
+		if err := s.revokeUserSessions(ctx, tx, key, "", at); err != nil {
+			return err
+		}
+		return s.revokeUserAPIKeys(ctx, tx, key, at)
 	})
 }
 
@@ -782,6 +801,200 @@ func (s *SQLStore) revokeUserSessions(ctx context.Context, q querier, key, keep 
 	}
 	if _, err := q.ExecContext(ctx, s.bind(query), args...); err != nil {
 		return fmt.Errorf("identity: revoke a user's sessions: %w", err)
+	}
+	return nil
+}
+
+// HasAPIKeys implements Store.
+func (s *SQLStore) HasAPIKeys() bool { return s.desc.APIKey != nil }
+
+// apiKeyColumns are an API key's columns as apiKeyScan reads them, of the
+// table aliased k: its id, user, name, permissions as a JSON array or
+// null, createdAt, expiresAt, lastUsedAt and revokedAt.
+func (s *SQLStore) apiKeyColumns() string {
+	t := s.t
+	return "k." + t.apiKeyID + ", k." + t.apiKeyUser + ", k." + t.apiKeyName + ", " + s.listRead("k", t.apiKeyPermissions) +
+		", k." + t.apiKeyCreatedAt + ", k." + t.apiKeyExpiresAt + ", k." + t.apiKeyLastUsedAt + ", k." + t.apiKeyRevokedAt
+}
+
+// apiKeyScan is where a row of apiKeyColumns is scanned.
+type apiKeyScan struct {
+	id, user, name                      string
+	permissions                         sql.NullString
+	created, expires, lastUsed, revoked timeScan
+}
+
+func (a *apiKeyScan) dest() []any {
+	return []any{&a.id, &a.user, &a.name, &a.permissions, &a.created, &a.expires, &a.lastUsed, &a.revoked}
+}
+
+// apiKey is the API key a scanned. Null permissions stay nil, every
+// permission its user holds; anything else is the list the key names.
+func (s *SQLStore) apiKey(a *apiKeyScan) (APIKey, error) {
+	key := APIKey{
+		ID: s.apiKeyKey.toWire(a.id), UserID: s.userKey.toWire(a.user), Name: a.name,
+		CreatedAt: a.created.t, ExpiresAt: a.expires.t, LastUsedAt: a.lastUsed.ptr(), RevokedAt: a.revoked.ptr(),
+	}
+	if a.permissions.Valid {
+		key.Permissions = []string{}
+		if a.permissions.String != "" {
+			if err := json.Unmarshal([]byte(a.permissions.String), &key.Permissions); err != nil {
+				return APIKey{}, fmt.Errorf("identity: read API key %s's permissions: %w", key.ID, err)
+			}
+			if key.Permissions == nil {
+				key.Permissions = []string{}
+			}
+		}
+	}
+	return key, nil
+}
+
+// CreateAPIKey implements Store.
+func (s *SQLStore) CreateAPIKey(ctx context.Context, nk NewAPIKeyRow) (APIKey, error) {
+	if !s.HasAPIKeys() {
+		return APIKey{}, ErrNoAPIKeys
+	}
+	user, ok := s.userKey.toDB(nk.UserID)
+	if !ok {
+		return APIKey{}, ErrNotFound
+	}
+	t := s.t
+	// Nil permissions are written as null, which no placeholder of the
+	// array's expression carries.
+	permissions, args := "NULL", []any{user, nk.Name, nk.TokenHash}
+	if nk.Permissions != nil {
+		permissions, args = s.permissionsWrite(), append(args, permissionsJSON(nk.Permissions))
+	}
+	args = append(args, s.timeArg(nk.CreatedAt), s.timeArg(nk.ExpiresAt))
+	var id string
+	if err := s.db.QueryRowContext(ctx, s.bind("INSERT INTO "+t.apiKey+" ("+t.apiKeyUser+", "+t.apiKeyName+", "+t.apiKeyTokenHash+", "+t.apiKeyPermissions+", "+t.apiKeyCreatedAt+", "+t.apiKeyExpiresAt+
+		") VALUES (?, ?, ?, "+permissions+", ?, ?) RETURNING "+t.apiKeyID), args...).Scan(&id); err != nil {
+		return APIKey{}, fmt.Errorf("identity: create an API key: %w", err)
+	}
+	return APIKey{
+		ID: s.apiKeyKey.toWire(id), UserID: s.userKey.toWire(user), Name: nk.Name, Permissions: slices.Clone(nk.Permissions),
+		CreatedAt: nk.CreatedAt.UTC(), ExpiresAt: nk.ExpiresAt.UTC(),
+	}, nil
+}
+
+// FindAPIKey implements Store.
+func (s *SQLStore) FindAPIKey(ctx context.Context, tokenHash string) (APIKeyRecord, error) {
+	if !s.HasAPIKeys() {
+		return APIKeyRecord{}, ErrNotFound
+	}
+	t := s.t
+	query := "SELECT " + s.apiKeyColumns() + ", u." + t.userLogin + ", u." + t.userName + ", c." + t.disabled + ", c." + t.pending +
+		" FROM " + t.apiKey + " k JOIN " + t.user + " u ON u." + t.userKey + " = k." + t.apiKeyUser +
+		" LEFT JOIN " + t.credential + " c ON c." + t.credentialUser + " = k." + t.apiKeyUser +
+		" WHERE k." + t.apiKeyTokenHash + " = ?"
+	var a apiKeyScan
+	var login, name string
+	var disabled, pending timeScan
+	err := s.db.QueryRowContext(ctx, s.bind(query), tokenHash).Scan(append(a.dest(), &login, &name, &disabled, &pending)...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return APIKeyRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return APIKeyRecord{}, fmt.Errorf("identity: find an API key: %w", err)
+	}
+	key, err := s.apiKey(&a)
+	if err != nil {
+		return APIKeyRecord{}, err
+	}
+	return APIKeyRecord{
+		APIKey: key,
+		User:   User{ID: key.UserID, Login: login, Name: name, Disabled: disabled.valid, Pending: pending.valid},
+	}, nil
+}
+
+// TouchAPIKey implements Store.
+func (s *SQLStore) TouchAPIKey(ctx context.Context, keyID string, at, staleBefore time.Time) error {
+	if !s.HasAPIKeys() {
+		return ErrNoAPIKeys
+	}
+	id, ok := s.apiKeyKey.toDB(keyID)
+	if !ok {
+		return ErrNotFound
+	}
+	t := s.t
+	if _, err := s.db.ExecContext(ctx, s.bind("UPDATE "+t.apiKey+" SET "+t.apiKeyLastUsedAt+" = ? WHERE "+t.apiKeyID+" = ? AND ("+t.apiKeyLastUsedAt+" IS NULL OR "+t.apiKeyLastUsedAt+" < ?)"),
+		s.timeArg(at), id, s.timeArg(staleBefore)); err != nil {
+		return fmt.Errorf("identity: touch an API key: %w", err)
+	}
+	return nil
+}
+
+// ListAPIKeys implements Store.
+func (s *SQLStore) ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error) {
+	if !s.HasAPIKeys() {
+		return nil, ErrNoAPIKeys
+	}
+	user, ok := s.userKey.toDB(userID)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	t := s.t
+	rows, err := s.db.QueryContext(ctx, s.bind("SELECT "+s.apiKeyColumns()+" FROM "+t.apiKey+" k WHERE k."+t.apiKeyUser+" = ? AND k."+t.apiKeyRevokedAt+" IS NULL"+
+		" ORDER BY k."+t.apiKeyCreatedAt+" DESC, k."+t.apiKeyID+" DESC"), user)
+	if err != nil {
+		return nil, fmt.Errorf("identity: list API keys: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	keys := []APIKey{}
+	for rows.Next() {
+		var a apiKeyScan
+		if err := rows.Scan(a.dest()...); err != nil {
+			return nil, fmt.Errorf("identity: list API keys: %w", err)
+		}
+		key, err := s.apiKey(&a)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("identity: list API keys: %w", err)
+	}
+	return keys, nil
+}
+
+// RevokeAPIKey implements Store.
+func (s *SQLStore) RevokeAPIKey(ctx context.Context, userID, keyID string, at time.Time) error {
+	if !s.HasAPIKeys() {
+		return ErrNoAPIKeys
+	}
+	user, ok := s.userKey.toDB(userID)
+	if !ok {
+		return ErrNotFound
+	}
+	id, ok := s.apiKeyKey.toDB(keyID)
+	if !ok {
+		return ErrNotFound
+	}
+	t := s.t
+	res, err := s.db.ExecContext(ctx, s.bind("UPDATE "+t.apiKey+" SET "+t.apiKeyRevokedAt+" = ? WHERE "+t.apiKeyID+" = ? AND "+t.apiKeyUser+" = ? AND "+t.apiKeyRevokedAt+" IS NULL"),
+		s.timeArg(at), id, user)
+	if err != nil {
+		return fmt.Errorf("identity: revoke an API key: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("identity: revoke an API key: %w", err)
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// revokeUserAPIKeys revokes the live API keys of the user with the
+// database key key, when the descriptor names their table.
+func (s *SQLStore) revokeUserAPIKeys(ctx context.Context, q querier, key string, at time.Time) error {
+	if !s.HasAPIKeys() {
+		return nil
+	}
+	t := s.t
+	if _, err := q.ExecContext(ctx, s.bind("UPDATE "+t.apiKey+" SET "+t.apiKeyRevokedAt+" = ? WHERE "+t.apiKeyUser+" = ? AND "+t.apiKeyRevokedAt+" IS NULL"),
+		s.timeArg(at), key); err != nil {
+		return fmt.Errorf("identity: revoke a user's API keys: %w", err)
 	}
 	return nil
 }

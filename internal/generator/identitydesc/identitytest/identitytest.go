@@ -103,6 +103,21 @@ func Schema(tb testing.TB, opts Options) *ir.Schema {
 		},
 	})
 
+	add(&ir.TypeDef{
+		Name: ir.IdentityAPIKeyTable,
+		Fields: []*ir.FieldDef{
+			idField(),
+			relation(ir.IdentityAPIKeyUserField, account.Name, false),
+			{Name: ir.IdentityAPIKeyNameField, TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.IdentityAPIKeyTokenHashField, TypeRef: ir.TypeRef{Name: SHA256}, Required: true, Unique: true},
+			{Name: ir.IdentityAPIKeyPermissionsField, TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
+			{Name: ir.IdentityAPIKeyCreatedAtField, TypeRef: ir.TypeRef{Name: DateTime}, Required: true},
+			{Name: ir.IdentityAPIKeyExpiresAtField, TypeRef: ir.TypeRef{Name: DateTime}, Required: true},
+			{Name: ir.IdentityAPIKeyLastUsedAtField, TypeRef: ir.TypeRef{Name: DateTime}},
+			{Name: ir.IdentityAPIKeyRevokedAtField, TypeRef: ir.TypeRef{Name: DateTime}},
+		},
+	})
+
 	if opts.Roles {
 		role := &ir.TypeDef{
 			Name:     "Role",

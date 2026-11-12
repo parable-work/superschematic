@@ -404,7 +404,7 @@ func TestAnEngineTypesByOfASeatIsRefusedAsAnyBy(t *testing.T) {
 		want string
 	}{
 		{"a transition's seat", note([]any{"seat:owners"}, nil),
-			`type Note: @behavior Workflow names by on the transition from "draft" to "sent", which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission and repeat, so leave it out`},
+			`type Note: @behavior Workflow names by on the transition from "draft" to "sent", which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission, repeat and finished, so leave it out`},
 		{"a state's seat", note(nil, []any{"seat:owners"}),
 			`type Note: @behavior StateRules names by in the rules of "sent", which a table's StateRules takes (implements StateRules<Note, C>, D104); an engine type's StateRules takes required, frozen and permission alone, so leave it out`},
 	} {

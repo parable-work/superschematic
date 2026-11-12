@@ -184,6 +184,7 @@ func projectionRepositories(schema *ir.Schema, dependencies map[string]*ir.Schem
 			field.FilterKind = goFilterKind(column.Filter)
 			field.SQL = sqlutil.ColumnStatementsOf(column)
 			field.Sortable = column.Sortable
+			field.SortNulls = column.Sortable && !column.Required
 			p.Fields = append(p.Fields, field)
 		}
 		for i := range p.Fields {

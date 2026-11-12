@@ -101,7 +101,7 @@ export interface ProblemFilter {
 export type ProblemOrderField = "id" | "title" | "agent" | "status" | "statusEnteredAt" | "_version";
 
 /** The members findPage orders rows of Problem by (D60, amended); ties break by id. */
-export type ProblemSortField = "id" | "title" | "status";
+export type ProblemSortField = "id" | "title" | "agent" | "status" | "statusEnteredAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ProblemUniqueKey = readonly ["id"];
@@ -189,12 +189,12 @@ export const problemTable: TableDefinition = {
   table: "problem",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "problem.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "title", column: "title", field: "title", qualified: "problem.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "agent", column: "agent", field: "agent", qualified: "problem.agent", uuid: true, filter: ["eq", "in", "isNull"] },
-    { name: "status", column: "status", field: "status", qualified: "problem.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "problem.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "problem._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "problem.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "title", column: "title", field: "title", qualified: "problem.title", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "agent", column: "agent", field: "agent", qualified: "problem.agent", uuid: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "problem.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "problem.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "problem._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"title\", \"agent\", \"status\", \"status_entered_at\", \"_version\"",
@@ -212,7 +212,9 @@ export const problemTable: TableDefinition = {
     page: "SELECT %s FROM problem%s%s LIMIT %d",
     pageAfterKey: "problem.id %s %s",
     pageAfter: "(%s, problem.id) %s ((SELECT %s FROM problem AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM problem AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", problem.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM problem WHERE problem.id = $1)",
     insert: "INSERT INTO problem (%s) VALUES (%s) RETURNING %s",
@@ -284,7 +286,7 @@ export interface SandboxFilter {
 export type SandboxOrderField = "id" | "name" | "status" | "statusEnteredAt" | "observed" | "observedObservedAt" | "observedDrift" | "observedReconciledAt" | "_version";
 
 /** The members findPage orders rows of Sandbox by (D60, amended); ties break by id. */
-export type SandboxSortField = "id" | "name" | "status";
+export type SandboxSortField = "id" | "name" | "status" | "statusEnteredAt" | "observed" | "observedObservedAt" | "observedReconciledAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type SandboxUniqueKey = readonly ["id"];
@@ -362,15 +364,15 @@ export const sandboxTable: TableDefinition = {
   table: "sandbox",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "sandbox.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "sandbox.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "status", column: "status", field: "status", qualified: "sandbox.status", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "sandbox.status_entered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "observed", column: "observed", field: "observed", qualified: "sandbox.observed", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "observedObservedAt", column: "observed_observed_at", field: "observedObservedAt", qualified: "sandbox.observed_observed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "observedDrift", column: "observed_drift", field: "observedDrift", qualified: "sandbox.observed_drift", json: true, filter: ["eq", "in", "isNull"] },
-    { name: "observedReconciledAt", column: "observed_reconciled_at", field: "observedReconciledAt", qualified: "sandbox.observed_reconciled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "_version", column: "_version", field: "_version", qualified: "sandbox._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "sandbox.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "sandbox.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "sandbox.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "sandbox.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "observed", column: "observed", field: "observed", qualified: "sandbox.observed", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "observedObservedAt", column: "observed_observed_at", field: "observedObservedAt", qualified: "sandbox.observed_observed_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "observedDrift", column: "observed_drift", field: "observedDrift", qualified: "sandbox.observed_drift", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "observedReconciledAt", column: "observed_reconciled_at", field: "observedReconciledAt", qualified: "sandbox.observed_reconciled_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "sandbox._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"name\", \"status\", \"status_entered_at\", \"observed\", \"observed_observed_at\", \"observed_drift\", \"observed_reconciled_at\", \"_version\"",
@@ -388,7 +390,9 @@ export const sandboxTable: TableDefinition = {
     page: "SELECT %s FROM sandbox%s%s LIMIT %d",
     pageAfterKey: "sandbox.id %s %s",
     pageAfter: "(%s, sandbox.id) %s ((SELECT %s FROM sandbox AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM sandbox AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", sandbox.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM sandbox WHERE sandbox.id = $1)",
     insert: "INSERT INTO sandbox (%s) VALUES (%s) RETURNING %s",
@@ -869,12 +873,14 @@ export const fixtureSeatsDbRules: RulesLayout = {
 export const fixtureSeatsDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

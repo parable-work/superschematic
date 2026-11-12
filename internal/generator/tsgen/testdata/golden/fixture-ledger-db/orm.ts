@@ -92,7 +92,7 @@ export interface AccountFilter {
 export type AccountOrderField = "id" | "name" | "code" | "openedOn" | "mailingAddress" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy";
 
 /** The members findPage orders rows of Account by (D60, amended); ties break by id. */
-export type AccountSortField = "id" | "name" | "code" | "createdAt" | "updatedAt";
+export type AccountSortField = "id" | "name" | "code" | "openedOn" | "createdAt" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type AccountUniqueKey = readonly ["id"] | readonly ["code"];
@@ -128,15 +128,15 @@ export const accountTable: TableDefinition = {
   table: "account",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "account.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "code", column: "code", field: "code", qualified: "account.code", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "openedOn", column: "opened_on", field: "openedOn", qualified: "account.opened_on", date: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "account.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "code", column: "code", field: "code", qualified: "account.code", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "openedOn", column: "opened_on", field: "openedOn", qualified: "account.opened_on", date: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "mailingAddress", column: "mailing_address", field: "mailingAddress", qualified: "account.mailing_address", json: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "account.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "account.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
@@ -154,7 +154,9 @@ export const accountTable: TableDefinition = {
     page: "SELECT %s FROM account%s%s LIMIT %d",
     pageAfterKey: "account.id %s %s",
     pageAfter: "(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", account.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM account WHERE account.id = $1)",
     insert: "INSERT INTO account (%s) VALUES (%s) RETURNING %s",
@@ -271,7 +273,7 @@ export interface EntryFilter {
 export type EntryOrderField = "id" | "amountCents" | "bookedOn" | "kind" | "memo" | "externalId" | "tags" | "metadata" | "reviewedAt" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "deletedAt" | "deletedBy";
 
 /** The members findPage orders rows of Entry by (D60, amended); ties break by id. */
-export type EntrySortField = "id" | "amountCents" | "bookedOn" | "createdAt" | "updatedAt";
+export type EntrySortField = "id" | "amountCents" | "bookedOn" | "memo" | "externalId" | "reviewedAt" | "createdAt" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type EntryUniqueKey = readonly ["id"] | readonly ["account", "externalId"];
@@ -307,21 +309,21 @@ export const entryTable: TableDefinition = {
   table: "entry",
   key: "id",
   columns: [
-    { name: "id", column: "id", field: "id", qualified: "entry.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "accountId", column: "account_id", field: "account", qualified: "entry.account_id", uuid: true, required: true, relation: "Account", filter: ["eq", "in", "isNull"] },
-    { name: "transferId", column: "transfer_id", field: "transfer", qualified: "entry.transfer_id", uuid: true, relation: "Account", filter: ["eq", "in", "isNull"] },
-    { name: "amountCents", column: "amount_cents", field: "amountCents", qualified: "entry.amount_cents", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "bookedOn", column: "booked_on", field: "bookedOn", qualified: "entry.booked_on", date: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "kind", column: "kind", field: "kind", qualified: "entry.kind", required: true, default: "debit", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "memo", column: "memo", field: "memo", qualified: "entry.memo", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "externalId", column: "external_id", field: "externalId", qualified: "entry.external_id", filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "id", column: "id", field: "id", qualified: "entry.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "accountId", column: "account_id", field: "account", qualified: "entry.account_id", uuid: true, required: true, relation: "Account", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "transferId", column: "transfer_id", field: "transfer", qualified: "entry.transfer_id", uuid: true, relation: "Account", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "amountCents", column: "amount_cents", field: "amountCents", qualified: "entry.amount_cents", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "bookedOn", column: "booked_on", field: "bookedOn", qualified: "entry.booked_on", date: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "kind", column: "kind", field: "kind", qualified: "entry.kind", required: true, default: "debit", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "memo", column: "memo", field: "memo", qualified: "entry.memo", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "externalId", column: "external_id", field: "externalId", qualified: "entry.external_id", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "tags", column: "tags", field: "tags", qualified: "entry.tags", list: true, required: true },
-    { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "in", "isNull"] },
-    { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "in", "isNull"] },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "entry.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "entry.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "in", "isNull"] },
+    { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "entry.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "entry.updated_by", uuid: true, required: true, audit: "updatedBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "entry.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "entry.deleted_by", uuid: true, audit: "deletedBy" },
   ],
@@ -341,7 +343,9 @@ export const entryTable: TableDefinition = {
     page: "SELECT %s FROM entry%s%s LIMIT %d",
     pageAfterKey: "entry.id %s %s",
     pageAfter: "(%s, entry.id) %s ((SELECT %s FROM entry AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM entry AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
     pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
     pageTiebreak: ", entry.id %s",
     pageKeyExists: "SELECT EXISTS (SELECT 1 FROM entry WHERE entry.id = $1)",
     insert: "INSERT INTO entry (%s) VALUES (%s) RETURNING %s",
@@ -385,12 +389,14 @@ export type FixtureLedgerDbTx = OrmTx<FixtureLedgerDbRepositories>;
 export const fixtureLedgerDbOrm: OrmDefinition = {
   clauses: {
     eq: "%s = $%d",
+    ne: "%s IS DISTINCT FROM $%d",
     gt: "%s > $%d",
     gte: "%s >= $%d",
     lt: "%s < $%d",
     lte: "%s <= $%d",
     ilike: "%s ILIKE $%d",
     in: "%s IN (%s)",
+    noneOf: "(%s IN (%s)) IS NOT TRUE",
     isNull: "%s IS NULL",
     isNotNull: "%s IS NOT NULL",
     search: "%s ILIKE $%d ESCAPE '\\'",

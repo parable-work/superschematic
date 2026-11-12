@@ -114,12 +114,18 @@ func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
 		if first := cfg.FirstUser; first != nil {
 			keys = append(keys, "firstUser: { role: "+quote(first.Role)+", permissions: ["+quotedList(first.Permissions)+"] }")
 		}
+		if cfg.APIKeys {
+			keys = append(keys, "apiKeys: true")
+		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userSessions"), optionalObjectLiteral(keys))
 	}
 	if cfg := set.UserAdministration; cfg != nil {
 		var keys []string
 		if cfg.Path != "" {
 			keys = append(keys, "path: "+quote(cfg.Path))
+		}
+		if cfg.APIKeys {
+			keys = append(keys, "apiKeys: true")
 		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userAdministration"), optionalObjectLiteral(keys))
 	}

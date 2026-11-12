@@ -175,7 +175,7 @@ export interface TableColumn extends RowField {
   readonly default?: unknown;
   /** The operations of the column's filter, in the order their conditions are written. */
   readonly filter?: readonly string[];
-  /** A column findPage orders by. */
+  /** A column findPage orders by. One that is not required may be null, and its nulls come last in either direction (D112). */
   readonly sortable?: boolean;
   /** An Encrypted<T> field's column, which holds its envelope (D85). */
   readonly encrypted?: boolean;
@@ -204,7 +204,16 @@ export interface TableStatements {
   readonly page: string;
   readonly pageAfterKey: string;
   readonly pageAfter: string;
+  /**
+   * The keyset of an order by a column that may be null (D112): the key's
+   * row's column %s and the key's placeholder %s, the column %s and a filled
+   * pageAfterKey %s, the column %s and a filled pageAfter %s. Absent in
+   * types written before it.
+   */
+  readonly pageAfterNulls?: string;
   readonly pageOrder: string;
+  /** pageOrder for a column that may be null, its nulls last in either direction (D112). */
+  readonly pageOrderNulls?: string;
   readonly pageTiebreak: string;
   readonly pageKeyExists: string;
   readonly insert: string;
@@ -229,12 +238,16 @@ export interface TableStatements {
 /** The parts of statements written around a column, sqlutil.Clauses: format strings whose first %s is the column. */
 export interface Clauses {
   readonly eq: string;
+  /** A filter's ne (D112): the rows eq leaves out, a row whose column is NULL among them. Absent in types written before it. */
+  readonly ne?: string;
   readonly gt: string;
   readonly gte: string;
   readonly lt: string;
   readonly lte: string;
   readonly ilike: string;
   readonly in: string;
+  /** A filter's notIn (D112): the rows in leaves out, a row whose column is NULL among them. Absent in types written before it. */
+  readonly noneOf?: string;
   readonly isNull: string;
   readonly isNotNull: string;
   readonly search: string;
@@ -459,6 +472,13 @@ export class TooManyRowsError extends Error {
   }
 }
 
+/** The clause of a filter's ne or notIn (D112), which types written before it do not carry. */
+function negationClause(clauses: Clauses, clause: 'ne' | 'noneOf', table: string, column: string): string {
+  const text = clauses[clause];
+  if (!text) throw new Error(`orm: ${table}.${column}: these types hold no clause for ${clause === 'ne' ? 'ne' : 'notIn'}: build them again`);
+  return text;
+}
+
 /** findPage's error for an after key that holds no key, or whose row no longer exists in an order by another column. */
 export class PageKeyError extends Error {
   constructor(message = 'the page key names no row of its sort') {
@@ -469,17 +489,23 @@ export class PageKeyError extends Error {
 
 /**
  * The filters of a column, by its kind, as the Go ORM's (D79): each set
- * member is one condition, all of them ANDed. in with no values adds none;
- * between is [min, max], both included; isNull, on a column that may be
- * null, true for IS NULL and false for IS NOT NULL.
+ * member is one condition, all of them ANDed. in with no values adds none,
+ * and neither does notIn; ne and notIn keep the rows eq and in leave out
+ * (D112), a row whose column is NULL among them; between is [min, max],
+ * both included; isNull, on a column that may be null, true for IS NULL
+ * and false for IS NOT NULL.
  */
 export interface UuidFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface StringFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
   /** Contains the text, in any case: ILIKE %text%. */
   readonly ilike?: string;
 }
@@ -491,38 +517,47 @@ export interface StringFilter<T = string> {
  */
 export interface JsonFilter<T = unknown> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface NumberFilter<T = number> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
   readonly lte?: T;
   readonly between?: readonly [T, T];
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface DateTimeFilter<T = Date> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
   readonly lte?: T;
   readonly between?: readonly [T, T];
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 export interface DateFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
   readonly lte?: T;
   readonly between?: readonly [T, T];
   readonly in?: readonly T[];
+  readonly notIn?: readonly T[];
 }
 /** A duration's filter, its values a duration's text; Postgres compares intervals with a day as 24 hours and a month as 30 days. */
 export interface DurationFilter<T = string> {
   readonly eq?: T;
+  readonly ne?: T;
   readonly gt?: T;
   readonly gte?: T;
   readonly lt?: T;
@@ -531,7 +566,9 @@ export interface DurationFilter<T = string> {
 }
 export interface BoolFilter {
   readonly eq?: boolean;
+  readonly ne?: boolean;
   readonly in?: readonly boolean[];
+  readonly notIn?: readonly boolean[];
 }
 /** A location's filter, which tests presence alone: Postgres has no equality for a POINT. */
 export type PointFilter = Record<never, never>;
@@ -1424,18 +1461,24 @@ class TableRepository {
             conditions.push(fill(c[op as 'eq' | 'gt' | 'gte' | 'lt' | 'lte'], q, ++n));
             args.push(this.encode(value, column, op));
             break;
+          case 'ne':
+            conditions.push(fill(negationClause(c, 'ne', this.def.name, column.name), q, ++n));
+            args.push(this.encode(value, column, op));
+            break;
           case 'ilike':
             conditions.push(fill(c.ilike, q, ++n));
             args.push(`%${String(value)}%`);
             break;
-          case 'in': {
+          case 'in':
+          case 'notIn': {
             const values = value as readonly unknown[];
             if (values.length === 0) break;
+            const clause = op === 'in' ? c.in : negationClause(c, 'noneOf', this.def.name, column.name);
             const placeholders = values.map(v => {
               args.push(this.encode(v, column, op));
               return fill(c.placeholder, ++n);
             });
-            conditions.push(fill(c.in, q, placeholders.join(', ')));
+            conditions.push(fill(clause, q, placeholders.join(', ')));
             break;
           }
           case 'between': {
@@ -1632,6 +1675,12 @@ class TableRepository {
     const conditions = this.conditions(filter, args, 0);
     if (this.def.softDelete && !options.includeDeleted) conditions.push(s.liveCondition);
     const [comparison, direction] = options.sort?.desc ? ['<', 'DESC'] : ['>', 'ASC'];
+    // A column that may be null orders its nulls last in either direction
+    // (D112), by statements the types carry since.
+    const nulls = !byKey && !column.required;
+    if (nulls && (!s.pageAfterNulls || !s.pageOrderNulls)) {
+      throw new Error(`orm: ${this.def.name}.${column.name} may be null, and these types hold no statement that pages by one: build them again`);
+    }
     let after: unknown;
     if (options.after) {
       const value = options.after[this.def.key];
@@ -1641,13 +1690,16 @@ class TableRepository {
       after = this.encode(value, key, 'page key');
       args.push(after);
       const placeholder = fill(this.clauses.placeholder, args.length);
-      conditions.push(
-        byKey
-          ? fill(s.pageAfterKey, comparison, placeholder)
-          : fill(s.pageAfter, column.qualified, comparison, fill(this.clauses.pageKey, column.column), placeholder, placeholder)
-      );
+      const afterKey = fill(s.pageAfterKey, comparison, placeholder);
+      const pageKey = fill(this.clauses.pageKey, column.column);
+      // The key's row gives the sort field's value. After a null come the
+      // nulls past the key; after a value, every null and the values past
+      // it.
+      let afterValue = fill(s.pageAfter, column.qualified, comparison, pageKey, placeholder, placeholder);
+      if (nulls) afterValue = fill(s.pageAfterNulls!, pageKey, placeholder, column.qualified, afterKey, column.qualified, afterValue);
+      conditions.push(byKey ? afterKey : afterValue);
     }
-    let order = fill(s.pageOrder, column.qualified, direction);
+    let order = fill(nulls ? s.pageOrderNulls! : s.pageOrder, column.qualified, direction);
     if (!byKey) order += fill(s.pageTiebreak, direction);
     // A page reads its rows' keys whatever it selects: the next key holds
     // the last one's.

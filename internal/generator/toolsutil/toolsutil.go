@@ -779,8 +779,9 @@ func PageParameters(page *apigen.PageInfo) map[string]JSONSchemaProperty {
 // FilterProperty is a filtered endpoint's filter as a tool parameter
 // (D106): a closed object with a member per field a caller may filter by,
 // each a value of the field's type, for equality, or a closed object of the
-// field's operators: eq and the comparisons a value, in a list of 1 to
-// ir.FilterMaxInValues values, contains text and isNull a boolean. A tool's
+// field's operators: eq, ne and the comparisons a value, in and notIn a
+// list of 1 to ir.FilterMaxInValues values, contains text and isNull a
+// boolean. A tool's
 // caller sends the object; the SDK that invokes the tool writes it as the
 // bracket form.
 func FilterProperty(filter *apigen.FilterInfo, scalars map[string]apigen.ScalarJSONSchemaInfo, enums map[string]apigen.ToolEnumInfo) JSONSchemaProperty {
@@ -802,7 +803,7 @@ func FilterProperty(filter *apigen.FilterInfo, scalars map[string]apigen.ScalarJ
 		for _, op := range field.Operators {
 			var operand JSONSchemaProperty
 			switch op {
-			case ir.FilterOpIn:
+			case ir.FilterOpIn, ir.FilterOpNotIn:
 				items := value
 				operand = JSONSchemaProperty{Type: "array", Items: &items, MinItems: &one, MaxItems: &most}
 			case ir.FilterOpContains:

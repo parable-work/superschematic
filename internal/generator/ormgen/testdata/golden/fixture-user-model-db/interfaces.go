@@ -64,6 +64,24 @@ type UserRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *UserFilter) (int, error)
 }
 
+// UserApiKeyRepositoryInterface defines the contract for UserApiKey data access.
+type UserApiKeyRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserApiKeyGetOptions) (*types.UserApiKey, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserApiKey, error)
+	FindOne(ctx context.Context, filter *UserApiKeyFilter, opts *UserApiKeyFindOptions) (*types.UserApiKey, error)
+	FindMany(ctx context.Context, filter *UserApiKeyFilter, opts *UserApiKeyFindOptions) ([]*types.UserApiKey, int, error)
+	FindPage(ctx context.Context, filter *UserApiKeyFilter, opts *UserApiKeyPageOptions) (*UserApiKeyPage, error)
+	CreateOne(ctx context.Context, input *types.UserApiKey) (*types.UserApiKey, error)
+	CreateMany(ctx context.Context, inputs []*types.UserApiKey) ([]*types.UserApiKey, error)
+	UpsertOne(ctx context.Context, input *types.UserApiKey, on UserApiKeyUniqueKey, update *UserApiKeyUpdate) (*types.UserApiKey, error)
+	UpsertOneResult(ctx context.Context, input *types.UserApiKey, on UserApiKeyUniqueKey, update *UserApiKeyUpdate, opts *UpsertOptions) (UpsertResult[*types.UserApiKey], error)
+	UpsertMany(ctx context.Context, inputs []*types.UserApiKey, on UserApiKeyUniqueKey, update UserApiKeyFields, opts *UpsertOptions) ([]UpsertResult[*types.UserApiKey], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserApiKeyUpdate) (*types.UserApiKey, error)
+	UpdateMany(ctx context.Context, filter *UserApiKeyFilter, update *UserApiKeyUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *UserApiKeyFilter) (int, error)
+}
+
 // UserCredentialRepositoryInterface defines the contract for UserCredential data access.
 type UserCredentialRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserCredentialGetOptions) (*types.UserCredential, error)
@@ -109,6 +127,7 @@ type DatabaseInterface interface {
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
+	GetUserApiKeyRepository() UserApiKeyRepositoryInterface
 	GetUserCredentialRepository() UserCredentialRepositoryInterface
 	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
 }
@@ -121,6 +140,7 @@ type TxInterface interface {
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
+	GetUserApiKeyRepository() UserApiKeyRepositoryInterface
 	GetUserCredentialRepository() UserCredentialRepositoryInterface
 	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
 }
@@ -131,6 +151,7 @@ type NoOpDatabase struct {
 	Role           *NoOpRoleRepository
 	Session        *NoOpSessionRepository
 	User           *NoOpUserRepository
+	UserApiKey     *NoOpUserApiKeyRepository
 	UserCredential *NoOpUserCredentialRepository
 	UserRoleGrant  *NoOpUserRoleGrantRepository
 }
@@ -140,6 +161,7 @@ type NoOpTx struct {
 	Role           *NoOpRoleRepository
 	Session        *NoOpSessionRepository
 	User           *NoOpUserRepository
+	UserApiKey     *NoOpUserApiKeyRepository
 	UserCredential *NoOpUserCredentialRepository
 	UserRoleGrant  *NoOpUserRoleGrantRepository
 }
@@ -154,6 +176,8 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.Session = db.Session
 	db.User = &NoOpUserRepository{}
 	tx.User = db.User
+	db.UserApiKey = &NoOpUserApiKeyRepository{}
+	tx.UserApiKey = db.UserApiKey
 	db.UserCredential = &NoOpUserCredentialRepository{}
 	tx.UserCredential = db.UserCredential
 	db.UserRoleGrant = &NoOpUserRoleGrantRepository{}
@@ -427,6 +451,80 @@ func (r *NoOpUserRepository) DeleteMany(_ context.Context, _ *UserFilter) (int, 
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return db.UserApiKey
+}
+
+func (tx *NoOpTx) GetUserApiKeyRepository() UserApiKeyRepositoryInterface {
+	return tx.UserApiKey
+}
+
+// NoOpUserApiKeyRepository provides deterministic no-op repository behavior.
+type NoOpUserApiKeyRepository struct{}
+
+func (r *NoOpUserApiKeyRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *UserApiKeyGetOptions) (*types.UserApiKey, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserApiKeyRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.UserApiKey, error) {
+	return map[types.IdentityUUID]*types.UserApiKey{}, nil
+}
+
+func (r *NoOpUserApiKeyRepository) FindOne(_ context.Context, _ *UserApiKeyFilter, _ *UserApiKeyFindOptions) (*types.UserApiKey, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserApiKeyRepository) FindMany(_ context.Context, _ *UserApiKeyFilter, _ *UserApiKeyFindOptions) ([]*types.UserApiKey, int, error) {
+	return []*types.UserApiKey{}, 0, nil
+}
+
+func (r *NoOpUserApiKeyRepository) FindPage(_ context.Context, _ *UserApiKeyFilter, _ *UserApiKeyPageOptions) (*UserApiKeyPage, error) {
+	return &UserApiKeyPage{Rows: []*types.UserApiKey{}}, nil
+}
+
+func (r *NoOpUserApiKeyRepository) CreateOne(_ context.Context, input *types.UserApiKey) (*types.UserApiKey, error) {
+	return input, nil
+}
+
+func (r *NoOpUserApiKeyRepository) CreateMany(_ context.Context, inputs []*types.UserApiKey) ([]*types.UserApiKey, error) {
+	if inputs == nil {
+		return []*types.UserApiKey{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpUserApiKeyRepository) UpsertOne(_ context.Context, input *types.UserApiKey, _ UserApiKeyUniqueKey, _ *UserApiKeyUpdate) (*types.UserApiKey, error) {
+	return input, nil
+}
+
+func (r *NoOpUserApiKeyRepository) UpsertOneResult(_ context.Context, input *types.UserApiKey, _ UserApiKeyUniqueKey, _ *UserApiKeyUpdate, _ *UpsertOptions) (UpsertResult[*types.UserApiKey], error) {
+	return UpsertResult[*types.UserApiKey]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpUserApiKeyRepository) UpsertMany(_ context.Context, inputs []*types.UserApiKey, _ UserApiKeyUniqueKey, _ UserApiKeyFields, _ *UpsertOptions) ([]UpsertResult[*types.UserApiKey], error) {
+	results := make([]UpsertResult[*types.UserApiKey], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.UserApiKey]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpUserApiKeyRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UserApiKeyUpdate) (*types.UserApiKey, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUserApiKeyRepository) UpdateMany(_ context.Context, _ *UserApiKeyFilter, _ *UserApiKeyUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpUserApiKeyRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpUserApiKeyRepository) DeleteMany(_ context.Context, _ *UserApiKeyFilter) (int, error) {
+	return 0, nil
+}
+
 func (db *NoOpDatabase) GetUserCredentialRepository() UserCredentialRepositoryInterface {
 	return db.UserCredential
 }
@@ -586,6 +684,8 @@ var (
 	_ SessionRepositoryInterface        = (*NoOpSessionRepository)(nil)
 	_ UserRepositoryInterface           = (*UserRepository)(nil)
 	_ UserRepositoryInterface           = (*NoOpUserRepository)(nil)
+	_ UserApiKeyRepositoryInterface     = (*UserApiKeyRepository)(nil)
+	_ UserApiKeyRepositoryInterface     = (*NoOpUserApiKeyRepository)(nil)
 	_ UserCredentialRepositoryInterface = (*UserCredentialRepository)(nil)
 	_ UserCredentialRepositoryInterface = (*NoOpUserCredentialRepository)(nil)
 	_ UserRoleGrantRepositoryInterface  = (*UserRoleGrantRepository)(nil)

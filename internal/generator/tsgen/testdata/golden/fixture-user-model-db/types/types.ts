@@ -47,6 +47,28 @@ export interface User {
 }
 
 /**
+ * UserApiKey - An API key: the user it calls as, its name, the SHA-256 of its token, and when it ends.
+ */
+export interface UserApiKey {
+  id?: IdentityUUID | null;
+  /** The user the key calls as. */
+  user: User;
+  /** What its user calls the key. */
+  name: string;
+  /** The SHA-256 of the key's token, which only its holder has. */
+  tokenHash: CryptoSHA256;
+  /** The permissions the key was made with, each held while its user holds it; null for every permission its user holds. */
+  permissions?: string[] | null;
+  createdAt: TemporalDateTime;
+  /** When the key ends. */
+  expiresAt: TemporalDateTime;
+  /** When the key last authenticated a request, written at most once a minute. */
+  lastUsedAt?: TemporalDateTime | null;
+  /** When the key was revoked, by its user, by an administrator, or when its user was disabled. */
+  revokedAt?: TemporalDateTime | null;
+}
+
+/**
  * UserCredential - A user's password hash, kept apart from the user row.
  */
 export interface UserCredential {
