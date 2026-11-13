@@ -1,0 +1,32 @@
+{
+  "dialect": "sqlite",
+  "expanded": "3ca204246f9f007152d9ee42d4289746484c591ad5ff28df98bfd3b3404a628a",
+  "from": "b92e98bd6b7b7d96ce54f8864147f11995ff0b2063bbdd5423a5e893a4e75003",
+  "hash": "ed0205eff097e7fa3191ca5aa837971079d1f99a690f68b14493b88685f0298e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_revision_fence\""
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_revision_fence\" BEFORE UPDATE ON \"order\" FOR EACH ROW\nWHEN NEW.\"revision\" IS NOT OLD.\"revision\" + 1 AND (\n  NEW.\"revision\" IS NOT OLD.\"revision\"\n  OR NEW.\"note\" IS NOT OLD.\"note\"\n  OR NEW.\"reference\" IS NOT OLD.\"reference\")\nBEGIN\n  SELECT RAISE(ABORT, 'order.revision is fenced: an update that changes a column it covers must add one to it, and any other must keep it or add one');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "eb7821d3f009edc007148bc3658c51716db15b5b97328e508c7e2131b025557b",
+  "toModel": null,
+  "version": 1
+}

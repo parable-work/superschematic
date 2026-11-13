@@ -17,7 +17,7 @@ database that holds rows, one phase at a time (D27 in
 
 ## The change
 
-v2 changes v1 in eight ways:
+v2 changes v1 in nine ways:
 
 | Change | Postgres | SQLite |
 |---|---|---|
@@ -27,6 +27,7 @@ v2 changes v1 in eight ways:
 | an index over `Task.project` and `Task.dueAt` | `CREATE INDEX CONCURRENTLY`, outside a transaction | `CREATE INDEX` in the rebuild |
 | `Comment.legacyId` is dropped | `DROP NOT NULL` in `expand`, `DROP COLUMN` in `contract` | nullable in the rebuild, `DROP COLUMN` in `contract` |
 | `Project.status`, a `Default<ProjectStatus, ProjectStatus.Active>`, is added | `ADD COLUMN ... DEFAULT 'active' NOT NULL`, then its enum's check, added `NOT VALID` and validated, in `expand`, since the column is new | `ADD COLUMN` with its default and check |
+| `Project.status` gets a state machine (`@stateMachine`, D117): an active project may be archived, and an archived one stays archived | the guard's function in `expand`, and its trigger in `contract`, since it refuses a write | the guard's one trigger, in `contract` |
 | an index over `lower(summary)` | `CREATE INDEX CONCURRENTLY` over the expression | `CREATE INDEX` in the rebuild |
 | a materialized view of each project's open tasks, raw SQL on Postgres alone (`@rawSql`) | its statements, last in `expand` (`raw-sql`) | nothing: the piece names Postgres alone |
 
@@ -83,3 +84,7 @@ Between the phases the check writes a comment as a v1 server would, with
 `legacy_id`, and one as a v2 server would, without it; both succeed. A v1
 server still breaks on the rename, which is why the plan marks it
 `compat`.
+
+No guard holds a project's status between the phases: the check archives
+the project and reopens it. After `contract` it archives the project
+again, and the move back is refused.

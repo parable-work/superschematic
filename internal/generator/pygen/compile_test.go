@@ -64,6 +64,19 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		}
 		cases = append(cases, fixtureCase{name: name, schema: schema})
 	}
+	// A model's state machines, one over an enum of a dependency (D117).
+	stateMachineEnums, err := loader.LoadService(filepath.Join(fixturesDir, stateMachineEnumService))
+	if err != nil {
+		t.Fatalf("load %s: %v", stateMachineEnumService, err)
+	}
+	stateMachineDB, err := loader.LoadService(filepath.Join(fixturesDir, stateMachineService))
+	if err != nil {
+		t.Fatalf("load %s: %v", stateMachineService, err)
+	}
+	cases = append(cases,
+		fixtureCase{name: stateMachineEnumService, schema: stateMachineEnums},
+		fixtureCase{name: stateMachineService, schema: stateMachineDB, deps: map[string]*ir.Schema{stateMachineEnumService: stateMachineEnums}},
+	)
 	// behaviors.py: each behavior's fields (D58).
 	behaviorsRegistry := behaviortypestest.Registry(t)
 	cases = append(cases, fixtureCase{name: behaviortypestest.Service, schema: behaviortypestest.Schema(t, behaviorsRegistry), registry: behaviorsRegistry})

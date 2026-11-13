@@ -119,7 +119,7 @@ var symbolPackages = map[string]string{
 	"decrypted":         "@superschematic/schema",
 	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema", "allowUnknownFields": "@superschematic/schema",
 	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema", "display": "@superschematic/schema",
-	"uiControl": "@superschematic/schema", "stateMachine": "@superschematic/schema",
+	"uiControl": "@superschematic/schema", "stateMachine": "@superschematic/schema", "fenced": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
 	// @superschematic/schema import so General schemas (which do not stage @superschematic/db)
 	// round-trip.
@@ -490,6 +490,16 @@ func (e *emitter) stateMachineArgs(def *ir.TypeDef, machine *ir.StateMachine) st
 	}
 	if len(machine.FromNull) > 0 {
 		parts = append(parts, "fromNull: "+members(machine.FromNull, false))
+	}
+	return objectLiteral(parts)
+}
+
+// fencedArgs renders @fenced's options (D118): the fence's field and, when
+// it lists them, the fields it covers, in the order written.
+func fencedArgs(fence *ir.Fence) string {
+	parts := []string{"field: " + quote(fence.Field)}
+	if len(fence.Covers) > 0 {
+		parts = append(parts, "covers: "+stringListLiteral(fence.Covers))
 	}
 	return objectLiteral(parts)
 }

@@ -1,0 +1,22 @@
+{
+  "dialect": "sqlite",
+  "expanded": "e12b74590b81f1034a74cb8529e468b294b42a948c44bedb2310ee68da6eec9d",
+  "from": "e12b74590b81f1034a74cb8529e468b294b42a948c44bedb2310ee68da6eec9d",
+  "hash": "9876791dce50a92eb1aafcae3e51124f9123571a547ab7b27de13f4099bf5329",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_revision_fence\""
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "3ca204246f9f007152d9ee42d4289746484c591ad5ff28df98bfd3b3404a628a",
+  "toModel": null,
+  "version": 1
+}

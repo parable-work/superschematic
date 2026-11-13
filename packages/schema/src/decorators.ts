@@ -165,6 +165,60 @@ export function stateMachine<T>(_config: StateMachineConfig<T>): ClassDecorator 
   return () => {};
 }
 
+/**
+ * The fields of `T` a fence may be: those typed by a number that is never
+ * null, as `Generic.Int64` or `Default<Generic.Int64, 0>`. A text field, a
+ * `Nullable` one and an optional one are none.
+ */
+export type FenceFieldOf<T> = {
+  [K in keyof T]-?: [T[K]] extends [number] ? K : never;
+}[keyof T];
+
+/** The options of `@fenced<T>`: the fence of `T`, and the fields it covers. */
+export interface FencedConfig<T> {
+  /** The fence: an integer field of the class that is never null, as `version`. */
+  readonly field: FenceFieldOf<T>;
+  /**
+   * The fields whose change the fence counts. Without it the fence counts
+   * every update of the row. A class with several fences gives each its
+   * own, and no field is in two lists. A relation is covered as the key it
+   * stores.
+   */
+  readonly covers?: readonly [keyof T, ...(keyof T)[]];
+}
+
+/**
+ * Names a counter of a DB table that every write it covers advances by one
+ * (D118), so a writer that compares the counter in its WHERE clause knows
+ * no other covered write came between its read and its write:
+ *
+ * ```ts
+ * @fenced<Job>({ field: "version", covers: ["label", "priority"] })
+ * @fenced<Job>({ field: "executionVersion", covers: ["claimedBy", "progress"] })
+ * export abstract class Job {
+ *   label: string;
+ *   priority: Default<Generic.Int64, 0>;
+ *   version: Default<Generic.Int64, 0>;
+ *   claimedBy: Nullable<string>;
+ *   progress: Default<Generic.Int64, 0>;
+ *   executionVersion: Default<Generic.Int64, 0>;
+ * }
+ * ```
+ *
+ * Without `covers`, every update of a row sets the fence to the stored
+ * value plus one. With it, an update that changes a covered field does,
+ * and any other update keeps the fence or adds one. The database refuses
+ * a write that does not, whatever writes the row, and the generated
+ * repositories advance the fence themselves. An insert is not fenced.
+ *
+ * The build checks that the fence is a required integer column no
+ * `@stateMachine` governs, and that each covered field stores a column
+ * one fence alone covers.
+ */
+export function fenced<T>(_config: FencedConfig<T>): ClassDecorator {
+  return () => {};
+}
+
 // Wire encodings for @temporalFormat: the epoch units. ISO text is the
 // default and is never declared.
 export type TemporalWireFormat =

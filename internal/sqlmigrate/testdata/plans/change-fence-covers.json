@@ -1,0 +1,42 @@
+{
+  "dialect": "postgres",
+  "expanded": "a696e6b1f491c0b0516d827110d9ae5225eb977f324392852fafb557681fedbf",
+  "from": "7943550ae0d9a447d84eab4f8c59e53e0f324be2d11bec9cb8c59b8bb8274cc1",
+  "hash": "321b2e2bc3f647c43d5adb4c9eeeae64739886a10660b3a58c6b92cc8456841e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_revision_fence ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_revision_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Order.revision (D118):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.note, NEW.reference) IS DISTINCT FROM ROW(OLD.note, OLD.reference) THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'order.revision must advance from % to %, not to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'order_revision_fence';\n    END IF;\n  ELSIF NEW.revision IS DISTINCT FROM OLD.revision THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'order.revision must stay at % or advance to %, not move to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'order_revision_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_revision_fence\n  BEFORE UPDATE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_revision_fence()"
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "9bc551c4a1cf268ca3385325e4f36392abccbdeacb91291cd7cb5cac7a4119f6",
+  "toModel": null,
+  "version": 1
+}

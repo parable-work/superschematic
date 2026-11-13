@@ -130,12 +130,22 @@ type ormTable struct {
 	Statements   orderedStrings          `json:"statements"`
 	SoftDelete   bool                    `json:"softDelete,omitempty"`
 	HistoryActor bool                    `json:"historyActor,omitempty"`
+	Fences       []ormFence              `json:"fences,omitempty"`
 	Search       string                  `json:"search,omitempty"`
 	UniqueKeys   map[string]ormUniqueKey `json:"uniqueKeys,omitempty"`
 	ReferencedBy []ormReference          `json:"referencedBy,omitempty"`
 	Relations    []ormRelation           `json:"relations,omitempty"`
 	Unsupported  string                  `json:"unsupported,omitempty"`
 	Behaviors    *ormBehaviors           `json:"behaviors,omitempty"`
+}
+
+// ormFence is a fence of a table, a @fenced field (D118), the runtime's
+// orm::Fence: sqlutil's FenceModel, whose bump an update, an update_many
+// and an upsert's update add to their assignments.
+type ormFence struct {
+	Column string   `json:"column"`
+	Covers []string `json:"covers,omitempty"`
+	Bump   string   `json:"bump"`
 }
 
 type ormBehaviors struct {
@@ -324,6 +334,9 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
+		}
+		for _, fence := range t.Fences {
+			table.Fences = append(table.Fences, ormFence{Column: fence.Column, Covers: fence.Covers, Bump: fence.Bump})
 		}
 		var behaviors *ormBehaviors
 		if layout != nil && layout.Types[t.Type] != nil {

@@ -235,6 +235,11 @@ export interface EnvironmentDecl {
   values?: { [key: string]: unknown };
 }
 
+export interface Fence {
+  covers?: string[];
+  field: string;
+}
+
 export interface FieldDef {
   arguments?: ArgumentDef[];
   auth?: boolean;
@@ -793,6 +798,7 @@ export interface TypeDef {
   environment?: EnvironmentDecl;
   extends?: string;
   extensions?: Extensions;
+  fences?: Fence[];
   fields?: FieldDef[];
   graphMember?: GraphMemberConfig;
   implements?: TraitRef[];

@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "expanded": "de129ac64f6830e2b552600d4bb0134daf36dc28194e7f4cf0a383431c0dac01",
+  "from": "de129ac64f6830e2b552600d4bb0134daf36dc28194e7f4cf0a383431c0dac01",
+  "hash": "e41f980254b88727ff17dea1d1ce1770e2e730fcbc6b3d6949eedac484768e44",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_order_status_transition_guard ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION order_status_transition_guard()"
+      ],
+      "subject": "function/order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "ae5c744ddcfe8cceb624d759c560efadcc3ee006d350e2eddd692c0a67e14675",
+  "toModel": null,
+  "version": 1
+}

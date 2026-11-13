@@ -1,0 +1,204 @@
+{
+  "dialect": "postgres",
+  "expanded": "c926066cb219ba3d2c7d1b3d67c8e15e312678469cb65d104cbd5a87d68e6406",
+  "from": "83eb77131371137c30e7cd3dcab126d44b5fd941b7b3c069f88250dd540ad653",
+  "hash": "5b28f45530ff05c536147697195399610ae5cb1afa62e5e5663a253d53cb3d94",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder",
+          "reason": "Table order is renamed to purchaseOrder, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME TO \"purchaseOrder\""
+      ],
+      "subject": "table/purchaseOrder",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder_label",
+          "reason": "Table order_label is renamed to purchaseOrder_label, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder_label"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_label RENAME TO \"purchaseOrder_label\""
+      ],
+      "subject": "table/purchaseOrder_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/purchaseOrder_id",
+          "reason": "order_line.order_id is renamed to order_line.purchaseOrder_id, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/order_line/column/purchaseOrder_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line RENAME COLUMN order_id TO \"purchaseOrder_id\""
+      ],
+      "subject": "table/order_line/column/purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder_label/column/purchaseOrder_id",
+          "reason": "order_label.order_id is renamed to purchaseOrder_label.purchaseOrder_id, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder_label/column/purchaseOrder_id"
+        }
+      ],
+      "index": 4,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder_label\" RENAME COLUMN order_id TO \"purchaseOrder_id\""
+      ],
+      "subject": "table/purchaseOrder_label/column/purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line RENAME CONSTRAINT fk_order_line_order_id TO \"fk_order_line_purchaseOrder_id\""
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder\" RENAME CONSTRAINT fk_order_customer_id TO \"fk_purchaseOrder_customer_id\""
+      ],
+      "subject": "table/purchaseOrder/constraint/fk_purchaseOrder_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder\" RENAME CONSTRAINT order_pkey TO \"purchaseOrder_pkey\""
+      ],
+      "subject": "table/purchaseOrder/constraint/purchaseOrder_pkey",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_customer_placed_at RENAME TO \"idx_purchaseOrder_customer_placed_at\""
+      ],
+      "subject": "table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder_label\" RENAME CONSTRAINT fk_order_label_label_id TO \"fk_purchaseOrder_label_label_id\""
+      ],
+      "subject": "table/purchaseOrder_label/constraint/fk_purchaseOrder_label_label_id",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder_label\" RENAME CONSTRAINT fk_order_label_order_id TO \"fk_purchaseOrder_label_purchaseOrder_id\""
+      ],
+      "subject": "table/purchaseOrder_label/constraint/fk_purchaseOrder_label_purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "index": 11,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder_label\" RENAME CONSTRAINT order_label_pkey TO \"purchaseOrder_label_pkey\""
+      ],
+      "subject": "table/purchaseOrder_label/constraint/purchaseOrder_label_pkey",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "renameFunction",
+      "phase": "expand",
+      "statements": [
+        "ALTER FUNCTION order_revision_fence() RENAME TO \"purchaseOrder_revision_fence\""
+      ],
+      "subject": "function/purchaseOrder_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 13,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_revision_fence ON \"purchaseOrder\""
+      ],
+      "subject": "trigger/purchaseOrder/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 14,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION \"purchaseOrder_revision_fence\"() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Order.revision (D118):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.note, NEW.customer_id) IS DISTINCT FROM ROW(OLD.note, OLD.customer_id) THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'purchaseOrder.revision must advance from % to %, not to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'purchaseOrder_revision_fence';\n    END IF;\n  ELSIF NEW.revision IS DISTINCT FROM OLD.revision THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'purchaseOrder.revision must stay at % or advance to %, not move to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'purchaseOrder_revision_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/purchaseOrder_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 15,
+      "op": "commentOnTable",
+      "phase": "expand",
+      "statements": [
+        "COMMENT ON TABLE \"purchaseOrder_label\" IS 'Join table for purchaseOrder.labels'"
+      ],
+      "subject": "table/purchaseOrder_label",
+      "transactional": true
+    },
+    {
+      "index": 16,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_purchaseOrder_revision_fence\"\n  BEFORE UPDATE ON \"purchaseOrder\"\n  FOR EACH ROW EXECUTE FUNCTION \"purchaseOrder_revision_fence\"()"
+      ],
+      "subject": "trigger/purchaseOrder/trg_purchaseOrder_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "c45e90334b916e58c3c2d36bb2aaf163096e9af25eb730182d2ef414581b8dcf",
+  "toModel": null,
+  "version": 1
+}

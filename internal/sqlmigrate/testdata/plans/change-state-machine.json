@@ -1,0 +1,42 @@
+{
+  "dialect": "postgres",
+  "expanded": "1dd19c03350654b8794cd66a93a3af51a59a943f6f3a357053c9bf4268b1032f",
+  "from": "c9f8454e2cc52d9f3489deef0b77a7d35a2c384867558d59d127f4c34638048f",
+  "hash": "4dfd39e03719d5054dc3ccb1585eac60051e617ff1c970149a01aca8e789cf05",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_status_transition_guard ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D117): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('shipped', 'cancelled') THEN\n    RAISE EXCEPTION 'order.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status IS NULL AND NEW.status IN ('placed'))\n    OR (OLD.status = 'placed' AND NEW.status IN ('shipped', 'cancelled'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_status_transition_guard\n  BEFORE UPDATE OF status ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_status_transition_guard()"
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "8fb414c038c1589ec4409831703fe1cbe2a36bf285caa120a0fdea1b35c92b2b",
+  "toModel": null,
+  "version": 1
+}

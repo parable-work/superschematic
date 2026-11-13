@@ -1,11 +1,11 @@
 ## Migration plan for `tasks-db` (postgres)
 
-11 steps (10 expand, 1 contract), 6 hazards (1 destructive, 1 blocking, 2 compat, 1 data-dependent, 1 raw-sql).
+13 steps (11 expand, 2 contract), 6 hazards (1 destructive, 1 blocking, 2 compat, 1 data-dependent, 1 raw-sql).
 
 - From: `5114b56a847c1f1aead0821a376bc6f01951f6e79419bb66fff1bec1de0dd120`
-- To: `0817bc633d2835099a5949a496bdec7642a6a362784fef790a4ab093677fd609`
-- Between the phases (expanded): `2f2872f14d662868e0ad94843dd05ecaadcf7b8b5488ce5dcb5c73add64d5750`
-- Plan: `a2e0e9f5de91d97c4331be32d6cf21af1799ea9d9d75cba4cbeec73783e65782`
+- To: `cfb8597dfc0750c84a20f5bb196960b4a7f4abb424af76251d981c21ba2acca1`
+- Between the phases (expanded): `d82ab463bc0dc48148b886c2d7bb03c500988adc8d3f9e75bb9451c77cf7824b`
+- Plan: `a4c8cd4414214c3e6417b37449f720fb259c13f05e3fa68e668c5ceb38ca2b4a`
 - Renames: `task.title=task.summary`
 
 | Class | Subject | Reader | Reason | ID |
@@ -78,7 +78,31 @@ ALTER TABLE project ADD CONSTRAINT ck_project_status CHECK (status IN ('active',
 ALTER TABLE project VALIDATE CONSTRAINT ck_project_status;
 ```
 
-**10. runRawSQL** `rawSql/project_open_tasks`. Hazards: raw-sql.
+**10. createFunction** `function/project_status_transition_guard`.
+
+```sql
+CREATE OR REPLACE FUNCTION project_status_transition_guard() RETURNS trigger AS $$
+BEGIN
+  -- The @stateMachine of Project.status (D117): an update that leaves the
+  -- column's value is no move, and any other must be one the machine lists.
+  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+  IF OLD.status IN ('archived') THEN
+    RAISE EXCEPTION 'project.status is terminal at %: it cannot move to %', OLD.status, NEW.status
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF (OLD.status = 'active' AND NEW.status IN ('archived'))
+  THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'project.status cannot move from % to %', OLD.status, NEW.status
+    USING ERRCODE = 'check_violation';
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**11. runRawSQL** `rawSql/project_open_tasks`. Hazards: raw-sql.
 
 ```sql
 DROP MATERIALIZED VIEW IF EXISTS project_open_tasks;
@@ -91,7 +115,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS project_open_tasks_project ON project_open_tas
 
 Runs after the new servers roll out.
 
-**11. dropColumn** `table/comment/column/legacy_id`. Hazards: destructive.
+**12. createTrigger** `trigger/project/trg_project_status_transition_guard`.
+
+```sql
+CREATE TRIGGER trg_project_status_transition_guard
+  BEFORE UPDATE OF status ON project
+  FOR EACH ROW EXECUTE FUNCTION project_status_transition_guard();
+```
+
+**13. dropColumn** `table/comment/column/legacy_id`. Hazards: destructive.
 
 ```sql
 ALTER TABLE "comment" DROP COLUMN legacy_id;

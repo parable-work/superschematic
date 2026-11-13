@@ -3,6 +3,7 @@ export {
   decrypted,
   denyUnknownFields,
   docs,
+  fenced,
   icon,
   internalMetadata,
   jsonField,
@@ -16,6 +17,8 @@ export {
   virtual,
 } from "./decorators";
 export type {
+  FenceFieldOf,
+  FencedConfig,
   StateMachineConfig,
   StateMachineConfigFor,
   StateOf,

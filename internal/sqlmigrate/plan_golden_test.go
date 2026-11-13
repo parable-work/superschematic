@@ -139,6 +139,10 @@ var modelFixtures = []string{
 	filepath.Join(sqlgenFixtures, "fixture-ddl-db"),
 	// A projection without a pool, beside the tables (D90).
 	filepath.Join(sqlgenFixtures, "fixture-finances-db"),
+	// A table's @stateMachine guards (D117).
+	filepath.Join(sqlgenFixtures, "fixture-state-machine-db"),
+	// A table's @fenced counters (D118).
+	filepath.Join(sqlgenFixtures, "fixture-fenced-db"),
 	vectorsFixture,
 	shopDir,
 }

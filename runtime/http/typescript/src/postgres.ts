@@ -348,6 +348,7 @@ export type {
   DateFilter,
   DateTimeFilter,
   DurationFilter,
+  FenceDefinition,
   FindOptions,
   IncludeOf,
   IsolationLevel,

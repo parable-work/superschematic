@@ -46,6 +46,18 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-queue-db", sqlite: true},
 		// Types that compose behaviors: src/behaviors.rs (D58).
 		{service: behaviortypestest.Service},
+		// An enum another service's state machine governs a field of, in a
+		// crate with no machine and so no src/state_machines.rs.
+		{service: "fixture-state-machine-enums"},
+		// State machines (D117): src/state_machines.rs holds each one's
+		// terminal states and helper, on a required field, on nullable
+		// ones, on a field typed by the dependency's enum and on a
+		// @jsonField class.
+		{service: "fixture-state-machine-db", deps: []string{"fixture-state-machine-enums"}, sqlite: true},
+		// @fenced fields (D118): each table's definition in src/orm.rs
+		// lists its fences, on Postgres and on SQLite, which the runtime's
+		// repositories advance, and Depot's soft deletes carry the bump.
+		{service: "fixture-fenced-db", sqlite: true},
 	}
 
 	for _, tc := range cases {

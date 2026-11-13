@@ -270,6 +270,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	for _, machine := range def.StateMachines {
 		fmt.Fprintf(&e.body, "@%s<%s>(%s)\n", e.use("stateMachine"), def.Name, e.stateMachineArgs(def, machine))
 	}
+	for _, fence := range def.Fences {
+		fmt.Fprintf(&e.body, "@%s<%s>(%s)\n", e.use("fenced"), def.Name, fencedArgs(fence))
+	}
 	if len(def.SeedRoles) > 0 {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}

@@ -46,7 +46,21 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 	if err != nil {
 		t.Skip("cargo not found, skipping the repositories' result comparison")
 	}
-	const fixture = "fixture-ledger-db"
+	out := runRepositoriesOnBoth(t, cargo, "fixture-ledger-db", "ledger_results", ledgerResultsTest)
+	alike := regexp.MustCompile(`SQLite and Postgres answered \d+ calls alike, \d+ of them refusals`).Find(out)
+	if alike == nil {
+		t.Fatalf("the comparison did not run:\n%s", out)
+	}
+	t.Logf("%s", alike)
+}
+
+// runRepositoriesOnBoth writes fixture's types crate with both dialects'
+// repositories and, beside it, a test crate over it whose integration test
+// is source, in tests/<name>.rs: the SQLite DDL the build writes at
+// create.sql and the Postgres DDL at postgres/create.sql, which the test
+// includes. It runs the test and answers cargo's output.
+func runRepositoriesOnBoth(t *testing.T, cargo, fixture, name, source string) []byte {
+	t.Helper()
 	paths := testpaths.Local(t)
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
 	if err != nil {
@@ -92,11 +106,11 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":              fmt.Sprintf(ormResultsManifest, output.CrateName, filepath.ToSlash(typesDir)),
-		"Cargo.lock":              string(lock),
-		"src/lib.rs":              "//! The repositories' results on SQLite and on Postgres: see tests/.\n",
-		"create.sql":              sqliteDDL,
-		"tests/ledger_results.rs": ledgerResultsTest,
+		"Cargo.toml":            fmt.Sprintf(ormResultsManifest, output.CrateName, filepath.ToSlash(typesDir)),
+		"Cargo.lock":            string(lock),
+		"src/lib.rs":            "//! The repositories' results on SQLite and on Postgres: see tests/.\n",
+		"create.sql":            sqliteDDL,
+		"tests/" + name + ".rs": source,
 	} {
 		if err := os.WriteFile(filepath.Join(crateDir, file), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -113,11 +127,7 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cargo test in %s: %v\n%s", crateDir, err, out)
 	}
-	alike := regexp.MustCompile(`SQLite and Postgres answered \d+ calls alike, \d+ of them refusals`).Find(out)
-	if alike == nil {
-		t.Fatalf("the comparison did not run:\n%s", out)
-	}
-	t.Logf("%s", alike)
+	return out
 }
 
 // ormResultsManifest is the test crate's Cargo.toml, given the types

@@ -11,7 +11,8 @@ import (
 
 // diffFunctions matches functions by name, following the renames of the
 // tables they are named after. A function whose definition changes is
-// replaced in place, so the triggers that execute it stay.
+// replaced in place, so the triggers that execute it stay, but a trigger
+// that refuses a write, which diffTriggers drops before the replacement.
 func (d *differ) diffFunctions() {
 	from := map[string]*Function{}
 	for _, f := range d.from.Functions {
@@ -43,6 +44,7 @@ func (d *differ) diffFunctions() {
 				function: tf, oldFunc: ff,
 			})
 			d.excludeHazard(c, tf)
+			d.replacedFunctions[tf.Name] = true
 		}
 	}
 	for _, ff := range d.from.Functions {
@@ -164,8 +166,30 @@ func parseTrigger(t *Trigger) (timing, function string, ok bool) {
 	return m[1], strings.Trim(m[2], `"`), true
 }
 
+// prevColumnNames are the names a trigger named after a column of its
+// table (trg_<table>_<column>_...), as the guard of a @stateMachine (D117)
+// and the trigger of a @fenced counter (D118) are, had before that
+// column's rename, for each of names: the name with the old column's in
+// place of the new one's.
+func (d *differ) prevColumnNames(table, prevTable string, names []string) []string {
+	var out []string
+	for column, prev := range d.renames.colFrom[table] {
+		for _, name := range names {
+			for _, named := range []string{table, prevTable} {
+				if rest, ok := strings.CutPrefix(name, "trg_"+named+"_"+column+"_"); ok {
+					out = append(out, "trg_"+named+"_"+prev+"_"+rest)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // diffTriggers matches triggers by table and name, following renames. A
 // trigger whose table becomes versioned is created with the history seed.
+// A trigger that refuses a write is placed by a rule of its own
+// (placeRefusing).
 func (d *differ) diffTriggers() {
 	from := map[string]*Trigger{}
 	for _, t := range d.from.Triggers {
@@ -183,6 +207,10 @@ func (d *differ) diffTriggers() {
 		for _, name := range names {
 			names = append(names, d.prevEnqueueNames(name)...)
 		}
+		// A trigger that refuses a write is named after its column too.
+		if tt.Refuses {
+			names = append(names, d.prevColumnNames(tt.Table, prevTable, names)...)
+		}
 		prevName := tt.Name
 		var ft *Trigger
 		for _, name := range names {
@@ -190,6 +218,13 @@ func (d *differ) diffTriggers() {
 				prevName = name
 				break
 			}
+		}
+		if tt.Refuses || ft != nil && ft.Refuses {
+			if ft != nil {
+				matched[ft.Table+"/"+ft.Name] = true
+			}
+			d.placeRefusing(ft, tt)
+			continue
 		}
 		seed := d.seeds[tt.Table]
 		if ft == nil {
@@ -246,6 +281,54 @@ func (d *differ) diffTriggers() {
 			return triggerOrder(seed.seed.triggers[i]) < triggerOrder(seed.seed.triggers[j])
 		})
 	}
+}
+
+// placeRefusing places tt, a trigger of the new model that refuses a write
+// (Trigger.Refuses), or whose previous one ft did (D117). A server of the
+// previous version runs until the contract phase and may make a write the
+// new trigger refuses, and a server of the new version runs from the end
+// of expand and may make one the previous trigger refuses. So a new
+// trigger is created in the contract phase, and a changed one is dropped
+// in expand, before its function is replaced, and created in contract:
+// between the phases neither version's servers are refused. A trigger is
+// changed when its statement changes or the plan replaces the function it
+// executes, as it does after a rename of the trigger's table or of the
+// column it is named after: the drop goes by the old name. The exceptions
+// refuse no server: a trigger on a table the plan creates is created with
+// it, since no server of the previous version writes the table, and one
+// that no longer refuses is created in expand. A trigger the new model
+// does not have is dropped in contract, as every trigger is.
+func (d *differ) placeRefusing(ft, tt *Trigger) {
+	create := &change{
+		op: opCreateTrigger, phase: Expand, subject: triggerSubject(tt.Table, tt.Name),
+		table: tt.Table, trigger: tt,
+	}
+	if tt.Refuses && d.existing(create) {
+		create.phase = Contract
+	}
+	create.backfill = tt.Backfill != "" && d.existing(create)
+	if ft == nil {
+		d.add(create)
+		return
+	}
+	replaced := false
+	if _, fn, ok := parseTrigger(tt); ok {
+		replaced = d.replacedFunctions[fn]
+	}
+	if ft.Refuses == tt.Refuses && !replaced && d.sameTrigger(ft, tt) {
+		if ft.Name != tt.Name {
+			d.add(&change{
+				op: opRenameTrigger, phase: Expand, subject: triggerSubject(tt.Table, tt.Name),
+				table: tt.Table, name: tt.Name, oldName: ft.Name,
+			})
+		}
+		return
+	}
+	d.add(&change{
+		op: opDropTrigger, phase: Expand, subject: triggerSubject(tt.Table, ft.Name),
+		table: tt.Table, oldTrigger: ft,
+	})
+	d.add(create)
 }
 
 // triggerOrder puts a table's history triggers in create.sql's order.

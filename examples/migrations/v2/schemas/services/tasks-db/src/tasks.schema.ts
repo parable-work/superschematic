@@ -1,5 +1,5 @@
 import { Generic, Identity, Temporal } from "superscalar";
-import { Default, Nullable } from "@superschematic/schema";
+import { Default, Nullable, stateMachine } from "@superschematic/schema";
 import { AutoGenerate, Relation, index, key, rawSql } from "@superschematic/db";
 
 // Whether a project is still worked on.
@@ -22,6 +22,13 @@ export enum ProjectStatus {
     CREATE UNIQUE INDEX IF NOT EXISTS project_open_tasks_project ON project_open_tasks (project_id)
   `,
   down: "DROP MATERIALIZED VIEW IF EXISTS project_open_tasks"
+})
+@stateMachine<Project>({
+  // An archived project stays archived: the database refuses the move
+  // back, whatever writes the row.
+  field: "status",
+  transitions: { [ProjectStatus.Active]: [ProjectStatus.Archived] },
+  terminal: [ProjectStatus.Archived]
 })
 export abstract class Project {
   @key

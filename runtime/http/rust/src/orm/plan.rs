@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::{
     invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreUpdate, Definition, Dialect,
-    Error, FieldCell, FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey, Values,
-    WriteOptions,
+    Error, Fence, FieldCell, FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey,
+    Values, WriteOptions,
 };
 use crate::search::{like_pattern, terms};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
@@ -49,6 +49,34 @@ pub fn fill(format: &str, args: &[&dyn Display]) -> Result<String, Error> {
         }
     }
     Ok(out)
+}
+
+/// The assignments that advance `fences` in an update whose assignments
+/// are `sets`, each of which begins with its column and ` = ` (D118): the
+/// bump of each fence that covers a column one of them sets, or of a fence
+/// with no covers when they set any, once. Whether a value differs from
+/// the stored one is not asked, which the statement cannot know. A fence
+/// the update sets itself gets none: its caller is driving the counter,
+/// and the fence's trigger judges the value written.
+pub(crate) fn fence_bumps(fences: &[Fence], sets: &[String]) -> Vec<String> {
+    let assigned = |column: &String| {
+        sets.iter().any(|set| {
+            set.strip_prefix(column.as_str())
+                .is_some_and(|rest| rest.starts_with(" = "))
+        })
+    };
+    fences
+        .iter()
+        .filter(|fence| !assigned(&fence.column))
+        .filter(|fence| {
+            if fence.covers.is_empty() {
+                !sets.is_empty()
+            } else {
+                fence.covers.iter().any(assigned)
+            }
+        })
+        .map(|fence| fence.bump.clone())
+        .collect()
 }
 
 /// A statement and the values it binds, in order.
@@ -1037,6 +1065,13 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
+    /// Adds to an update's assignments, its stamps among them, the bump
+    /// of each fence they advance (D118).
+    fn advance(&self, sets: &mut Vec<String>) {
+        let bumps = fence_bumps(&self.table.fences, sets);
+        sets.extend(bumps);
+    }
+
     /// Refuses preconditions given to a write of a table that composes no
     /// behaviors (D104): nothing would check them.
     pub(crate) fn refuse_preconditions(&self, options: &WriteOptions) -> Result<(), Error> {
@@ -1082,6 +1117,7 @@ impl<'a> Plan<'a> {
                 self.table.name
             )));
         }
+        self.advance(&mut sets);
         args.push(key_bound);
         let s = &self.table.statements;
         let mut sql = fill(&s.update, &[&sets.join(", "), &args.len()])?;
@@ -1127,6 +1163,7 @@ impl<'a> Plan<'a> {
                 self.table.name
             )));
         }
+        self.advance(&mut sets);
         let conditions = self.conditions(self.table, filter, &mut args)?;
         let where_ = self.live_where(self.where_of(&conditions), false);
         let sql = fill(
@@ -1263,6 +1300,7 @@ impl<'a> Plan<'a> {
             assignments.push(key.keep.clone());
         } else {
             self.stamp(&mut assignments, update, &mut args)?;
+            self.advance(&mut assignments);
         }
         // The WHERE of the update: the live rows, and, only if changed or
         // for an update that sets nothing, the rows whose columns differ
@@ -1705,5 +1743,55 @@ mod tests {
         assert_eq!(fill("LIKE '100%%' %s", &[&"x"]).unwrap(), "LIKE '100%' x");
         assert!(fill("%s %s", &[&"a"]).is_err());
         assert!(fill("%v", &[&"a"]).is_err());
+    }
+
+    /// The fences of fixture-fenced-db's tables, as its types crate's
+    /// definition holds them (D118); rustgen's tests run the repositories
+    /// over them on SQLite and on Postgres.
+    #[test]
+    fn an_update_advances_each_fence_that_covers_a_column_it_sets() {
+        let fence = |column: &str, covers: &[&str], table: &str| Fence {
+            column: column.to_owned(),
+            covers: covers.iter().map(|&covered| covered.to_owned()).collect(),
+            bump: format!("{column} = {table}.{column} + 1"),
+        };
+        let delivery = [
+            fence("plan_version", &["address", "courier_id"], "delivery"),
+            fence("run_version", &["attempts", "proof"], "delivery"),
+        ];
+        let parcel = [fence("version", &[], "parcel")];
+        let depot = [fence("revision", &["\"name\"", "deleted_at"], "depot")];
+        let plan = "plan_version = delivery.plan_version + 1";
+        let run = "run_version = delivery.run_version + 1";
+        let cases: [(&[Fence], &[&str], &[&str]); 14] = [
+            (&delivery, &["address = ?1", "updated_at = ?2"], &[plan]),
+            (&delivery, &["courier_id = NULL"], &[plan]),
+            (&delivery, &["proof = $1", "address = $2"], &[plan, run]),
+            (&delivery, &["attempts = $1", "proof = $2"], &[run]),
+            (&delivery, &["note = $1", "updated_at = $2"], &[]),
+            // The caller drives planVersion; runVersion is still advanced.
+            (
+                &delivery,
+                &["address = $1", "plan_version = $2", "attempts = $3"],
+                &[run],
+            ),
+            (&delivery, &["plan_version = $1"], &[]),
+            (&delivery, &[], &[]),
+            (&parcel, &["note = NULL"], &["version = parcel.version + 1"]),
+            (&parcel, &["note = $1", "version = $2"], &[]),
+            (&parcel, &[], &[]),
+            (&depot, &["capacity = $1"], &[]),
+            (
+                &depot,
+                &["\"name\" = $1"],
+                &["revision = depot.revision + 1"],
+            ),
+            // A column is read whole: name_note is no write of name.
+            (&depot, &["\"name_note\" = $1", "name = $2"], &[]),
+        ];
+        for (fences, sets, want) in cases {
+            let sets: Vec<String> = sets.iter().map(|&set| set.to_owned()).collect();
+            assert_eq!(fence_bumps(fences, &sets), want, "a write of {sets:?}");
+        }
     }
 }

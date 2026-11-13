@@ -54,6 +54,12 @@ type ImportedTypeInfo struct {
 type TypeImport struct {
 	ModuleName string
 	TypeNames  []string
+
+	// Required is set when a state machine of a model names the members
+	// of an enum the module owns (D117). types.py then imports the module
+	// with no fallback: bound to Any, the enum would have no members, and
+	// a missing dependency is the clearer error.
+	Required bool
 }
 
 // ModuleOutput contains all generated code for a Python types module.
@@ -75,6 +81,10 @@ type ModuleOutput struct {
 
 	// readUnions are the unions UnionReads picks the members of.
 	readUnions map[string]bool
+
+	// stateMachines are the @stateMachine declarations each model carries
+	// (D117), by type name; StateMachinesOf reads them.
+	stateMachines map[string][]StateMachineInfo
 
 	// ImportedEnumNames lists imported enum names so templates and default
 	// classification can distinguish dependency-owned enums from models.
@@ -343,6 +353,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	applyUnionDiscriminatorLiterals(output)
 	collectModelRebuildTypes(output, imported.enumNames)
+	if err := buildStateMachines(schema, opts, output); err != nil {
+		return nil, err
+	}
 
 	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
 		return nil, err

@@ -141,6 +141,10 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_utensil.go", "versiongraph_recipe.go",
 		}},
 		{"fixture-optimistic-db", []string{"repository_shelf.go", "repository_stock.go"}},
+		// @fenced fields (D118): fences.go holds each table's fences and
+		// the rule by which an update, an UpdateMany and an upsert's update
+		// advance them, and Depot's soft deletes carry the bump.
+		{"fixture-fenced-db", []string{"repository_courier.go", "repository_delivery.go", "repository_depot.go", "repository_parcel.go", "fences.go"}},
 		{"fixture-user-model-db", []string{
 			"repository_role.go", "repository_session.go", "repository_user.go", "repository_user_api_key.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
@@ -283,6 +287,7 @@ func TestREADMEListsVersionFencedMethods(t *testing.T) {
 		{"fixture-nested-arrays-db", false},
 		{"fixture-version-graph-db", false},
 		{"fixture-optimistic-db", true},
+		{"fixture-fenced-db", false},
 		{"fixture-user-model-db", false},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {

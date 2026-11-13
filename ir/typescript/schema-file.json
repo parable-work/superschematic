@@ -4483,6 +4483,26 @@
       },
       "type": "object"
     },
+    "Fence": {
+      "additionalProperties": false,
+      "properties": {
+        "covers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
     "FieldDef": {
       "additionalProperties": false,
       "properties": {
@@ -6595,6 +6615,13 @@
           "additionalProperties": false,
           "default": {},
           "type": "object"
+        },
+        "fences": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Fence"
+          },
+          "type": "array"
         },
         "fields": {
           "default": [],

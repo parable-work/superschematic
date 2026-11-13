@@ -105,6 +105,18 @@ func TestWriteTypesGolden(t *testing.T) {
 		// upserts, runDeadline and runEvent, and its deadline and event
 		// queues in queues.ts and the layout.
 		{service: "fixture-pool-db", behaviors: true},
+		// An enum another service's state machine governs a field of, in a
+		// package with no machine and so no state-machines.ts.
+		{service: "fixture-state-machine-enums"},
+		// State machines (D117): state-machines.ts holds each one's
+		// transitions, terminal states and helper, on a required field, on
+		// nullable ones, on a field typed by the dependency's enum and on
+		// a @jsonField class.
+		{service: "fixture-state-machine-db", deps: []string{"fixture-state-machine-enums"}, sqlite: true},
+		// @fenced fields (D118): each table's definition in orm.ts lists
+		// its fences, which the runtime's repositories advance, and Depot's
+		// soft deletes carry the bump.
+		{service: "fixture-fenced-db", sqlite: true},
 	}
 
 	for _, tc := range cases {

@@ -128,6 +128,17 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(encryptedFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove encrypted.go: %w", err)
 	}
+	// fences.go holds the fences of each table with a @fenced field and
+	// the rule by which a write advances them (D118); a schema without one
+	// has none, so a file an earlier build wrote goes.
+	fencesFile := filepath.Join(outputDir, "fences.go")
+	if output.HasFences {
+		if err := generateFile(generator, "fences.tmpl", fencesFile, output); err != nil {
+			return fmt.Errorf("failed to write fences.go: %w", err)
+		}
+	} else if err := os.Remove(fencesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove fences.go: %w", err)
+	}
 	// search.go writes the words of a filter's SearchText and their LIKE
 	// patterns (D62, amended); a schema without search fields has none, so a
 	// file an earlier build wrote goes.

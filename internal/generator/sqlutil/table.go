@@ -474,6 +474,10 @@ type TableModel struct {
 	// includes and a filter reaches through (D90, attachRelations).
 	ToOne  []ToOne
 	ToMany []ToMany
+
+	// Fences are the table's @fenced counters, in the order declared, which
+	// its statements advance (D118, FenceBumps); none for most tables.
+	Fences []FenceModel
 }
 
 // ColumnModel is a column of a table.
@@ -850,6 +854,9 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 		return table, err
 	}
 	table.UniqueKeys = keys
+	if table.Fences, err = fencesOf(td, &table); err != nil {
+		return table, err
+	}
 	return table, nil
 }
 

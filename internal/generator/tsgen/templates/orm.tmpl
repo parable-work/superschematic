@@ -255,6 +255,13 @@ export const {{.Const}}: TableDefinition = {
 {{- if .HistoryActor}}
   historyActor: true,
 {{- end}}
+{{- if .Fences}}
+  fences: [
+{{- range .Fences}}
+    { column: {{jsonString .Column}}{{if .Covers}}, covers: [{{range $i, $c := .Covers}}{{if $i}}, {{end}}{{jsonString $c}}{{end}}]{{end}}, bump: {{jsonString .Bump}} },
+{{- end}}
+  ],
+{{- end}}
 {{- if .Search}}
   search: {{jsonString .Search}},
 {{- end}}

@@ -217,19 +217,33 @@ func (d *differ) rebuilds(phase Phase, changes []*change) map[string]*tableRebui
 
 // phaseTriggers are the triggers a phase leaves on table: the new model's,
 // and in expand also the previous model's that contract drops, on a table
-// that keeps its name, since their definitions name it.
+// that keeps its name, since their definitions name it. Expand leaves
+// neither a trigger contract creates nor one expand itself drops, as a
+// trigger that refuses a write is placed (D117).
 func (d *differ) phaseTriggers(phase Phase, table string) []*Trigger {
 	var out []*Trigger
 	named := map[string]bool{}
+	later, gone := map[string]bool{}, map[string]bool{}
+	for _, c := range d.changes {
+		switch {
+		case c.table != table || phase != Expand:
+		case c.op == opCreateTrigger && c.phase == Contract:
+			later[c.trigger.Name] = true
+		case c.op == opDropTrigger && c.phase == Expand:
+			gone[c.oldTrigger.Name] = true
+		}
+	}
 	for _, t := range d.to.Triggers {
 		if t.Table == table {
-			out = append(out, t)
 			named[t.Name] = true
+			if !later[t.Name] {
+				out = append(out, t)
+			}
 		}
 	}
 	if phase == Expand {
 		for _, t := range d.from.Triggers {
-			if t.Table == table && !named[t.Name] && d.renames.table(t.Table) == table {
+			if t.Table == table && !named[t.Name] && !gone[t.Name] && d.renames.table(t.Table) == table {
 				out = append(out, t)
 			}
 		}

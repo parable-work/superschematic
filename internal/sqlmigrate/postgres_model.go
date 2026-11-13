@@ -126,6 +126,29 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
+	// A @stateMachine's guard (D117): its function, and the trigger that
+	// refuses a move the machine does not list, which the planner places by
+	// Trigger.Refuses.
+	for _, g := range out.StateGuards {
+		m.Functions = append(m.Functions, &Function{Name: g.FunctionName, Definition: g.FunctionSQL(), Origin: g.Origin})
+		trigger, err := modelTrigger(g.Trigger(), g.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+
+	// A @fenced counter (D118): its function, and the trigger that refuses
+	// an update that does not advance the fence, placed as a guard's is.
+	for _, f := range out.Fences {
+		m.Functions = append(m.Functions, &Function{Name: f.FunctionName, Definition: f.FunctionSQL(), Origin: f.Origin})
+		trigger, err := modelTrigger(f.Trigger(), f.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {
 		// A view without a pool is created beside the tables (D90), in a
@@ -346,7 +369,7 @@ func modelTrigger(t sqlgen.Trigger, origin string) (*Trigger, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Trigger{Name: t.Name, Table: t.Table, Definition: definition, Origin: origin}, nil
+	return &Trigger{Name: t.Name, Table: t.Table, Definition: definition, Origin: origin, Refuses: t.Refuses}, nil
 }
 
 func modelView(view sqlgen.ProjectionView) *View {

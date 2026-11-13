@@ -267,8 +267,14 @@ type DDLOutput struct {
 	// ChangeTriggers are the change triggers of the tables whose writes
 	// behaviors hear, by table (changes.go, D103).
 	ChangeTriggers []ChangeTrigger
-	Projections    []ProjectionView
-	Timestamp      string
+	// StateGuards are the guards of the tables' @stateMachine declarations,
+	// by table and column (state_guard.go, D117).
+	StateGuards []StateGuard
+	// Fences are the triggers of the tables' @fenced declarations, by table
+	// and column (fence.go, D118).
+	Fences      []Fence
+	Projections []ProjectionView
+	Timestamp   string
 
 	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
 	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
@@ -536,6 +542,14 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	stateGuards, err := buildStateGuards(tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
+	fences, err := buildFences(tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
 	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
 	if err != nil {
 		return nil, err
@@ -589,6 +603,8 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		OptimisticTables: optimisticTables,
 		EnqueueTriggers:  enqueueTriggers,
 		ChangeTriggers:   changeTriggers,
+		StateGuards:      stateGuards,
+		Fences:           fences,
 		RoleSeeds:        roleSeeds,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),

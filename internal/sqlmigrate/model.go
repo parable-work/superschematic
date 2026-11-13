@@ -334,6 +334,13 @@ type Trigger struct {
 	// SQLite the declaration's first trigger holds it. Empty for every
 	// other trigger.
 	Backfill string `json:"backfill,omitempty"`
+	// Refuses is set on a trigger that fails a write it does not allow, as
+	// a @stateMachine's guard (D117) and a @fenced counter's trigger (D118)
+	// do. A plan creates such a trigger on a table the previous model has
+	// in the contract phase, when no server of the previous version is left
+	// to make a write it refuses, and drops a changed one in expand
+	// (diffTriggers).
+	Refuses bool `json:"refuses,omitempty"`
 }
 
 // View is a projection view.

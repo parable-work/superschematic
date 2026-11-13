@@ -1,6 +1,6 @@
 ---
 title: Schema migrations
-description: Plan the change of a DB service's database between two versions of its schema with migrate plan; the two phases and the model between them, the hazard classes, readers and renames, versioned tables and version graphs, SQLite and its copy-table rebuild, the superschematic-migrate runner and its state, and the limits.
+description: Plan the change of a DB service's database between two versions of its schema with migrate plan; the two phases and the model between them, the hazard classes, readers and renames, versioned tables and version graphs, the triggers that refuse a write, SQLite and its copy-table rebuild, the superschematic-migrate runner and its state, and the limits.
 sidebar:
   order: 9
 ---
@@ -166,7 +166,10 @@ The rest of v2 needs no acknowledgment but the raw SQL's.
 `Project.status` is required and has a default, so the column is added
 with it, and the previous version's servers keep inserting projects
 without it; its enum's check follows in `expand`, since the column is new
-([Defaults and checks](#defaults-and-checks)). The index over
+([Defaults and checks](#defaults-and-checks)). Its state machine's guard
+is a function in `expand` and a trigger in `contract`, since the trigger
+refuses a write
+([Triggers that refuse a write](#triggers-that-refuse-a-write)). The index over
 `lower(summary)` is built concurrently. The materialized view is raw SQL
 the schema declares, which runs last, and is `raw-sql`
 ([Raw SQL](#raw-sql)).
@@ -217,7 +220,7 @@ Every step is in one of two phases.
 | Phase | Runs | Holds |
 | --- | --- | --- |
 | `expand` | before the new servers roll out | everything that keeps the previous version's servers working: renames, creates and adds, defaults, alterations, indexes, constraints, functions, triggers, views and comments, and new or changed raw SQL |
-| `contract` | after the rollout | what removes something the previous version's servers use or tightens what they write: drops, `SET NOT NULL`, dropped defaults, foreign keys over columns the previous version already has, checks that tighten a column it has, and the `down` of raw SQL the schema no longer declares |
+| `contract` | after the rollout | what removes something the previous version's servers use or tightens what they write: drops, `SET NOT NULL`, dropped defaults, foreign keys over columns the previous version already has, checks that tighten a column it has, a trigger that refuses a write, such as a `@stateMachine`'s guard ([Triggers that refuse a write](#triggers-that-refuse-a-write)), and the `down` of raw SQL the schema no longer declares |
 
 A column dropped in `contract` that is `NOT NULL` first loses the
 constraint in `expand`, so the new servers can insert without it. A step
@@ -263,8 +266,11 @@ there and what it tightens still loose. A column `contract` drops keeps its
 pool schemas of both versions are there, since a plan drops neither. A
 version graph keeps the previous version's schema epoch, and a member's
 content is the new version's for every column the new table has and the
-previous version's for the columns `contract` drops. A plan without
-contract steps carries neither member, since its expand steps end at `to`.
+previous version's for the columns `contract` drops. A trigger that
+refuses a write, which `contract` creates, is not in it
+([Triggers that refuse a write](#triggers-that-refuse-a-write)). A plan
+without contract steps carries neither member, since its expand steps end
+at `to`.
 
 The runner records that model when the expand steps finish, so a rollout
 that fails leaves the database at a model a new plan can start from
@@ -473,6 +479,64 @@ and what a trigger enqueues add these (D80):
 | a table gains, changes or loses an [`@enqueueOnChange`](/superschematic/guides/queues/#enqueue-on-a-change) | on Postgres its function is created or replaced in `expand`, and its trigger created, or replaced when `on` changes; both are dropped in `contract`. On SQLite each trigger is created, replaced (dropped and created) or dropped, and a rebuild of the table creates its triggers again |
 | a table gains, changes or loses a behavior's change queue (D103: it implements `Timers` or `Reactions`, or another table's `Reactions` hears it) | the queue's table, its D80 indexes (its key, `row_key`, serialized), and its trigger: on Postgres the function `<table>_changes` created after the queue's table and replaced in place when the columns its image holds change, and the trigger `trg_<table>_changes` (`AFTER INSERT OR UPDATE OR DELETE`); on SQLite the triggers `trg_<table>_changes_insert`, `_update` and `_delete`, replaced by a drop and a create, and created again by a rebuild of the table. All go with the last behavior that hears the table. The trigger writes no message for the rows already there: their deadlines reconcile at their next write |
 | a table the previous version has gains an `@enqueueOnChange` with `backfill: true` | the step that creates the trigger then inserts a message for each row that meets `when`, under the queue's `onDuplicate`, in the same transaction (`blocking`: the trigger's lock keeps writes out while it runs). On SQLite the first of its triggers' steps does, or the table's rebuild, after the triggers. Changing an existing trigger backfills nothing ([Backfill](/superschematic/guides/queues/#backfill)) |
+
+## Triggers that refuse a write
+
+A [`@stateMachine`](/superschematic/guides/database-tables/#state-machines)'s
+guard and a [`@fenced`](/superschematic/guides/database-tables/#fences)
+table's trigger fail a write they do not allow. A trigger that only adds
+work, as an `@enqueueOnChange`'s does, is created in `expand`. One that
+refuses cannot be: the previous version's servers run until `contract`,
+and would be refused from the first step, for a move their schema lists
+or for an update that advances no fence. So the plan places a trigger
+that refuses a write by a rule of its own (D117, D118):
+
+| Change | Plan |
+| --- | --- |
+| a table the previous version has gains a guard or a fence | the trigger is created in `contract`, when no server of the previous version is left to make a write it refuses. On Postgres its function is created in `expand`, where nothing runs it |
+| a guard or a fence changes | the trigger is dropped in `expand`, before its function is replaced, and created in `contract`. Between the phases neither version's servers are refused, and nothing holds the rule |
+| a guard or a fence is taken away | the trigger is dropped in `contract`, as every trigger is, and on Postgres its function after it |
+| the table or the column a guard is named after is renamed | the guard is dropped under its old name in `expand`, once the rename has run, and the new one is created in `contract`. On Postgres a renamed column's function is another function, created in `expand`, the old one dropped in `contract`; a renamed table's is renamed, then replaced |
+| a table the plan creates has a guard or a fence | the trigger is created with the table, in `expand`: no server of the previous version writes the table |
+
+`examples/migrations`' v2 gives `Project.status` a state machine in which
+an archived project stays archived. On Postgres the plan creates the
+guard's function in `expand`:
+
+<Snippet example="migrations" file="testdata/generated/plan.postgres.sql" from="createFunction function/project_status_transition_guard" to="LANGUAGE plpgsql;" />
+
+and its trigger in `contract`, before the drop of `legacy_id`:
+
+<Snippet example="migrations" file="testdata/generated/plan.postgres.sql" from="createTrigger trigger/project/trg_project_status_transition_guard" to="EXECUTE FUNCTION project_status_transition_guard();" />
+
+Between the phases a project may be archived and reopened. Once
+`contract` has run, the move back is refused. A machine that changes
+later plans `dropTrigger` and `replaceFunction` in `expand`, and
+`createTrigger` in `contract`.
+
+SQLite's guard is one trigger with no function, so its plans are the
+trigger's steps alone:
+
+<Snippet example="migrations" file="testdata/generated/plan.sqlite.sql" from="createTrigger trigger/project/trg_project_status_transition_guard" to="END;" />
+
+A [rebuild](#steps) of the table creates the triggers its phase leaves on
+it: a rebuild in `expand` leaves the guard out, and `contract` creates it
+in a step of its own; a rebuild in `contract` creates the new guard with
+the table.
+
+A guard's steps carry no hazard: creating one reads no row the table
+holds, so it fails on none. A row already in a state the new machine
+does not move from stays there. A deploy without a rollout runs both
+phases back to back, and the guard is there when it ends.
+
+A plan from an empty database has no previous servers to keep working:
+it creates every such trigger in `expand`, with its table.
+
+A plan that reads a SQLite file with `--from-database` and renames a
+guarded column does not know the file's guard under the column's old
+name: it is a trigger the read has no form of, and the plan is told to
+drop it, `--drop trigger:<name>`
+([A file built by hand](#a-file-built-by-hand)).
 
 ## Declared queries
 
@@ -1072,6 +1136,11 @@ it alone and refuses one that does not exist.
 - The planner does not read raw SQL: a change Postgres refuses while a
   piece depends on a column fails its step.
 - A change the plan cannot express fails the plan and names it.
+- Between the phases of a plan that changes a `@stateMachine` or a
+  `@fenced` declaration, no trigger holds the rule: the old one is
+  dropped in `expand` and the new one created in `contract`. A trigger
+  that holds both versions' rules in between is not built
+  ([Triggers that refuse a write](#triggers-that-refuse-a-write)).
 - SQLite refuses `@versioned`, projections, an index
   method other than BTREE and an operator class, and `LTREE` and the
   PostGIS types ([Refusals](#refusals)).

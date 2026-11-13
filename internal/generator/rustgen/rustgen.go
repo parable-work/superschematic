@@ -294,6 +294,11 @@ type ModuleOutput struct {
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as src/behaviors.rs. Nil when no type composes one.
 	Behaviors []behaviortypes.Type
+
+	// StateMachines are the schema's @stateMachine declarations (D117),
+	// which src/state_machines.rs writes as each one's terminal states and
+	// helper. Nil writes no src/state_machines.rs.
+	StateMachines []StateMachineInfo
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -464,6 +469,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
+		return nil, err
+	}
+	if output.StateMachines, err = stateMachines(schema, defaultEnums); err != nil {
 		return nil, err
 	}
 	if opts.EngineDocument != nil {

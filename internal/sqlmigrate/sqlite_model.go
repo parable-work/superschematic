@@ -20,9 +20,12 @@ import (
 // trigger per write, which holds its insert. An @optimistic table's bump,
 // which a table whose fields are behaviors takes (D103), is an AFTER UPDATE
 // trigger that gives the row it updated the next version, as Postgres's
-// BEFORE UPDATE trigger does (sqliteBumpTrigger). The model refuses what
-// SQLite has no form of (D27), naming the feature: @versioned, projections,
-// GIN and GIST indexes, and types it has no storage for.
+// BEFORE UPDATE trigger does (sqliteBumpTrigger). A @stateMachine's guard
+// (D117) is one trigger whose WHEN is the machine's rule and whose body
+// fails the write, and a @fenced counter's (D118) is one of the same form.
+// The model refuses what SQLite has no form of (D27), naming the feature:
+// @versioned, projections, GIN and GIST indexes, and types it has no
+// storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -92,6 +95,18 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		for _, t := range c.SQLiteTriggers(qs) {
 			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
 		}
+	}
+	// A @stateMachine's guard (D117): one trigger, which holds the rule and
+	// refuses a move the machine does not list.
+	for _, g := range out.StateGuards {
+		t := g.SQLiteTrigger(qs)
+		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: g.Origin, Refuses: t.Refuses})
+	}
+	// A @fenced counter (D118): one trigger, which holds the rule and
+	// refuses an update that does not advance the fence.
+	for _, f := range out.Fences {
+		t := f.SQLiteTrigger(qs)
+		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: f.Origin, Refuses: t.Refuses})
 	}
 
 	graphs, err := modelGraphs(schema, m)

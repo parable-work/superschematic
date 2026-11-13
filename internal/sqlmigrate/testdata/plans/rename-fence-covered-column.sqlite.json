@@ -1,0 +1,50 @@
+{
+  "dialect": "sqlite",
+  "expanded": "d3658ff643bb32c4b2a797dfb4e56dac73ba554cbfc3163096043e0c9c156500",
+  "from": "abde65df483ec908fc3c999741cf3b916913dccc78efe2635af1727dd440a950",
+  "hash": "81043a6cf6c5e4b718a06321bf36c2995174b049bd22e28f519e629331f30af6",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/remark",
+          "reason": "order.note is renamed to order.remark, following Order.note's @column: servers built from the previous version still use the old name.",
+          "subject": "table/order/column/remark"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN \"note\" TO \"remark\""
+      ],
+      "subject": "table/order/column/remark",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_revision_fence\""
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_revision_fence\" BEFORE UPDATE ON \"order\" FOR EACH ROW\nWHEN NEW.\"revision\" IS NOT OLD.\"revision\" + 1 AND (\n  NEW.\"revision\" IS NOT OLD.\"revision\"\n  OR NEW.\"remark\" IS NOT OLD.\"remark\"\n  OR NEW.\"customer_id\" IS NOT OLD.\"customer_id\")\nBEGIN\n  SELECT RAISE(ABORT, 'order.revision is fenced: an update that changes a column it covers must add one to it, and any other must keep it or add one');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "3178377fe2bf70e9ce9d9c81194ed2cff9da3275913fc1158b9231d6a03df077",
+  "toModel": null,
+  "version": 1
+}

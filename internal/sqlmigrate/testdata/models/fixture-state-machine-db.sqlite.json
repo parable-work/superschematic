@@ -1,0 +1,127 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-state-machine-db",
+  "tables": [
+    {
+      "checks": [
+        {
+          "column": "escalation",
+          "in": [
+            "raised",
+            "acknowledged"
+          ],
+          "name": "ck_ticket_escalation"
+        },
+        {
+          "column": "review",
+          "in": [
+            "RETRY",
+            "APPROVED",
+            "REJECTED"
+          ],
+          "name": "ck_ticket_review"
+        },
+        {
+          "column": "state",
+          "in": [
+            "open",
+            "in_progress",
+            "resolved",
+            "closed"
+          ],
+          "name": "ck_ticket_state"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Ticket.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "origin": "Ticket.subject",
+          "type": "TEXT"
+        },
+        {
+          "default": "'open'",
+          "name": "state",
+          "origin": "Ticket.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "review",
+          "nullable": true,
+          "origin": "Ticket.review",
+          "type": "TEXT"
+        },
+        {
+          "name": "escalation",
+          "nullable": true,
+          "origin": "Ticket.escalation",
+          "type": "TEXT"
+        },
+        {
+          "default": "'active'",
+          "name": "account_status",
+          "origin": "Ticket.accountStatus",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "sign_off",
+          "nullable": true,
+          "origin": "Ticket.signOff",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "origin": "Ticket.updatedAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "ticket",
+      "origin": "Ticket",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_account_status_transition_guard\" BEFORE UPDATE OF \"account_status\" ON \"ticket\" FOR EACH ROW\nWHEN NEW.\"account_status\" IS NOT OLD.\"account_status\" AND (\n  OLD.\"account_status\" IN ('closed')\n  OR NOT COALESCE(\n    (OLD.\"account_status\" IS 'active' AND NEW.\"account_status\" IN ('suspended', 'closed'))\n    OR (OLD.\"account_status\" IS 'suspended' AND NEW.\"account_status\" IN ('active', 'closed')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'ticket.account_status cannot make this move: its state machine does not list it');\nEND",
+      "name": "trg_ticket_account_status_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_escalation_transition_guard\" BEFORE UPDATE OF \"escalation\" ON \"ticket\" FOR EACH ROW\nWHEN NEW.\"escalation\" IS NOT OLD.\"escalation\" AND (\n  NOT COALESCE(\n    (OLD.\"escalation\" IS NULL AND NEW.\"escalation\" IN ('raised'))\n    OR (OLD.\"escalation\" IS 'raised' AND NEW.\"escalation\" IN ('acknowledged'))\n    OR (OLD.\"escalation\" IS 'acknowledged' AND NEW.\"escalation\" IS NULL), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'ticket.escalation cannot make this move: its state machine does not list it');\nEND",
+      "name": "trg_ticket_escalation_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_review_transition_guard\" BEFORE UPDATE OF \"review\" ON \"ticket\" FOR EACH ROW\nWHEN NEW.\"review\" IS NOT OLD.\"review\" AND (\n  OLD.\"review\" IN ('APPROVED', 'REJECTED')\n  OR NOT COALESCE(\n    (OLD.\"review\" IS NULL AND NEW.\"review\" IN ('RETRY', 'APPROVED', 'REJECTED'))\n    OR (OLD.\"review\" IS 'RETRY' AND (NEW.\"review\" IS NULL OR NEW.\"review\" IN ('APPROVED', 'REJECTED'))), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'ticket.review cannot make this move: its state machine does not list it');\nEND",
+      "name": "trg_ticket_review_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_ticket_state_transition_guard\" BEFORE UPDATE OF \"state\" ON \"ticket\" FOR EACH ROW\nWHEN NEW.\"state\" IS NOT OLD.\"state\" AND (\n  OLD.\"state\" IN ('closed')\n  OR NOT COALESCE(\n    (OLD.\"state\" IS 'open' AND NEW.\"state\" IN ('open', 'in_progress', 'resolved', 'closed'))\n    OR (OLD.\"state\" IS 'in_progress' AND NEW.\"state\" IN ('resolved', 'open'))\n    OR (OLD.\"state\" IS 'resolved' AND NEW.\"state\" IN ('open', 'closed')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'ticket.state cannot make this move: its state machine does not list it');\nEND",
+      "name": "trg_ticket_state_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    }
+  ],
+  "version": 1
+}

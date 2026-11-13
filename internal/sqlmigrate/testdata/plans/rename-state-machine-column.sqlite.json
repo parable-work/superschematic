@@ -1,0 +1,50 @@
+{
+  "dialect": "sqlite",
+  "expanded": "dd3c3e542ad99e3e44c2004340da51dae0444bd275e5d6f9baf72af4784b5053",
+  "from": "a6d610c27a47f7c6cfe61f4e4c026749af8fbcb22b46a88ff89f8dfa3f2af61e",
+  "hash": "22946f8e2f111009c46a15aa10b71d29ec61bbb390c12057a83fa485dd83dd9b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/stage",
+          "reason": "order.status is renamed to order.stage, following Order.status's @column: servers built from the previous version still use the old name.",
+          "subject": "table/order/column/stage"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN \"status\" TO \"stage\""
+      ],
+      "subject": "table/order/column/stage",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_status_transition_guard\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_stage_transition_guard\" BEFORE UPDATE OF \"stage\" ON \"order\" FOR EACH ROW\nWHEN NEW.\"stage\" IS NOT OLD.\"stage\" AND (\n  OLD.\"stage\" IN ('shipped')\n  OR NOT COALESCE(\n    (OLD.\"stage\" IS NULL AND NEW.\"stage\" IN ('placed'))\n    OR (OLD.\"stage\" IS 'placed' AND NEW.\"stage\" IN ('shipped')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'order.stage cannot make this move: its state machine does not list it');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_stage_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "22a8c986706a009a91fb4e1dc0a831744916513449c339ae3bb5c81715efd25d",
+  "toModel": null,
+  "version": 1
+}

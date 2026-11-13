@@ -284,6 +284,18 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "drop-enqueue-on-change", op: "dropTrigger", phase: Contract},
 		{plan: "enqueue-on-change-rebuilt", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, dataDependent, copyTable},
 			reason: "cannot make note NOT NULL"},
+
+		// A @stateMachine's guard, which refuses a write (D117).
+		{plan: "add-state-machine", op: "createTrigger", phase: Contract},
+		{plan: "change-state-machine", op: "dropTrigger", phase: Expand},
+		{plan: "change-state-machine", op: "createTrigger", phase: Contract},
+		{plan: "drop-state-machine", op: "dropTrigger", phase: Contract},
+
+		// A @fenced counter's trigger, which refuses a write (D118).
+		{plan: "add-fence", op: "createTrigger", phase: Contract},
+		{plan: "change-fence-covers", op: "dropTrigger", phase: Expand},
+		{plan: "change-fence-covers", op: "createTrigger", phase: Contract},
+		{plan: "drop-fence", op: "dropTrigger", phase: Contract},
 	})
 }
 

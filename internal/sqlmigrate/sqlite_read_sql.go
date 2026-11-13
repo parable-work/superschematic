@@ -512,3 +512,18 @@ func unwrap(tokens []sqlToken) []sqlToken {
 	}
 	return tokens
 }
+
+// sqliteTriggerRefuses reports whether a CREATE TRIGGER statement makes a
+// trigger that refuses a write (Trigger.Refuses, D117): one of its
+// statements, or its WHEN, calls RAISE, which fails the write that fired
+// the trigger or, with IGNORE, leaves it out. It reads the statement's
+// tokens, so a RAISE inside a string or a quoted name is none.
+func sqliteTriggerRefuses(sql string) bool {
+	tokens := lexSQLite(sql)
+	for i := 0; i+1 < len(tokens); i++ {
+		if tokens[i].is("RAISE") && tokens[i+1].punct("(") {
+			return true
+		}
+	}
+	return false
+}

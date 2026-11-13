@@ -55,6 +55,13 @@ type ORMOutput struct {
 	// it has the fenced methods and no history. The README says so.
 	HasOptimisticTables bool
 
+	// HasFences is true when a repository's table has a @fenced field
+	// (D118); it writes fences.go, each such table's fences and the rule by
+	// which a write advances them, which reads an assignment's column as
+	// the text before FenceAssignmentInfix (sqlutil.AssignmentInfix).
+	HasFences            bool
+	FenceAssignmentInfix string
+
 	// HasArraysOfArrays is true when a column is an array of arrays (T[][]);
 	// it emits the encoder those columns write through.
 	HasArraysOfArrays bool
@@ -320,6 +327,12 @@ type Repository struct {
 	// repositories run them.
 	Table *sqlutil.TableModel
 	SQL   sqlutil.TableStatements
+
+	// Fences are the table's @fenced fields (D118), sqlutil's FenceModel:
+	// an update, an UpdateMany and an upsert's update add the bump of each
+	// fence their assignments advance (fences.go), and a soft delete and a
+	// reseal carry it in SQL's statements.
+	Fences []sqlutil.FenceModel
 
 	// UniqueKeys are the keys UpsertOne may be keyed by (D79), each with
 	// the name of its <Type>UniqueKey constant.
@@ -1077,9 +1090,13 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			hasSearch = true
 		}
 	}
+	hasFences := false
 	for _, repo := range repositories {
 		if repo.HasSearch {
 			hasSearch = true
+		}
+		if len(repo.Fences) > 0 {
+			hasFences = true
 		}
 		if len(repo.EncryptedFields) > 0 {
 			hasEncryptedFields = true
@@ -1159,6 +1176,8 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasVersionedRepositories: hasVersionedRepositories,
 		HasVersionFences:         hasVersionFences,
 		HasOptimisticTables:      hasOptimisticTables,
+		HasFences:                hasFences,
+		FenceAssignmentInfix:     sqlutil.AssignmentInfix,
 		HasHistoryActor:          hasHistoryActor,
 		HasGenericJSON:           hasGenericJSON,
 		HasArraysOfArrays:        hasArraysOfArrays,
@@ -1809,6 +1828,7 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 		return fmt.Errorf("ormgen: the repository of %s lists the columns %v, and sqlutil's table %v", repo.TypeName, members, columns)
 	}
 	repo.Table = table
+	repo.Fences = table.Fences
 	repo.SQL = sqlutil.TableStatementsOf(table)
 	if err := repo.SQL.CheckFormats(); err != nil {
 		return err

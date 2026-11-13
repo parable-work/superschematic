@@ -168,6 +168,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_state_machine.go, D117).
 	specs = append(specs, stateMachineDecorator())
 
+	// The counters of a DB table every covered write advances by one
+	// (core_fenced.go, D118).
+	specs = append(specs, fencedDecorator())
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

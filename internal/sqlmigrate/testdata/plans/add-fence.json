@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "expanded": "844656dab4ecddd31401b8f89b0ff7b517b0e8000df845b0af133366ff3f7b02",
+  "from": "e272a67a99f1afb2da1158341b53f918a44fe8e7e7cc67caf8717b80044dafd2",
+  "hash": "c12961629501800b4b6430442e2c6255424e0f55f346fd6d8832e0855b706136",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_revision_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Order.revision (D118):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.note, NEW.customer_id) IS DISTINCT FROM ROW(OLD.note, OLD.customer_id) THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'order.revision must advance from % to %, not to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'order_revision_fence';\n    END IF;\n  ELSIF NEW.revision IS DISTINCT FROM OLD.revision THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'order.revision must stay at % or advance to %, not move to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'order_revision_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_revision_fence\n  BEFORE UPDATE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_revision_fence()"
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "83eb77131371137c30e7cd3dcab126d44b5fd941b7b3c069f88250dd540ad653",
+  "toModel": null,
+  "version": 1
+}

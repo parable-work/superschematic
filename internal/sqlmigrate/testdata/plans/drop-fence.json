@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "expanded": "c90ddf14bc73ba48bf43e92bb8f8a73b427244d59f1a593b12e758b7897e9299",
+  "from": "c90ddf14bc73ba48bf43e92bb8f8a73b427244d59f1a593b12e758b7897e9299",
+  "hash": "54eeeaa7bd3bf3a73c03e38e76e2f9c9f00bc159ac8f508b56b4937c6b876afc",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_order_revision_fence ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION order_revision_fence()"
+      ],
+      "subject": "function/order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "e272a67a99f1afb2da1158341b53f918a44fe8e7e7cc67caf8717b80044dafd2",
+  "toModel": null,
+  "version": 1
+}

@@ -161,6 +161,28 @@ func TestHazardClasses(t *testing.T) {
 			reason: "stack queue backfill"},
 		{plan: "add-enqueue-on-change-backfill-per-key", op: "createTrigger", phase: Expand, want: []HazardClass{blockingClass}},
 
+		// A @stateMachine's guard refuses a write (D117): it is created in
+		// contract, a changed one is dropped in expand, before its function
+		// is replaced, and a removed one is dropped in contract, with no
+		// hazard.
+		{plan: "add-state-machine", op: "createFunction", phase: Expand},
+		{plan: "add-state-machine", op: "createTrigger", phase: Contract},
+		{plan: "change-state-machine", op: "dropTrigger", phase: Expand},
+		{plan: "change-state-machine", op: "replaceFunction", phase: Expand},
+		{plan: "change-state-machine", op: "createTrigger", phase: Contract},
+		{plan: "drop-state-machine", op: "dropTrigger", phase: Contract},
+		{plan: "drop-state-machine", op: "dropFunction", phase: Contract},
+
+		// A @fenced counter's trigger refuses a write too (D118), and is
+		// placed the same, with no hazard.
+		{plan: "add-fence", op: "createFunction", phase: Expand},
+		{plan: "add-fence", op: "createTrigger", phase: Contract},
+		{plan: "change-fence-covers", op: "dropTrigger", phase: Expand},
+		{plan: "change-fence-covers", op: "replaceFunction", phase: Expand},
+		{plan: "change-fence-covers", op: "createTrigger", phase: Contract},
+		{plan: "drop-fence", op: "dropTrigger", phase: Contract},
+		{plan: "drop-fence", op: "dropFunction", phase: Contract},
+
 		// A required timestamp's DEFAULT now is declared (D88): dropping
 		// the one a compiler before gave it, and adding a declared one,
 		// take no hazard.

@@ -1,0 +1,22 @@
+{
+  "dialect": "sqlite",
+  "expanded": "db494498d82d2b0a9be05b92ae9a59aab35f76dc2a1326d47dad99365c03caad",
+  "from": "db494498d82d2b0a9be05b92ae9a59aab35f76dc2a1326d47dad99365c03caad",
+  "hash": "b2aae32315a968594fcc2145229643e6f2aa5eed89ac6080c94b7b527226c55c",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_status_transition_guard\" BEFORE UPDATE OF \"status\" ON \"order\" FOR EACH ROW\nWHEN NEW.\"status\" IS NOT OLD.\"status\" AND (\n  OLD.\"status\" IN ('shipped')\n  OR NOT COALESCE(\n    (OLD.\"status\" IS NULL AND NEW.\"status\" IN ('placed'))\n    OR (OLD.\"status\" IS 'placed' AND NEW.\"status\" IN ('shipped')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'order.status cannot make this move: its state machine does not list it');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "a6d610c27a47f7c6cfe61f4e4c026749af8fbcb22b46a88ff89f8dfa3f2af61e",
+  "toModel": null,
+  "version": 1
+}
