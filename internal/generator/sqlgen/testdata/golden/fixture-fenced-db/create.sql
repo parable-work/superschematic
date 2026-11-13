@@ -34,7 +34,11 @@ stores, and advances planVersion; the courier''s device writes attempts
 and proof, and advances runVersion. A write of one party''s fields leaves
 the other''s counter as it was, so neither fails the other''s compare.
 No fence covers note or updatedAt: a write of them alone advances
-neither counter.';
+neither counter. The courier is nullable, set and cleared by the
+planner''s writes alone: its delete action is RESTRICT, so a courier a
+delivery names is not deleted. A SET NULL would have the database clear
+the column itself, an update that advances no fence, and the build
+refuses a fence that covers such a relation.';
 
 CREATE TABLE depot (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -68,7 +72,7 @@ ALTER TABLE delivery
   ADD CONSTRAINT fk_delivery_courier_id
   FOREIGN KEY (courier_id)
   REFERENCES courier(id)
-  ON DELETE SET NULL;
+  ON DELETE RESTRICT;
 
 -- Create indexes
 

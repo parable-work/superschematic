@@ -343,7 +343,12 @@ Most are load errors; knowing them saves a build round-trip:
   update except to compare: filter on the value you read and set it to
   that plus one with `updateMany` (`UpdateMany`), and read the count. An
   insert is not fenced. On an `@optimistic` table of a service that
-  lists `sqlite`, a fence lists `covers`. Don't put `@fenced` on a table
+  lists `sqlite`, a fence lists `covers`. Don't cover a relation whose
+  `onDelete` is `SET NULL`, or put a fence without `covers` on a table
+  that has one: the database sets that column itself when the row it
+  names is deleted, an update that advances no fence, so the build
+  refuses it. Give the relation `RESTRICT`, `CASCADE` or `NO ACTION`, or
+  leave it out of `covers`. Don't put `@fenced` on a table
   that composes a behavior (a field typed as one, `status: Workflow<{
   ... }>`, or an `implements` use): the behaviors' core writes its rows
   with statements that advance no fence, so the build refuses it, with

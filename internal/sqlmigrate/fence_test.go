@@ -20,23 +20,31 @@ import (
 // fencedFixture is the service whose tables declare fences: Parcel one
 // over the row, Delivery two, each over its own columns, a relation's key
 // among them, and Depot one over a name and a nullable timestamp. Courier
-// has none.
+// has none. The relation's delete action is RESTRICT: the build takes no
+// fence that covers a relation the database itself would clear.
 var fencedFixture = filepath.Join(sqlgenFixtures, "fixture-fenced-db")
 
 // fenceWrite is one statement TestFences of testdata/pgconverge and of
 // testdata/sqliteconverge runs, and what it must do. A write a fence
 // refuses names the fence, as Type.field, and what its Postgres message
-// says after the column's name; one that passes names neither. After
-// either, Query's rows are Want: each row's columns joined by "|", NULL
-// for a null, and the rows by "; ". A refused write's Want is what the
-// rows held before it.
+// says after the column's name; a write a relation's foreign key refuses,
+// and no fence, names the relation, as Type.field; one that passes names
+// none of them. After either, Query's rows are Want: each row's columns
+// joined by "|", NULL for a null, and the rows by "; ". A refused write's
+// Want is what the rows held before it.
 type fenceWrite struct {
-	Name  string `json:"name"`
-	SQL   string `json:"sql"`
-	Fence string `json:"-"`
-	Says  string `json:"-"`
-	Query string `json:"query"`
-	Want  string `json:"want"`
+	Name     string `json:"name"`
+	SQL      string `json:"sql"`
+	Fence    string `json:"-"`
+	Says     string `json:"-"`
+	Relation string `json:"-"`
+	Query    string `json:"query"`
+	Want     string `json:"want"`
+
+	// ForeignKey is the constraint of Relation, which the test fills from
+	// the tables sqlgen built. Postgres's error names it; SQLite's names
+	// no constraint.
+	ForeignKey string `json:"foreignKey,omitempty"`
 
 	// Constraint is the constraint Postgres's error names, and Message the
 	// dialect's message: Postgres's whole, and SQLite's fixed one. The
@@ -65,6 +73,12 @@ func (s *fenceScript) pass(name, sql, query, want string) {
 // query's rows as they were.
 func (s *fenceScript) refuse(name, sql, fence, says, query string) {
 	s.writes = append(s.writes, fenceWrite{Name: name, SQL: sql, Fence: fence, Says: says, Query: query, Want: s.held[query]})
+}
+
+// restrict adds a write the foreign key of relation refuses, and no
+// fence, which leaves query's rows as they were.
+func (s *fenceScript) restrict(name, sql, relation, query string) {
+	s.writes = append(s.writes, fenceWrite{Name: name, SQL: sql, Relation: relation, Query: query, Want: s.held[query]})
 }
 
 // fenceWrites are the writes the fixture's fences are tried with, in both
@@ -195,11 +209,13 @@ func fenceWrites() []fenceWrite {
 		other(`"address" = '10 Mill', "plan_version" = 8`)+` AND "plan_version" = 7`, second, "8|3|10 Mill|NULL|0|NULL|NULL")
 	s.refuse("a writer that writes the planVersion the row holds", other(`"address" = '11 Mill', "plan_version" = 8`),
 		"Delivery.planVersion", "must advance from 8 to 9, not to 8", second)
-	// The key's ON DELETE SET NULL is an update of courier_id that adds
-	// nothing, so the fence refuses the delete of a courier a delivery
-	// names, in both dialects.
-	s.refuse("a delete of a courier a delivery names, which sets its courier to null", `DELETE FROM "courier" WHERE "id" = `+c1,
-		"Delivery.planVersion", "must advance from 7 to 8, not to 7", first)
+	// The courier's delete action is RESTRICT, so the key refuses the
+	// delete of a courier a delivery names, in both dialects, and no fence
+	// hears of it: the delete writes no delivery. A SET NULL would be an
+	// update of courier_id that adds nothing, which the fence refuses as
+	// it does the writes above that clear the courier and leave
+	// planVersion, so the build takes no fence over such a relation.
+	s.restrict("a delete of a courier a delivery names", `DELETE FROM "courier" WHERE "id" = `+c1, "Delivery.courier", first)
 	s.pass("a delete of a courier no delivery names", `DELETE FROM "courier" WHERE "id" = `+c2,
 		`SELECT "name" FROM "courier"`, "Ada")
 
@@ -259,7 +275,8 @@ func optimisticFences(dialect Dialect) func(*ir.Schema) {
 // fenceCases are the services whose fences run, each with its writes: the
 // fixture, the fixture under oddFenceNames, and the fixture with its
 // tables @optimistic. A refused write's constraint and messages are those
-// of the fence sqlgen builds.
+// of the fence sqlgen builds, and a restricted one's constraint is the
+// foreign key's.
 func fenceCases(t *testing.T, dialect Dialect) map[string]struct {
 	schema *ir.Schema
 	writes []fenceWrite
@@ -287,10 +304,25 @@ func fenceCases(t *testing.T, dialect Dialect) map[string]struct {
 		for _, f := range ddl.Fences {
 			fences[f.Origin+"."+f.Field] = f
 		}
+		keys := map[string]string{}
+		for _, table := range ddl.Tables {
+			for _, column := range table.Columns {
+				for _, fk := range table.ForeignKeys {
+					if fk.Column == column.Name {
+						keys[column.Origin] = fk.ConstraintName
+					}
+				}
+			}
+		}
 		writes := fenceWrites()
 		for i := range writes {
 			w := &writes[i]
 			w.SQL, w.Query = c.respell.Replace(w.SQL), c.respell.Replace(w.Query)
+			if w.Relation != "" {
+				if w.ForeignKey = keys[w.Relation]; w.ForeignKey == "" {
+					t.Fatalf("%s: the service has no foreign key of %s", name, w.Relation)
+				}
+			}
 			if w.Fence == "" {
 				continue
 			}
@@ -341,8 +373,9 @@ func runFences(t *testing.T, module string, env ...string) {
 // with the fences untouched; each of Delivery's fences counts its own
 // columns, and a write of both parties' needs both advanced; a relation's
 // key, a null set and a null cleared are changes; a fence without covers
-// counts every update; an insert passes at any value; and drop.sql drops
-// the fences. testdata/pgconverge's TestFences holds the checks. Set
+// counts every update; an insert passes at any value; the delete of a row
+// a covered relation names is refused by the relation's key, whose delete
+// action is RESTRICT, and by no fence; and drop.sql drops the fences. testdata/pgconverge's TestFences holds the checks. Set
 // SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
 // TestConvergenceOnPostgres.
 func TestFencesOnPostgres(t *testing.T) {

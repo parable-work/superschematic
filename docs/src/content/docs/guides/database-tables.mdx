@@ -1283,7 +1283,8 @@ export abstract class Parcel {
 
 // A delivery two parties write. A write of one party's fields leaves the
 // other's counter as it was. No fence covers note or updatedAt: a write
-// of them alone advances neither counter.
+// of them alone advances neither counter. The courier's delete action is
+// RESTRICT: a fence covers no relation the database would clear itself.
 @fenced<Delivery>({ field: "planVersion", covers: ["address", "courier"] })
 @fenced<Delivery>({ field: "runVersion", covers: ["attempts", "proof"] })
 export abstract class Delivery {
@@ -1292,7 +1293,7 @@ export abstract class Delivery {
 
   address: string;
 
-  courier: Nullable<Relation<Courier, { onDelete: "SET NULL" }>>;
+  courier: Nullable<Relation<Courier, { onDelete: "RESTRICT" }>>;
 
   planVersion: Default<Generic.Int64, 0>;
 
@@ -1328,7 +1329,7 @@ export abstract class Depot {
 | Option | What it sets |
 | --- | --- |
 | `field` | the fence: a required integer field of the class, as `Default<Generic.Int64, 0>` |
-| `covers` | the fields whose change the fence counts. Without it the fence counts every update of the row. A relation is covered as the key it stores |
+| `covers` | the fields whose change the fence counts. Without it the fence counts every update of the row. A relation is covered as the key it stores, and its `onDelete` is not `SET NULL` |
 
 The rule, for an update of a row:
 
@@ -1369,8 +1370,8 @@ the fence's field:
 @fenced on Delivery.runVersion: covers lists address, which the fence on Delivery.planVersion covers; one fence covers a field, so a write of it advances one counter
 ```
 
-Two more refusals keep a fence away from a writer that would not advance
-it:
+Three more refusals keep a fence away from a writer that would not
+advance it:
 
 - A table that composes a behavior takes no fence, with `covers` or
   without: one that types a field as a behavior, as `status: Workflow<{
@@ -1386,9 +1387,20 @@ it:
   own that sets `_version` alone, which a fence over the whole row would
   refuse. List the fields the fence counts, or build the service for
   Postgres alone.
+- A fence counts no relation the database itself rewrites. A relation
+  whose `onDelete` is `SET NULL` has the database set its column when
+  the row it names is deleted. That is an update no writer makes, so it
+  advances no fence: the trigger would refuse it, and the delete with
+  it. So the build refuses a fence that covers such a relation, and a
+  fence without `covers` on a table that has one. Give the relation
+  another `onDelete`, or leave it out of `covers`; for a fence without
+  `covers`, list `covers` without it. `CASCADE`, `RESTRICT` and `NO
+  ACTION` update no row, and a fence covers a relation with any of
+  them.
 
 ```
 @fenced on Ticket: Ticket composes the Workflow behavior, so the behaviors' core writes its rows, the table's own fields among them, with statements of its own, which advance no fence; a fence on a table that composes a behavior is not built
+@fenced on Delivery.planVersion: covers lists courier, a relation to Courier whose onDelete is SET NULL, so the database sets courier's column itself when the Courier it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or leave it out of covers
 ```
 
 A JSON or YAML schema file writes the same list on the type, under
@@ -1481,6 +1493,11 @@ n, err := db.Delivery.UpdateMany(ctx,
   `UpdateOneIfVersion` is `_version`'s. Filter on the fence field and set
   it, as above.
 - A member of a version graph takes no fence.
+- A fence's trigger does not tell the database's own write from a
+  writer's. A relation's `SET NULL` is an update it would refuse, so the
+  build refuses a fence that counts such a relation, and the delete of
+  a row a covered relation names is the foreign key's to refuse
+  (`RESTRICT`, `NO ACTION`) or to carry to the row (`CASCADE`).
 - A generated server has no answer of its own for a fence's refusal: it
   is the database's error, as a state machine guard's is
   ([What a state machine does not do](#what-a-state-machine-does-not-do)).

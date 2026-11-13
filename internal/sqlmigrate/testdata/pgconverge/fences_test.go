@@ -20,18 +20,24 @@ type fenceCase struct {
 }
 
 // fenceWrite is one statement and what it must do. A write a fence
-// refuses names the fence's constraint and its whole message; one that
-// passes names neither. After either, Query's rows are Want: each row's
-// columns joined by "|", NULL for a null, and the rows by "; ". A refused
-// write's Want is what the rows held before it.
+// refuses names the fence's constraint and its whole message; a write a
+// foreign key refuses, and no fence, names the key's constraint; one that
+// passes names none of them. After either, Query's rows are Want: each
+// row's columns joined by "|", NULL for a null, and the rows by "; ". A
+// refused write's Want is what the rows held before it.
 type fenceWrite struct {
 	Name       string `json:"name"`
 	SQL        string `json:"sql"`
 	Constraint string `json:"constraint"`
 	Message    string `json:"message"`
+	ForeignKey string `json:"foreignKey"`
 	Query      string `json:"query"`
 	Want       string `json:"want"`
 }
+
+// The codes of a delete a foreign key refuses: foreign_key_violation,
+// and restrict_violation, which later servers give a RESTRICT.
+const foreignKeyViolation, restrictViolation = "23503", "23001"
 
 // shownRows are a query's rows as a fenceWrite's Want writes them.
 func shownRows(ctx context.Context, conn *pgx.Conn, query string) (string, error) {
@@ -59,8 +65,10 @@ func shownRows(ctx context.Context, conn *pgx.Conn, query string) (string, error
 // database its create.sql made (D118). A write a fence allows passes, and
 // one it does not is refused with check_violation (23514), the fence's
 // constraint and its message, which holds the stored, the expected and the
-// written value; either way the rows then hold what the case says, so a
-// refused write leaves them as they were. drop.sql then leaves no fence.
+// written value; one a foreign key refuses fails with the key's
+// constraint, and not with a fence's; either way the rows then hold what
+// the case says, so a refused write leaves them as they were. drop.sql
+// then leaves no fence.
 func TestFences(t *testing.T) {
 	casesDir := os.Getenv("PGCONVERGE_FENCES")
 	if casesDir == "" {
@@ -95,7 +103,15 @@ func TestFences(t *testing.T) {
 			passed, refused := 0, 0
 			for _, w := range fc.Writes {
 				_, err := conn.PgConn().Exec(ctx, w.SQL).ReadAll()
+				var pgErr *pgconn.PgError
 				switch {
+				case w.ForeignKey != "" && err == nil:
+					t.Errorf("%s passes, and the foreign key %s refuses it\n%s", w.Name, w.ForeignKey, w.SQL)
+				case w.ForeignKey != "":
+					refused++
+					if !errors.As(err, &pgErr) || (pgErr.Code != foreignKeyViolation && pgErr.Code != restrictViolation) || pgErr.ConstraintName != w.ForeignKey {
+						t.Errorf("%s fails with %v, want a violation of the foreign key %s\n%s", w.Name, err, w.ForeignKey, w.SQL)
+					}
 				case w.Constraint == "" && err != nil:
 					t.Errorf("%s is refused: %v\n%s", w.Name, err, w.SQL)
 				case w.Constraint == "":
@@ -104,7 +120,6 @@ func TestFences(t *testing.T) {
 					t.Errorf("%s passes, and %s refuses it\n%s", w.Name, w.Constraint, w.SQL)
 				default:
 					refused++
-					var pgErr *pgconn.PgError
 					if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != w.Constraint || pgErr.Message != w.Message {
 						t.Errorf("%s fails with %v, want check_violation (23514) of the constraint %s: %s\n%s", w.Name, err, w.Constraint, w.Message, w.SQL)
 					}

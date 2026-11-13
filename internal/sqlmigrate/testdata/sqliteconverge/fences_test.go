@@ -22,17 +22,23 @@ type fenceCase struct {
 }
 
 // fenceWrite is one statement and what it must do. A write a fence
-// refuses names the message the fence's trigger fails it with; one that
-// passes names none. After either, Query's rows are Want: each row's
-// columns joined by "|", NULL for a null, and the rows by "; ". A refused
-// write's Want is what the rows held before it.
+// refuses names the message the fence's trigger fails it with; a write a
+// foreign key refuses, and no fence, names the key; one that passes names
+// neither. After either, Query's rows are Want: each row's columns joined
+// by "|", NULL for a null, and the rows by "; ". A refused write's Want is
+// what the rows held before it.
 type fenceWrite struct {
-	Name    string `json:"name"`
-	SQL     string `json:"sql"`
-	Message string `json:"message"`
-	Query   string `json:"query"`
-	Want    string `json:"want"`
+	Name       string `json:"name"`
+	SQL        string `json:"sql"`
+	Message    string `json:"message"`
+	ForeignKey string `json:"foreignKey"`
+	Query      string `json:"query"`
+	Want       string `json:"want"`
 }
+
+// foreignKeyFailed is the message of a write a foreign key refuses, which
+// names no constraint.
+const foreignKeyFailed = "FOREIGN KEY constraint failed"
 
 // shownRows are a query's rows as a fenceWrite's Want writes them.
 func shownRows(ctx context.Context, conn *sql.Conn, query string) (string, error) {
@@ -72,8 +78,9 @@ func shownRows(ctx context.Context, conn *sql.Conn, query string) (string, error
 // TestFences runs the writes of each case under SQLITECONVERGE_FENCES on a
 // database its create.sql made (D118). A write a fence allows passes, and
 // one it does not fails with the fence's message as
-// SQLITE_CONSTRAINT_TRIGGER (1811); either way the rows then hold what the
-// case says, so a refused write leaves them as they were.
+// SQLITE_CONSTRAINT_TRIGGER (1811); one a foreign key refuses fails with
+// the key's message, and not with a fence's; either way the rows then
+// hold what the case says, so a refused write leaves them as they were.
 func TestFences(t *testing.T) {
 	casesDir := os.Getenv("SQLITECONVERGE_FENCES")
 	if casesDir == "" {
@@ -106,6 +113,13 @@ func TestFences(t *testing.T) {
 			for _, w := range fc.Writes {
 				_, err := conn.ExecContext(ctx, w.SQL)
 				switch {
+				case w.ForeignKey != "" && err == nil:
+					t.Errorf("%s passes, and the foreign key %s refuses it\n%s", w.Name, w.ForeignKey, w.SQL)
+				case w.ForeignKey != "":
+					refused++
+					if !strings.Contains(err.Error(), foreignKeyFailed) {
+						t.Errorf("%s fails with %v, want %q of the foreign key %s\n%s", w.Name, err, foreignKeyFailed, w.ForeignKey, w.SQL)
+					}
 				case w.Message == "" && err != nil:
 					t.Errorf("%s is refused: %v\n%s", w.Name, err, w.SQL)
 				case w.Message == "":

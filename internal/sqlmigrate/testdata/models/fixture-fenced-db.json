@@ -108,14 +108,14 @@
           "type": "TIMESTAMPTZ"
         }
       ],
-      "comment": "A delivery two parties write, neither waiting on the other. The planner\nwrites the address and the courier, a relation, covered as the key it\nstores, and advances planVersion; the courier's device writes attempts\nand proof, and advances runVersion. A write of one party's fields leaves\nthe other's counter as it was, so neither fails the other's compare.\nNo fence covers note or updatedAt: a write of them alone advances\nneither counter.",
+      "comment": "A delivery two parties write, neither waiting on the other. The planner\nwrites the address and the courier, a relation, covered as the key it\nstores, and advances planVersion; the courier's device writes attempts\nand proof, and advances runVersion. A write of one party's fields leaves\nthe other's counter as it was, so neither fails the other's compare.\nNo fence covers note or updatedAt: a write of them alone advances\nneither counter. The courier is nullable, set and cleared by the\nplanner's writes alone: its delete action is RESTRICT, so a courier a\ndelivery names is not deleted. A SET NULL would have the database clear\nthe column itself, an update that advances no fence, and the build\nrefuses a fence that covers such a relation.",
       "foreignKeys": [
         {
           "columns": [
             "courier_id"
           ],
           "name": "fk_delivery_courier_id",
-          "onDelete": "SET NULL",
+          "onDelete": "RESTRICT",
           "refColumns": [
             "id"
           ],

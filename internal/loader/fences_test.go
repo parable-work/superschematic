@@ -49,6 +49,13 @@ func TestFencedFixtureLoads(t *testing.T) {
 // and whatever else a case declares.
 func fencedService(t *testing.T, dialects, job string) string {
 	t.Helper()
+	return fencedServiceOwnedBy(t, dialects, `{"type": "Owner"}`, job)
+}
+
+// fencedServiceOwnedBy is fencedService with the relation of the Job's
+// owner as given, its delete action in it.
+func fencedServiceOwnedBy(t *testing.T, dialects, owner, job string) string {
+	t.Helper()
 	return writeService(t, map[string]string{
 		"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {"sql": {"dialects": ` + dialects + `}}}`,
 		"src/job.schema.json": `{
@@ -79,7 +86,7 @@ func fencedService(t *testing.T, dialects, job string) string {
 						{"name": "id", "typeRef": {"name": "string"}, "required": true, "key": true},
 						{"name": "label", "typeRef": {"name": "string"}, "required": true},
 						{"name": "priority", "typeRef": {"name": "Generic.Int64"}, "required": true},
-						{"name": "owner", "typeRef": {"name": "Owner"}, "relation": {"type": "Owner"}},
+						{"name": "owner", "typeRef": {"name": "Owner"}, "relation": ` + owner + `},
 						{"name": "planVersion", "typeRef": {"name": "Generic.Int64"}, "required": true, "default": "0"},
 						{"name": "claimedBy", "typeRef": {"name": "string"}},
 						{"name": "progress", "typeRef": {"name": "Generic.Int64"}, "required": true},
@@ -290,6 +297,61 @@ func TestFencedRefusedBesideABehavior(t *testing.T) {
 	}
 	if job := schema.Types["Job"]; len(job.Fences) != 1 || len(job.TableBehaviors()) != 0 {
 		t.Errorf("Job = %s", marshal(t, job))
+	}
+}
+
+// TestFencedRefusesARelationTheDatabaseRewrites: a relation whose delete
+// action is SET NULL is a column the database itself updates when the row
+// it names is deleted, a write that advances no fence. So the build
+// refuses a fence that covers it, and a fence with no covers on its
+// table, and takes the same table with the relation left out of covers
+// or with a delete action that updates no row (D118).
+func TestFencedRefusesARelationTheDatabaseRewrites(t *testing.T) {
+	const setNull = `{"type": "Owner", "onDelete": "SET NULL"}`
+	const why = "so the database sets owner's column itself when the Owner it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), "
+	const covered = `"fences": [{"field": "planVersion", "covers": ["label", "owner"]}, {"field": "executionVersion", "covers": ["progress"]}]`
+	const whole = `"fences": [{"field": "planVersion"}]`
+	for _, tc := range []struct {
+		name   string
+		fences string
+		want   string
+	}{
+		{"a covered relation", covered,
+			"@fenced on Job.planVersion: covers lists owner, a relation to Owner whose onDelete is SET NULL, " + why + "or leave it out of covers"},
+		{"a fence with no covers", whole,
+			"@fenced on Job.planVersion: the fence lists no covers, so it counts every update of Job, and owner is a relation to Owner whose onDelete is SET NULL, " + why + "or list in covers the fields the fence counts, without owner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadService(fencedServiceOwnedBy(t, bothDialects, setNull, tc.fences))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadService = %v, want an error containing %q", err, tc.want)
+			}
+			if n := strings.Count(err.Error(), "@fenced on Job"); n != 1 {
+				t.Errorf("LoadService reports %d fence errors, want 1: %v", n, err)
+			}
+		})
+	}
+
+	// No fence counts the relation: the database clears it, and both
+	// fences keep their values.
+	if _, err := LoadService(fencedServiceOwnedBy(t, bothDialects, setNull,
+		`"fences": [{"field": "planVersion", "covers": ["label", "priority"]}, {"field": "executionVersion", "covers": ["progress"]}]`)); err != nil {
+		t.Errorf("a SET NULL relation no fence covers: LoadService: %v", err)
+	}
+	// A delete action that updates no row, covered and under a fence with
+	// no covers.
+	for _, action := range []string{"CASCADE", "RESTRICT", "NO ACTION"} {
+		owner := `{"type": "Owner", "onDelete": "` + action + `"}`
+		for _, fences := range []string{covered, whole} {
+			schema, err := LoadService(fencedServiceOwnedBy(t, bothDialects, owner, fences))
+			if err != nil {
+				t.Errorf("%s: LoadService: %v", action, err)
+				continue
+			}
+			if got := fieldNamed(schema.Types["Job"].Fields, "owner").Relation.OnDelete; got != action {
+				t.Errorf("Job.owner onDelete = %q, want %q", got, action)
+			}
+		}
 	}
 }
 

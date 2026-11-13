@@ -2,6 +2,7 @@ package verify
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -176,6 +177,84 @@ func TestFenceRefusesACoveredColumnNoEqualityCompares(t *testing.T) {
 	schema, in = fenceSchema()
 	oneFence(schema)
 	wantFenceErrors(t, schema, in)
+}
+
+// ownerOnDelete gives the Job's owner the delete action given.
+func ownerOnDelete(schema *ir.Schema, action string) {
+	fieldNamed(jobOf(schema), "owner").Relation = &ir.RelationDef{Type: "Owner", OnDelete: action}
+}
+
+// A SET NULL is an update the database itself makes of each row that
+// names a deleted row. It changes a covered column and advances nothing,
+// so the trigger would refuse it, and the delete with it: a fence covers
+// no such relation.
+func TestFenceRefusesACoveredRelationTheDatabaseRewrites(t *testing.T) {
+	const what = ", so the database sets owner's column itself when the Owner it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or leave it out of covers"
+	schema, in := fenceSchema()
+	ownerOnDelete(schema, "SET NULL")
+	wantFenceErrors(t, schema, in, "@fenced on Job.version: covers lists owner, a relation to Owner whose onDelete is SET NULL"+what)
+
+	// The rule lists the actions that leave the column, so one the IR
+	// does not have, which ir.Schema.Validate refuses, is held to it too.
+	schema, in = fenceSchema()
+	ownerOnDelete(schema, "SET DEFAULT")
+	wantFenceErrors(t, schema, in, "@fenced on Job.version: covers lists owner, a relation to Owner whose onDelete is SET DEFAULT"+what)
+
+	// A key held in a column of its own, which a relation names the table
+	// of, is rewritten the same way.
+	schema, in = fenceSchema()
+	job := jobOf(schema)
+	job.Fields = append(job.Fields, &ir.FieldDef{Name: "reviewerId", TypeRef: ir.TypeRef{Name: "Identity.UUID"},
+		Relation: &ir.RelationDef{Type: "Owner", OnDelete: "SET NULL"}})
+	job.Fences[0].Covers = []string{"label", "reviewerId"}
+	wantFenceErrors(t, schema, in, "@fenced on Job.version: covers lists reviewerId, a relation to Owner whose onDelete is SET NULL, so the database sets reviewerId's column itself when the Owner it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or leave it out of covers")
+
+	// A relation no fence covers is the database's to clear: the write
+	// changes no covered column and keeps both fences.
+	schema, in = fenceSchema()
+	ownerOnDelete(schema, "SET NULL")
+	jobOf(schema).Fences[0].Covers = []string{"label", "priority"}
+	wantFenceErrors(t, schema, in)
+}
+
+// A fence with no covers counts every update of the row, the database's
+// own among them: each relation of the table it rewrites is refused.
+func TestFenceRefusesNoCoversBesideARelationTheDatabaseRewrites(t *testing.T) {
+	const what = "@fenced on Job.version: the fence lists no covers, so it counts every update of Job, and %[1]s is a relation to Owner whose onDelete is %[2]s, so the database sets %[1]s's column itself when the Owner it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or list in covers the fields the fence counts, without %[1]s"
+	schema, in := fenceSchema()
+	oneFence(schema)
+	ownerOnDelete(schema, "SET NULL")
+	wantFenceErrors(t, schema, in, fmt.Sprintf(what, "owner", "SET NULL"))
+
+	schema, in = fenceSchema()
+	job := oneFence(schema)
+	ownerOnDelete(schema, "SET NULL")
+	job.Fields = append(job.Fields, &ir.FieldDef{Name: "reviewer", TypeRef: ir.TypeRef{Name: "Owner"},
+		Relation: &ir.RelationDef{Type: "Owner", OnDelete: "SET DEFAULT"}})
+	wantFenceErrors(t, schema, in, fmt.Sprintf(what, "owner", "SET NULL"), fmt.Sprintf(what, "reviewer", "SET DEFAULT"))
+
+	// The same table with the relation left out of a fence's covers.
+	schema, in = fenceSchema()
+	job = oneFence(schema)
+	ownerOnDelete(schema, "SET NULL")
+	job.Fences[0].Covers = []string{"label", "priority"}
+	wantFenceErrors(t, schema, in)
+}
+
+// CASCADE, the default, deletes the row, and RESTRICT and NO ACTION
+// refuse the delete: none updates it, so a fence covers such a relation,
+// and a fence with no covers stands beside it.
+func TestFenceTakesARelationTheDatabaseDoesNotRewrite(t *testing.T) {
+	for _, action := range []string{"", "CASCADE", "RESTRICT", "NO ACTION"} {
+		schema, in := fenceSchema()
+		ownerOnDelete(schema, action)
+		wantFenceErrors(t, schema, in)
+
+		schema, in = fenceSchema()
+		oneFence(schema)
+		ownerOnDelete(schema, action)
+		wantFenceErrors(t, schema, in)
+	}
 }
 
 // A class with no table has no row to fence: reported once for the class,

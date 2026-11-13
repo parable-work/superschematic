@@ -18424,7 +18424,22 @@ a SQLite file read with a rename of a guarded column, whose guard of the
 old name is then a trigger the read does not know and the plan is told to
 drop; and a team's own names for a machine's states.
 
-Status: proposed, not built.
+Status: built. The declaration's rules are held by `ir/state_machine_test.go`,
+the field's and the enum's by `internal/loader/verify/state_machine_test.go`,
+and the three authoring forms by `internal/loader/state_machines_test.go`
+and `internal/writer/state_machine_test.go`, over the fixture
+`fixture-state-machine-db`, whose `accountStatus` is typed by the enum of
+`fixture-state-machine-enums`. `TestStateMachineGuardsOnPostgres` and
+`TestStateMachineGuardsOnSQLite` (`internal/sqlmigrate`) try every pair
+of values against the guards, `TestStateMachineGuardPhases`,
+`TestRefusingTriggerPhases` and `TestEnqueueTriggerPhasesUnchanged` hold
+the planner's rule, and the plan cases converge on both databases.
+`TestGeneratedStateMachineHelpers` (`typegen`, `pygen`) and
+`TestStateMachineHelpers` (`tsgen`, `rustgen`) run the helpers in their
+languages, and `TestStateMachineParity` (`internal/generator/parity`)
+holds the four helpers and the two guards to one answer on every pair.
+`examples/migrations` adds a machine in its second version, and its check
+finds no guard between the phases and the guard after `contract`.
 
 ## D118. A table names a counter every covered write advances by one with `@fenced`: a trigger on Postgres and SQLite refuses a write that does not, and the generated repositories advance it themselves (D27, D79, D116 amended)
 
@@ -18448,9 +18463,9 @@ which writer it is.
 |----------|------------------------|
 | `@fenced<T>({ field, covers? })`, from `@superschematic/schema`, on a table of a DB schema. `field` is a required integer field of the class, the fence. Without `covers`, every update of a row sets the fence to the stored value plus one. With `covers`, a list of the class's fields, an update that changes one of them does, and any other update keeps the fence or adds one: it never skips a value, moves it back or sets it null. A class has several fences only when each lists its `covers`, and no field is in two lists. An insert is not fenced. TypeScript holds `field` to a number that is never null (`FenceFieldOf`) and `covers` to the class's fields. | Options on `@optimistic`, whose counter is the database's to bump and is no field of the class. A trigger that advances the fence itself: with two fences it advances both or guesses, and a writer that named the value it read would be refused for adding one. |
 | The IR holds `TypeDef.Fences`, each a `Field` and its `Covers`, and the data forms write the same under `fences`. | |
-| The build refuses, naming the type and the field: a fence field the class lacks, one that is nullable, one whose column is not `SMALLINT`, `INTEGER` or `BIGINT`, a relation among them, one a `@stateMachine` (D117) governs, and one two fences name; a class with several fences where one has no `covers`; an empty `covers`; and a covered field that the class lacks, that stores no column, whose column `IS DISTINCT FROM` cannot compare (`POINT`, a PostGIS type, as in D80), that is listed twice, that is a fence's own field or another fence's, or that two fences cover. A relation is its key's column, as in `@enqueueOnChange` (D80). | |
+| The build refuses, naming the type and the field: a fence field the class lacks, one that is nullable, one whose column is not `SMALLINT`, `INTEGER` or `BIGINT`, a relation among them, one a `@stateMachine` (D117) governs, and one two fences name; a class with several fences where one has no `covers`; an empty `covers`; and a covered field that the class lacks, that stores no column, whose column `IS DISTINCT FROM` cannot compare (`POINT`, a PostGIS type, as in D80), that is listed twice, that is a fence's own field or another fence's, or that two fences cover. A relation is its key's column, as in `@enqueueOnChange` (D80), and one the database itself rewrites is refused: a covered relation whose `onDelete` is `SET NULL`, and a fence without `covers` on a table that has one. `CASCADE`, `RESTRICT` and `NO ACTION` update no row and are taken; the check lists those, so an action the IR gains later is refused until it is listed. That action is an update no writer makes, so it advances nothing, and the trigger would refuse the delete of the row it names. | Passing a referential action in the trigger, which SQLite cannot tell from any other update, and which would change a covered column under a reader that compared the fence. |
 | It also refuses what no generated writer would follow: a class that is no table, a `@queue` class and an engine type; a member of a version graph, whose engines write its rows; a table that composes a behavior, since the behaviors' core then writes its rows, the table's own fields among them, with statements of its own that advance no fence, and the repository's update, upsert and soft delete go through it; and, in a service that lists `sqlite`, a fence without `covers` on an `@optimistic` table, whose bump there is an update of its own that sets `_version` alone. | Advancing a fence in the core's three adapters, which is their statements, their layouts and both recorded corpora: left below. |
-| A table gets, per fence, a trigger in each dialect the service lists. Postgres: the function `<table>_<column>_fence()` and the trigger `trg_<table>_<column>_fence`, `BEFORE UPDATE` of the row, which raise `check_violation` with the constraint `<table>_<column>_fence` and the stored, the expected and the written value in the message; covered columns are compared as one row, `ROW(NEW...) IS DISTINCT FROM ROW(OLD...)`. SQLite: one trigger of the same name whose `WHEN` is the same rule, column by column with `IS NOT`, and whose body is `SELECT RAISE(ABORT, ...)` with a fixed message. A name over 63 bytes fails the build. | |
+| A table gets, per fence, a trigger in each dialect the service lists. Postgres: the function `<table>_<column>_fence()` and the trigger `trg_<table>_<column>_fence`, `BEFORE UPDATE` of the row, which raise `check_violation` with the constraint `<table>_<column>_fence` and the stored, the expected and the written value in the message; covered columns are compared as one row, `ROW(NEW...) IS DISTINCT FROM ROW(OLD...)`. SQLite: one trigger of the same name whose `WHEN` is the same rule, column by column with `IS NOT`, and whose body is `SELECT RAISE(ABORT, ...)` with a fixed message. A name over 63 bytes fails the build. The rule is of values, not of statements: a covered column set to the value it holds is no change, and passes with the bump or without; a write of the fence alone passes when it keeps the value or adds one, and with no `covers` only when it adds one; and a null fence is the trigger's to refuse, since it fires before the column's NOT NULL. The stored value plus one is worked out only for a write it decides, so an update of other columns passes on a row whose fence is at its type's last value. | |
 | The migration planner places a fence's trigger by D117's rule for a trigger that refuses a write: created in contract, a changed one dropped in expand and created in contract, dropped in contract. So the previous version's servers, whose repositories advance nothing, are never refused. | |
 | The generated repositories advance a fence themselves, in Go, TypeScript and Rust, on each dialect they run. `sqlutil` writes it once, as it writes every statement (D79): a table's model lists its fences, and an update, an `UpdateMany` and the update half of an upsert add `<fence> = <table>.<fence> + 1` once when the columns they set include one the fence covers, or any column when it has no `covers`; the stored value is named by its table, since Postgres reads a bare column in `ON CONFLICT DO UPDATE` as ambiguous. Which columns a write sets is known when it runs, so each language holds the rule once, over the table's fences as data: `fenceBumps` in the Go module's `fences.go`, `fenceBumps` in the TypeScript runtime and `plan::fence_bumps` in the Rust one. A stamp the repository adds (`updated_at`) is a column the write sets, and counts when a fence covers it. A column the write sets to the value it holds counts, which the trigger allows. A soft delete and a reseal, whose columns are fixed, carry the bump in their statement when a fence covers them. So a `@tableOperation` (D106), which writes through the repository, needs nothing of its own. | Leaving the bump to the caller, as a hand-written writer has it: every update through a repository would be refused, and with it every table operation, until each caller read the row and wrote the counter. Advancing only when a covered column's value changed, which the statement cannot know without the row. |
 | A write that sets the fence field itself is written as it stands, with no bump added, and the trigger judges it. So a caller that read 4 may write 5, and its compare is a filter on the fence field (`UpdateMany`). A snapshot update, which sets every field from its input, sets the fence so, and its caller writes the next value. An upsert that sets an encrypted field beside a covered one is two statements (D79), and each advances the fence. | Leaving the field out of an update's type, which takes away the one way to write the value a caller compared. A second assignment beside the caller's, which SQL refuses. |
@@ -18461,4 +18476,19 @@ table that composes a behavior; a compare-and-set of a repository's own,
 a version graph's member; and a generated server's answer to a fence's
 refusal, which is any refused write's.
 
-Status: proposed, not built.
+Status: built. The declaration's rules are held by `ir/fence_test.go`,
+the table's, the fields' and the service's by
+`internal/loader/verify/fence_test.go`, and the three authoring forms by
+`internal/loader/fences_test.go` and `internal/writer/fenced_test.go`,
+over the fixture `fixture-fenced-db`. `TestFencesOnPostgres` and
+`TestFencesOnSQLite` (`internal/sqlmigrate`) run one script of writes
+against the triggers, the statements the repositories send among them,
+and `TestFencePhases` and `TestFenceFollowsRenames` hold the plans.
+`internal/generator/sqlutil/fence_test.go` holds the rule the three
+repositories share. The Go repositories are run under the triggers on
+Postgres by `TestFencesOnPostgres` and
+`TestFenceOverAnEncryptedFieldOnPostgres` (`ormgen`), the TypeScript ones
+by `TestRepositoriesOnPostgres/fixture-fenced-db` (`tsgen`), and the Rust
+ones on SQLite and Postgres by `TestFencesOnSQLiteAndPostgres`
+(`rustgen`); a Go or a TypeScript repository runs on Postgres alone, as
+before, so SQLite's are Rust's.

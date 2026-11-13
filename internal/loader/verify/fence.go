@@ -34,6 +34,13 @@ import (
 // an @optimistic table lists its covers: there the bump of _version is an
 // update of its own that sets _version alone.
 //
+// A fence counts no relation the database itself rewrites
+// (setOnDelete): the update a SET NULL makes of the rows that name a
+// deleted row advances no fence, so the trigger would refuse it, and the
+// delete with it, and no writer could make it pass. A covered relation
+// has another delete action, and a fence with no covers stands on a table
+// with no such relation.
+//
 // What the declarations decide alone (one fence per field, covers on
 // every fence of a class with several, no field covered twice) is
 // ir.Schema.Validate's.
@@ -128,7 +135,46 @@ func checkFence(schema *ir.Schema, in Input, td *ir.TypeDef, fence *ir.Fence, sc
 		case !comparable(column.Type):
 			fail("covers lists %s, a %s column, which IS DISTINCT FROM cannot compare, so the fence's trigger could not tell a write that changes it; leave it out", name, column.Type)
 		}
+		if action := setOnDelete(covered); ok && action != "" {
+			fail("covers lists %s, a relation to %s whose onDelete is %s, so the database sets %s's column itself when the %s it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or leave it out of covers",
+				name, relationTarget(covered), action, name, relationTarget(covered))
+		}
 	}
+
+	// With no covers the fence counts every column, so each relation of
+	// the table the database rewrites is one it counts.
+	if fence.CoversRow() {
+		for _, f := range td.Fields {
+			if f == nil {
+				continue
+			}
+			action := setOnDelete(f)
+			if _, ok := sqlutil.ColumnOf(schema, f, scalarTypes); !ok || action == "" {
+				continue
+			}
+			fail("the fence lists no covers, so it counts every update of %s, and %s is a relation to %s whose onDelete is %s, so the database sets %s's column itself when the %s it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or list in covers the fields the fence counts, without %s",
+				td.Name, f.Name, relationTarget(f), action, f.Name, relationTarget(f), f.Name)
+		}
+	}
+}
+
+// setOnDelete returns the delete action of a relation whose foreign key
+// has the database rewrite the field's column when the row it names is
+// deleted, or "" for a field with no such action. Of the actions a
+// relation takes (ir.RelationDef.OnDelete), CASCADE, the default, deletes
+// the row, and RESTRICT and NO ACTION refuse the delete: none updates the
+// row. SET NULL does, and so would any action that is none of those
+// three, which is why the three are the ones listed here. A relation has
+// no update action: sqlgen writes ON DELETE alone.
+func setOnDelete(f *ir.FieldDef) string {
+	if f.Relation == nil || f.JsonField || f.TypeRef.IsMap {
+		return ""
+	}
+	switch f.Relation.OnDelete {
+	case "", "CASCADE", "RESTRICT", "NO ACTION":
+		return ""
+	}
+	return f.Relation.OnDelete
 }
 
 // integerColumn reports whether sqlType is a column a fence counts in:

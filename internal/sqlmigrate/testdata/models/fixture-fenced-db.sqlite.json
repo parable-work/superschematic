@@ -88,7 +88,7 @@
             "courier_id"
           ],
           "name": "fk_delivery_courier_id",
-          "onDelete": "SET NULL",
+          "onDelete": "RESTRICT",
           "refColumns": [
             "id"
           ],
