@@ -17998,6 +17998,37 @@ its user and by an administrator, and is then 401
 `TestRustSDKCallsTheUserModelRoutes` on SQLite and Postgres). The 401's
 documented meaning is now "no usable session or API key".
 
+## D115. A generated Go type's decode error names what it read itself: a union its name, an enum its type and value, and no field the decoder adds (D31 amended)
+
+The generated Go types and their tests were written to a decoder that
+completed an error an `UnmarshalJSON` returned: `encoding/json` filled a
+`*json.UnmarshalTypeError` with the struct and the field around the
+value. D31's amendment chose that error for an enum's refusal partly
+because the decoder would name the field in it, and a union wrapper
+handed back the decoder's own error for a payload that is no object,
+which named the union only through the type of the field around it. The
+project moved from Go 1.26.4 to 1.27.3 (#459), whose `encoding/json`
+gives an `UnmarshalJSON`'s error as it is. Three tests of the full tier,
+which a pull request does not run (D40), fail on it: gosdkgen's
+`TestPagedUnionSDKBuildsAndRuns`, which passed in the full run the day
+before the move and has failed in it since, and typegen's
+`TestGeneratedDurationsReadTheirText` and
+`TestNestedArraysFixtureModules`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A union wrapper's `UnmarshalJSON` names its union in every error it returns, a payload that is no object included: `decode Entry union:` before the decoder's error, which it wraps, so `errors.As` still finds the `*json.UnmarshalTypeError`. | The union's name read from the field around it, which the decoder no longer gives. |
+| An enum's refusal is still the `*json.UnmarshalTypeError` D31's amendment chose, naming the enum's type and the value (`string "purple"`). It names no field, and the tests and `install/go.md` no longer say it does. A generated Go route answers `enum` at the value's path as before: `bodyargs.DecodeRefusal` reads the error's type alone and walks the body beside the Go type itself. | An `UnmarshalJSON` on every generated struct that holds an enum, at any depth of list and map, to complete the path for a caller of `json.Unmarshal` that reads the field from the error: a decoder per struct, which no route needs. An error of a type of our own, which D31's amendment refused. |
+| A type that reads its own durations still names the field in a duration's decode error (`durationFieldError`). The path starts at that type's field, with none of the struct that holds the type. | |
+
+Status: built. gosdkgen's `TestPagedUnionSDKBuildsAndRuns`, and
+typegen's `TestGeneratedDurationsReadTheirText` and
+`TestNestedArraysFixtureModules`, which hold an enum's refusal to its
+type and value. apigen's `TestTableOperationsBesideUnservedOnesCompile`,
+which had refused `filterparse` in `tables.go` since D108 gave the
+fixture a filtered list beside the implementation's, holds that list
+there instead.
+
 ## D116. A Rust API serves a SQLite file through repositories the build writes, answers a request with no transport under it, serves the MCP endpoint and runs behavior workers there, and an `embedded` target builds an environment as one binary that migrates its files as it starts (D27, D53, D57, D79, D81, D103, D106 amended)
 
 D104 held the behaviors to one application: an app that runs coding

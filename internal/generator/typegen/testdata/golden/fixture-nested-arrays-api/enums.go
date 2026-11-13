@@ -14,8 +14,9 @@ import (
 // accepts. null is no value (ok is false), which leaves the enum as it was,
 // as encoding/json leaves a string. A value that is not a string, or a
 // string valid refuses, is refused with the *json.UnmarshalTypeError
-// encoding/json gives a value of the wrong JSON type, naming typ, which
-// encoding/json completes with the field's path.
+// encoding/json gives a value of the wrong JSON type, naming typ and the
+// value. It names no field: encoding/json gives an UnmarshalJSON's error
+// as it is, so a reader that needs the value's path finds it itself.
 func unmarshalEnumJSON(data []byte, typ reflect.Type, valid func(string) bool) (value string, ok bool, err error) {
 	data = bytes.TrimSpace(data)
 	if bytes.Equal(data, []byte("null")) {

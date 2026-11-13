@@ -217,9 +217,11 @@ TypeScript's `Object.values`, and iterating a Python enum. `IsValid()`
 checks membership. Decoding refuses a string the enum lacks, and a value
 that is not a string, as every other language's decoder does: with the
 `*json.UnmarshalTypeError` `encoding/json` gives a value of the wrong JSON
-type, which names the field (`json: cannot unmarshal string "purple" into
-Go struct field Alias.shade of type types.Shade`). null leaves the value
-as it was.
+type, which names the enum and the value (`json: cannot unmarshal string
+"purple" into Go value of type types.Shade`). It names no field:
+`encoding/json` returns an `UnmarshalJSON`'s error as it is. A generated
+route still answers with the value's path, which it finds itself. null
+leaves the value as it was.
 
 A `Temporal.Duration` field holds a `time.Duration`, but is read from its
 text as every validator reads it: the scalar's pattern and length, then

@@ -63,11 +63,13 @@ func (w {{.Name}}Wrapper) Validate() ValidationErrors {
 // values the payload does not contradict and under whose types the payload
 // decodes; when none does, the first member whose tags the payload allows
 // and under whose types it decodes.
-{{end}}// A payload no member reads is an error.
+{{end}}// A payload no member reads is an error, and so is one that is no object.
+// Each error names the union itself: encoding/json gives an error an
+// UnmarshalJSON returns as it is, with no field of the value around it.
 func (w *{{.Name}}Wrapper) UnmarshalJSON(data []byte) error {
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
+		return fmt.Errorf("decode {{.Name}} union: %w", err)
 	}
 	if payload == nil {
 		return fmt.Errorf("decode {{.Name}} union: expected object payload")

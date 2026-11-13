@@ -302,7 +302,8 @@ func TestTableOperationsAPICompiles(t *testing.T) {
 // every operation of IssueView is the implementation's, with its filter's
 // type and its page, in the interface, the scaffolds and the
 // implementation scaffold, while the guest's view of the same table and
-// the other tables are served from tables.go. An API none of whose table
+// the other tables are served from tables.go, Notes's filtered list among
+// them. An API none of whose table
 // operations is served builds too, with no tables.go and no database in
 // its Config.
 func TestTableOperationsBesideUnservedOnesCompile(t *testing.T) {
@@ -343,12 +344,18 @@ func TestTableOperationsBesideUnservedOnesCompile(t *testing.T) {
 			t.Errorf("interfaces.go holds no %q", want)
 		}
 	}
-	for _, want := range []string{"func tableIssuesGetIssueForGuest(", "func asIssueGuestView(row *fixturetrackerdb.Issue) types.IssueGuestView", "func tableCommentsCreateComment(", "func tableTeamsListTeams("} {
+	// Notes's list is served from tables.go and filters (D108), so its
+	// filter's type and filterparse stay there. What only Issues's filter
+	// needs does not: its type, the ordered and text kinds, and contains.
+	for _, want := range []string{
+		"func tableIssuesGetIssueForGuest(", "func asIssueGuestView(row *fixturetrackerdb.Issue) types.IssueGuestView", "func tableCommentsCreateComment(", "func tableTeamsListTeams(",
+		"func tableNotesListNotes(", "type NotesListNotesFilter struct {",
+	} {
 		if !strings.Contains(tables, want) {
 			t.Errorf("tables.go holds no %q", want)
 		}
 	}
-	for _, absent := range []string{"asIssueView", "tableIssuesListIssues", "IssuesListIssuesFilter", "filterparse", "tableContains"} {
+	for _, absent := range []string{"asIssueView", "tableIssuesListIssues", "IssuesListIssuesFilter", "filterparse.Ordered", "filterparse.Text", "tableContains"} {
 		if strings.Contains(tables, absent) {
 			t.Errorf("tables.go holds %s, of an operation the implementation serves", absent)
 		}
