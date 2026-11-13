@@ -72,6 +72,19 @@ This crate provides:
   take their limiters from (`rate_limits`, a new one by default). Options
   compare their registry by identity, so a clone is equal to its original
   and two `RouterOptions::default()` are not
+- `mcp`: the MCP endpoint of an API with `outputs.api.mcp` on (D81, D116),
+  as the TypeScript runtime's `mcp.ts` serves it. `mcp::serve` is the
+  stateless transport over a `ToolSet`, held to the engine's recorded
+  exchanges (`tests/mcp_parity.rs`), with the confirmation of a tool that
+  asks (D93, `mcp::Confirmations`) and the check of its call before
+  anyone is asked (D98). `mcp::Mount` is what a generated router mounts:
+  the router of `POST`, `GET` and `DELETE /api/mcp`, whose tools are the
+  build's table (`mcp::RouteTool`), each call a request to its
+  operation's route through `handle`, as the caller the endpoint's
+  controls established, with the endpoint request's headers and
+  extensions. `RouterOptions.mcp`, an `mcp::EndpointOptions`, sets its
+  server info, its own rate limit and timeout, and the key and the store
+  of its confirmations; `tests/mcp_mount.rs` holds it
 - `Authenticator` and `Principal`: how a service tells the router who the
   caller is, and the dotted-path permission rule (`has_any_permission`)
 - `ServiceAuthenticator` and `ServiceCaller` (D37): which deployable is
@@ -281,6 +294,27 @@ TypeScript runtimes' (D51):
   message, its `complete` does nothing, and every other call is the
   queue's, so a handler's error still fails its message and a stopping
   worker still releases the ones its handlers did not finish.
+- The `sqlite` feature's `worker::drain` (D116): a worker on a SQLite
+  file as a function its host calls. `SqliteWorker::new().queue(queue,
+  handler)` adds a queue whose handler, any `Fn(M) -> Result<(),
+  BoxError>`, answers for its message, and `queue_in_unit(queue, handler)`
+  one whose handler completes each message itself (D103), in the
+  IMMEDIATE transaction the drain runs it in and commits on `Ok`: it takes
+  the `Unit`, which lends the connection (`unit.with(|connection| ...)`),
+  the `Claimed<M>` and the time. `worker.drain(&mut connection, now,
+  limit)` claims and runs what is due of its queues, in the order they
+  were added, a message at a time, up to the limit, and answers `Drained
+  { ran, next }`: how many it ran and when the next falls due. It needs no
+  tokio runtime, reads no clock and extends no claim; a claim reads the
+  database's clock, and `now` is the time a handler's commands run at and
+  the prune's cadence goes by. A failed claim, a busy file among them, is
+  the drain's error; a handler's failure is its message's. `Wake` is what
+  a sleeping host waits on (`wait(seen, timeout)`, or `woken(seen)` in a
+  future): `orm::sqlite::Database::wake()` is notified after each write
+  the file commits. `run_drain(worker, connections, wake, DrainOptions {
+  limit, grace, poll }, shutdown)` is the loop over it on tokio, a lane per
+  connection on the blocking pool, which a stack's Rust worker on a SQLite
+  file runs. `tests/worker_drain.rs` runs it on a file of its own.
 - The `otel` feature's `telemetry` module (D67), OpenTelemetry trace
   export over OTLP/HTTP in protobuf. `telemetry::start(Defaults { stack,
   kind, name })` is what a generated server's, job's or worker's `main`
@@ -396,7 +430,10 @@ of the core user model. It does what the Go runtime's
   generated types' `IDENTITY_DESCRIPTOR`), which runs its SQL through a
   `Client`: `TokioPostgres` with `identity-postgres`, `Rusqlite` with
   `identity-sqlite`, or a binding of the service's own (a pool, another
-  driver). The store parses logins, display names and keys with the scalar
+  driver). `Rusqlite::open(path)` opens a connection of the store's own
+  to a SQLite file, in write-ahead logging with a five-second busy
+  timeout, which a server whose database is a SQLite file builds its
+  store over, beside the file's own connections (D116). The store parses logins, display names and keys with the scalar
   catalog the service passes as `Scalars`, superscalar's registry in a
   generated crate, since this crate does not link the scalar crate
 - `Service`, every session and administration operation with the Go

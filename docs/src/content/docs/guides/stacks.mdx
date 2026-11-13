@@ -37,6 +37,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself; a queue worker woken sooner than its next firing |
+| [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; an API over the user model, its identity store on the database's file; `stack dev` | jobs, buckets, memory stores and an engine in the binary; installing, signing and updating it |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
@@ -814,9 +815,11 @@ constructor as a `@worker`'s does
 D104). `concurrency` applies to each queue. A table's change queue that no deployed worker runs keeps its
 messages waiting: no rule runs and no raw write's deadline moves until one
 does, so run a behavior worker for each such table in every environment
-whose writes matter. No behavior worker claims on SQLite or D1 yet, so
-there a hearing table's change queue grows by a message per write until
-one does.
+whose writes matter. A Rust API's behavior worker claims on a SQLite file
+(D116): its process drains the table's queues, deadlines first, on
+connections of its own, and prunes each as any worker does. No TypeScript
+or Go one claims on SQLite yet, and none on D1, so there a hearing
+table's change queue grows by a message per write until one does.
 
 ## The engine's runner
 
@@ -1251,7 +1254,9 @@ job's `NewJobs` in `go/shop-orders/jobs.go`:
 The worker files one open restock request per product, which a unique
 index in `shop-db` holds it to, and the job files one for each product the
 engine lists low (`Stock.low`) and orders each open one, watching the
-`Shutdown` its entrypoint cancels on SIGTERM:
+`Shutdown` its entrypoint cancels on SIGTERM. Both write `shop-db` through
+the repositories its Rust types carry, on a connection of the pool `Deps`
+holds, so neither writes a statement by hand:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
@@ -2195,8 +2200,9 @@ runs under `stack dev`, where the database is a SQLite file under the
 environment's state directory, `databases/<database>.sqlite`, and the
 server opens the `sqlite:` URL its edge derives with the runtime's
 `openSqlite`. Resolution refuses a TypeScript API whose database runs in
-another dialect than its first, a Go or Rust API on a SQLite database,
-and a TypeScript API over the user model on a sqlite-first one.
+another dialect than its first, a Rust API whose database does, a Go API
+on a SQLite database, and a TypeScript API over the user model on a
+sqlite-first one.
 
 A deploy migrates each D1 database from your machine, or the CI job's,
 between its steps: it finds `superschematic-migrate` on `PATH`, or where
@@ -2456,6 +2462,82 @@ no workers.dev address and no custom domain. An API over the user model
 whose `authDb` is on [Hyperdrive](#databases-on-hyperdrive) signs the page
 in with a cookie on the site's origin, with no `trustedOrigins`, no
 `cookie.domain` and no CORS.
+
+## Build one binary
+
+An environment on the `embedded` target is one binary a person installs:
+every server and worker of the environment in one process, each database
+a SQLite file under one data directory, and the site's built files inside
+the binary. Its servers are Rust, and each of its databases lists `sqlite`
+first. `examples/embedded-notes` is one.
+
+```ts
+@stack({ deploy: [NotesApi, NotesWeb], origins: [{ site: NotesWeb }] })
+export abstract class Notes {}
+
+@environment({ target: "embedded", embedded: { port: 4170 } })
+export abstract class Desktop {}
+```
+
+```sh
+superschematic stack build Desktop --release
+```
+
+`stack build` builds the stack, runs the site's build, plans each
+database, and builds the environment's crate, at
+`<output-root>/embedded/<stack>/<environment>/`, with `cargo build
+--release --locked`. It prints the binary's path. With `--release` it
+records the plan of each database, from the model the last recorded plan
+ends at to the schema's model, in the Stack service's
+`plans/<environment>/<db>/`, numbered. Commit those files, as you commit
+the lockfiles. A release stops on a plan with a hazard until `--allow`
+names it. Without `--release` the binary carries the same step and
+nothing is recorded.
+
+The binary carries every recorded plan. As it starts it takes each
+database's file to the model the last plan ends at: an empty file starts
+from the first plan, and a file an earlier release wrote goes forward
+plan by plan. A file whose model no carried plan starts from is a newer
+build's or another app's: the binary stops and changes nothing.
+
+```sh
+notes-stack-desktop --data ~/Library/Notes
+```
+
+It listens on `127.0.0.1` at `PORT`, or the environment's `port`.
+`--listen` names another address, and `--every-interface` listens on
+every interface. Each API is under `/api/<service>` and every other path
+is the site's, on one origin.
+
+| What the environment holds | What happens |
+| --- | --- |
+| a Go or TypeScript server | refused: the binary runs Rust |
+| a database with no sqlite dialect | refused |
+| a job, a bucket, a memory store, an app, an engine | refused, each with its reason |
+| an API over the user model | its users, their sessions and their API keys are kept in the identity store on the database's file, and its session cookie goes without `Secure`, since the binary serves plain HTTP on the machine it is installed on |
+| a `@worker` or a `@behaviorWorker` of one of its APIs | it runs inside the binary, claiming its queue on the database's file; a write the binary commits wakes it |
+| two APIs, one calling the other | the call is the SDK's, answered in the process, and a service clause holds |
+
+`stack deploy`, `plan` and `destroy` refuse the environment and name
+`stack build`. `stack dev` runs it as one process, with its files under
+the environment's state directory.
+
+A database built by hand before the app used superschematic can be
+adopted. Print its model with `superschematic migrate plan <db>
+--dialect sqlite --from-database <file> --print-model`, keep the file in
+the Stack service, and name it in the database's settings with a
+statement that answers one row holding 1 for such a file:
+
+```ts
+settings: [{ of: NotesDb, adoption: { model: "plans/adopted.json", check: "SELECT user_version = 7 FROM pragma_user_version" } }]
+```
+
+A project with a process of its own links the crate's library in place
+of its `main.rs`: `Embedded::open`, `handle` and `close`, and for each of
+`workers()` either `run`, the loop on tokio, or `drain`, which a host
+with no async runtime calls on a thread of its own with a connection from
+`connect`, the time and a limit, sleeping until the time it answers or
+until `wake` says the process wrote to the file.
 
 ## Generated CI
 

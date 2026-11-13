@@ -60,11 +60,11 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 			".layer(identity_service.cors())",
 			// The API key routes (D114): createApiKey behind its rate limit
 			// and a caller, the others behind a caller.
-			"let route = RouteControls::new()\n        .rate_limiter(limits.of(&crate::operations::ACCOUNT_CREATE_API_KEY))\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_CREATE_API_KEY));\n    router = router.route(\"/api/auth/keys\", route);",
-			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_LIST_API_KEYS));\n    router = router.route(\"/api/auth/keys\", route);",
-			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_REVOKE_API_KEY));\n    router = router.route(\"/api/auth/keys/{id}\", route);",
-			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_LIST_USER_API_KEYS));\n    router = router.route(\"/api/auth/admin/users/{id}/keys\", route);",
-			"let route = RouteControls::new()\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_REVOKE_USER_API_KEY));\n    router = router.route(\"/api/auth/admin/users/{id}/keys/{keyId}\", route);",
+			"let route = RouteControls::under(transport)\n        .rate_limiter(limits.of(&crate::operations::ACCOUNT_CREATE_API_KEY))\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_CREATE_API_KEY));\n    router = router.route(\"/api/auth/keys\", route);",
+			"let route = RouteControls::under(transport)\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_LIST_API_KEYS));\n    router = router.route(\"/api/auth/keys\", route);",
+			"let route = RouteControls::under(transport)\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_REVOKE_API_KEY));\n    router = router.route(\"/api/auth/keys/{id}\", route);",
+			"let route = RouteControls::under(transport)\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_LIST_USER_API_KEYS));\n    router = router.route(\"/api/auth/admin/users/{id}/keys\", route);",
+			"let route = RouteControls::under(transport)\n        .authorize(Arc::clone(&authenticator), &[])\n        .apply(identity_handler(&identity_service, identity::OP_REVOKE_USER_API_KEY));\n    router = router.route(\"/api/auth/admin/users/{id}/keys/{keyId}\", route);",
 		},
 		"src/operations.rs": {
 			"pub const ACCOUNT_ADMIN_GRANT_ROLE: OperationInfo", `permissions: &["identity.roles.write"],`,

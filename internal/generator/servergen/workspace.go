@@ -60,12 +60,19 @@ var rustWorkspaceExclude = []string{"api", "engine", MirrorRoot, "sdk", "types"}
 
 // RustWorkspaceMembers lists the crates of the Rust servers, jobs and
 // workers the output root holds, `server/<stack>/<deployable>` with a
-// Cargo.toml, slash-separated and sorted.
+// Cargo.toml, and the crates of the environments that build as one binary
+// (D116), `embedded/<stack>/<environment>` with one, slash-separated and
+// sorted.
 func RustWorkspaceMembers(outputRoot string) ([]string, error) {
 	matches, err := filepath.Glob(filepath.Join(outputRoot, "server", "*", "*", RustManifestFile))
 	if err != nil {
 		return nil, err
 	}
+	embedded, err := filepath.Glob(filepath.Join(outputRoot, EmbeddedRoot, "*", "*", RustManifestFile))
+	if err != nil {
+		return nil, err
+	}
+	matches = append(matches, embedded...)
 	members := make([]string, 0, len(matches))
 	for _, m := range matches {
 		rel, err := filepath.Rel(outputRoot, filepath.Dir(m))

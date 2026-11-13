@@ -1,0 +1,105 @@
+{
+  "comment": "Confirmations the TypeScript runtime minted (D93) and the canonical JSON it binds arguments as. Written by confirm_vectors.ts beside this file; tests/mcp_confirm.rs redeems each token with the Rust runtime and writes each canonical text.",
+  "key": "kkkkkkkkkkkkkkkkeeeeeeeeeeeeeeeey",
+  "now": 1793016000000,
+  "ttlSeconds": 60,
+  "canonical": [
+    {
+      "json": "{\"b\":[1,{\"d\":2,\"a\":null}],\"a\":\"x\"}",
+      "canonical": "{\"a\":\"x\",\"b\":[1,{\"a\":null,\"d\":2}]}"
+    },
+    {
+      "json": "{\"id\":\"i1\",\"newName\":\"Desk\"}",
+      "canonical": "{\"id\":\"i1\",\"newName\":\"Desk\"}"
+    },
+    {
+      "json": "{\"newName\":\"Desk\",\"id\":\"i1\"}",
+      "canonical": "{\"id\":\"i1\",\"newName\":\"Desk\"}"
+    },
+    {
+      "json": "{}",
+      "canonical": "{}"
+    },
+    {
+      "json": "{\"n\":[0,-0,1.0,-1.5,100,1e2,1E3,0.1,0.000001,1e-7,1.25e-7,1e21,1.5e+21,123456789012345e6,1e22,9007199254740991,-9007199254740991,2.5e-10]}",
+      "canonical": "{\"n\":[0,0,1,-1.5,100,100,1000,0.1,0.000001,1e-7,1.25e-7,1e+21,1.5e+21,123456789012345000000,1e+22,9007199254740991,-9007199254740991,2.5e-10]}"
+    },
+    {
+      "json": "{\"text\":\"\\u00e9\\\"\\\\\\n\\t\\u0001\\u001f\\u007f\\u2028 / <>&\",\"flag\":true,\"none\":null}",
+      "canonical": "{\"flag\":true,\"none\":null,\"text\":\"\u00e9\\\"\\\\\\n\\t\\u0001\\u001f\u007f\u2028 / <>&\"}"
+    },
+    {
+      "json": "{\"\\uff5e\":1,\"\\ud83d\\ude00\":2,\"\\ue000\":3,\"a\":4,\"B\":5,\"\":6,\"10\":7,\"9\":8}",
+      "canonical": "{\"\":6,\"10\":7,\"9\":8,\"B\":5,\"a\":4,\"\ud83d\ude00\":2,\"\ue000\":3,\"\uff5e\":1}"
+    },
+    {
+      "json": "{\"where\":{\"quantity\":{\"in\":[3,4],\"gte\":2},\"name\":\"Hex bolt\"},\"tags\":[[\"a\"],[],{}]}",
+      "canonical": "{\"tags\":[[\"a\"],[],{}],\"where\":{\"name\":\"Hex bolt\",\"quantity\":{\"gte\":2,\"in\":[3,4]}}}"
+    }
+  ],
+  "tokens": [
+    {
+      "tool": "rename_item",
+      "caller": "[\"ada\",null]",
+      "scope": "items-api",
+      "mode": "token",
+      "args": "{\"id\":\"i1\",\"newName\":\"Desk\"}",
+      "token": "v1.token.1793016060.hA2o_VjqUm__Rh61XY0K1Q.8iKuBwDmDvrXrk6hwTZ8NRRDNbREOCt2xGb0gvvyyv8.ogkck5inAHpKRYqlxLqRvaZVEliEamT9uNuzTmCXHPc",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    },
+    {
+      "tool": "rename_item",
+      "caller": "[\"ada\",null]",
+      "scope": "items-api",
+      "mode": "elicit",
+      "args": "{\"newName\":\"Desk\",\"id\":\"i1\"}",
+      "token": "v1.elicit.1793016060.uxHhTD7DMkbU7lQIb6xY7A.8iKuBwDmDvrXrk6hwTZ8NRRDNbREOCt2xGb0gvvyyv8.H7M8anFcIelkHc_uoEsRmkzZxPeqLpS-cIWxC9vNyDc",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    },
+    {
+      "tool": "purge",
+      "caller": "",
+      "scope": "",
+      "mode": "token",
+      "args": "{}",
+      "token": "v1.token.1793016060.klQwdfrWZrN94zqkp_O-gg.dwUGs24Za5vMmACoe_-O42ho7M5hZzzpW7EqFMRZjr4.LxeoH71PdrAZQg7FBAmHE4s1rOlFgkNfOdv1JaRrq20",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    },
+    {
+      "tool": "set_numbers",
+      "caller": "[null,\"janitor\"]",
+      "scope": "numbers",
+      "mode": "token",
+      "args": "{\"n\":[0,-0,1.0,-1.5,100,1e2,1E3,0.1,0.000001,1e-7,1.25e-7,1e21,1.5e+21,123456789012345e6,1e22,9007199254740991,-9007199254740991,2.5e-10]}",
+      "token": "v1.token.1793016060.zniTyA-BEq2Vub3meB0AjA.HxHRHMZyZUQreVAO0gPdrcD0UfK4eh0xtIzQEdozX-Y.n3ufvgTCuqx8PC2POZf9Lb4SA9nBeI2mB6YTYUpV2kg",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    },
+    {
+      "tool": "\u00e9crire",
+      "caller": "[\"zo\u00eb\",\"worker\"]",
+      "scope": "\u00fcn\u00efcode-api",
+      "mode": "elicit",
+      "args": "{\"text\":\"\\u00e9\\\"\\\\\\n\\t\\u0001\\u001f\\u007f\\u2028 / <>&\",\"flag\":true,\"none\":null}",
+      "token": "v1.elicit.1793016060.81sgz4j6shYgNfzVudVOTA.jBjD_1IHXkKRzhHo3IEIR8JKvnKLki6j5B0DRuh1a7I.0gxMnsRAiGqHICApRmbYQ7TN-_V6m1vYeVDsYCIuiBA",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    },
+    {
+      "tool": "sorted",
+      "caller": "[\"ada\",null]",
+      "scope": "items-api",
+      "mode": "token",
+      "args": "{\"\\uff5e\":1,\"\\ud83d\\ude00\":2,\"\\ue000\":3,\"a\":4,\"B\":5,\"\":6,\"10\":7,\"9\":8}",
+      "token": "v1.token.1793016060.3v9Y41D2gBe4z9UbWVgpMQ.YfogpUkXbA-WqnJxU8v200Ce06kikfMlB0M8-tblDFA._zvRdxNjw1ay5cNqp91-ch5jOpF9ssk-fII4cbenuLo",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    },
+    {
+      "tool": "list_parts",
+      "caller": "[\"ada\",null]",
+      "scope": "items-api",
+      "mode": "token",
+      "args": "{\"where\":{\"quantity\":{\"in\":[3,4],\"gte\":2},\"name\":\"Hex bolt\"},\"tags\":[[\"a\"],[],{}]}",
+      "token": "v1.token.1793016060.SQ2J5aq_q66CUeNJfeERJA.8X02g3K9iFZRQdzSbE1hddB5sNJa0rtqhT69MAs8KF0.klKVzcUwUlH_ciBPcvw1GK0i_PP8duscD7bdCquo7Sg",
+      "expiresAt": "2026-10-26T12:01:00Z"
+    }
+  ]
+}

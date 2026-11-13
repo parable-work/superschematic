@@ -62,109 +62,112 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// client against one budget.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
     let limits = options.rate_limits.clone();
+    // With no transport under the router (`Api::handle`, D116), each
+    // route's rate limit, body limit and timeout are its host's.
+    let transport = options.transport;
     let identity_service = Arc::clone(implementations.authenticator.service());
     let authenticator: Arc<dyn Authenticator> = implementations.authenticator.clone();
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(get(handle_greeting_greet));
     router = router.route("/api/greeting", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_CAPABILITIES));
     router = router.route("/api/auth/capabilities", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_LIST_API_KEYS));
     router = router.route("/api/auth/keys", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_CREATE_API_KEY))
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_CREATE_API_KEY));
     router = router.route("/api/auth/keys", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_REVOKE_API_KEY));
     router = router.route("/api/auth/keys/{id}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_LOGIN))
         .apply(identity_handler(&identity_service, identity::OP_LOGIN));
     router = router.route("/api/auth/login", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_LOGOUT));
     router = router.route("/api/auth/logout", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_ME));
     router = router.route("/api/auth/me", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_CHANGE_PASSWORD))
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_CHANGE_PASSWORD));
     router = router.route("/api/auth/password", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::ACCOUNT_REGISTER))
         .apply(identity_handler(&identity_service, identity::OP_REGISTER));
     router = router.route("/api/auth/register", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_LIST_ROLES));
     router = router.route("/api/auth/admin/roles", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_CREATE_ROLE));
     router = router.route("/api/auth/admin/roles", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_DELETE_ROLE));
     router = router.route("/api/auth/admin/roles/{id}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_UPDATE_ROLE));
     router = router.route("/api/auth/admin/roles/{id}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_LIST_USERS));
     router = router.route("/api/auth/admin/users", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_CREATE_USER));
     router = router.route("/api/auth/admin/users", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_GET_USER));
     router = router.route("/api/auth/admin/users/{id}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_APPROVE_USER));
     router = router.route("/api/auth/admin/users/{id}/approve", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_DISABLE_USER));
     router = router.route("/api/auth/admin/users/{id}/disable", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_ENABLE_USER));
     router = router.route("/api/auth/admin/users/{id}/enable", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_LIST_USER_API_KEYS));
     router = router.route("/api/auth/admin/users/{id}/keys", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_REVOKE_USER_API_KEY));
     router = router.route("/api/auth/admin/users/{id}/keys/{keyId}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_SET_USER_PASSWORD));
     router = router.route("/api/auth/admin/users/{id}/password", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_REVOKE_ROLE));
     router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_GRANT_ROLE));
     router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);
@@ -234,4 +237,62 @@ async fn handle_greeting_greet(
         .greet(ctx)
         .await;
     operation_response(result, request_id.as_deref())
+}
+
+/// The API with no transport under it (D116): a request in and a response
+/// out, for a host that has no HTTP server of its own to mount a router
+/// on, or wants none between itself and the API. `handle` does what the
+/// router does for a request it holds whole: it finds the route,
+/// authenticates the caller through the implementation's authenticator,
+/// admits by the route's rule, decodes and checks each argument, runs the
+/// operation and writes the envelope or the problem, through the handlers
+/// `build_router`'s routes run.
+///
+/// What needs a socket, a clock or a store shared between requests stays
+/// the host's: the listener, TLS, the body's limit (`handle` takes a body
+/// already read), timeouts, rate limits, CORS and draining. A host tells
+/// the API what it knows of a connection through the request's extensions,
+/// which the authenticator receives.
+///
+/// The implementation's methods are asynchronous. A host with no async
+/// runtime drives `handle` with the runtime's `block_on`, which polls on
+/// the calling thread: an API whose databases are SQLite files, and that
+/// calls no other server, awaits nothing that needs a reactor.
+#[derive(Clone)]
+pub struct Api {
+    router: Router,
+}
+
+impl Api {
+    /// The operations `handle` does not route, by name: the
+    /// @manualRouteRegistration ones, whose handlers a service mounts on
+    /// a router of its own (`build_router_with_manual_routes`).
+    pub const UNROUTED: &'static [&'static str] = &[
+    ];
+
+    /// The API over `implementations`.
+    pub fn new(implementations: Implementations) -> Self {
+        Self::with(implementations, RouterOptions::default())
+    }
+
+    /// `new` with `options`, but for its `transport`, which an `Api` has
+    /// none of.
+    pub fn with(implementations: Implementations, options: RouterOptions) -> Self {
+        let options = RouterOptions {
+            transport: false,
+            ..options
+        };
+        Self {
+            router: build_router_with(implementations, options),
+        }
+    }
+
+    /// Answers `request`, whose body is read already, with a response
+    /// whose body is whole.
+    pub async fn handle(
+        &self,
+        request: axum::http::Request<axum::body::Bytes>,
+    ) -> axum::http::Response<axum::body::Bytes> {
+        superschematic_http_runtime::handle(&self.router, request).await
+    }
 }

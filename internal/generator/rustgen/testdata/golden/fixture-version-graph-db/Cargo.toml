@@ -12,3 +12,10 @@ superscalar = "0.1.0"
 serde_json = { version = "1.0" }
 superschematic-schema-runtime = "0.0.0"
 superschematic-versiongraph-engine = "0.0.0"
+# The repositories (D79, D116): src/orm.rs runs each table through the HTTP
+# runtime's orm module, on the dialect each feature names.
+superschematic-http-runtime = { version = "0.0.0", default-features = false, optional = true }
+
+[features]
+postgres = ["dep:superschematic-http-runtime", "superschematic-http-runtime/postgres"]
+sqlite = ["dep:superschematic-http-runtime", "superschematic-http-runtime/sqlite"]

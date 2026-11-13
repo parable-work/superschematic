@@ -19,6 +19,7 @@ dependencies = [
  "serde",
  "serde_json",
  "superscalar",
+ "superschematic-http-runtime",
  "superschematic-schema-runtime",
 ]
 
@@ -112,6 +113,7 @@ dependencies = [
 name = "acme-shop-stock-implementation"
 version = "0.1.0"
 dependencies = [
+ "acme-shop-db-types",
  "acme-shop-stock-api",
  "async-trait",
  "http",

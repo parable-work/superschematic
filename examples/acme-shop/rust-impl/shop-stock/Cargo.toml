@@ -13,12 +13,14 @@ publish = false
 
 # The generated API crate, and the HTTP runtime it is built on, whose
 # postgres feature is the pool Deps holds and the tokio-postgres it
-# re-exports; the engine, whose Background Deps holds and whose calls take
+# re-exports; shop-db's Rust types, which the API crate re-exports, with
+# the repositories they carry for Postgres (D116); the engine, whose Background Deps holds and whose calls take
 # and return JSON (D58); tokio, whose blocking pool runs them; and
 # tracing, which logs inside the API's span.
 [dependencies]
 async-trait = "0.1.89"
 acme-shop-stock-api = { path = "../../schemas/dist/api/shop-stock" }
+acme-shop-db-types = { path = "../../schemas/dist/types/rust/shop-db", features = ["postgres"] }
 http = "1"
 serde_json = "1.0.149"
 superschematic-engine = { path = "../../../../runtime/engine/rust/engine", default-features = false, features = ["background"] }

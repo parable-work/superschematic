@@ -1,0 +1,39 @@
+[package]
+name = "superschematic-migrate"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.99.0"
+authors = ["Parable Work, Inc."]
+description = "Applies superschematic migration plans to a SQLite file, in the process that serves it"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+
+# Standalone crate: an embedded environment's crate depends on it by path
+# (D116), so it carries its own dependency versions instead of inheriting a
+# workspace's.
+[workspace]
+
+[lib]
+name = "superschematic_migrate"
+
+[dependencies]
+# The SQLite the runner applies plans to, with the SQLite it bundles, as the
+# HTTP runtime's sqlite feature binds it. backup is SQLite's online backup,
+# which copies a file before a chain with a contract step. Without the
+# default features, which are a statement cache the runner does not use and
+# the SQLite of wasm targets.
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "backup"] }
+# The SHA-256 of a model, a plan and a step's statements, as the version
+# graph and the engine hash.
+sha2 = "0.10.9"
+
+[dev-dependencies]
+# The tests edit plan documents and seal them again. arbitrary_precision
+# keeps a number as written, as the Go runner's tests decode with UseNumber.
+# The library reads JSON with its own decoder, which accepts and refuses
+# what Go's does.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

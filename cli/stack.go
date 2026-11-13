@@ -326,6 +326,14 @@ target. A secret a server reads comes from
 itself in git, and no secret reaches the output root. The keys that sign the
 calls between servers are generated beside it.
 
+An environment that builds as one binary, as one on the embedded target
+does (D116), runs as the one process it is: --environment names it, or it
+is the stack's one such environment when the stack has none on the local
+target. Dev migrates each database's SQLite file under the state
+directory as the local target does, from the model the file recorded to
+the schema's, builds the binary as stack build builds one that is no
+release, and runs it on 127.0.0.1 at the environment's port until Ctrl-C.
+
 Without a directory, dev runs the working directory when it is a Stack
 service, else the one Stack service under ./schemas/services.
 
@@ -454,9 +462,14 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	if err := p.build(cmd); err != nil {
 		return err
 	}
-	env, err := p.localEnvironment(flags.environment)
+	env, err := p.devEnvironment(flags.environment)
 	if err != nil {
 		return err
+	}
+	// An environment that builds as one binary runs as the one process it
+	// is (D116).
+	if env.IsBinary() {
+		return runStackDevBinary(cmd, p, env, flags)
 	}
 	spec, ok := p.reg.Provisioner(env.Provisioner)
 	if !ok {

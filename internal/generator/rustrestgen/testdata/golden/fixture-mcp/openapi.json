@@ -1,0 +1,625 @@
+{
+  "components": {
+    "schemas": {
+      "Address": {
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "postalCode": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "line1",
+          "city"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Order": {
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "revision": {
+            "format": "double",
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus"
+          },
+          "totalCents": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "totalCents"
+        ],
+        "type": "object"
+      },
+      "OrderStatus": {
+        "enum": [
+          "open",
+          "shipped"
+        ],
+        "type": "string"
+      },
+      "OrderUpdate": {
+        "properties": {
+          "note": {
+            "nullable": true,
+            "type": "string"
+          },
+          "revision": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "ReturnRequest": {
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "orderId": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "pickup": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "requestId": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId",
+          "orderId",
+          "reason",
+          "pickup",
+          "labels"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-mcp schema",
+    "title": "Fixture-Mcp API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/orders": {
+      "get": {
+        "description": "Lists orders by status.",
+        "operationId": "OrderListOrdersHandler",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "statuses",
+            "required": true,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/OrderStatus"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "double",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/Order"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "List orders",
+        "tags": [
+          "order"
+        ],
+        "x-superschematic-docs": {
+          "capability": "orders.list",
+          "description": "Lists orders by status.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "List orders",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/orders/export": {
+      "get": {
+        "description": "Not classified: no @mcp, so no tool.",
+        "operationId": "OrderExportOrdersHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "string"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "exportOrders",
+        "tags": [
+          "order"
+        ]
+      }
+    },
+    "/api/orders/{id}": {
+      "delete": {
+        "operationId": "OrderDeleteOrderHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Order"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "deleteOrder",
+        "tags": [
+          "order"
+        ]
+      },
+      "get": {
+        "description": "Returns one order by its identifier.",
+        "operationId": "OrderGetOrderHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Order"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Get an order",
+        "tags": [
+          "order"
+        ],
+        "x-superschematic-docs": {
+          "audience": "shoppers",
+          "capability": "orders.get",
+          "description": "Returns one order by its identifier.",
+          "doNotUseWhen": "Do not use to list orders; call list_orders.",
+          "errors": [
+            {
+              "code": "order_not_found",
+              "commonCorrection": "Take the identifier from a list_orders result.",
+              "description": "No order has that identifier."
+            }
+          ],
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "success": "Returns the order with its status and total.",
+          "title": "Get an order",
+          "useWhen": "Use when you have an order identifier.",
+          "visibility": "public"
+        }
+      },
+      "patch": {
+        "description": "Changes an order's note when its revision still matches.",
+        "operationId": "OrderUpdateOrderHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Order"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Update an order",
+        "tags": [
+          "order"
+        ],
+        "x-superschematic-docs": {
+          "capability": "orders.update",
+          "description": "Changes an order's note when its revision still matches.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [
+              "/revision"
+            ],
+            "idempotencyKeyPointers": [],
+            "mode": "compare_and_swap"
+          },
+          "title": "Update an order",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/returns": {
+      "post": {
+        "description": "Opens a return for one delivered order.",
+        "operationId": "OrderOpenReturnHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Order"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Open a return",
+        "tags": [
+          "order"
+        ],
+        "x-superschematic-docs": {
+          "capability": "orders.returns.open",
+          "description": "Opens a return for one delivered order.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [
+              "/requestId"
+            ],
+            "mode": "idempotent"
+          },
+          "title": "Open a return",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

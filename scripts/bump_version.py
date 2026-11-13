@@ -63,6 +63,8 @@ Version sites (relative to the repository root):
   examples/acme-shop/topcoat/Cargo.lock
                                       the superschematic-http-runtime and
                                       superschematic-schema-runtime packages
+  runtime/migrate/rust/Cargo.toml     [package] version
+  runtime/migrate/rust/Cargo.lock     the superschematic-migrate package
   runtime/schema/rust/Cargo.toml      [package] version
   runtime/schema/rust/Cargo.lock      the superschematic-schema-runtime package
   runtime/schema/rust-ir/Cargo.toml   [package] version
@@ -88,6 +90,8 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   extensions/cloudflare/go.mod        require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
+  extensions/embedded/go.mod          require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
   extensions/pulumi/go.mod            require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../extensions/gcp vX.Y.Z and
@@ -96,14 +100,16 @@ Version sites (relative to the repository root):
   cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../extensions/gcp vX.Y.Z,
-                                      .../extensions/cloudflare vX.Y.Z and
+                                      .../extensions/cloudflare vX.Y.Z,
+                                      .../extensions/embedded vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
   extensions/topcoat/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../cmd/superschematic vX.Y.Z (the
                                       official extensions its binary links),
                                       .../extensions/gcp vX.Y.Z,
-                                      .../extensions/cloudflare vX.Y.Z and
+                                      .../extensions/cloudflare vX.Y.Z,
+                                      .../extensions/embedded vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
 
 The Go requires carry the release version so a consumer at a tag resolves
@@ -161,6 +167,7 @@ GO_MODULES = [
     "",
     "extensions/gcp",
     "extensions/cloudflare",
+    "extensions/embedded",
     "extensions/pulumi",
     "cmd/superschematic",
     "extensions/topcoat",
@@ -406,6 +413,22 @@ def sites():
             "semver",
         )
     )
+    # The migration runner an embedded environment's binary carries (D116):
+    # the release version, in its manifest and its lockfile.
+    out.append(
+        (
+            ROOT / "runtime" / "migrate" / "rust" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-migrate"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "migrate" / "rust" / "Cargo.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-migrate"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
     # The engine's schema reader is not published; it carries the release
     # version as the version graph's engine does, and its lockfile records
     # the schema runtime's, a path dependency.
@@ -493,7 +516,7 @@ def sites():
     # The extension modules and the installed binary, for the same reason,
     # and because each is tagged: a consumer at a tag resolves its siblings
     # from theirs.
-    for ext in ("gcp", "cloudflare"):
+    for ext in ("gcp", "cloudflare", "embedded"):
         out.append(
             (
                 ROOT / "extensions" / ext / "go.mod",
@@ -524,6 +547,7 @@ def sites():
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/embedded"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",
@@ -541,6 +565,7 @@ def sites():
                 (go_require_pattern(GO_MODULE + "/cmd/superschematic"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/embedded"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",

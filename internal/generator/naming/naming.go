@@ -510,6 +510,12 @@ type PathsConfig struct {
 	// superschematic-rules-behaviors (D103), whose core() the same API
 	// crate builds its core with, beside RulesAdapterRust. Unpublished too.
 	RulesBehaviorsRust string `toml:"rules_behaviors_rust"`
+	// MigrateRust holds the migration runner a binary links,
+	// superschematic-migrate (D116), which the crate of an environment on
+	// the embedded target depends on to migrate each database's file as it
+	// starts, from the plans it carries. The crate is unpublished, so an
+	// embedded environment builds only in a checkout.
+	MigrateRust string `toml:"migrate_rust"`
 	// EngineGo holds the behavior engine's Go binding module (D58), which
 	// a Go server whose API's database holds engine types requires. A
 	// server's checkout Dockerfile builds the engine's static archive from
@@ -574,6 +580,7 @@ type LocalPaths struct {
 	EngineNapiRust         string
 	RulesAdapterRust       string
 	RulesBehaviorsRust     string
+	MigrateRust            string
 	EngineGo               string
 	EngineTypeScript       string
 	VersionGraphPython     string
@@ -612,6 +619,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineNapiRust:         resolve(n.Paths.EngineNapiRust),
 		RulesAdapterRust:       resolve(n.Paths.RulesAdapterRust),
 		RulesBehaviorsRust:     resolve(n.Paths.RulesBehaviorsRust),
+		MigrateRust:            resolve(n.Paths.MigrateRust),
 		EngineGo:               resolve(n.Paths.EngineGo),
 		EngineTypeScript:       resolve(n.Paths.EngineTypeScript),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
@@ -656,6 +664,7 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_napi_rust", p.EngineNapiRust},
 		{"rules_adapter_rust", p.RulesAdapterRust},
 		{"rules_behaviors_rust", p.RulesBehaviorsRust},
+		{"migrate_rust", p.MigrateRust},
 		{"engine_go", p.EngineGo},
 		{"engine_typescript", p.EngineTypeScript},
 		{"versiongraph_python", p.VersionGraphPython},

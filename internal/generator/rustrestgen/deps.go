@@ -41,6 +41,19 @@ type DepsInfo struct {
 	// or its one DB-kind dependency. Empty when the API has neither.
 	Database string
 
+	// SQLite is whether Database's DB service lists the sqlite dialect
+	// first (D116): Deps.db is then the HTTP runtime's SQLite file, in the
+	// pool's place, and the repositories the crate serves its table
+	// operations from are SQLite's.
+	SQLite bool
+
+	// FieldKeys is the field of the API's EnvConfig that holds the keys of
+	// Database's Encrypted<T> fields (D85), the secret its DB service's
+	// config names, when the API serves table operations from its
+	// repositories, which seal and open with them; empty for a database
+	// without such a field.
+	FieldKeys string
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 
@@ -435,14 +448,14 @@ func (o *APIOutput) DepsExports() string {
 // Rust types as database_types: for its workers' messages and queues,
 // a behavior worker's among them (D65, D103).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0)
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
 // Rust types for an API with workers or derivers, nil without one or when
 // the crate depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if (!o.HasDatabaseTypes() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
+	if o.Deps == nil || (!o.HasDatabaseTypes() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
@@ -451,6 +464,18 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 		}
 	}
 	return &DependencyCrate{Name: o.Deps.DatabaseTypesCrate, Path: o.Deps.DatabaseTypesPath}
+}
+
+// DependencyFeatures is what follows the path of the Cargo.toml dependency
+// on the crate name: for the database's Rust types of an API with table
+// operations, the feature of the database's dialect, which the
+// repositories they are served from are behind (D116); empty for any
+// other crate.
+func (o *APIOutput) DependencyFeatures(name string) string {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || !o.HasTableOperations() {
+		return ""
+	}
+	return `, features = ["` + o.DatabaseDialect() + `"]`
 }
 
 // SetDeps sets what Deps holds, so the crate writes src/deps.rs, refusing
@@ -488,7 +513,14 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if err := o.checkBehaviorDeps(&deps); err != nil {
 		return err
 	}
+	if err := o.checkSQLiteDeps(&deps); err != nil {
+		return err
+	}
 	o.Deps = &deps
+	if err := o.checkTableDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
 	return nil
 }
 
@@ -562,7 +594,10 @@ func (o *APIOutput) DepsUses() []string {
 	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
 		runtime = append(runtime, "memorystore::MemoryStore")
 	}
-	if o.Deps != nil && o.Deps.Database != "" {
+	switch {
+	case o.Deps != nil && o.Deps.Database != "" && o.Deps.SQLite:
+		runtime = append(runtime, "orm::sqlite::Database")
+	case o.Deps != nil && o.Deps.Database != "":
 		runtime = append(runtime, "postgres::Pool")
 	}
 	if o.ChecksEndUsers() {
@@ -597,8 +632,10 @@ func (o *APIOutput) DepsUses() []string {
 // NewSignature is the signature of Implementations::new, indented as a
 // method of an impl: the handlers, the identity runtime's authenticator for
 // an API over the user model (D50), the service authenticator for an API
-// with a service clause (D37) and the pool of its database for an API with
-// behavior operations (D103), on one line when it fits.
+// with a service clause (D37), the pool of its database for an API with
+// behavior operations (D103) or table operations (D106), and the keyring
+// of the database's Encrypted<T> fields for table operations over one
+// (D85), on one line when it fits.
 func (o *APIOutput) NewSignature() string {
 	params := []string{"handlers: Handlers"}
 	if o.Identity != nil {
@@ -607,10 +644,48 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() {
-		params = append(params, "db: Pool")
+	if o.HasBehaviorOperations() || o.HasTableOperations() {
+		params = append(params, "db: "+o.DatabaseType())
+	}
+	if o.TableFieldKeys() {
+		params = append(params, "field_keys: Arc<crate::runtime::orm::FieldKeyring>")
 	}
 	return rustFn("    ", "pub fn new", params, "Self")
+}
+
+// TableFieldKeys reports whether the router's table operations seal and
+// open Encrypted<T> fields (D85): Implementations::new then takes the
+// keyring of the database's key secret, which src/tables.rs reads from the
+// API's config (field_keys).
+func (o *APIOutput) TableFieldKeys() bool {
+	return o.HasTableOperations() && o.Deps != nil && o.Deps.FieldKeys != ""
+}
+
+// FieldKeysField is the field of EnvConfig that holds the key secret.
+func (o *APIOutput) FieldKeysField() string {
+	if o.Deps == nil {
+		return ""
+	}
+	return o.Deps.FieldKeys
+}
+
+// DatabaseType is the type of Deps.db: a pool of the API's database, or,
+// for a database whose DB service lists sqlite first, its SQLite file
+// (D116).
+func (o *APIOutput) DatabaseType() string {
+	if o.Deps != nil && o.Deps.SQLite {
+		return "Arc<Database>"
+	}
+	return "Pool"
+}
+
+// DatabaseDialect is the dialect of the API's database, postgres unless
+// its DB service lists sqlite first.
+func (o *APIOutput) DatabaseDialect() string {
+	if o.Deps != nil && o.Deps.SQLite {
+		return "sqlite"
+	}
+	return "postgres"
 }
 
 // NotImplemented is the body of endpoint's method in the implementation's
@@ -661,7 +736,15 @@ func (o *APIOutput) RuntimeFeatures() []string {
 	}
 	// Deps.db's pool is the one the behavior operations run on (D103), so
 	// a crate with them has a database.
-	if o.Deps.Database != "" {
+	switch {
+	case o.Deps.Database != "" && o.Deps.SQLite:
+		features = append(features, "sqlite")
+		// The identity store runs on a connection of its own to the file
+		// (D116).
+		if o.Identity != nil {
+			features = append(features, "identity-sqlite")
+		}
+	case o.Deps.Database != "":
 		features = append(features, "postgres")
 		if o.Identity != nil {
 			features = append(features, "identity-postgres")

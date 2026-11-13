@@ -784,7 +784,8 @@ The policy is read in five places, all through the registry:
 - The SDK generators write `Key` at fixed positions and type it in
   `tools/index.ts` as the union of `Values`.
 - The TypeScript API generator marks each tool of `mcp.ts` whose value
-  `Confirm` lists, and the endpoint confirms its calls (D93).
+  `Confirm` lists, and the Rust API generator each tool of
+  `src/router/mcp.rs` (D116), and the endpoint confirms its calls (D93).
 
 In the IR the policy is `OperationMCP.Invocation`, an `ir.MCPInvocation`
 holding the key and the value, which `OperationMCP`'s JSON and YAML

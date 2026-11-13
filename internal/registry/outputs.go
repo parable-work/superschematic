@@ -84,8 +84,8 @@ type APIOutputConfig struct {
 	ScaffoldsOutputDir string `json:"scaffoldsOutputDir,omitempty"`
 
 	// MCP serves the API's visible @mcp operations as MCP tools at POST
-	// /api/mcp (D81). A TypeScript API serves it; ParseOutputs refuses it
-	// on a Go or Rust API.
+	// /api/mcp (D81). A TypeScript API and a Rust one (D116) serve it;
+	// ParseOutputs refuses it on a Go API.
 	MCP bool `json:"mcp,omitempty"`
 
 	// MCPConfirmationKey is the @envVars Secret<string> the MCP endpoint
@@ -97,9 +97,9 @@ type APIOutputConfig struct {
 	MCPConfirmationKey string `json:"mcpConfirmationKey,omitempty"`
 }
 
-// APIMCPLanguages says which API servers serve outputs.api.mcp (D81), for
-// the refusal of the others.
-const APIMCPLanguages = "a TypeScript API serves the MCP endpoint; Go and Rust follow"
+// APIMCPLanguages says which API servers serve outputs.api.mcp (D81,
+// D116), for the refusal of the other.
+const APIMCPLanguages = "a TypeScript API and a Rust API serve the MCP endpoint; Go follows"
 
 // SQLOutputConfig configures the DB kind's sql output. The DDL and the ORM
 // are implied by the kind; this block places and owns the generated
@@ -433,9 +433,10 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if err := errors.Join(missingTypes...); err != nil {
 		return nil, err
 	}
-	// Only the TypeScript router serves the MCP endpoint yet (D81).
-	if outputs.APIEnabled() && outputs.API.MCP && (outputs.API.Language == APILanguageGo || outputs.API.Language == APILanguageRust) {
-		return nil, fmt.Errorf("outputs.api.mcp is on and the API's language is %s: %s; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)", outputs.API.Language, APIMCPLanguages)
+	// The TypeScript router and the Rust router serve the MCP endpoint
+	// (D81, D116); the Go router does not yet.
+	if outputs.APIEnabled() && outputs.API.MCP && outputs.API.Language == APILanguageGo {
+		return nil, fmt.Errorf("outputs.api.mcp is on and the API's language is %s: %s; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)", outputs.API.Language, APIMCPLanguages)
 	}
 	// The MCP endpoint's confirmation key names a secret as the encryption
 	// key does (D93).

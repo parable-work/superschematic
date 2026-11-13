@@ -1,0 +1,9 @@
+# The output root is generated, but for the lockfiles of its Bun and Cargo
+# workspaces, which pin what the site's build installs (D51) and every
+# crate the binary builds from (D57). A broader rule may ignore the
+# directory itself, which would hide every file under it, so it is taken
+# back and its contents ignored instead.
+!/dist/
+/dist/*
+!/dist/bun.lock
+!/dist/Cargo.lock

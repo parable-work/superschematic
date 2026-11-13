@@ -1,0 +1,25 @@
+# The implementation of the notes-digest API (D57).
+#
+# superschematic wrote this crate once, as a scaffold, and never writes it
+# again: it is the example's, and so is its name. Each
+# build of a stack copies it into the output root's impl/notes-digest, with
+# its path dependencies re-based there, and the stack's server entrypoint
+# depends on that copy and calls its `create`.
+[package]
+name = "notes-notes-digest-implementation"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+publish = false
+
+# The generated API crate, and the HTTP runtime it is built on.
+[dependencies]
+async-trait = "0.1.89"
+notes-notes-digest-api = { path = "../../schemas/dist/api/notes-digest" }
+# notes-api's SDK, whose client Deps holds: the implementation names the
+# query of the call it makes.
+notes-notes-api-sdk = { path = "../../schemas/dist/sdk/rust/notes-api" }
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

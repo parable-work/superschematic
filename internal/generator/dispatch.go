@@ -405,6 +405,7 @@ func (r run) generateRustTypes() error {
 		Registry:         r.Registry,
 		EngineDocument:   engineDocument,
 		SQLite:           r.Outputs.SQLDialect(registry.SQLDialectSQLite),
+		Actor:            r.ormActor(),
 		Clock:            r.Options.Clock,
 	})
 	if err != nil {
@@ -414,6 +415,13 @@ func (r run) generateRustTypes() error {
 	dir := TypesDir(r.Options.OutputRoot, "rust", r.Config.Name)
 	if err := rustgen.SetLocalPaths(output, r.Options.Paths, dir); err != nil {
 		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
+	}
+	// The repositories write a table that composes behaviors through the
+	// core (D103, D116), by two unpublished crates the naming file names;
+	// without them the crate binds no core, and such a write is refused.
+	if output.ORM != nil && output.ORM.Rules && !output.BindsRules() {
+		r.Warnf("%s: the Rust repositories of %s write no row: each composes behaviors (D103), which they run through %s and %s, unpublished crates the naming file's [paths] rules_adapter_rust and rules_behaviors_rust name, and one is unset; set them to a superschematic checkout's runtime/engine/rust/rules-adapter and runtime/engine/rust/rules-behaviors, or a create, an update and a delete of such a row are refused (D116)",
+			r.Config.Name, joinAnd(output.ORM.RulesTables), rustgen.RulesAdapterCrate, rustgen.RulesBehaviorsCrate)
 	}
 	if err := rustgen.WriteTypes(output, dir); err != nil {
 		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
@@ -576,31 +584,6 @@ func (r run) generateORM() error {
 	return nil
 }
 
-// warnTableOperationsUnserved warns, once per API, that a server of
-// language writes no handler for the API's @tableOperation operations
-// (D106): each stays a method of the implementation's interface and its
-// scaffold, to be written by hand, so a project that builds the API in two
-// languages still builds. The Go and TypeScript servers write the
-// handlers; the Rust server waits on a Rust ORM.
-func (r run) warnTableOperationsUnserved(language string) {
-	var names []string
-	for _, set := range r.Schema.OperationSets {
-		if set == nil {
-			continue
-		}
-		for _, op := range set.Operations {
-			if op != nil && op.TableOperation != nil {
-				names = append(names, set.Name+"."+op.Name)
-			}
-		}
-	}
-	if len(names) == 0 {
-		return
-	}
-	r.Warnf("%s: the %s server writes no handler for a @tableOperation yet (D106): %s %s of the implementation's interface, to be written by hand, with the same route and types",
-		r.Config.Name, language, strings.Join(names, ", "), map[bool]string{true: "stays a method", false: "stay methods"}[len(names) == 1])
-}
-
 // warnGoTableOperationsUnserved warns of each @tableOperation the Go
 // server writes no handler for yet (D106), with why: a projection, a view
 // that holds more than single values, a default it cannot write. Each
@@ -637,7 +620,6 @@ func (r run) generateAPI() error {
 		}
 		return r.generateGoAPI()
 	case APILanguageRust:
-		r.warnTableOperationsUnserved("Rust")
 		return r.generateRustAPI()
 	case APILanguageTypeScript:
 		return r.generateTypeScriptAPI()
@@ -1572,12 +1554,27 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
 		AuthDB:       authDB,
+		// The router serves the visible @mcp tools at POST /api/mcp (D81,
+		// D116).
+		MCP: r.Outputs.APIEnabled() && r.Outputs.API.MCP,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if output == nil {
 		return nil, nil, nil
+	}
+	if output.MCP != nil {
+		// The MCP endpoint signs the confirmations of the tools that ask
+		// with the secret the API's config names, which its @envVars holds
+		// (D93).
+		confirmationKey, err := r.mcpConfirmationKeyField(output.MCP.Endpoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		if confirmationKey != nil {
+			output.MCP.ConfirmationKey = confirmationKey.Name
+		}
 	}
 	rustDeps, err := r.rustDeps(deps)
 	if err != nil {
@@ -1651,7 +1648,21 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 	}
 	if db, _, ok := r.Schema.Database(); ok {
 		deps.Database = db
+		// A Rust API's Deps.db is the client of its database's first
+		// dialect (D116): a pool, or the SQLite file.
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(db); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, fmt.Errorf("generator: schema config for %s: %w", db, err)
+				}
+				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
+			}
+		}
 		if err := r.rustQueueTypes(db, apiDir, &deps); err != nil {
+			return deps, err
+		}
+		if err := r.rustFieldKeys(db, &deps); err != nil {
 			return deps, err
 		}
 	} else if len(r.Schema.Workers) > 0 {
@@ -1720,7 +1731,7 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 // no database here.
 func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	if len(r.Schema.Workers) == 0 && len(r.Schema.Derivers) == 0 {
-		return nil
+		return r.rustTableTypes(db, apiDir, deps)
 	}
 	schema, err := r.LoadDependency(db)
 	if err != nil {
@@ -1752,6 +1763,35 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 	return nil
 }
 
+// rustTableTypes sets the Rust types of db, the database of the API whose
+// crate is at apiDir, in deps when the API has an operation marked
+// @tableOperation (D106, D116): its handlers are served from the tables'
+// repositories, which the types crate's src/orm.rs holds. The Rust types
+// of db must be generated.
+func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
+	if !r.Schema.HasTableOperations() {
+		return nil
+	}
+	if r.Options.DependencyConfig != nil {
+		if cfg, ok := r.Options.DependencyConfig(db); ok {
+			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+			if err != nil {
+				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) {
+				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from the repositories of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D106, D116)", r.Config.Name, db, db, LangRust, db)
+			}
+		}
+	}
+	path, err := naming.RelPath(apiDir, TypesDir(r.Options.OutputRoot, LangRust, db))
+	if err != nil {
+		return fmt.Errorf("generator: the Rust types of %s from %s: %w", db, r.Config.Name, err)
+	}
+	deps.DatabaseTypesCrate = r.Options.Naming.RustTypesCrate(db)
+	deps.DatabaseTypesPath = path
+	return nil
+}
+
 // generateRustAPI emits the Rust REST API crate, its src/config.rs (the
 // @envVars loader and the EnvConfig its Deps holds, D57) and its route
 // scaffolds, and under Options.ImplementationRoot it scaffolds a missing
@@ -1764,6 +1804,13 @@ func (r run) generateRustAPI() error {
 	}
 	if output == nil {
 		return r.generateEnvConfig(LangRust)
+	}
+	// Each @tableOperation the Rust server writes no handler for yet
+	// (D106, D116) stays a method of the implementation's interface, and
+	// the API's other table operations are served.
+	for _, op := range output.UnservedTables {
+		r.Warnf("%s: the Rust server writes no handler for %s, a @tableOperation (D106): %s; it stays a method of the implementation's interface, to be written by hand, with the same route and types",
+			r.Config.Name, op.Operation, op.Reason)
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)

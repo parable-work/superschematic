@@ -34,7 +34,7 @@ export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell script
 # replay links in place of the core's (it is never shipped).
 ENGINE_REPLAY_LIB := $(CURDIR)/runtime/engine/go/lib/testkit/$(shell go env GOOS)_$(shell go env GOARCH)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/rules/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/rules/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
 # a release ships and a user installs: cmd/superschematic, a Go module of its
@@ -252,7 +252,10 @@ python:
 # store on Redis (D75), whose tests run on the Valkey
 # SUPERSCHEMATIC_TEST_MEMORY_STORE names, when it is set, and beside a
 # worker's two; and otel, a deployable's
-# trace export (D67), alone and with postgres, as a worker builds it.
+# trace export (D67), alone and with postgres, as a worker builds it. The
+# migration runner an embedded environment's binary carries (D116,
+# runtime/migrate/rust) runs its tests beside the Go runner's binary, which
+# this builds first: each continues a file the other migrated.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -277,9 +280,13 @@ rust:
 		&& cargo test --features postgres,otel \
 		&& cargo clippy --all-targets --features sqlite -- -D warnings && cargo test --features sqlite \
 		&& cargo clippy --all-targets --features postgres,sqlite,logging -- -D warnings \
-		&& cargo test --features postgres,sqlite,logging
+		&& cargo test --features postgres,sqlite,logging \
+		&& cargo clippy --all-targets --features sqlite,logging,otel -- -D warnings
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
+	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate
+	cd runtime/migrate/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& SUPERSCHEMATIC_MIGRATE_BIN=$(CURDIR)/bin/superschematic-migrate cargo test
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --all-features -- -D warnings \
 		&& cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings \

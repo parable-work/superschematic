@@ -56,6 +56,12 @@ use {{ .RuntimeCrateIdent }}::identity;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+{{- if .MCP }}
+
+// The API's MCP endpoint (outputs.api.mcp, D81, D116): its tools, and the
+// routes' checks when a tool asks the person first.
+mod mcp;
+{{- end }}
 {{- range .Patterns }}
 
 static {{ .Name }}: Pattern = Pattern::new({{ rustString .Source }});
@@ -155,6 +161,13 @@ pub struct RouterState {
 /// permission itself.
 {{- end }}
 {{- end }}
+{{- if .MCP }}
+///
+/// The router serves the API's MCP endpoint at `POST /api/mcp`
+/// (outputs.api.mcp, D81, D116): its visible @mcp tools, behind the routes'
+/// auth gate, each call a request to its operation's route, answered by
+/// these routes as the caller the endpoint's request authenticated.
+{{- end }}
 {{- if .WebhookProviders }}
 ///
 /// An @hmacVerified operation's route runs its provider's verifier first.
@@ -163,6 +176,16 @@ pub struct RouterState {
 ///
 /// When `implementations.webhook_verifiers` lacks the verifier of a
 /// provider (`Implementations::validate_implementations`).
+{{- end }}
+{{- if and .MCP .MCP.Checks }}
+///
+{{- if not .WebhookProviders }}
+/// # Panics
+///
+{{- end }}
+/// Always, for this API: {{ .MCP.ConfirmingList }} run{{ if eq (len .MCP.Confirming) 1 }}s{{ end }} only once the
+/// person confirms the call (D93), and the endpoint signs a confirmation
+/// with `options.mcp.confirmation_key`, which `build_router_with` takes.
 {{- end }}
 pub fn build_router(implementations: Implementations) -> Router {
     build_router_with(implementations, RouterOptions::default())
@@ -178,11 +201,26 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// registry, or a router and a Topcoat app's procedures and pages, count a
 /// client against one budget.
 {{- end }}
+{{- if .MCP }}
+///
+/// The MCP endpoint takes `options.mcp`: its server info, its own rate
+/// limit and timeout, and the key and the store of its confirmations.
+{{- end }}
 {{- if .WebhookProviders }}
 ///
 /// # Panics
 ///
 /// As `build_router` does.
+{{- end }}
+{{- if and .MCP .MCP.Checks }}
+///
+{{- if not .WebhookProviders }}
+/// # Panics
+///
+{{- end }}
+/// When `options.mcp.confirmation_key` is absent or shorter than 32 bytes:
+/// {{ .MCP.ConfirmingList }} run{{ if eq (len .MCP.Confirming) 1 }}s{{ end }} only once the person confirms the call
+/// (D93).
 {{- end }}
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
 {{- if .ManualEndpoints }}
@@ -227,6 +265,11 @@ fn mount(
 {{- if .HasRateLimits }}
     let limits = options.rate_limits.clone();
 {{- end }}
+{{- if .HasControls }}
+    // With no transport under the router (`Api::handle`, D116), each
+    // route's rate limit, body limit and timeout are its host's.
+    let transport = options.transport;
+{{- end }}
 {{- if .Identity }}
     let identity_service = Arc::clone(implementations.authenticator.service());
 {{- if .HasAuth }}
@@ -239,7 +282,7 @@ fn mount(
 {{- range .Endpoints }}
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
 {{- range .ControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
@@ -261,7 +304,7 @@ fn mount(
 {{- range .IdentityEndpoints }}
 {{- $route := printf "identity_handler(&identity_service, identity::%s)" .IdentityConst }}
 {{- if .HasControls }}
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
 {{- range .IdentityControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
@@ -270,12 +313,16 @@ fn mount(
 {{- end }}
     router = router.route("{{ .Path }}", {{ $route }});
 {{- end }}
+{{- if and .MCP .ManualEndpoints }}
+    // A tool of a manual operation answers 501 where no handler is mounted.
+    let manual_mounted = manual_routes.is_some();
+{{- end }}
 {{- if .ManualEndpoints }}
     if let Some(manual_routes) = manual_routes {
 {{- range .ManualEndpoints }}
         let route = {{ .Method }}(handle_{{ .SnakeName }}).with_state(Arc::clone(&manual_routes));
 {{- if .HasControls }}
-        let route = RouteControls::new()
+        let route = RouteControls::under(transport)
 {{- range .ControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
             {{ . }}
 {{- end }}
@@ -295,9 +342,20 @@ fn mount(
 {{- end }}
     }
 {{- end }}
+{{- if .MCP }}
+    let routes = router
+        .with_state(Arc::clone(&state))
+        .layer(axum::middleware::from_fn(request_ids));
+    // The MCP endpoint: a route of the router, whose calls are requests to
+    // the routes above.
+    let endpoint = mcp::endpoint(&routes, &state, &options, {{ if .ManualEndpoints }}manual_mounted{{ else }}false{{ end }});
+    routes
+        .merge(endpoint)
+{{- else }}
     router
         .with_state(state)
         .layer(axum::middleware::from_fn(request_ids))
+{{- end }}
         .merge(openapi_router(crate::openapi::OPENAPI_JSON, {{ rustString .SchemaName }}, &options))
 {{- if .Identity }}
         .layer(identity_service.cors())
@@ -545,6 +603,11 @@ async fn handle_{{ .SnakeName }}(
         Err(err) => return error_response(err),
     };
 {{- end }}
+{{- if and .Table .Table.Input }}
+    // The body as it was sent, which tells a member the request left out
+    // from one it sent as null, where the input type reads both as none.
+    let raw = body.clone();
+{{- end }}
 {{- if .HasArgs }}
     let args = match decode_{{ .SnakeName }}({{ .DecodeCall }}) {
         Ok(args) => args,
@@ -576,6 +639,25 @@ async fn handle_{{ .SnakeName }}(
     // runs it on a transaction of {{ .Behavior.Database }}'s pool, as the request's caller.
 {{- end }}
 {{ .BehaviorCall }}
+{{- else if .Table }}
+{{- if and .Page .Page.Sort }}
+    // The page's next names the sort it was read in (D60, amended).
+    let page = args.page.clone();
+{{- end }}
+    // {{ .Table.Type }}'s rows, {{ .Table.Article }} (D106): served from the table's
+    // repository in one transaction of {{ .Table.Database }}, as the request's caller.
+    let result = crate::tables::{{ .SnakeName }}(
+        &state.implementations.tables,
+        ctx.principal.clone(),
+{{- if .HasArgs }}
+        args,
+{{- end }}
+{{- if .Table.Input }}
+        raw,
+{{- end }}
+    )
+    .await{{ if and .Page .Page.Sort }}
+    .and_then(|listed| listed.bind(&page)){{ end }};
 {{- else }}
 {{- if and .Page .Page.Sort }}
     // The page's next names the sort it was read in (D60, amended).
@@ -648,3 +730,79 @@ async fn handle_{{ .SnakeName }}(
     }
 }
 {{- end }}
+
+/// The API with no transport under it (D116): a request in and a response
+/// out, for a host that has no HTTP server of its own to mount a router
+/// on, or wants none between itself and the API. `handle` does what the
+/// router does for a request it holds whole: it finds the route,
+/// authenticates the caller through the implementation's authenticator,
+/// admits by the route's rule, decodes and checks each argument, runs the
+/// operation and writes the envelope or the problem, through the handlers
+/// `build_router`'s routes run.
+///
+/// What needs a socket, a clock or a store shared between requests stays
+/// the host's: the listener, TLS, the body's limit (`handle` takes a body
+/// already read), timeouts, rate limits, CORS and draining. A host tells
+/// the API what it knows of a connection through the request's extensions,
+/// which the authenticator receives.
+///
+/// The implementation's methods are asynchronous. A host with no async
+/// runtime drives `handle` with the runtime's `block_on`, which polls on
+/// the calling thread: an API whose databases are SQLite files, and that
+/// calls no other server, awaits nothing that needs a reactor.
+#[derive(Clone)]
+pub struct Api {
+    router: Router,
+}
+
+impl Api {
+    /// The operations `handle` does not route, by name: the
+    /// @manualRouteRegistration ones, whose handlers a service mounts on
+    /// a router of its own (`build_router_with_manual_routes`).
+    pub const UNROUTED: &'static [&'static str] = &[
+{{- range .ManualEndpoints }}
+        "{{ .Namespace }}.{{ .Name }}",
+{{- end }}
+    ];
+
+    /// The API over `implementations`.
+{{- if .WebhookProviders }}
+    ///
+    /// # Panics
+    ///
+    /// As `build_router` does.
+{{- end }}
+    pub fn new(implementations: Implementations) -> Self {
+        Self::with(implementations, RouterOptions::default())
+    }
+
+    /// `new` with `options`, but for its `transport`, which an `Api` has
+    /// none of.
+{{- if .WebhookProviders }}
+    ///
+    /// # Panics
+    ///
+    /// As `build_router` does.
+{{- end }}
+    pub fn with(implementations: Implementations, options: RouterOptions) -> Self {
+        let options = RouterOptions {
+            transport: false,
+            ..options
+        };
+        Self {
+            router: build_router_with(implementations, options),
+        }
+    }
+
+    /// Answers `request`, whose body is read already, with a response
+    /// whose body is whole.
+{{- if .MCP }} `POST /api/mcp` is a route of it too: the MCP
+    /// endpoint's transport is the stateless one, and its answer is bytes.
+{{- end }}
+    pub async fn handle(
+        &self,
+        request: axum::http::Request<axum::body::Bytes>,
+    ) -> axum::http::Response<axum::body::Bytes> {
+        {{ .RuntimeCrateIdent }}::handle(&self.router, request).await
+    }
+}

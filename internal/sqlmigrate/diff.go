@@ -321,6 +321,19 @@ func (d *differ) diffTable(ft, tt *Table) error {
 		}
 	}
 
+	// A table read from a database may hold what the model has no form of
+	// (Table.Unmodeled, D116). No ALTER TABLE drops it, so the table is
+	// rebuilt as the new model writes it, in expand, before the new
+	// version's servers write to a table whose constraints and actions
+	// they do not know. What the new model's table lists too stays: it is
+	// the same table read from the same file.
+	if unmodeled := minus(ft.Unmodeled, tt.Unmodeled); len(unmodeled) > 0 {
+		d.add(&change{
+			op: opDropUnmodeled, phase: Expand, subject: tableSubject(tt.Name),
+			table: tt.Name, unmodeled: unmodeled,
+		})
+	}
+
 	if err := d.diffColumns(ft, tt); err != nil {
 		return err
 	}
@@ -816,6 +829,10 @@ func (d *differ) dropTables(tables []*Table) {
 // api-breaking for its readers.
 func (d *differ) dropTableHazards(c *change, ft *Table, created []*Table) {
 	reason := fmt.Sprintf("Dropping table %s deletes its rows (%s).", ft.Name, ft.Origin)
+	if ft.Origin == "" {
+		// A table read from a database that no schema declares (D116).
+		reason = fmt.Sprintf("Dropping table %s deletes its rows.", ft.Name)
+	}
 	switch ft.Kind {
 	case TableHistory:
 		reason = fmt.Sprintf("Dropping %s deletes every recorded version of %s.", ft.Name, ft.Origin)

@@ -183,10 +183,17 @@ type ResolvedDeployable struct {
 }
 
 // HasImage reports whether a deploy builds, pins and records an image for
-// d: a server, a job or a worker whose artifact is not a bundle. One
-// resolved before D64 records no artifact, and has an image.
+// d: a server, a job or a worker whose artifact is neither a bundle nor
+// its environment's binary. One resolved before D64 records no artifact,
+// and has an image.
 func (d *ResolvedDeployable) HasImage() bool {
-	return d.Kind.RunsCode() && d.Artifact != ArtifactBundle
+	return d.Kind.RunsCode() && d.Artifact != ArtifactBundle && d.Artifact != ArtifactBinary
+}
+
+// InBinary reports whether d runs inside its environment's one binary: a
+// server or a worker whose platform builds none of its own (D116).
+func (d *ResolvedDeployable) InBinary() bool {
+	return d.Kind.RunsCode() && d.Artifact == ArtifactBinary
 }
 
 // HasBundle reports whether a deploy builds, pins and records a bundle for
@@ -211,10 +218,33 @@ const (
 	// with BundleDigestToken and BundleFileToken and places beside the
 	// provisioner's program (D64).
 	ArtifactBundle Artifact = "bundle"
+
+	// ArtifactBinary is the environment's one binary (D116): every server
+	// and worker on a platform of this artifact is linked into the crate
+	// the stack's build writes at EmbeddedDir, which `stack build` builds
+	// with cargo. A deploy builds, pins and records nothing for it, and
+	// rolls nothing out.
+	ArtifactBinary Artifact = "binary"
 )
 
 // Valid reports whether a is an artifact v1 knows.
-func (a Artifact) Valid() bool { return a == ArtifactImage || a == ArtifactBundle }
+func (a Artifact) Valid() bool {
+	return a == ArtifactImage || a == ArtifactBundle || a == ArtifactBinary
+}
+
+// IsBinary reports whether env builds as one binary (D116): a server or a
+// worker of it runs inside the environment's binary.
+func (env *ResolvedEnvironment) IsBinary() bool {
+	if env == nil {
+		return false
+	}
+	for _, d := range env.Deployables {
+		if d != nil && d.InBinary() {
+			return true
+		}
+	}
+	return false
+}
 
 // ResolvedJob is a job's run in one environment (D52): the method of its
 // API's Jobs interface it calls, and the schedule, time zone, timeout and

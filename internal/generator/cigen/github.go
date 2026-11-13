@@ -230,6 +230,9 @@ func (g github) render() ([]byte, error) {
 		case e.Target == local.Target:
 			notes = append(notes, fmt.Sprintf("%s is on the %s target: %s stack dev runs it.", e.Environment, local.Target, g.cli))
 			continue
+		case e.IsBinary():
+			notes = append(notes, fmt.Sprintf("%s is on the %s target, which builds one binary and rolls nothing out (D116): %s stack build %s builds it, and check holds its recorded plans and compiles its crate.", e.Environment, e.Target, g.cli, e.Environment))
+			continue
 		case len(e.Parameters) > 1:
 			notes = append(notes, fmt.Sprintf("%s takes %d parameters (%s): CI deploys a member of an environment with one.", e.Environment, len(e.Parameters), strings.Join(e.Parameters, ", ")))
 			continue
@@ -471,6 +474,16 @@ func (g github) check() job {
 			})
 		}
 	}
+	// An environment that builds as one binary (D116): the plans its
+	// releases recorded are committed and as they were recorded, and its
+	// crate compiles, frozen to the lockfile, with nothing carried.
+	for _, environment := range g.binaries() {
+		steps = append(steps, g.recordedPlans(environment), step{
+			name: "Compile the binary of " + environment,
+			dir:  path.Join(st.OutputRoot, servergen.EmbeddedRoot, st.Name, environment),
+			run:  rustCheck,
+		})
+	}
 	for _, site := range sites {
 		steps = append(steps, step{
 			name: "Build site " + site,
@@ -613,6 +626,50 @@ func (g github) rustLockfile() step {
 		}, "\n"),
 	}
 }
+
+// binaries are the stack's environments that build as one binary (D116),
+// in declaration order.
+func (g github) binaries() []string {
+	var names []string
+	for _, env := range g.req.Environments {
+		if env.Environment.IsBinary() {
+			names = append(names, env.Environment.Environment)
+		}
+	}
+	return names
+}
+
+// recordedPlans checks the plans the releases of environment recorded, in
+// the Stack service's plans/<environment>/ (D116), which the project
+// commits as it commits its lockfiles: a binary carries every one, so an
+// install is taken forward from whichever it applied last. A plan git
+// does not track would be carried by this machine's builds alone, and one
+// that differs from what is committed was changed after an install may
+// have applied it, as D102 holds a projection's stamp. The build before
+// it refuses a chain a binary cannot carry: a plan missing, or one whose
+// hash is not its content's.
+func (g github) recordedPlans(environment string) step {
+	st := g.req.Stack
+	plans := path.Join(embeddedPlansDir, environment)
+	where := path.Join(st.Dir, plans)
+	return step{
+		name: "Check the recorded plans of " + environment,
+		dir:  st.Dir,
+		run: strings.Join([]string{
+			fmt.Sprintf(`untracked="$(git ls-files --others --exclude-standard -- %s)"`, plans),
+			`if [ -n "$untracked" ]; then`,
+			fmt.Sprintf(`  echo "::error::%s holds a recorded plan that is not committed; commit what %s stack build %s --release wrote" && echo "$untracked" && exit 1`, where, g.cli, environment),
+			"fi",
+			fmt.Sprintf("git diff --quiet -- %s || {", plans),
+			fmt.Sprintf(`  echo "::error::a recorded plan under %s differs from the one committed; a recorded plan is never changed, since an install may have applied it: restore it, and record the change as the next plan with %s stack build %s --release" && git --no-pager diff --stat -- %s && exit 1`, where, g.cli, environment, plans),
+			"}",
+		}, "\n"),
+	}
+}
+
+// embeddedPlansDir is the directory of a Stack service that holds the
+// plans its releases recorded (internal/embedded's PlansDir).
+const embeddedPlansDir = "plans"
 
 // typeCheck type-checks a TypeScript package with the compiler its
 // manifest depends on, which the workspace's install linked into it, and

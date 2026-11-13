@@ -7,6 +7,8 @@
 pub mod scalars;
 pub mod types;
 pub mod validators;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod orm;
 
 pub use scalars::*;
 pub use types::*;

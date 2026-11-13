@@ -32,10 +32,10 @@
 //! them; a NULL column leaves its member out of the message.
 
 #[cfg(feature = "postgres")]
-mod codec;
+pub(crate) mod codec;
 mod duration;
 #[cfg(feature = "sqlite")]
-mod sqlite;
+pub(crate) mod sqlite;
 
 #[cfg(feature = "postgres")]
 use std::borrow::Cow;

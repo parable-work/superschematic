@@ -31,6 +31,10 @@ pub mod behaviors;
 {{if .Queues -}}
 pub mod queues;
 {{end -}}
+{{if .ORM -}}
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod orm;
+{{end -}}
 {{range .VersionGraphs -}}
 pub mod versiongraph_{{.FileName}};
 {{end}}

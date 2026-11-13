@@ -11,8 +11,10 @@ import (
 //   - a TypeScript one's Deps.db is the client of its database's first
 //     dialect, a pg Pool for postgres and a SqlDatabase for sqlite, so its
 //     database must resolve to that dialect;
-//   - a Go or Rust one's Deps reach Postgres alone, the Go ORM and the Rust
-//     pool, so its database must resolve to postgres;
+//   - a Rust one's is too (D116), a pool for postgres and the runtime's
+//     SQLite file for sqlite, with the repositories of that dialect;
+//   - a Go one's Deps reach Postgres alone, through the Go ORM, so its
+//     database must resolve to postgres;
 //   - a TypeScript API over the user model authenticates with an identity
 //     store on Postgres, and none over SQLite is built, so its database may
 //     not list sqlite first, wherever it runs (D50).
@@ -32,14 +34,15 @@ func (r *resolver) checkDatabaseDialects() {
 				r.fail(CodeUnrealizable, "%s %s is a TypeScript %s on %s, whose DB service lists %s first, and environment %s places %s on %s, a %s database; a TypeScript API's Deps.db is the client of its database's first dialect (D64)",
 					from.Kind, from.Name, from.Kind, db, first, r.envName(), db, e.to.res.Name, placed)
 			}
-		case "", registry.APILanguageGo, registry.APILanguageRust:
+		case registry.APILanguageRust:
+			if placed != first {
+				r.fail(CodeUnrealizable, "%s %s is a Rust %s on %s, whose DB service lists %s first, and environment %s places %s on %s, a %s database; a Rust API's Deps.db is the client of its database's first dialect (D64, D116)",
+					from.Kind, from.Name, from.Kind, db, first, r.envName(), db, e.to.res.Name, placed)
+			}
+		case "", registry.APILanguageGo:
 			if placed != registry.SQLDialectPostgres {
-				lang := from.Language
-				if lang == "" {
-					lang = registry.APILanguageGo
-				}
-				r.fail(CodeUnrealizable, "%s %s is a %s %s on %s, and environment %s places %s on %s, a %s database; a Go or Rust API's Deps reach Postgres alone, through the Go ORM or the Rust pool (D64)",
-					from.Kind, from.Name, lang, from.Kind, db, r.envName(), db, e.to.res.Name, placed)
+				r.fail(CodeUnrealizable, "%s %s is a %s %s on %s, and environment %s places %s on %s, a %s database; a Go API's Deps reach Postgres alone, through the Go ORM (D64)",
+					from.Kind, from.Name, registry.APILanguageGo, from.Kind, db, r.envName(), db, e.to.res.Name, placed)
 			}
 		}
 	}

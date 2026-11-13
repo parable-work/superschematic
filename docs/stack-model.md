@@ -3439,13 +3439,24 @@ export abstract class FulfilOrders {}
   the claims over one. The Rust runtime's `sqlite` feature adds
   `queue::enqueue_sqlite`, through a rusqlite connection or transaction,
   and `queue::SqliteQueue`, which the worker loop runs as it runs a
-  `PostgresQueue`. On the local target a TypeScript worker of a
+  `PostgresQueue`. On the local target a TypeScript or a Rust worker of a
   sqlite-first database claims on the environment's SQLite file
   (`local.worker-sqlite`), beside the server that enqueues, each process
   with a connection of its own that waits five seconds for the other's
-  write lock. A Go or Rust worker there is refused with its server, since
-  their `Deps` reach Postgres alone (D64); their clients are proven by the
-  parity test. D1 claims nothing: it is reached through a Worker's binding
+  write lock. A Go worker there is refused with its server, since its
+  `Deps` reach Postgres alone (D64); its client is proven by the
+  parity test. A Rust worker on a SQLite file is a function its host
+  calls (D116): `worker::SqliteWorker::drain`, with a connection, the time
+  and a limit, claims and runs what is due, a message at a time, and
+  answers how many it ran and when the next falls due. It needs no async
+  runtime: a host with none calls it on a thread of its own and sleeps
+  until that time, or until a commit of its own process wakes it, which
+  the runtime's SQLite file signals after each write it commits
+  (`orm::sqlite::Database::wake`, a `worker::Wake`); a write another
+  process made is heard at the next poll. `worker::run_drain` is the loop
+  over it on tokio, which a stack's Rust worker runs. A drain prunes each
+  queue as the claim loop does (D68), by the times it is given, and
+  extends no claim, so a handler has its queue's lease to finish. D1 claims nothing: it is reached through a Worker's binding
   alone, and Workers runs no claim loop.
 - **Workers.** `@worker` comes from `@superschematic/api` and goes on a
   class of an API schema that holds nothing: `queue`, the `@queue` class,
@@ -3546,7 +3557,23 @@ export abstract class FulfilOrders {}
   down` on SIGTERM, a line the Go and TypeScript workers do not write.
   Once the grace is over, a method still running is dropped where it
   waits, and its message released. Its image, as a Rust job's, holds the
-  binary at `/<worker>` and no port.
+  binary at `/<worker>` and no port. Over a database whose DB service
+  lists sqlite first (D116), its `main.rs` opens the database's SQLite
+  file for the API's `Deps`, builds a `worker::SqliteWorker` of the queue
+  with the worker's method as its handler, and runs `worker::run_drain`
+  over it on connections of the worker's own to the file, one per message
+  it handles at a time, as `WORKER_CONCURRENCY` says: each drains in turn
+  on tokio's blocking pool, where the method's future is driven, and
+  sleeps until the next message falls due, a second at most, or until a
+  write the worker's `Deps` commit wakes it. On SIGTERM it starts no
+  drain and gives the running ones the grace; a method still running then
+  is left to its claim's expiry. A behavior worker there (D103) runs the
+  same loop over the worker its API crate's `behaviors` module builds
+  (`<worker>_worker`): its table's deadline, change and event queues, in
+  that order, each message run through the rules adapter's `sqlite` module
+  in a transaction of the worker's connection its message is spent in, at
+  the time the drain was given. A Rust job there opens the file as a
+  server does.
 - **Local.** `stack dev` runs each worker as a process with no port,
   a TypeScript one as `bun main.ts` and a Rust one from the binary its
   crate builds with cargo (D65), ready once it starts, its output
@@ -5586,10 +5613,15 @@ the user's cache, checked against the same digests (section 8.3).
   6.9), kept current by the gcp target's tool, which both share through
   `stack/providerschema`. Built. The cloudflare target (section 18,
   D64), with Workers, D1, R2, sites and Cron Triggers, joins it.
+- **`extensions/embedded`**, a Go module of its own: the embedded target
+  (section 19, D116), its platforms, connectors and policy rules. It has
+  no provisioner and no deploy seam: an environment on it builds as one
+  binary, which the core's stack build writes the crate of and `stack
+  build` builds.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
-  cloudflare.Extension{}, pulumi.Extension{ProviderVersions:
+  cloudflare.Extension{}, embedded.Extension{}, pulumi.Extension{ProviderVersions:
   map[string]string{"gcp": gcp.ProviderVersion, cloudflare.Package:
   cloudflare.ProviderVersion, stack.GenericKeyPackage:
   stack.GenericKeyProviderVersion}})`, so the provisioner installs each
@@ -6405,8 +6437,32 @@ Resolution refuses (`unrealizable`), on each sql edge:
 - a TypeScript server, job or worker whose database resolves to another
   dialect than its DB service's first, since its `Deps.db` would be the
   wrong client;
-- a Go or Rust one whose database resolves to `sqlite`, since the Go ORM
-  and the Rust pool reach Postgres alone.
+- a Rust one whose database resolves to another dialect than its DB
+  service's first, as a TypeScript one's: its `Deps.db` is a pool for
+  `postgres` and the HTTP runtime's SQLite file for `sqlite` (D116);
+- a Go one whose database resolves to `sqlite`, since the Go ORM reaches
+  Postgres alone.
+
+A Rust server on a SQLite file serves its table operations from the Rust
+repositories on SQLite, a table that composes behaviors among them: its
+rows are written through the behaviors' core by the adapter's `sqlite`
+module, which the database's Rust types bind (D103, D116). Its behavior operations run
+through the same module in a transaction of the file's writing
+connection, and its jobs and workers open the file too: a worker, a
+`@worker`'s and a `@behaviorWorker`'s alike, is drained on connections of
+its own (section 8.8). A Rust API over the user model keeps its users,
+their sessions and their API keys in the runtime's identity store on the
+file (D50, D116): its server's entrypoint builds the store with the API
+crate's `identity::store_on_file`, on a connection of the store's own to
+the file, since one of its transactions holds its connection across its
+statements, where the file's handle lends its writer to one piece of work
+at a time. The file is in write-ahead logging, so the store's reads never
+wait, and its writes take their turn with the file's writer, up to the
+busy timeout. The build refuses, by name, what it does not run
+there yet: an engine, which the Rust
+runtime builds over a Postgres pool so far, a worker whose queue's
+message SQLite has no storage for, and a Rust deriver, engine's runner or
+app.
 
 acme-shop's `shop-db` lists `postgres` first, so nothing of it changes;
 its `shop-wishlist-db` lists `sqlite` first, for `wishlist-stack`'s
@@ -6958,3 +7014,176 @@ live on Workers (workers.dev, then a domain, through the SDK, with a
 rollback and a destroy), and a D1-backed TypeScript API, acme-shop's
 `wishlist-stack`, has run live (expand, rollout, contract). Buckets,
 sites and cron jobs, built beside them, have not run live either.
+
+## 19. The embedded target
+
+An environment on the `embedded` target is one binary a person installs
+(D116): every server and worker of the environment in one process, each
+database a SQLite file under one data directory, and the site's built
+files compiled into the binary. The target is `extensions/embedded`'s. It registers no
+provisioner, no state and no deploy seam: what it makes is a file, and it
+rolls nothing out.
+
+### 19.1 What resolves
+
+| Platform | Places |
+|---|---|
+| `embedded.process` | a Rust server, inside the binary |
+| `embedded.worker` | a Rust worker, inside the binary; the registry holds a platform to one deployable kind, so a worker has a platform beside the server's |
+| `embedded.sqlite` | a database whose DB services list `sqlite`: a file per hosted DB schema, `databases/<database>.sqlite` under the data directory, as `stack dev` lays them out |
+| `embedded.assets` | the site, whose origin serves each API of the binary under `/api/<service>` (D91) |
+
+Resolution refuses the rest by name: a Go or a TypeScript server, by the
+languages `embedded.process` runs; a database with no sqlite dialect, by
+the dialects `embedded.sqlite` runs; a job, a bucket, a memory store, an
+engine's runner, a deriver and an app, each with the target's reason
+(`TargetSpec.Unplaced`); and, by the target's policy rules, a domain, a
+parameterized environment, a deployable a settings platform places
+outside the binary, more than one instance of a worker, and a second
+site. The environment's one value is `port`, the port the binary listens
+on when `PORT` is unset, 8080 without it.
+
+The process platforms declare `ir.ArtifactBinary`: a deployable on one
+runs inside its environment's binary, and a deploy builds, pins and
+records nothing for it. `ir.ResolvedEnvironment.IsBinary` reports such an
+environment, and every stack command but `stack build` and `stack dev`
+refuses it, naming `stack build`.
+
+An http edge between two servers of the binary derives the callee's path
+on the binary's origin, which is never dialed, and gives the callee the
+caller as an issuer whose key is the caller's loopback key (section 9.9),
+which the process generates as it starts. A site edge derives the API's
+path on the site's own origin.
+
+### 19.2 The crate
+
+The stack's build writes the environment's crate at
+`<output-root>/embedded/<stack>/<environment>/`, a member of the output
+root's Cargo workspace beside the servers' crates (section 8.6): a
+library and a short `main.rs` over it.
+
+The library's `Embedded::open` takes the data directory. It migrates each
+database's file (section 19.3), sets each variable the environment binds
+that the process's environment leaves unset, and each database field to
+its file, loads each API's `EnvConfig`, opens each file once for every
+API on it, in WAL mode with one writing connection, builds each API's
+`Deps` and calls its `create`. `Embedded::handle` takes a request it
+holds whole and answers a whole response: a request under
+`/api/<service>` by that API's `Api::handle`, with the prefix taken off,
+and any other path from the site: the file the path names, `index.html`
+for a directory, the site's config at `/__superschematic/config.json`
+with each API's URL on the origin the request named, and the site's
+fallback for a path that names no file. A file's ETag is its digest.
+`Embedded::close` lets go of every API and file. A project whose process
+is its own links the library and none of `main.rs`.
+
+`Embedded::workers` are the environment's workers that run, a `@worker`
+or a `@behaviorWorker` of an API of the binary, each its queues over the
+file the binary opened (the HTTP runtime's `SqliteWorker`). A `@worker`'s
+method is the implementation's, from `create_workers` with Deps of its
+own; a behavior worker's queues are the ones the API crate's behaviors
+module builds. `Worker::drain` takes a connection of the worker's own
+(`Worker::connect`), the time and a limit, claims and runs what is due,
+and answers how many messages it ran and when the next falls due. It
+reads no clock and starts no task, so a host with no async runtime calls
+it on a thread of its own and sleeps until that time, or until
+`Worker::wake` says the process committed a write to the file.
+`Worker::run` is the loop over it on tokio, on as many connections as the
+environment gives the worker concurrency.
+
+`main.rs` serves `handle` through axum. It listens on `127.0.0.1` at
+`$PORT`; `--listen <address>[:<port>]` names another address;
+`--every-interface` listens on every interface, and an unspecified
+address without it is refused. `--data <directory>` names the data
+directory, `data` under the working directory without it. A request's
+body is read up to 2 MiB.
+It runs each worker's loop beside the server; once the server has
+stopped, the workers claim no more and let their running drains finish
+for each one's grace.
+
+A call from one API of the binary to another is its SDK's, over the HTTP
+runtime's `in_process::transport`, which hands the request to the
+callee's `handle`. A client of an API whose operations have a service
+clause signs with the loopback key of the caller's server, and the
+callee's service authenticator accepts the loopback issuer of each server
+that calls it, so the clause holds as it does between two servers.
+
+An API whose MCP endpoint runs a tool that asks is built with its router
+options, whose confirmation key its config holds (D93).
+
+An API over the user model (D50) keeps its users, their sessions and
+their API keys in the runtime's identity store on the database's file:
+the library builds one store per such database, on a connection of its
+own to the file, by the API crate's `identity::store_on_file`, and each
+API's identity service over it, with the config its identity config
+field holds. `embedded.process` binds that field to a session cookie
+without `Secure`, since the binary serves plain HTTP on the machine it is
+installed on, unless the environment sets it; the binary carries the
+bound value, and the process's environment overrides it. The identity
+tables are in the database's plan, so the start migrates them with the
+rest.
+
+### 19.3 Plans a binary carries
+
+`superschematic stack build <environment>` builds the stack and every
+service it reaches, runs the site's build, plans each database, writes
+the plans and the site's files into the crate's `carried/` directory and
+`src/carried.rs`, builds the crate with `cargo build --release --locked`
+in the output root's workspace, and prints the binary's path, alone, on
+its standard output.
+
+A plan is the step from the model the last recorded plan ends at, or an
+empty database, to the model the schema declares on SQLite. With
+`--release` the step is recorded in the Stack service's directory, at
+`plans/<environment>/<db>/<number>.json`, numbered from `0001`, to
+commit; a release refuses a step with a hazard of a `--fail-on` class
+that no `--allow` names, and records nothing. Without `--release` the
+binary carries the step and nothing is recorded. Either way the binary
+carries every recorded plan, in order.
+
+A recorded plan is never changed: an install may have applied it. Every
+build of the stack reads the chain and refuses a file that is no plan's,
+a gap in the numbers, a plan whose hash is not its content's, a first
+plan that does not start from an empty database and a plan that does not
+start where the one before it ends. The generated CI's `check` refuses a
+recorded plan git does not track and one that differs from what is
+committed, and compiles the environment's crate.
+
+As it starts, the library takes each file to the model the carried plans
+end at with `superschematic-migrate`'s `start` (`runtime/migrate/rust`):
+a file at that model needs nothing; an empty file starts from the first
+plan; a file at a model a carried plan starts from goes forward plan by
+plan, expand and contract back to back, with a copy of the file made
+before a chain with a contract step; any other file stops the start and
+is not changed. A binary built by cargo alone carries no plan, and
+refuses to start, naming `stack build`.
+
+A database's settings may name one adoption, `adoption: { model, check
+}`: the file of a model document, from the Stack service's directory, as
+`superschematic migrate plan --dialect sqlite --from-database <file>
+--print-model` prints one, and a statement that answers one row holding
+1. The library records the model as applied on a file with tables, no
+migration state and that answer, once, and runs the chain from it. The
+first release of a database with an adoption records two plans: one from
+an empty database to the adoption's model, so a new install builds what a
+file built by hand holds, and the step from it to the schema's model.
+
+### 19.4 Local development
+
+`stack dev` runs the environment as the one process it is. It migrates
+each file under the environment's state directory as the local target
+does (section 8.3): it asks `superschematic-migrate` for the model the
+file recorded, plans from it to the schema's model and applies both
+phases back to back. Then it builds the binary as a build that is no
+release, whose carried plans end at the schema's model, and runs it at
+the environment's port until Ctrl-C.
+
+### 19.5 Not built
+
+- A memory store on the runtime's in-process store, a bucket on a local
+  directory, a job in the process, and an engine on a SQLite file.
+- An operation that is `@manualRouteRegistration`: `handle` routes none,
+  and the build names each.
+- A route's own body limit, rate limit and timeout, which are the
+  host's: `main.rs` holds every request to one body limit.
+- Installing the binary as a service, signing it and updating it.

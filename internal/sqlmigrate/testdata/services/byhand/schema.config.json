@@ -1,0 +1,8 @@
+{
+  "name": "byhand-db",
+  "kind": "DB",
+  "outputs": {
+    "types": { "go": { "enabled": true } },
+    "sql": { "dialects": ["postgres", "sqlite"] }
+  }
+}

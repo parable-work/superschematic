@@ -21,7 +21,9 @@
 //! and two workers that claim at once take different messages. The lease,
 //! the attempts, the backoff, the dead messages and the retention are
 //! Postgres's. Times are the database's clock, in RFC 3339 in UTC to the
-//! millisecond.
+//! millisecond. The same statements run where a worker's drain stands, on
+//! its host's thread, with no runtime under them (D116; the `worker`
+//! module's `drain`).
 //!
 //! A message crosses to its row through its serde form, as on Postgres, each
 //! field as the descriptor marks it: a JSON value as its JSON text; a list
@@ -178,13 +180,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     /// waiting up to [`BUSY_TIMEOUT`] for another connection's lock.
     pub fn open(path: impl AsRef<Path>, definition: QueueDefinition) -> Result<Self, QueueError> {
         let context = format!("open the SQLite database of {}", definition.table);
-        let connection = Connection::open(path).map_err(|err| failed(&context, &err))?;
-        connection
-            .busy_timeout(BUSY_TIMEOUT)
-            .and_then(|()| {
-                connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
-            })
-            .map_err(|err| failed(&context, &err))?;
+        let connection = open_connection(path.as_ref(), &context)?;
         Self::new(connection, definition)
     }
 
@@ -204,18 +200,19 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
         self.definition.lease()
     }
 
-    /// Runs `work` on the connection on tokio's blocking pool.
+    /// Runs `work` on the connection on tokio's blocking pool; `what` says
+    /// what it does, for a task that did not finish.
     async fn with<T: Send + 'static>(
         &self,
-        context: String,
-        work: impl FnOnce(&Connection, &QueueDefinition, &str) -> Result<T, QueueError> + Send + 'static,
+        what: &str,
+        work: impl FnOnce(&Connection, &QueueDefinition) -> Result<T, QueueError> + Send + 'static,
     ) -> Result<T, QueueError> {
         let connection = Arc::clone(&self.connection);
         let definition = Arc::clone(&self.definition);
-        let task_context = context.clone();
+        let context = format!("{what} on {}", self.definition.table);
         tokio::task::spawn_blocking(move || {
             let connection = connection.lock().unwrap_or_else(PoisonError::into_inner);
-            work(&connection, &definition, &task_context)
+            work(&connection, &definition)
         })
         .await
         .map_err(|err| QueueError::Failed(format!("{context}: {err}")))?
@@ -228,65 +225,19 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     /// so it is failed alone, its cause [`UNREADABLE`] and why, and the
     /// others are returned.
     pub async fn claim(&self, n: usize, lease: Duration) -> Result<Vec<Claim<M>>, QueueError> {
-        if n == 0 {
-            return Ok(Vec::new());
-        }
-        let context = format!("claim on {}", self.definition.table);
-        self.with(context, move |connection, definition, context| {
-            let statements = sqlite_statements(definition)?;
-            if !statements.due.is_empty() {
-                let due = connection
-                    .prepare_cached(&statements.due)
-                    .and_then(|mut s| s.exists([]))
-                    .map_err(|err| failed(context, &err))?;
-                if !due {
-                    return Ok(Vec::new());
-                }
-            }
-            connection
-                .prepare_cached(&statements.expire)
-                .and_then(|mut s| s.execute([i64::from(definition.retries)]))
-                .map_err(|err| failed(context, &err))?;
-            let mut statement = connection
-                .prepare_cached(&statements.claim)
-                .map_err(|err| failed(context, &err))?;
-            let n = i64::try_from(n).unwrap_or(i64::MAX);
-            let mut rows = statement
-                .query(rusqlite::params![n, lease.as_secs_f64()])
-                .map_err(|err| failed(context, &err))?;
-            let mut claims = Vec::new();
-            let mut unreadable = Vec::new();
-            while let Some(row) = rows.next().map_err(|err| failed(context, &err))? {
-                match claim_of(definition, row) {
-                    Ok(claim) => claims.push(claim),
-                    Err(ClaimRead::Sql(err)) => return Err(failed(context, &err)),
-                    Err(ClaimRead::Unreadable { id, token, reason }) => {
-                        unreadable.push((id, token, reason));
-                    }
-                }
-            }
-            drop(rows);
-            drop(statement);
-            // Each row is claimed already: one that does not read fails
-            // alone, and a failure to record that leaves it to its lease.
-            for (id, token, reason) in unreadable {
-                let _ = fail_row(
-                    connection,
-                    definition,
-                    &id,
-                    &token,
-                    &format!("{UNREADABLE}: {reason}"),
-                );
-            }
-            Ok(claims)
+        self.with("claim", move |connection, definition| {
+            claim_on(connection, definition, n, lease)
         })
         .await
     }
 
     /// Marks the message `id`, which `token` claims, done.
     pub async fn complete(&self, id: &str, token: &str) -> Result<(), QueueError> {
-        self.update("complete", |s| &s.complete, id, token, None)
-            .await
+        let (id, token) = (id.to_string(), token.to_string());
+        self.with("complete", move |connection, definition| {
+            complete_on(connection, definition, &id, &token)
+        })
+        .await
     }
 
     /// Records `cause` on the message `id`, which `token` claims, and makes
@@ -294,94 +245,264 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     /// capped at the maximum backoff, or dead when its retries are spent.
     /// Returns whether the message is dead.
     pub async fn fail(&self, id: &str, token: &str, cause: &str) -> Result<bool, QueueError> {
-        let context = format!("fail message {id} on {}", self.definition.table);
         let (id, token, cause) = (id.to_string(), token.to_string(), cause.to_string());
-        self.with(context, move |connection, definition, context| {
-            let state = fail_row(connection, definition, &id, &token, &cause)?
-                .map_err(|err| failed(context, &err))?;
-            match state {
-                None => Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}"))),
-                Some(state) => Ok(state == "dead"),
-            }
+        self.with("fail", move |connection, definition| {
+            fail_on(connection, definition, &id, &token, &cause)
         })
         .await
     }
 
     /// Holds the message `id`, which `token` claims, for `lease` from now.
     pub async fn extend(&self, id: &str, token: &str, lease: Duration) -> Result<(), QueueError> {
-        self.update(
-            "extend",
-            |s| &s.extend,
-            id,
-            token,
-            Some(SqlValue::Real(lease.as_secs_f64())),
-        )
+        let (id, token) = (id.to_string(), token.to_string());
+        self.with("extend", move |connection, definition| {
+            let extra = Some(SqlValue::Real(lease.as_secs_f64()));
+            update_on(
+                connection,
+                definition,
+                "extend",
+                |s| &s.extend,
+                &id,
+                &token,
+                extra,
+            )
+        })
         .await
     }
 
     /// Gives the message `id`, which `token` claims, back, due at once, its
     /// attempt not counted: its handler did not finish, and did not fail.
     pub async fn release(&self, id: &str, token: &str) -> Result<(), QueueError> {
-        self.update("release", |s| &s.release, id, token, None)
-            .await
+        let (id, token) = (id.to_string(), token.to_string());
+        self.with("release", move |connection, definition| {
+            update_on(
+                connection,
+                definition,
+                "release",
+                |s| &s.release,
+                &id,
+                &token,
+                None,
+            )
+        })
+        .await
     }
 
     /// Deletes up to `limit` messages done for the queue's retention or
     /// longer, the oldest first, and returns how many it deleted. It never
     /// deletes a dead message.
     pub async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
-        if limit == 0 {
-            return Ok(0);
-        }
-        let context = format!("prune {}", self.definition.table);
-        self.with(context, move |connection, definition, context| {
-            let statements = sqlite_statements(definition)?;
-            let deleted = connection
-                .prepare_cached(&statements.prune)
-                .and_then(|mut s| {
-                    s.execute(rusqlite::params![
-                        i64::try_from(definition.retain_seconds).unwrap_or(i64::MAX),
-                        i64::try_from(limit).unwrap_or(i64::MAX),
-                    ])
-                })
-                .map_err(|err| failed(context, &err))?;
-            Ok(u64::try_from(deleted).unwrap_or(0))
+        self.with("prune", move |connection, definition| {
+            prune_on(connection, definition, limit)
         })
         .await
     }
+}
 
-    /// Runs the statement `which` picks, which changes the message `id`
-    /// while `token` claims it, and refuses a change of no row as a lost
-    /// claim.
-    async fn update(
-        &self,
-        what: &str,
-        which: fn(&QueueStatements) -> &String,
-        id: &str,
-        token: &str,
-        extra: Option<SqlValue>,
-    ) -> Result<(), QueueError> {
-        let context = format!("{what} message {id} on {}", self.definition.table);
-        let params: Vec<SqlValue> = [
-            SqlValue::Text(id.to_string()),
-            SqlValue::Text(token.to_string()),
-        ]
-        .into_iter()
-        .chain(extra)
-        .collect();
-        self.with(context, move |connection, definition, context| {
-            let statements = sqlite_statements(definition)?;
-            let changed = connection
-                .prepare_cached(which(statements))
-                .and_then(|mut s| s.execute(params_from_iter(params)))
-                .map_err(|err| failed(context, &err))?;
-            if changed == 0 {
-                return Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}")));
-            }
-            Ok(())
+/// Opens a worker's connection to the SQLite file at `path`: foreign keys
+/// on, write-ahead logging, so a reader never waits for a writer, and a
+/// statement waiting up to [`BUSY_TIMEOUT`] for another connection's lock.
+pub(crate) fn open_connection(path: &Path, context: &str) -> Result<Connection, QueueError> {
+    let connection = Connection::open(path).map_err(|err| failed(context, &err))?;
+    connection
+        .busy_timeout(BUSY_TIMEOUT)
+        .and_then(|()| {
+            connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
         })
-        .await
+        .map_err(|err| failed(context, &err))?;
+    Ok(connection)
+}
+
+/// [`SqliteQueue::claim`] on `connection`, where it stands: what the queue
+/// runs on tokio's blocking pool, and a drain on its host's thread (D116).
+pub(crate) fn claim_on<M: DeserializeOwned>(
+    connection: &Connection,
+    definition: &QueueDefinition,
+    n: usize,
+    lease: Duration,
+) -> Result<Vec<Claim<M>>, QueueError> {
+    if n == 0 {
+        return Ok(Vec::new());
     }
+    let context = &format!("claim on {}", definition.table);
+    let statements = sqlite_statements(definition)?;
+    if !statements.due.is_empty() {
+        let due = connection
+            .prepare_cached(&statements.due)
+            .and_then(|mut s| s.exists([]))
+            .map_err(|err| failed(context, &err))?;
+        if !due {
+            return Ok(Vec::new());
+        }
+    }
+    connection
+        .prepare_cached(&statements.expire)
+        .and_then(|mut s| s.execute([i64::from(definition.retries)]))
+        .map_err(|err| failed(context, &err))?;
+    let mut statement = connection
+        .prepare_cached(&statements.claim)
+        .map_err(|err| failed(context, &err))?;
+    let n = i64::try_from(n).unwrap_or(i64::MAX);
+    let mut rows = statement
+        .query(rusqlite::params![n, lease.as_secs_f64()])
+        .map_err(|err| failed(context, &err))?;
+    let mut claims = Vec::new();
+    let mut unreadable = Vec::new();
+    while let Some(row) = rows.next().map_err(|err| failed(context, &err))? {
+        match claim_of(definition, row) {
+            Ok(claim) => claims.push(claim),
+            Err(ClaimRead::Sql(err)) => return Err(failed(context, &err)),
+            Err(ClaimRead::Unreadable { id, token, reason }) => {
+                unreadable.push((id, token, reason));
+            }
+        }
+    }
+    drop(rows);
+    drop(statement);
+    // Each row is claimed already: one that does not read fails alone, and
+    // a failure to record that leaves it to its lease.
+    for (id, token, reason) in unreadable {
+        let _ = fail_row(
+            connection,
+            definition,
+            &id,
+            &token,
+            &format!("{UNREADABLE}: {reason}"),
+        );
+    }
+    Ok(claims)
+}
+
+/// [`SqliteQueue::complete`] on `connection`, where it stands.
+pub(crate) fn complete_on(
+    connection: &Connection,
+    definition: &QueueDefinition,
+    id: &str,
+    token: &str,
+) -> Result<(), QueueError> {
+    update_on(
+        connection,
+        definition,
+        "complete",
+        |s| &s.complete,
+        id,
+        token,
+        None,
+    )
+}
+
+/// [`SqliteQueue::fail`] on `connection`, where it stands.
+pub(crate) fn fail_on(
+    connection: &Connection,
+    definition: &QueueDefinition,
+    id: &str,
+    token: &str,
+    cause: &str,
+) -> Result<bool, QueueError> {
+    let context = format!("fail message {id} on {}", definition.table);
+    let state = fail_row(connection, definition, id, token, cause)?
+        .map_err(|err| failed(&context, &err))?;
+    match state {
+        None => Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}"))),
+        Some(state) => Ok(state == "dead"),
+    }
+}
+
+/// [`SqliteQueue::prune`] on `connection`, where it stands.
+pub(crate) fn prune_on(
+    connection: &Connection,
+    definition: &QueueDefinition,
+    limit: usize,
+) -> Result<u64, QueueError> {
+    if limit == 0 {
+        return Ok(0);
+    }
+    let context = format!("prune {}", definition.table);
+    let statements = sqlite_statements(definition)?;
+    let deleted = connection
+        .prepare_cached(&statements.prune)
+        .and_then(|mut s| {
+            s.execute(rusqlite::params![
+                i64::try_from(definition.retain_seconds).unwrap_or(i64::MAX),
+                i64::try_from(limit).unwrap_or(i64::MAX),
+            ])
+        })
+        .map_err(|err| failed(&context, &err))?;
+    Ok(u64::try_from(deleted).unwrap_or(0))
+}
+
+/// Runs the statement `which` picks, which changes the message `id` while
+/// `token` claims it, and refuses a change of no row as a lost claim.
+pub(crate) fn update_on(
+    connection: &Connection,
+    definition: &QueueDefinition,
+    what: &str,
+    which: fn(&QueueStatements) -> &String,
+    id: &str,
+    token: &str,
+    extra: Option<SqlValue>,
+) -> Result<(), QueueError> {
+    let context = format!("{what} message {id} on {}", definition.table);
+    let params: Vec<SqlValue> = [
+        SqlValue::Text(id.to_string()),
+        SqlValue::Text(token.to_string()),
+    ]
+    .into_iter()
+    .chain(extra)
+    .collect();
+    let statements = sqlite_statements(definition)?;
+    let changed = connection
+        .prepare_cached(which(statements))
+        .and_then(|mut s| s.execute(params_from_iter(params)))
+        .map_err(|err| failed(&context, &err))?;
+    if changed == 0 {
+        return Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}")));
+    }
+    Ok(())
+}
+
+/// When the next message of the queue falls due, in epoch milliseconds, by
+/// the times its rows hold: the earliest time a ready message is due at or
+/// a claimed one's claim expires at, or `None` when no message waits. It
+/// only reads, so it takes no write lock. The queue's statements have no
+/// such read, so this one is written here, over the columns every queue
+/// table has (D53): what a drain answers its host with (D116).
+pub(crate) fn next_due_on(
+    connection: &Connection,
+    definition: &QueueDefinition,
+) -> Result<Option<i64>, QueueError> {
+    let context = format!("read when {} is next due", definition.table);
+    let sql = format!(
+        "SELECT MIN(CASE WHEN state = 'ready' THEN due_at ELSE claim_expires_at END) FROM {} WHERE state IN ('ready', 'claimed')",
+        definition.table
+    );
+    let at: Option<String> = connection
+        .prepare_cached(&sql)
+        .and_then(|mut s| s.query_row([], |row| row.get(0)))
+        .map_err(|err| failed(&context, &err))?;
+    match at {
+        None => Ok(None),
+        Some(at) => epoch_millis(&at).map(Some).ok_or_else(|| {
+            QueueError::Failed(format!("{context}: {at:?} is no time a queue's row holds"))
+        }),
+    }
+}
+
+/// A queue row's time, RFC 3339 in UTC, in epoch milliseconds, its
+/// fraction cut to the millisecond.
+fn epoch_millis(text: &str) -> Option<i64> {
+    let utc = utc_timestamp(text).ok()?;
+    let number = |range: std::ops::Range<usize>| utc.get(range)?.parse::<i64>().ok();
+    let days = to_days(number(0..4)?, number(5..7)?, number(8..10)?);
+    let seconds = days * 86_400 + number(11..13)? * 3600 + number(14..16)? * 60 + number(17..19)?;
+    let fraction: String = utc[19..]
+        .trim_start_matches('.')
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .chain("000".chars())
+        .take(3)
+        .collect();
+    Some(seconds * 1000 + fraction.parse::<i64>().ok()?)
 }
 
 /// Runs the fail statement on the message `id` while `token` claims it:
@@ -645,6 +766,28 @@ mod tests {
         );
         assert!(utc_timestamp("yesterday").is_err());
         assert!(utc_timestamp("2026-10-11T09:15:00.Z").is_err());
+    }
+
+    #[test]
+    fn a_rows_time_is_its_epoch_milliseconds() {
+        assert_eq!(epoch_millis("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(
+            epoch_millis("2099-01-01T00:00:00.250Z"),
+            Some(4_070_908_800_250)
+        );
+        assert_eq!(
+            epoch_millis("2026-10-11T09:15:00.123456+02:00"),
+            Some(1_791_702_900_123)
+        );
+        assert_eq!(
+            epoch_millis("2026-10-11T07:15:00Z"),
+            Some(1_791_702_900_000)
+        );
+        assert_eq!(
+            epoch_millis("2026-10-11T07:15:00.5Z"),
+            Some(1_791_702_900_500)
+        );
+        assert_eq!(epoch_millis("soon"), None);
     }
 
     #[test]

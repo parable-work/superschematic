@@ -29,7 +29,7 @@ service's config lists, and regenerates it on every change:
 - the HTTP server: routing, argument decoding, validation, permission
   checks, rate, body and time limits, pagination, webhook signature checks
 - OpenAPI, client SDKs in four languages, MCP tool documents, and on a
-  TypeScript API an MCP endpoint that serves the tools
+  TypeScript or a Rust API an MCP endpoint that serves the tools
 - environment variable loaders, and the server entrypoints, Dockerfiles
   and CI of a stack
 
@@ -134,7 +134,7 @@ breaks your code, the type checker of each language points at the line.
 | A static front end | a Site service | the config, served in each environment, that holds each API's address, and CORS on each API it calls | the front end | [Static sites](/superschematic/guides/static-sites/#declare-a-site) |
 | A front end and its APIs on one origin, for a cookie session with no CORS | `origins: [{ site, apis }]` in `@stack` | each API under `/api/<service>` on the site's address, in `stack dev`, on gcp's load balancer and through the site's Worker on Cloudflare, and the config that names it there | nothing | [Static sites](/superschematic/guides/static-sites/#one-origin) |
 | Clients in Go, TypeScript, Python, Rust | a line per language in `outputs.sdk` | an SDK with the server's checks, pages, errors and retries | nothing | [Client SDKs](/superschematic/guides/client-sdks/#generate-them) |
-| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript API's endpoint at `POST /api/mcp`, which runs an `invocationPolicy: "ask"` tool only once the person confirms the call | nothing; with an `ask` tool, the secret `outputs.api.mcpConfirmationKey` names, set per environment | [MCP tools](/superschematic/reference/mcp-tools/) |
+| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript or a Rust API's endpoint at `POST /api/mcp`, which runs an `invocationPolicy: "ask"` tool only once the person confirms the call | nothing; with an `ask` tool, the secret `outputs.api.mcpConfirmationKey` names, set per environment | [MCP tools](/superschematic/reference/mcp-tools/) |
 | Labels and controls for forms | `@docs`, `@purpose`, `@display`, `@uiControl` | the metadata a schema form reads | nothing | [Documentation](/superschematic/reference/documentation/) |
 
 ## Running and deploying

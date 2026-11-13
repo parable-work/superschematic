@@ -30,7 +30,7 @@ mod engine;
 {{- end }}
 
 use std::process::ExitCode;
-{{- if or .Buckets .MemoryStores }}
+{{- if or .Buckets .MemoryStores .Files }}
 use std::sync::Arc;
 {{- end }}
 use std::time::Instant;

@@ -217,6 +217,7 @@ func TestTableRefusals(t *testing.T) {
 const tableOperationsTest = `package fixturetrackerapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -226,6 +227,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"reflect"
 	"slices"
 	"sort"
@@ -282,7 +284,7 @@ func (t teams) SummarizeTeam(ctx context.Context, id types.IdentityUUID) (*types
 // openDatabase is the pool and the ORM of fixture-tracker-db over a schema
 // of its own, holding the build's create.sql, which it drops when the test
 // ends.
-func openDatabase(t *testing.T) (*pgxpool.Pool, *orm.Database) {
+func openDatabase(t *testing.T) (*pgxpool.Pool, *orm.Database, string) {
 	t.Helper()
 	target := os.Getenv("` + behaviorServerDatabaseEnv + `")
 	if target == "" {
@@ -322,7 +324,52 @@ func openDatabase(t *testing.T) (*pgxpool.Pool, *orm.Database) {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	return pool, db
+	return pool, db, schema
+}
+
+// externalServerEnv names the binary of another server of the same API,
+// which the scenario then calls in the Go server's place: the generated
+// Rust server's (D116), held to the cases the Go and TypeScript servers
+// are. The binary reads its database from TABLE_OPERATIONS_DATABASE_URL,
+// a URL whose search path is the scenario's schema, listens on a port of
+// its own on the loopback interface, and prints "listening on <url>".
+const externalServerEnv = "TABLE_OPERATIONS_SERVER"
+
+// startExternalServer starts the server binary over the scenario's schema
+// and returns its URL, once it prints it.
+func startExternalServer(t *testing.T, binary, schema string) string {
+	t.Helper()
+	target, err := url.Parse(os.Getenv("` + behaviorServerDatabaseEnv + `"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := target.Query()
+	query.Set("options", "-c search_path="+schema+",public")
+	// A Postgres URL's reader takes a space as %20, not as the + a form
+	// writes.
+	target.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
+	server := exec.Command(binary)
+	server.Env = append(os.Environ(), "TABLE_OPERATIONS_DATABASE_URL="+target.String())
+	server.Stderr = os.Stderr
+	stdout, err := server.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Start(); err != nil {
+		t.Fatalf("start %s: %v", binary, err)
+	}
+	t.Cleanup(func() {
+		_ = server.Process.Kill()
+		_ = server.Wait()
+	})
+	lines := bufio.NewScanner(stdout)
+	for lines.Scan() {
+		if address, ok := strings.CutPrefix(lines.Text(), "listening on "); ok {
+			return strings.TrimSpace(address)
+		}
+	}
+	t.Fatalf("%s ended without saying where it listens", binary)
+	return ""
 }
 
 // reply is a response: its status and its decoded body.
@@ -344,9 +391,9 @@ func (r reply) data(t *testing.T) map[string]any {
 
 // client calls the server as one caller.
 type client struct {
-	t      *testing.T
-	server *httptest.Server
-	token  string
+	t     *testing.T
+	base  string
+	token string
 }
 
 func (c client) do(method, path string, body any) reply {
@@ -363,7 +410,7 @@ func (c client) do(method, path string, body any) reply {
 		}
 		payload = bytes.NewReader([]byte(text))
 	}
-	request, err := http.NewRequest(method, c.server.URL+"/api"+path, payload)
+	request, err := http.NewRequest(method, c.base+"/api"+path, payload)
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -411,8 +458,12 @@ func uuid(t *testing.T, id any) string {
 func refused(t *testing.T, what string, got reply, status int, code, detail string) {
 	t.Helper()
 	t.Logf("%s: %d %s", what, got.status, got.raw)
-	// A refusal of the route's own guard carries no code.
+	// A refusal of the Go route's own guard carries no code; another
+	// server's guard may name the status in one.
 	held, _ := got.body["code"].(string)
+	if code == "" && os.Getenv(externalServerEnv) != "" {
+		held = ""
+	}
 	if got.status != status || held != code || got.body["detail"] != detail || got.body["status"] != float64(status) {
 		t.Errorf("%s: %d %s, want %d %s %q", what, got.status, got.raw, status, code, detail)
 	}
@@ -442,20 +493,26 @@ const (
 
 func TestTableOperations(t *testing.T) {
 	ctx := context.Background()
-	pool, db := openDatabase(t)
-	router := chi.NewRouter()
-	router.Use(chimiddleware.RequestID)
-	router.Use(authenticate)
-	if err := api.RegisterRoutes(router, api.Config{
-		DB:              db,
-		Logger:          zap.NewNop(),
-		Implementations: api.Implementations{Teams: teams{db: db}},
-	}); err != nil {
-		t.Fatal(err)
+	pool, db, schema := openDatabase(t)
+	var base string
+	if external := os.Getenv(externalServerEnv); external != "" {
+		base = startExternalServer(t, external, schema)
+	} else {
+		router := chi.NewRouter()
+		router.Use(chimiddleware.RequestID)
+		router.Use(authenticate)
+		if err := api.RegisterRoutes(router, api.Config{
+			DB:              db,
+			Logger:          zap.NewNop(),
+			Implementations: api.Implementations{Teams: teams{db: db}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(router)
+		t.Cleanup(server.Close)
+		base = server.URL
 	}
-	server := httptest.NewServer(router)
-	t.Cleanup(server.Close)
-	as := func(token string) client { return client{t: t, server: server, token: token} }
+	as := func(token string) client { return client{t: t, base: base, token: token} }
 	ada, ben, reader, nobody := as(alice+every), as(bob+every), as(bob+":issues.read"), as("")
 
 	// column reads one column of one row, as text; "" for null.

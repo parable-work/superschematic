@@ -1428,13 +1428,26 @@ does, and a create reads a zero or an empty optional member as unset. An
 update reads the request's own JSON, so `"estimate": 0` writes 0 and
 `"estimate": null` clears it.
 
-A Rust server writes no handler yet. It keeps each method in the
-namespace's trait and its scaffold, to be written by hand, and the build
-warns once per API, naming every such operation, so a project that
-builds the API in two languages still builds:
+A Rust server writes the handlers too (D116), from the repositories the
+database's Rust types carry: over its pool, or over the environment's
+SQLite file when the DB service lists `sqlite` first. A table that
+composes behaviors is written through the behaviors' core on either, as
+the caller with the permissions it holds, and a create that names the
+state its row starts in makes the Workflow's own transition in the
+create's transaction, as the TypeScript server does. The types crate
+binds the core through `superschematic-rules-adapter` and
+`superschematic-rules-behaviors`, which are unpublished, so the naming
+file's `[paths] rules_adapter_rust` and `rules_behaviors_rust` name a
+checkout's; without them the build warns, and a write of such a table is
+refused. A view's `@decrypted` member is the opened value of its
+`Encrypted<T>` column: the server's entrypoint reads the keyring of the
+database's key secret from the API's config (`tables::field_keys`) and
+hands it to `Implementations::new`. The Rust server writes none yet for
+an operation over a projection, which stays a method of the namespace's
+trait and its scaffold, and the build warns of it, with why:
 
 ```
-warning: tracker-api: the Rust server writes no handler for a @tableOperation yet (D106): Issues.listIssues, Issues.getIssue, Issues.createIssue, Issues.updateIssue, Issues.deleteIssue stay methods of the implementation's interface, to be written by hand, with the same route and types
+warning: tracker-api: the Rust server writes no handler for Reports.getOrderTotals, a @tableOperation (D106): it reads the projection OrderTotals, and the Rust repositories read tables so far; it stays a method of the implementation's interface, to be written by hand, with the same route and types
 ```
 
 A TypeScript server answers a `Temporal.DateTime` to the millisecond,
@@ -1604,7 +1617,10 @@ with behavior operations builds only in a checkout that sets `[paths]
 rules_adapter_rust` and `rules_behaviors_rust`
 ([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
 TypeScript repositories run on Postgres alone, so a database that lists
-`sqlite` first has no behavior operations on a TypeScript server yet.
+`sqlite` first has no behavior operations on a TypeScript server yet. A
+Rust server there runs them in a transaction of the SQLite file's writing
+connection (D116), and a write that waits past the busy timeout for it is
+a 503 the caller may try again.
 
 A raw SQL write of an owned column is never refused, so an operator can
 repair a row, but it skips the behavior's rules: move a state through its
@@ -2066,8 +2082,13 @@ last attempt (about fifteen minutes); the row's later changes wait behind
 it, so one row's changes always run in the order they were written. Nothing
 refuses a table whose change queue no worker runs: its messages wait, and
 no rule runs and no raw write's deadline moves until a worker claims them.
-On a database that lists `sqlite` first, and on D1, no behavior worker
-claims yet, so a hearing table's change queue grows by a message per
+On a database that lists `sqlite` first, a Rust API's behavior worker
+claims on the SQLite file (D116): it drains the table's deadline, change
+and event queues in turn on a connection of its own, each message spent in
+the transaction that applies its change set, sleeps until the next falls
+due, a second at most, and hears a write another process made at its next
+poll. No TypeScript or Go behavior worker claims there yet, and none on
+D1, so there a hearing table's change queue grows by a message per
 write, each holding the row's columns, until one does; an operator may
 delete them, and the writes they held then go unheard. A table's rows
 written before its trigger existed have no messages; their deadlines
@@ -2499,8 +2520,8 @@ reads no file, on Bun, Node.js and Workers alike. It still exports
 `openapi.json` as `<package>/openapi.json`. A server that serves several
 APIs answers both routes from the first API's router.
 
-With `outputs.api.mcp` on, a TypeScript API also serves its MCP tools at
-`POST /api/mcp`
+With `outputs.api.mcp` on, a TypeScript or a Rust API also serves its MCP
+tools at `POST /api/mcp`
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
 A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once
 the person confirms the call, by MCP elicitation or a two-step token, so
