@@ -164,6 +164,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_enqueue.go, D80).
 	specs = append(specs, queueDecorator(), workerDecorator(), enqueueOnChangeDecorator())
 
+	// The moves an enum field of a class may make, in a schema of any kind
+	// (core_state_machine.go, D117).
+	specs = append(specs, stateMachineDecorator())
+
 	// A DB service's declared queries, a class each (core_queries.go, D86).
 	specs = append(specs, queryDecorator())
 

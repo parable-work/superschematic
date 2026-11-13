@@ -1091,6 +1091,48 @@
       "error": "a behavior name that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0/name': got number, want string"
     },
     {
+      "name": "a type's state machines",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [\n\t\t{\"field\": \"state\", \"transitions\": [{\"from\": \"open\", \"to\": [\"resolved\", \"closed\"]}, {\"from\": \"resolved\", \"to\": [\"open\"]}], \"terminal\": [\"closed\"]},\n\t\t{\"field\": \"review\", \"fromNull\": [\"RETRY\"], \"transitions\": [{\"from\": \"RETRY\", \"toNull\": true}]}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"name\":\"Ticket\",\"role\":\"DBTable\",\"stateMachines\":[{\"field\":\"state\",\"terminal\":[\"closed\"],\"transitions\":[{\"from\":\"open\",\"to\":[\"resolved\",\"closed\"]},{\"from\":\"resolved\",\"to\":[\"open\"]}]},{\"field\":\"review\",\"fromNull\":[\"RETRY\"],\"transitions\":[{\"from\":\"RETRY\",\"toNull\":true}]}]}}}"
+    },
+    {
+      "name": "a state machine with no move and no terminal state",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"state\", \"transitions\": [], \"terminal\": [], \"fromNull\": [\"open\"]}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"name\":\"Ticket\",\"role\":\"DBTable\",\"stateMachines\":[{\"field\":\"state\",\"fromNull\":[\"open\"]}]}}}"
+    },
+    {
+      "name": "a state machine with an empty fromNull",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"review\", \"fromNull\": []}]}",
+      "accept": false,
+      "error": "a state machine with an empty fromNull: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0/fromNull': minItems: got 0, want 1"
+    },
+    {
+      "name": "a state machine without its field",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"terminal\": [\"closed\"]}]}",
+      "accept": false,
+      "error": "a state machine without its field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0': missing property 'field'"
+    },
+    {
+      "name": "a state machine's transition without its state",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"state\", \"transitions\": [{\"to\": [\"closed\"]}]}]}",
+      "accept": false,
+      "error": "a state machine's transition without its state: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0/transitions/0': missing property 'from'"
+    },
+    {
+      "name": "a state machine's transitions keyed by state",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"state\", \"transitions\": {\"open\": [\"closed\"]}}]}",
+      "accept": false,
+      "error": "a state machine's transitions keyed by state: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0/transitions': got object, want array"
+    },
+    {
       "name": "a display",
       "registry": "core",
       "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"transitions\": {\"todo\": {\"doing\": \"Start\"}},\n\t\t\"states\": {\"doing\": {\"tone\": \"active\", \"activeForm\": \"Doing\"}, \"todo\": {\"label\": \"To do\"}}, \"summaryFields\": [\"Workflow.status\", \"title\"], \"titleField\": \"title\", \"noun\": \"Ticket\"}}",

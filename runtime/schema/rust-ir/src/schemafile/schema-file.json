@@ -6384,6 +6384,63 @@
       },
       "type": "object"
     },
+    "StateMachine": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "fromNull": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "terminal": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "transitions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StateTransition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "StateTransition": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "toNull": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
     "TableOperation": {
       "additionalProperties": false,
       "properties": {
@@ -6637,6 +6694,13 @@
         },
         "stack": {
           "$ref": "#/$defs/StackDecl"
+        },
+        "stateMachines": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StateMachine"
+          },
+          "type": "array"
         },
         "strictJSON": {
           "default": false,

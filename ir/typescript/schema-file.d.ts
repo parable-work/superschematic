@@ -735,6 +735,19 @@ export interface StackDecl {
   origins?: Origin[];
 }
 
+export interface StateMachine {
+  field: string;
+  fromNull?: string[];
+  terminal?: string[];
+  transitions?: StateTransition[];
+}
+
+export interface StateTransition {
+  from: string;
+  to?: string[];
+  toNull?: boolean;
+}
+
 export interface TableOperation {
   by?: string[];
   database?: string;
@@ -801,6 +814,7 @@ export interface TypeDef {
   source?: SourceRef;
   sqlName?: string;
   stack?: StackDecl;
+  stateMachines?: StateMachine[];
   strictJSON?: boolean;
   traitConfig?: TraitConfigSchema;
   user?: UserTrait;

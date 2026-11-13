@@ -1,3 +1,5 @@
+import type { Wrapped } from "./wrappers";
+
 const noopPropertyDecorator: PropertyDecorator = () => {};
 const noopClassOrPropertyDecorator: ClassDecorator &
   PropertyDecorator = () => {};
@@ -90,6 +92,78 @@ export const virtual: PropertyDecorator = noopPropertyDecorator;
  * so: whatever the view holds, a response sends.
  */
 export const decrypted: PropertyDecorator = noopPropertyDecorator;
+
+/**
+ * The states of a field: the enum that types it, for a field typed `E`,
+ * `Nullable<E>` or `Default<E, V>`. A wrapper's enum is read through its
+ * `Wrapped<T>` base. A field of any text or of no text has no states.
+ */
+export type StateOf<F> = (NonNullable<F> extends Wrapped<infer T> ? T : NonNullable<F>) extends infer E
+  ? [E] extends [string]
+    ? string extends E
+      ? never
+      : E
+    : never
+  : never;
+
+/** The machine of the field `K` of `T`: every state is a member of the enum that types the field. */
+export interface StateMachineConfigFor<T, K extends keyof T> {
+  /** The field the machine governs, one an enum types. */
+  readonly field: K;
+  /**
+   * The states a state may move to. A state with no entry moves nowhere.
+   * `null` in a list returns the field to null, on a `Nullable` field with
+   * a `fromNull`.
+   */
+  readonly transitions: {
+    readonly [S in StateOf<T[K]>]?: readonly (StateOf<T[K]> | null)[];
+  };
+  /** The states no update leaves. */
+  readonly terminal: readonly StateOf<T[K]>[];
+  /**
+   * The states a null field may take, on a `Nullable` field. Without it an
+   * update cannot set a null field.
+   */
+  readonly fromNull?: readonly StateOf<T[K]>[];
+}
+
+/**
+ * The options of `@stateMachine<T>`: the machine of one field of `T`, told
+ * apart by `field`, so the one type argument holds every state to that
+ * field's enum.
+ */
+export type StateMachineConfig<T> = {
+  [K in keyof T]-?: StateMachineConfigFor<T, K>;
+}[keyof T];
+
+/**
+ * Declares the moves an enum field of the class may make (D117). A class
+ * takes one per field:
+ *
+ * ```ts
+ * @stateMachine<Ticket>({
+ *   field: "state",
+ *   transitions: {
+ *     [TicketState.Open]: [TicketState.Resolved, TicketState.Closed],
+ *     [TicketState.Resolved]: [TicketState.Open, TicketState.Closed],
+ *   },
+ *   terminal: [TicketState.Closed],
+ * })
+ * export abstract class Ticket {
+ *   state: Default<TicketState, TicketState.Open>;
+ * }
+ * ```
+ *
+ * The build checks the graph: no transition leaves a terminal state, and
+ * every state can be reached from the field's `Default`, or from null when
+ * it has none and the machine has a `fromNull`. A write that keeps the
+ * field's value is no move, and an insert is not held. On a table of a DB
+ * service the database refuses every other move, whatever writes the row;
+ * the generated types carry the same moves for a caller to ask.
+ */
+export function stateMachine<T>(_config: StateMachineConfig<T>): ClassDecorator {
+  return () => {};
+}
 
 // Wire encodings for @temporalFormat: the epoch units. ISO text is the
 // default and is never declared.

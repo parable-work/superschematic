@@ -265,6 +265,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkJobs(schema, r)
 	checkQueues(schema, r)
 	checkEnqueueOnChange(schema, r)
+	checkStateMachines(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)

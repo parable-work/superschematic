@@ -397,6 +397,17 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"an unknown key on a behavior entry", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "extra": 1}]}`},
 	{"a behavior entry without its name", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"config": {"aisles": 1}}]}`},
 	{"a behavior name that is not a string", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": 3}]}`},
+	// A type's state machines (D117): each a field, the moves of its
+	// states, its terminal states and, on a nullable field, its null start,
+	// which lists a state when it is written.
+	{"a type's state machines", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [
+		{"field": "state", "transitions": [{"from": "open", "to": ["resolved", "closed"]}, {"from": "resolved", "to": ["open"]}], "terminal": ["closed"]},
+		{"field": "review", "fromNull": ["RETRY"], "transitions": [{"from": "RETRY", "toNull": true}]}]}`},
+	{"a state machine with no move and no terminal state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": [], "terminal": [], "fromNull": ["open"]}]}`},
+	{"a state machine with an empty fromNull", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "review", "fromNull": []}]}`},
+	{"a state machine without its field", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"terminal": ["closed"]}]}`},
+	{"a state machine's transition without its state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": [{"to": ["closed"]}]}]}`},
+	{"a state machine's transitions keyed by state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": {"open": ["closed"]}}]}`},
 	// A type's display (D48): the registered @display schema's shape.
 	{"a display", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"doing": "Start"}},
 		"states": {"doing": {"tone": "active", "activeForm": "Doing"}, "todo": {"label": "To do"}}, "summaryFields": ["Workflow.status", "title"], "titleField": "title", "noun": "Ticket"}}`},
