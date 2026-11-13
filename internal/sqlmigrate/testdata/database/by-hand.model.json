@@ -1,0 +1,152 @@
+{
+  "dialect": "sqlite",
+  "service": "byhand-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "order_id",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "what",
+          "nullable": true,
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "audit_log",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "audit_log_pkey"
+      },
+      "unmodeled": [
+        "AUTOINCREMENT on id"
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "name",
+          "origin": "Customer.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "id",
+          "origin": "Customer.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "email",
+          "origin": "Customer.email",
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "name": "active",
+          "origin": "Customer.active",
+          "type": "INTEGER"
+        },
+        {
+          "name": "nickname",
+          "nullable": true,
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "customer",
+      "origin": "Customer",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "customer_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "sqlite_autoindex_customer_2"
+        }
+      ],
+      "unmodeled": [
+        "UNIQUE (email) in the table's definition"
+      ]
+    },
+    {
+      "checks": [
+        {
+          "column": "state",
+          "in": [
+            "open",
+            "shipped"
+          ],
+          "name": "ck_order_state"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin": "Order.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "customer_id",
+          "origin": "Order.customer",
+          "type": "TEXT"
+        },
+        {
+          "name": "total",
+          "origin": "Order.total",
+          "type": "REAL"
+        },
+        {
+          "default": "'open'",
+          "name": "state",
+          "origin": "Order.state",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "element": "TEXT",
+          "holds": "list",
+          "name": "tags",
+          "origin": "Order.tags",
+          "type": "TEXT"
+        },
+        {
+          "name": "placed_at",
+          "origin": "Order.placedAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "total"
+          ],
+          "method": "BTREE",
+          "name": "order_by_total"
+        }
+      ],
+      "kind": "entity",
+      "name": "order",
+      "origin": "Order",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

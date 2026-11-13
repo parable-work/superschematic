@@ -96,30 +96,33 @@ fn mount(
     manual_routes: Option<Arc<dyn ManualRoutes>>,
 ) -> Router {
     let limits = options.rate_limits.clone();
+    // With no transport under the router (`Api::handle`, D116), each
+    // route's rate limit, body limit and timeout are its host's.
+    let transport = options.transport;
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .apply(get(handle_session_current_tenant));
     router = router.route("/api/auth/me", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::TENANT_LIST_TENANTS))
         .body_limit_megabytes(1)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
         .apply(get(handle_tenant_list_tenants));
     router = router.route("/api/tenants", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
         .apply(post(handle_tenant_create_tenant));
     router = router.route("/api/tenants", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::TENANT_GET_TENANT))
         .body_limit_megabytes(1)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
         .timeout_seconds(5)
         .apply(get(handle_tenant_get_tenant));
     router = router.route("/api/tenants/{id}", route);
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
         .apply(patch(handle_tenant_update_secret));
     router = router.route("/api/tenants/{id}", route);
@@ -430,5 +433,64 @@ async fn handle_tenant_custom_handler(
     match manual_routes.tenant_custom_handler(ctx, request).await {
         Ok(response) => response,
         Err(err) => error_response(err),
+    }
+}
+
+/// The API with no transport under it (D116): a request in and a response
+/// out, for a host that has no HTTP server of its own to mount a router
+/// on, or wants none between itself and the API. `handle` does what the
+/// router does for a request it holds whole: it finds the route,
+/// authenticates the caller through the implementation's authenticator,
+/// admits by the route's rule, decodes and checks each argument, runs the
+/// operation and writes the envelope or the problem, through the handlers
+/// `build_router`'s routes run.
+///
+/// What needs a socket, a clock or a store shared between requests stays
+/// the host's: the listener, TLS, the body's limit (`handle` takes a body
+/// already read), timeouts, rate limits, CORS and draining. A host tells
+/// the API what it knows of a connection through the request's extensions,
+/// which the authenticator receives.
+///
+/// The implementation's methods are asynchronous. A host with no async
+/// runtime drives `handle` with the runtime's `block_on`, which polls on
+/// the calling thread: an API whose databases are SQLite files, and that
+/// calls no other server, awaits nothing that needs a reactor.
+#[derive(Clone)]
+pub struct Api {
+    router: Router,
+}
+
+impl Api {
+    /// The operations `handle` does not route, by name: the
+    /// @manualRouteRegistration ones, whose handlers a service mounts on
+    /// a router of its own (`build_router_with_manual_routes`).
+    pub const UNROUTED: &'static [&'static str] = &[
+        "tenant.customHandler",
+    ];
+
+    /// The API over `implementations`.
+    pub fn new(implementations: Implementations) -> Self {
+        Self::with(implementations, RouterOptions::default())
+    }
+
+    /// `new` with `options`, but for its `transport`, which an `Api` has
+    /// none of.
+    pub fn with(implementations: Implementations, options: RouterOptions) -> Self {
+        let options = RouterOptions {
+            transport: false,
+            ..options
+        };
+        Self {
+            router: build_router_with(implementations, options),
+        }
+    }
+
+    /// Answers `request`, whose body is read already, with a response
+    /// whose body is whole.
+    pub async fn handle(
+        &self,
+        request: axum::http::Request<axum::body::Bytes>,
+    ) -> axum::http::Response<axum::body::Bytes> {
+        superschematic_http_runtime::handle(&self.router, request).await
     }
 }

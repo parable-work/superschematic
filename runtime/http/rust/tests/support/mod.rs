@@ -159,6 +159,20 @@ pub fn sqlite() -> TestDb {
     sqlite_with(&fixture("sqlite/create.sql"))
 }
 
+/// A SQLite file at `path` holding the fixture's tables, with the store's
+/// client on a connection of its own to it, as a server whose database is
+/// a SQLite file opens it (D116).
+pub fn sqlite_file(path: &std::path::Path) -> TestDb {
+    rusqlite::Connection::open(path)
+        .and_then(|connection| connection.execute_batch(&fixture("sqlite/create.sql")))
+        .unwrap();
+    TestDb {
+        name: "sqlite file",
+        client: Arc::new(Rusqlite::open(path).unwrap()),
+        cleanup: None,
+    }
+}
+
 /// The databases a test runs on: SQLite, and Postgres when
 /// [`POSTGRES_URL_ENV`] names one.
 pub async fn databases() -> Vec<TestDb> {

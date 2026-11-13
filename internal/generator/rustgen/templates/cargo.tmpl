@@ -35,3 +35,28 @@ serde = { version = "1.0.228", features = ["derive"] }
 {{.Naming.VersionGraphRustCrate}} = "0.0.0"
 {{- end}}
 {{- end}}
+{{- if .ORM}}
+# The repositories (D79, D116): src/orm.rs runs each table through the HTTP
+# runtime's orm module, on the dialect each feature names.
+{{- if .HTTPRuntimeDepPath}}
+{{.Naming.HTTPRuntimeRustCrate}} = { path = "{{.HTTPRuntimeDepPath}}", default-features = false, optional = true }
+{{- else}}
+{{.Naming.HTTPRuntimeRustCrate}} = { version = "0.0.0", default-features = false, optional = true }
+{{- end}}
+{{- if .BindsRules}}
+# The behaviors' core (D103, D116): src/orm.rs writes a table that composes
+# behaviors through it, by its adapter's module for each dialect. Both
+# crates are unpublished, so the crate depends on them by path.
+{{rulesAdapterCrate}} = { path = "{{.RulesAdapterDepPath}}", optional = true }
+{{rulesBehaviorsCrate}} = { path = "{{.RulesBehaviorsDepPath}}", optional = true }
+{{- end}}
+
+[features]
+{{- if .BindsRules}}
+postgres = ["dep:{{.Naming.HTTPRuntimeRustCrate}}", "{{.Naming.HTTPRuntimeRustCrate}}/postgres", "dep:{{rulesAdapterCrate}}", "{{rulesAdapterCrate}}/postgres", "dep:{{rulesBehaviorsCrate}}"]
+sqlite = ["dep:{{.Naming.HTTPRuntimeRustCrate}}", "{{.Naming.HTTPRuntimeRustCrate}}/sqlite", "dep:{{rulesAdapterCrate}}", "{{rulesAdapterCrate}}/sqlite", "dep:{{rulesBehaviorsCrate}}"]
+{{- else}}
+postgres = ["dep:{{.Naming.HTTPRuntimeRustCrate}}", "{{.Naming.HTTPRuntimeRustCrate}}/postgres"]
+sqlite = ["dep:{{.Naming.HTTPRuntimeRustCrate}}", "{{.Naming.HTTPRuntimeRustCrate}}/sqlite"]
+{{- end}}
+{{- end}}

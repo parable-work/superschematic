@@ -291,6 +291,14 @@ func (r run) generateServers() error {
 		}
 	}
 
+	// The crate of each environment that builds as one binary (D116), over
+	// the APIs its servers serve, whose implementations the servers' plans
+	// scaffold.
+	embedded, err := r.planEmbedded(st.Name, facts.environments)
+	if err != nil {
+		return err
+	}
+
 	for _, p := range plans {
 		for _, sc := range p.scaffold {
 			if err := sc.write(r); err != nil {
@@ -328,7 +336,11 @@ func (r run) generateServers() error {
 	if len(plans) == 0 && len(tsPlans) == 0 && len(rustPlans) == 0 {
 		// The stack's Rust servers are gone, if it had any: the workspace's
 		// root names the other stacks' alone, or is removed, and so do the
-		// implementations' mirrors.
+		// implementations' mirrors, and no environment has a binary to hold
+		// them.
+		if err := r.writeEmbedded(st.Name, nil); err != nil {
+			return err
+		}
 		if _, err := servergen.WriteRustWorkspace(r.Options.OutputRoot); err != nil {
 			return err
 		}
@@ -369,6 +381,9 @@ func (r run) generateServers() error {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
 	if err := r.writeRustMirrors(rustPlans); err != nil {
+		return fmt.Errorf("stack %s: %w", st.Name, err)
+	}
+	if err := r.writeEmbedded(st.Name, embedded); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
 	if err := r.writeRustWorkspace(len(rustPlans) > 0); err != nil {
@@ -992,8 +1007,9 @@ func workerDatabase(w *ir.ResolvedDeployable, services []stack.Service) string {
 
 // checkRustQueue refuses a Rust worker whose queue the Rust types of its
 // database leave out of src/queues.rs, as they leave out a queue whose
-// message the Rust queue client cannot hold yet (D65), and as
-// checkTypeScriptQueue refuses a TypeScript one.
+// message the Rust queue client cannot hold yet (D65), and one of a
+// sqlite-first database whose message the SQLite queue client cannot hold
+// (D116), as checkTypeScriptQueue refuses a TypeScript one.
 func (r run) checkRustQueue(stackName string, w *ir.ResolvedDeployable, services []stack.Service) error {
 	db := workerDatabase(w, services)
 	if db == "" || r.Options.LoadDependency == nil {
@@ -1003,13 +1019,24 @@ func (r run) checkRustQueue(stackName string, w *ir.ResolvedDeployable, services
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
-	queues, err := rustgen.RustQueues(schema, false)
+	// A worker of a sqlite-first database claims on its SQLite file
+	// (D116), by the statements on SQLite its queue's descriptor carries.
+	sqliteFirst := false
+	for _, svc := range services {
+		if svc.Name == db && len(svc.Dialects) > 0 && svc.Dialects[0] == registry.SQLDialectSQLite {
+			sqliteFirst = true
+		}
+	}
+	queues, err := rustgen.RustQueues(schema, sqliteFirst)
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
 	for _, q := range queues {
 		if q.Name == w.Worker.Queue && q.Unsupported != "" {
 			return fmt.Errorf("stack %s: Rust worker %s claims queue %s of %s, which the Rust queue client cannot hold yet: its %s; hold the value in a @jsonField type, or write the worker in Go (D65)", stackName, w.Name, q.Name, db, q.Unsupported)
+		}
+		if q.Name == w.Worker.Queue && q.SQLiteUnsupported != "" {
+			return fmt.Errorf("stack %s: Rust worker %s claims queue %s of %s, whose DB service lists sqlite first, and the SQLite queue client cannot hold its %s; hold the value in a @jsonField type (D53, amended; D116)", stackName, w.Name, q.Name, db, q.SQLiteUnsupported)
 		}
 	}
 	return nil
@@ -1325,6 +1352,8 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 	in.App = app
 	var scaffolds []*rustrestgen.APIOutput
 	var first *rustrestgen.APIOutput
+	// The API whose router answers the server's POST /api/mcp (D81, D116).
+	mcp := ""
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
 		if err != nil {
@@ -1336,6 +1365,12 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 		}
 		if output == nil {
 			return nil, nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		if output.MCP != nil && s.Kind == ir.DeployableServer {
+			if mcp != "" {
+				return nil, nil, nil, fmt.Errorf("stack %s: server %s serves %s and %s, which both turn on outputs.api.mcp, and one server answers POST %s for one API; serve them from two servers, or turn mcp off in one (D81)", stackName, s.Name, mcp, ref.Name, tsrestgen.MCPPath)
+			}
+			mcp = ref.Name
 		}
 		if first == nil {
 			first = output
@@ -1444,6 +1479,11 @@ type stackFacts struct {
 	// whose artifact is a bundle (D64): a TypeScript server's package then
 	// holds fetch.ts and bundle.ts.
 	bundles map[string]bool
+
+	// environments are the stack's environments, resolved, in declaration
+	// order: one that builds as one binary gets a crate of its own (D116;
+	// embedded.go).
+	environments []*ir.ResolvedEnvironment
 }
 
 // environmentFacts resolves every environment of the stack and reads its
@@ -1455,7 +1495,7 @@ func environmentFacts(c registry.GenerateContext, st *ir.Stack, services []stack
 	if err != nil {
 		return stackFacts{}, err
 	}
-	out := stackFacts{cloudSQL: map[string][]string{}, bundles: map[string]bool{}}
+	out := stackFacts{cloudSQL: map[string][]string{}, bundles: map[string]bool{}, environments: envs}
 	for _, env := range envs {
 		edges := map[string]*ir.Edge{}
 		for _, e := range env.Edges {

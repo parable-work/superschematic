@@ -17,17 +17,21 @@ import (
 
 // migratePlanFlags holds one migrate plan command's flag values.
 type migratePlanFlags struct {
-	from       string
-	fromRef    string
-	renames    []string
-	readers    []string
-	dialect    string
-	out        string
-	format     string
-	failOn     []string
-	allow      []string
-	printModel bool
-	namingPath string
+	from    string
+	fromRef string
+	// fromDatabase names a SQLite file built by hand to plan from, and
+	// drops name the objects of it the plan drops first (D116).
+	fromDatabase string
+	drops        []string
+	renames      []string
+	readers      []string
+	dialect      string
+	out          string
+	format       string
+	failOn       []string
+	allow        []string
+	printModel   bool
+	namingPath   string
 	// databaseURL names the Postgres the new version's queries are
 	// prepared on (D86).
 	databaseURL string
@@ -38,6 +42,7 @@ type migratePlanFlags struct {
 type migratePlanInputs struct {
 	dialect sqlmigrate.Dialect
 	renames []sqlmigrate.Rename
+	drops   []sqlmigrate.Drop
 	failOn  []sqlmigrate.HazardClass
 }
 
@@ -53,7 +58,10 @@ func newMigrateCmd(a *app) *cobra.Command {
 		Long: `migrate plans the change of a DB service's database from one version of
 its schema to another, with no database at hand. The plan is a JSON
 document of ordered steps in two phases, each with its SQL and its
-hazards. superschematic-migrate (runtime/migrate) applies it.`,
+hazards. superschematic-migrate (runtime/migrate) applies it.
+
+A plan starts from another version of the schema, with no database at
+hand, or from a SQLite file built by hand (--from-database).`,
 		Args: cobra.NoArgs,
 	}
 	cmd.AddCommand(newMigratePlanCmd(a))
@@ -68,7 +76,7 @@ func newMigratePlanCmd(a *app) *cobra.Command {
 		Long: `plan compares the DB service at <service-dir> with a previous version of
 it and prints the plan that migrates a database from one to the other.
 Both versions resolve to models with the options a build uses; no
-database is read.
+database is read, but the file --from-database names.
 
 The previous version is another checkout of the service (--from
 <service-dir>), the model a database recorded (--from <model.json>, as
@@ -92,6 +100,19 @@ version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (--from <model.json>).
 
+--from-database plans from a SQLite file built by hand, with --dialect
+sqlite: superschematic-migrate, on PATH or where $SUPERSCHEMATIC_MIGRATE
+names it, opens the file to read it alone, and its tables, columns,
+indexes, foreign keys, checks and triggers become the model the plan
+starts from. What a table's definition holds that a model has no form
+of, such as a UNIQUE written in it, is dropped by a rebuild of the table.
+A view, a virtual table, a trigger that is not the schema's, and an index
+of several keys with an expression among them stop the plan until --drop
+names each (--drop view:order_totals), and the plan then drops them
+first. With --print-model, the file's model is printed, for
+superschematic-migrate adopt to record on the file before the plan is
+applied; --rename and --drop are given to both.
+
 --out writes the plan JSON the runner applies. --format prints the plan
 as json, sql or markdown. --fail-on exits non-zero, after printing, when
 the plan has a hazard of a listed class that no --allow names.
@@ -107,7 +128,9 @@ Examples:
   superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --format markdown --fail-on destructive,compat
   superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --rename order.total=order.amount --out plan.json
   superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
-  superschematic migrate plan ./schemas/services/shop-db --print-model > model.json`,
+  superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
+  superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --out plan.json
+  superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --print-model > legacy-model.json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMigratePlan(cmd, a, flags, args[0])
@@ -115,6 +138,8 @@ Examples:
 	}
 	cmd.Flags().StringVar(&flags.from, "from", "", "the previous version: another checkout of the service directory, or a model JSON file")
 	cmd.Flags().StringVar(&flags.fromRef, "from-ref", "", "the previous version: the service as it is at this git ref")
+	cmd.Flags().StringVar(&flags.fromDatabase, "from-database", "", "the previous version: a SQLite file built by hand, read into a model (with --dialect sqlite)")
+	cmd.Flags().StringArrayVar(&flags.drops, "drop", nil, "an object of the --from-database file that a model has no form of, for the plan to drop first: trigger:<name>, view:<name>, index:<name> or virtual-table:<name> (repeatable)")
 	cmd.Flags().StringArrayVar(&flags.renames, "rename", nil, "a rename: old=new for a table, oldTable.oldColumn=newTable.newColumn for a column (repeatable)")
 	cmd.Flags().StringArrayVar(&flags.readers, "reader", nil, "an API or General service directory outside the schemas root whose @source views read the database (repeatable)")
 	cmd.Flags().StringVar(&flags.dialect, "dialect", string(sqlmigrate.Postgres), "the database dialect: postgres or sqlite")
@@ -122,7 +147,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.format, "format", "sql", "print the plan to stdout as json, sql or markdown")
 	cmd.Flags().StringSliceVar(&flags.failOn, "fail-on", nil, "exit non-zero when the plan has a hazard of these classes that --allow does not name (comma-separated; all for every class)")
 	cmd.Flags().StringArrayVar(&flags.allow, "allow", nil, "a hazard id --fail-on lets pass (repeatable)")
-	cmd.Flags().BoolVar(&flags.printModel, "print-model", false, "print the new version's model as canonical JSON and plan nothing")
+	cmd.Flags().BoolVar(&flags.printModel, "print-model", false, "print the new version's model, or with --from-database the file's, as canonical JSON and plan nothing")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.databaseURL, "database-url", "", "a Postgres server whose role may create a database, which the new version's queries are prepared on (default $"+QueriesDatabaseEnv+", else Postgres in Docker)")
 	return cmd
@@ -133,18 +158,21 @@ Examples:
 func (f *migratePlanFlags) parse(cmd *cobra.Command) (migratePlanInputs, error) {
 	var in migratePlanInputs
 	if f.printModel {
+		// The file's model follows the renames and the drops the plan from
+		// it is given (D116), so --print-model takes them with the file.
+		what, refused := "the new version's model", []string{"from", "from-ref", "rename", "drop", "reader", "out", "format", "fail-on", "allow", "database-url"}
+		if f.fromDatabase != "" {
+			what, refused = "the file's model", []string{"from", "from-ref", "reader", "out", "format", "fail-on", "allow", "database-url"}
+		}
 		var given []string
-		for _, name := range []string{"from", "from-ref", "rename", "reader", "out", "format", "fail-on", "allow", "database-url"} {
+		for _, name := range refused {
 			if cmd.Flags().Changed(name) {
 				given = append(given, "--"+name)
 			}
 		}
 		if len(given) > 0 {
-			return in, fmt.Errorf("--print-model prints the new version's model and plans nothing; drop %s", strings.Join(given, ", "))
+			return in, fmt.Errorf("--print-model prints %s and plans nothing; drop %s", what, strings.Join(given, ", "))
 		}
-	}
-	if f.from != "" && f.fromRef != "" {
-		return in, fmt.Errorf("--from and --from-ref both name the previous version; give one")
 	}
 	if !slices.Contains(migrateFormats, f.format) {
 		return in, fmt.Errorf("--format %q: want json, sql or markdown", f.format)
@@ -154,6 +182,9 @@ func (f *migratePlanFlags) parse(cmd *cobra.Command) (migratePlanInputs, error) 
 		in.dialect = dialect
 	default:
 		return in, fmt.Errorf("--dialect %q: want postgres or sqlite", f.dialect)
+	}
+	if err := f.checkDatabaseFlags(cmd, &in); err != nil {
+		return in, err
 	}
 	for _, value := range f.renames {
 		rename, err := sqlmigrate.ParseRename(value)
@@ -247,10 +278,23 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 		return err
 	}
 
-	if flags.printModel {
-		model, err := current.model(name, in.dialect)
-		if err != nil {
+	toModel, err := current.model(name, in.dialect)
+	if err != nil {
+		return err
+	}
+	// A file built by hand is read against the model the plan ends at
+	// (D116). --print-model then prints the file's model, which adopt
+	// records on the file before the plan from it is applied.
+	var database *sqlmigrate.Database
+	if flags.fromDatabase != "" {
+		if database, err = readDatabase(cmd, flags, in, toModel); err != nil {
 			return err
+		}
+	}
+	if flags.printModel {
+		model := toModel
+		if database != nil {
+			model = database.Model
 		}
 		canonical, err := model.CanonicalJSON()
 		if err != nil {
@@ -260,8 +304,10 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 		return err
 	}
 
-	prev, err := openPrevious(cmd, a, flags, current, name, in.dialect)
-	if err != nil {
+	prev := &previousVersion{label: "--from-database " + flags.fromDatabase}
+	if database != nil {
+		prev.model = database.Model
+	} else if prev, err = openPrevious(cmd, a, flags, current, name, in.dialect); err != nil {
 		return err
 	}
 	defer prev.close()
@@ -270,10 +316,6 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 		return err
 	}
 
-	toModel, err := current.model(name, in.dialect)
-	if err != nil {
-		return err
-	}
 	fromModel := prev.model
 	if prev.found {
 		if fromModel, err = prev.version.model(name, in.dialect); err != nil {
@@ -313,11 +355,17 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 		after = append(after, reads)
 	}
 
-	plan, err := sqlmigrate.Diff(fromModel, toModel, sqlmigrate.Options{
+	opts := sqlmigrate.Options{
 		Renames:       in.renames,
 		ReadersBefore: sqlmigrate.MergeReads(before...),
 		ReadersAfter:  sqlmigrate.MergeReads(after...),
-	})
+	}
+	var plan *sqlmigrate.Plan
+	if database != nil {
+		plan, err = sqlmigrate.DiffDatabase(database, toModel, opts)
+	} else {
+		plan, err = sqlmigrate.Diff(fromModel, toModel, opts)
+	}
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package sqlutil_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -144,6 +145,100 @@ func TestTableStatementsOfALedger(t *testing.T) {
 	probe := ReferenceProbeOf(tables["Account"], tables["Account"].ReferencedBy[0])
 	if probe.Probe != "SELECT 1 FROM entry WHERE entry.account_id = account.id" || probe.Live != " AND entry.deleted_at IS NULL" {
 		t.Errorf("Account's probe = %+v", probe)
+	}
+}
+
+// TestSQLiteTableStatementsOfALedger holds the statements a repository runs
+// on SQLite (D116): Postgres's, with ?n for a parameter, an upsert that
+// does not say whether it inserted, and no ILIKE.
+func TestSQLiteTableStatementsOfALedger(t *testing.T) {
+	tables := ledgerTables(t)
+	entry := SQLiteTableStatementsOf(tables["Entry"])
+	if err := entry.CheckFormats(); err != nil {
+		t.Fatal(err)
+	}
+	postgres := TableStatementsOf(tables["Entry"])
+	for i, st := range entry.AllStatements() {
+		if strings.Contains(st.SQL, "$") {
+			t.Errorf("Entry's %s on SQLite holds a Postgres parameter: %q", st.Name, st.SQL)
+		}
+		// But for its parameters and the upsert's last column, a
+		// statement is Postgres's.
+		want := strings.ReplaceAll(strings.ReplaceAll(postgres.AllStatements()[i].SQL, "$%d", "?%d"), ", (xmax = 0) AS _inserted", "")
+		for n := 9; n >= 1; n-- {
+			want = strings.ReplaceAll(want, fmt.Sprintf("$%d", n), fmt.Sprintf("?%d", n))
+		}
+		if st.SQL != want {
+			t.Errorf("Entry's %s on SQLite = %q, want %q", st.Name, st.SQL, want)
+		}
+	}
+	for name, want := range map[string]string{
+		"getOne":        `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = ?1`,
+		"pageKeyExists": "SELECT EXISTS (SELECT 1 FROM entry WHERE entry.id = ?1)",
+		"update":        "UPDATE entry SET %s WHERE id = ?%d",
+		"updatedAt":     "updated_at = ?%d",
+		"softDelete":    "UPDATE entry SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+		"delete":        "DELETE FROM entry WHERE id = ?1",
+	} {
+		var got string
+		for _, st := range entry.AllStatements() {
+			if st.Name == name {
+				got = st.SQL
+			}
+		}
+		if got != want {
+			t.Errorf("Entry's %s on SQLite = %q, want %q", name, got, want)
+		}
+	}
+	if !strings.HasSuffix(entry.Upsert, `DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`) {
+		t.Errorf("Entry's upsert on SQLite = %q", entry.Upsert)
+	}
+	c := SQLiteClauses()
+	for _, clause := range c.AllClauses() {
+		if err := CheckFormat(clause.Name, clause.SQL); err != nil {
+			t.Error(err)
+		}
+		if strings.Contains(clause.SQL, "$") || strings.Contains(clause.SQL, "ILIKE") {
+			t.Errorf("the clause %s on SQLite = %q", clause.Name, clause.SQL)
+		}
+	}
+	if c.Ne != "%s IS DISTINCT FROM ?%d" || c.ILike != `%s LIKE ?%d ESCAPE '\'` || c.Search != c.ILike || c.Default != "" || c.Placeholder != "?%d" {
+		t.Errorf("the clauses on SQLite = %+v", c)
+	}
+	// A key's reads on SQLite: a list of row values is VALUES.
+	key := tables["Entry"].UniqueKeyNamed("account,externalId")
+	if got := key.SQLite().Rows; !strings.HasSuffix(got, "FROM entry WHERE (account_id, external_id) IN (VALUES %s) AND (deleted_at IS NULL)") {
+		t.Errorf("Entry's key by account and externalId reads its rows on SQLite with %q", got)
+	}
+	if key.SQLite().Conflict != key.Conflict || key.SQLite().Keep != key.Keep || key.SQLite().Held != "" {
+		t.Errorf("Entry's key on SQLite = %+v", key.SQLite())
+	}
+	for name, table := range tables {
+		if reason := SQLiteTableRefusal(table); reason != "" {
+			t.Errorf("%s has no repository on SQLite: %s", name, reason)
+		}
+	}
+}
+
+// TestSQLiteTableRefusal holds what keeps a table from a repository on
+// SQLite: a name SQLite reserves that the statements leave bare, and bytes.
+func TestSQLiteTableRefusal(t *testing.T) {
+	table := &TableModel{Name: "event", Quoted: "event", Columns: []ColumnModel{{Name: "id"}, {Name: "exists"}}}
+	if got := SQLiteTableRefusal(table); !strings.Contains(got, "column exists is named for a word SQLite reserves") {
+		t.Errorf("a column named exists is refused with %q", got)
+	}
+	table = &TableModel{Name: "insert", Quoted: "insert", Columns: []ColumnModel{{Name: "id"}}}
+	if got := SQLiteTableRefusal(table); !strings.Contains(got, "its table is named insert") {
+		t.Errorf("a table named insert is refused with %q", got)
+	}
+	table = &TableModel{Name: "blob", Quoted: "blob", Columns: []ColumnModel{{Name: "id"}, {Name: "body", Type: "BYTEA"}}}
+	if got := SQLiteTableRefusal(table); !strings.Contains(got, "its column body is a BYTEA column") {
+		t.Errorf("a column of bytes is refused with %q", got)
+	}
+	// A name Postgres's quoting quotes is one SQLite reads too.
+	table = &TableModel{Name: "order", Quoted: `"order"`, Columns: []ColumnModel{{Name: "id"}, {Name: "index"}}}
+	if got := SQLiteTableRefusal(table); got != "" {
+		t.Errorf("a table named order is refused with %q", got)
 	}
 }
 

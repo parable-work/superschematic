@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/extensions/cloudflare v0.0.0
+	github.com/parable-work/superschematic/extensions/embedded v0.0.0
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0
 	github.com/parable-work/superschematic/extensions/pulumi v0.0.0
 )
@@ -184,6 +185,8 @@ replace github.com/parable-work/superschematic => ../..
 replace github.com/parable-work/superschematic/ir => ../../ir
 
 replace github.com/parable-work/superschematic/extensions/cloudflare => ../../extensions/cloudflare
+
+replace github.com/parable-work/superschematic/extensions/embedded => ../../extensions/embedded
 
 replace github.com/parable-work/superschematic/extensions/gcp => ../../extensions/gcp
 

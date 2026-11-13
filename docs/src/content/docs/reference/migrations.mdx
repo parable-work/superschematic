@@ -32,7 +32,8 @@ previous version is one of:
 | `--from <service-dir>` | Another checkout of the service directory. |
 | `--from <model.json>` | The model a database recorded, as `superschematic-migrate status --model` prints it. |
 | `--from-ref <git-ref>` | The service as it is at a git ref. |
-| neither | An empty database. The plan creates everything `create.sql` creates. |
+| `--from-database <file>` | A SQLite file built by hand, read into a model ([A file built by hand](#a-file-built-by-hand)). |
+| none | An empty database. The plan creates everything `create.sql` creates. |
 
 A model is the relational schema `sqlgen` resolves before it renders
 `create.sql`: tables with their columns, defaults, keys, checks and
@@ -77,6 +78,8 @@ and to `--out` as JSON.
 | --- | --- | --- |
 | `--from` | none | the previous version: another checkout of the service directory, or a model JSON file |
 | `--from-ref` | none | the previous version: the schemas root at this git ref; cannot be combined with `--from` |
+| `--from-database` | none | the previous version: a SQLite file built by hand, read into a model ([A file built by hand](#a-file-built-by-hand)); needs `--dialect sqlite`, and cannot be combined with `--from` or `--from-ref` |
+| `--drop` | none | with `--from-database`: an object of the file that a model has no form of, for the plan to drop first, as `trigger:<name>`, `view:<name>`, `index:<name>` or `virtual-table:<name>`; repeatable |
 | `--rename` | none | `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column ([Renames](#renames)); repeatable |
 | `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database ([Readers](#readers)); repeatable |
 | `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` for a service whose `outputs.sql.dialects` lists it ([SQLite](#sqlite)) |
@@ -84,7 +87,7 @@ and to `--out` as JSON.
 | `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
 | `--fail-on` | none | hazard classes, comma-separated, or `all`: exit non-zero when the plan has a hazard of one of them that no `--allow` names |
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
-| `--print-model` | false | print the new version's model as canonical JSON and plan nothing |
+| `--print-model` | false | print the new version's model as canonical JSON and plan nothing; with `--from-database`, print the file's model, with the `--rename` and `--drop` its plan is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's declared queries are prepared on ([Declared queries](#declared-queries)) |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file of the new version |
 
@@ -202,6 +205,10 @@ tables and columns after the database's with `@table` and `@column`
 ([Table and column names](/superschematic/guides/database-tables/#table-and-column-names)),
 or change the database, until it prints nothing, then adopt. On SQLite it
 compares the tables, their columns and the indexes.
+
+A SQLite file an app built by hand, before it had a schema, is adopted from
+what it holds instead, and a plan takes it to the schema
+([A file built by hand](#a-file-built-by-hand)).
 
 ## Phases
 
@@ -529,6 +536,8 @@ target can choose. A service that lists `sqlite` first,
 
 - a TypeScript API on it gets `Deps.db` as the HTTP runtime's
   `SqlDatabase`, D1's interface, not a `pg` Pool;
+- a Rust API on it gets `Deps.db` as the HTTP runtime's SQLite file, one
+  writing connection and a few reading ones, not a pool (D116);
 - `stack dev` keeps its database in a SQLite file under the environment's
   state directory, `databases/<database>.sqlite`, which the provisioner
   migrates from the SQLite plan with `superschematic-migrate` at its
@@ -536,9 +545,9 @@ target can choose. A service that lists `sqlite` first,
 - the cloudflare target keeps it on D1, and migrates it from the
   deploying machine at `d1://<account>/<uuid>`.
 
-A Go or Rust API on a sqlite-first database is refused where the database
-runs on SQLite, since their `Deps` reach Postgres alone, and so is a
-TypeScript API whose database runs in another dialect than its first.
+A Go API on a sqlite-first database is refused where the database runs
+on SQLite, since its `Deps` reach Postgres alone, and so is a TypeScript
+or a Rust API whose database runs in another dialect than its first.
 
 ### Types and defaults
 
@@ -760,6 +769,112 @@ the feature and the dialect:
   `SMALLINT[]` and `BIGINT[]` arrays of numbers, so a change between
   them is no step ([A list's element](#a-lists-element)).
 
+### A file built by hand
+
+A SQLite file an app built by hand holds no recorded model, and rarely
+the one `create.sql` would give it. `--from-database` reads the file into
+a model and plans from that:
+
+```sh
+superschematic migrate plan schemas/services/shop-db --dialect sqlite \
+  --from-database legacy.db --out adopt.plan.json
+superschematic migrate plan schemas/services/shop-db --dialect sqlite \
+  --from-database legacy.db --print-model > legacy.model.json
+superschematic-migrate adopt --model legacy.model.json --database-url legacy.db
+superschematic-migrate apply --plan adopt.plan.json --database-url legacy.db
+```
+
+`--print-model` prints the file's model, the one the plan starts from.
+`adopt` records it on the file, or on any file that holds the same schema,
+and `apply` then runs the plan. The compiler holds no SQLite driver: it
+runs `superschematic-migrate inspect`, from `PATH` or
+`$SUPERSCHEMATIC_MIGRATE`, which opens the file to read it alone and prints
+what its catalog holds. The file is never written, and one that does not
+exist is refused. SQLite's own tables and the runner's state tables are no
+part of the model. The model is read from the file, so it needs no
+`adopt --diff`, which compares a declared type and a default as written
+and so lists the file's `VARCHAR(40)` beside the model's `TEXT`.
+
+The file is read for the service being planned. A file made from the
+service's own `sqlite/create.sql` reads back as the schema's model, and
+the plan from it has no step but the seeding of the roles the schema
+seeds. The file states its tables, columns, keys,
+indexes, checks and triggers, in the model's forms:
+
+- A column's type is its affinity, which is all SQLite keeps of a
+  declared type: `VARCHAR(40)` is `TEXT`, `BIGINT` is `INTEGER`, `BOOLEAN`
+  and `DATETIME` are `NUMERIC`, and a column with no type is `BLOB`.
+  `COLLATE NOCASE` on a text column is `TEXT COLLATE NOCASE`.
+- A default is the file's, with `TRUE` and `FALSE` read as the `1` and `0`
+  they name. `DEFAULT CURRENT_TIMESTAMP` is not the schema's timestamp
+  default, which writes RFC 3339, so the plan changes it.
+- A `PRIMARY KEY` column takes `NULL` in SQLite unless it says `NOT NULL`
+  or is the rowid (`INTEGER PRIMARY KEY`), and reads so.
+- A `CHECK` in one of the forms a schema's checks take reads as that
+  check, however it is spaced or quoted.
+- A unique index is a unique constraint when the schema's table has one
+  over the same columns.
+- An index of one key that is an expression, or in a collation that is
+  not its column's, is an expression index; a descending key reads as its
+  column.
+
+What only the compiler knows, the file cannot say, and the model takes it
+from the schema for the tables and columns both hold, by name: the schema
+field a column stores, the names of keys and checks, and what a `TEXT`
+column holds as JSON. A text column the schema declares as a list or a
+JSON value is taken to hold one; the read does not look at rows. A table
+or a column the schema names otherwise is matched with `--rename`
+([Renames](#renames)), given to the plan and to `--print-model` alike.
+A table, a column or an index the schema does not declare is in the model
+like any other, and the plan drops it in `contract`, with its hazards.
+The roles `@seedRoles` keeps are rows, so the plan seeds each; the insert
+leaves a role that is there alone.
+
+Some of what a table's definition may hold has no form in a model: a
+`UNIQUE` written in the definition, whose index SQLite lets no statement
+drop, a `CHECK` in another form, `AUTOINCREMENT`, `ON CONFLICT`, a foreign
+key's `ON UPDATE` action or `DEFERRABLE INITIALLY DEFERRED`, a collation
+other than `NOCASE`, `WITHOUT ROWID` and `STRICT`. The model lists each on
+its table (`unmodeled`), and the plan rebuilds the table as the schema
+writes it, in `expand`, which drops them; the `copy-table` hazard's reason
+names each. A `UNIQUE` the schema declares too becomes the schema's unique
+index in that rebuild.
+
+A view, a virtual table, a trigger that is not the schema's, and an index
+of several keys with an expression or another collation among them are
+objects no model holds. They stop the plan, which names each and the flag
+that drops it:
+
+```
+--from-database legacy.db: sqlmigrate: the file holds 2 objects the model has no form of, which a plan would leave in a file no model describes:
+  trigger order_audit on order
+  view order_totals
+Name each to have the plan drop it first:
+  --drop trigger:order_audit
+  --drop view:order_totals
+```
+
+With `--drop` naming each, the plan drops them in its first steps, in
+`expand`: SQLite refuses to rename a rebuilt table into place, or to drop
+a column, while a view or a trigger names what the step changes. Each
+drop is `destructive`, since no plan creates the object again, and
+`compat`, since it runs before the previous version's servers are gone. A
+`--drop` that names an object the file does not hold, or one the schema
+declares, is refused.
+
+An object the schema's raw SQL creates ([Raw SQL](#raw-sql)) is the raw
+SQL's: a table, an index, a view, a trigger or a virtual table that a
+`CREATE` statement of a piece names is in no table of the model and needs
+no `--drop`. A piece counts as run when the file holds every object its
+statements create, each as its statement writes it. Any other piece runs
+in the plan, as a piece may run again over what it made. So a search table
+the file already has is kept by declaring it with `@rawSql`.
+
+The file's names are taken as written. A table or a column the file names
+as the schema does but for its case is refused: SQLite takes the two as
+one name. Name it in the schema as the file does, with `@table` or
+`@column`.
+
 ## The runner
 
 `superschematic-migrate` applies a plan. It is the Go module
@@ -796,6 +911,7 @@ superschematic-migrate status --service NAME [--model] [--database-url URL]
 superschematic-migrate adopt --model model.json [--database-url URL]
 superschematic-migrate queue --queue queue.json [--database-url URL | --cloud-sql INSTANCE --cloud-sql-user USER --database NAME] [--result result.json]
 superschematic-migrate describe --statements statements.json [--database-url URL]
+superschematic-migrate inspect [--database-url URL]
 superschematic-migrate version
 ```
 
@@ -938,6 +1054,11 @@ built from `create.sql` or changed by hand. The model's `service` and
 `dialect` key the row. It refuses while a plan is in progress, and prints
 the hash it replaces. `migrate plan --print-model` prints the model to
 adopt.
+
+`inspect` prints what the catalog of a SQLite file holds as JSON, for
+`migrate plan --from-database`
+([A file built by hand](#a-file-built-by-hand)). It opens the file to read
+it alone and refuses one that does not exist.
 
 ## Limits
 

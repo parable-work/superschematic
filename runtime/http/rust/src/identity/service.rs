@@ -614,12 +614,16 @@ fn since(now: SystemTime, then: SystemTime) -> Duration {
 }
 
 /// Runs a password hash or verify on the blocking pool, so its cost does
-/// not hold an executor thread.
+/// not hold an executor thread, and where it stands when no tokio runtime
+/// runs the caller: a host that polls a request's future itself (D116).
 async fn blocking<T, F>(work: F) -> Result<T, ApiError>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return Ok(work());
+    }
     tokio::task::spawn_blocking(work)
         .await
         .map_err(|err| internal(&err))

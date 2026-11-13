@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -269,6 +270,26 @@ type ModuleOutput struct {
 	// names the crate's version instead.
 	SchemaRuntimeDepPath string
 
+	// ORM is the schema's tables as src/orm.rs types and describes them
+	// (D79, D116); nil for a schema with no table.
+	ORM *ORMInfo
+
+	// HTTPRuntimeDepPath is the Cargo.toml path entry for the HTTP runtime
+	// crate (Naming.HTTPRuntimeRustCrate), whose orm module src/orm.rs
+	// runs its tables through, relative to the output directory, set by
+	// SetHTTPRuntimePath. Empty names the crate's version instead.
+	HTTPRuntimeDepPath string
+
+	// RulesAdapterDepPath and RulesBehaviorsDepPath are the Cargo.toml path
+	// entries for the behaviors' adapter and the behaviors' own crate
+	// (superschematic-rules-adapter and superschematic-rules-behaviors),
+	// through which src/orm.rs writes a table that composes behaviors
+	// (D103, D116), relative to the output directory, set by
+	// SetRulesPaths. Both crates are unpublished, so a crate with either
+	// unset binds no core, and says so (BindsRules).
+	RulesAdapterDepPath   string
+	RulesBehaviorsDepPath string
+
 	// Behaviors are the types that compose behaviors, each with its
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as src/behaviors.rs. Nil when no type composes one.
@@ -311,8 +332,13 @@ type Options struct {
 
 	// SQLite is whether the DB service lists the sqlite dialect, whose
 	// statements each queue's descriptor in queues.rs then carries beside
-	// Postgres's (D53, amended).
+	// Postgres's (D53, amended), and each table's definition in orm.rs
+	// (D116).
 	SQLite bool
+
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87), which orm.rs's definitions carry.
+	Actor sqlutil.Actor
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
@@ -443,6 +469,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if opts.EngineDocument != nil {
 		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
 	}
+	if output.ORM, err = rustORM(schema, opts, output); err != nil {
+		return nil, err
+	}
 	if output.Queues, err = RustQueues(schema, opts.SQLite); err != nil {
 		return nil, err
 	}
@@ -487,14 +516,72 @@ func SetSchemaRuntimePath(output *ModuleOutput, paths naming.LocalPaths, outputD
 	return nil
 }
 
+// SetHTTPRuntimePath points the HTTP runtime crate the repositories run
+// through at its directory under paths, relative to outputDir.
+func SetHTTPRuntimePath(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	rel, err := naming.RelPath(outputDir, paths.HTTPRuntimeRust)
+	if err != nil {
+		return fmt.Errorf("http runtime crate path: %w", err)
+	}
+	output.HTTPRuntimeDepPath = rel
+	return nil
+}
+
+// SetRulesPaths points the behaviors' adapter and the behaviors' crate,
+// through which the repositories write a table that composes behaviors
+// (D103, D116), at their directories under paths, relative to outputDir.
+// Either left unset in paths leaves the crate binding no core.
+func SetRulesPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	adapter, err := naming.RelPath(outputDir, paths.RulesAdapterRust)
+	if err != nil {
+		return fmt.Errorf("behaviors' adapter crate path: %w", err)
+	}
+	behaviors, err := naming.RelPath(outputDir, paths.RulesBehaviorsRust)
+	if err != nil {
+		return fmt.Errorf("behaviors' crate path: %w", err)
+	}
+	output.RulesAdapterDepPath, output.RulesBehaviorsDepPath = adapter, behaviors
+	return nil
+}
+
+// RulesAdapterCrate and RulesBehaviorsCrate are the unpublished crates the
+// repositories of a database with a table that composes behaviors run its
+// writes through (D103, D116): the adapter, the pure core's host loop in
+// the caller's transaction, and the behaviors, which build the core.
+const (
+	RulesAdapterCrate   = "superschematic-rules-adapter"
+	RulesBehaviorsCrate = "superschematic-rules-behaviors"
+)
+
+// BindsRules reports whether src/orm.rs binds the behaviors' core to its
+// repositories (D103, D116): the schema has a table that composes
+// behaviors, and the build names both unpublished crates the binding
+// depends on by path.
+func (o *ModuleOutput) BindsRules() bool {
+	return o.ORM != nil && o.ORM.Rules && o.RulesAdapterDepPath != "" && o.RulesBehaviorsDepPath != ""
+}
+
+// HTTPRuntimeIdent is the HTTP runtime crate as a Rust path names it.
+func (o *ModuleOutput) HTTPRuntimeIdent() string {
+	return strings.ReplaceAll(o.Naming.HTTPRuntimeRustCrate, "-", "_")
+}
+
 // SetLocalPaths points every runtime crate the types crate depends on at
-// its directory under paths: the scalar library, the version graph's engine
-// and the schema runtime. An unset path names the crate's version instead.
+// its directory under paths: the scalar library, the version graph's
+// engine, the schema runtime, the HTTP runtime and the behaviors' two
+// crates. An unset path names the crate's version instead, but the
+// behaviors' crates', which have none: a crate without them binds no core.
 func SetLocalPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
 	if err := SetScalarLibPath(output, paths, outputDir); err != nil {
 		return err
 	}
 	if err := SetVersionGraphPath(output, paths, outputDir); err != nil {
+		return err
+	}
+	if err := SetHTTPRuntimePath(output, paths, outputDir); err != nil {
+		return err
+	}
+	if err := SetRulesPaths(output, paths, outputDir); err != nil {
 		return err
 	}
 	return SetSchemaRuntimePath(output, paths, outputDir)

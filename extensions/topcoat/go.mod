@@ -16,6 +16,8 @@ replace github.com/parable-work/superschematic/cmd/superschematic => ../../cmd/s
 
 replace github.com/parable-work/superschematic/extensions/cloudflare => ../cloudflare
 
+replace github.com/parable-work/superschematic/extensions/embedded => ../embedded
+
 replace github.com/parable-work/superschematic/extensions/gcp => ../gcp
 
 replace github.com/parable-work/superschematic/extensions/pulumi => ../pulumi
@@ -132,6 +134,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f // indirect
 	github.com/parable-work/superschematic/extensions/cloudflare v0.0.0 // indirect
+	github.com/parable-work/superschematic/extensions/embedded v0.0.0 // indirect
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0 // indirect
 	github.com/parable-work/superschematic/extensions/pulumi v0.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect

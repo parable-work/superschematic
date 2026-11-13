@@ -607,6 +607,14 @@ server and of the worker holds the adapter's Cargo workspace. The crate
 is unpublished, so the build refuses such an API while this key is
 unset.
 
+The Rust types crate of a database with a table that composes behaviors
+depends on it by path too, behind its `postgres` and `sqlite` features:
+its repositories write such a table through the core, by the adapter's
+module for each dialect (D116). While this key or `rules_behaviors_rust`
+is unset, the crate depends on neither and binds no core, the build warns
+of the tables, and a create, an update and a delete of their rows are
+refused.
+
 ### `paths.rules_behaviors_rust`
 
 Default: unset. This repository's own file sets
@@ -614,8 +622,20 @@ Default: unset. This repository's own file sets
 
 Directory of the behaviors ported onto the core,
 `superschematic-rules-behaviors` (D103), whose core the same Rust API
-crate runs its behavior operations on, beside `rules_adapter_rust`.
+crate runs its behavior operations on, beside `rules_adapter_rust`, and
+whose core a database's Rust types crate binds to its repositories (D116).
 Unpublished too: the build refuses such an API while this key is unset.
+
+### `paths.migrate_rust`
+
+Default: unset. This repository's own file sets `runtime/migrate/rust`.
+
+Directory of the migration runner a binary links,
+`superschematic-migrate` (D116). The crate of an environment on the
+`embedded` target depends on it by path, and migrates each database's
+SQLite file with it as the binary starts, from the plans it carries. The
+crate is unpublished, so the build writes no embedded crate while this
+key is unset, and says so.
 
 ### `paths.engine_go`
 

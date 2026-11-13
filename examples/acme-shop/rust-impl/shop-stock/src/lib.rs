@@ -20,6 +20,11 @@
 //! files one for each Inventory the engine lists low with none open, and
 //! orders the open ones.
 //!
+//! It reads shop-db's products and reads and writes its restock requests
+//! through the repositories shop-db's Rust types carry (D116), over a
+//! connection of the pool its `Deps` holds: no statement here is written
+//! by hand.
+//!
 //! The build scaffolded this crate once, at the naming file's
 //! `[implementation_paths] rust` template, `rust-impl/{service}`; it is
 //! the shop's from then on.
@@ -28,7 +33,11 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use acme_shop_stock_api::database_types::{self, STOCK_LOW_QUEUE};
+use acme_shop_stock_api::database_types::orm::postgres::Repositories;
+use acme_shop_stock_api::database_types::orm::{
+    RestockRequestCreate, RestockRequestFilter, RestockRequestUpdate,
+};
+use acme_shop_stock_api::database_types::{self, RestockStatus, STOCK_LOW_QUEUE};
 use acme_shop_stock_api::types::{self, IdentityUUID};
 use acme_shop_stock_api::{
     BoxError, Deps, Handlers, Jobs, StockGetStockArgs, StockImplementation, StockReceiveStockArgs,
@@ -38,8 +47,8 @@ use async_trait::async_trait;
 use http::StatusCode;
 use serde_json::{json, Value};
 use superschematic_engine::{calls, Principal, PrincipalService};
+use superschematic_http_runtime::orm::{self, ConstraintKind, Equals, FindOptions, OrderBy, Text};
 use superschematic_http_runtime::postgres::deadpool_postgres::Object;
-use superschematic_http_runtime::postgres::tokio_postgres::error::SqlState;
 use superschematic_http_runtime::queue::{self, QueueDefinition};
 use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
 
@@ -287,16 +296,19 @@ impl StockImplementation for Stock {
         let principal = staff_principal(&ctx)?;
         let product = args.product_id;
         let client = connection(&self.deps).await?;
-        let row = client
-            .query_opt(
-                "SELECT sku, price_cents FROM product WHERE id = $1",
-                &[product.as_uuid()],
-            )
-            .await
+        let repositories = Repositories::new(&client).map_err(|err| failed(&self.deps, err))?;
+        let found = repositories
+            .product()
             .map_err(|err| failed(&self.deps, err))?
-            .ok_or_else(|| ApiError::not_found(format!("no product has id {product}")))?;
-        let sku: String = row.get("sku");
-        let price: i64 = row.get("price_cents");
+            .get_one(&product)
+            .await;
+        let (sku, price) = match found {
+            Ok(row) => (row.sku, row.price_cents),
+            Err(orm::Error::NotFound(_)) => {
+                return Err(ApiError::not_found(format!("no product has id {product}")))
+            }
+            Err(err) => return Err(failed(&self.deps, err)),
+        };
         let reorder_at = args
             .input
             .reorder_at
@@ -469,30 +481,46 @@ fn restock_quantity(quantity: i64, threshold: i64) -> i64 {
 
 /// Files an open restock request for a product, unless one is open:
 /// restock_request's one_open_per_product index admits one open request
-/// per product. Returns whether it filed one; none for a product deleted
-/// since, which has no stock to restock.
+/// per product, so the create of a second is refused by that key. Returns
+/// whether it filed one; none for a product deleted since, which has no
+/// stock to restock.
 async fn file_restock(
     deps: &Deps,
     client: &Object,
     product: &IdentityUUID,
     quantity: i64,
 ) -> Result<bool, BoxError> {
-    let filed = client
-        .execute(
-            "INSERT INTO restock_request (product_id, open_product_id, status, quantity) \
-             VALUES ($1, $1, 'open', $2) \
-             ON CONFLICT (open_product_id) DO NOTHING",
-            &[product.as_uuid(), &quantity],
-        )
+    let filed = Repositories::new(client)?
+        .restock_request()?
+        .create_one(&RestockRequestCreate {
+            id: None,
+            product_id: *product,
+            status: None,
+            quantity,
+            open_product_id: Some(*product),
+            ordered_at: None,
+        })
         .await;
     match filed {
-        Ok(n) => Ok(n > 0),
-        Err(err) if err.code() == Some(&SqlState::FOREIGN_KEY_VIOLATION) => {
+        Ok(_) => Ok(true),
+        Err(orm::Error::Constraint(refused)) if refused.kind == ConstraintKind::Unique => Ok(false),
+        Err(orm::Error::Constraint(refused)) if refused.kind == ConstraintKind::ForeignKey => {
             tracing::info!(parent: &deps.span, product = %product.as_uuid(), "no product to restock");
             Ok(false)
         }
         Err(err) => Err(err.into()),
     }
+}
+
+/// How many open restock requests one run of OrderRestocks reads: a run
+/// that leaves some open leaves them to the next.
+const ORDER_BATCH: u32 = 500;
+
+/// The time now, as a row holds one.
+fn now() -> Result<database_types::TemporalDateTime, BoxError> {
+    Ok(serde_json::from_value(json!(orm::rfc3339_millis(
+        std::time::SystemTime::now()
+    )))?)
 }
 
 /// Implements the workers of shop-stock.
@@ -579,14 +607,26 @@ impl Jobs for StockJobs {
                 filed += 1;
             }
         }
-        let open = client
-            .query(
-                "SELECT id FROM restock_request WHERE status = 'open' ORDER BY created_at, id",
-                &[],
+        let repositories = Repositories::new(&client)?;
+        let requests = repositories.restock_request()?;
+        let is_open = || Some(Text::eq(RestockStatus::Open));
+        let open = requests
+            .find_many(
+                Some(&RestockRequestFilter {
+                    status: is_open(),
+                    ..Default::default()
+                }),
+                &FindOptions {
+                    order_by: vec![OrderBy::asc("createdAt"), OrderBy::asc("id")],
+                    limit: Some(ORDER_BATCH),
+                    skip_count: true,
+                    ..Default::default()
+                },
             )
-            .await?;
+            .await?
+            .rows;
         let mut ordered = 0;
-        for row in &open {
+        for request in &open {
             if shutdown.is_cancelled() {
                 return Err(format!(
                     "stopped after ordering {ordered} of {} open restock requests",
@@ -594,15 +634,22 @@ impl Jobs for StockJobs {
                 )
                 .into());
             }
-            let id = IdentityUUID::from_uuid(row.get("id"));
-            // A shop would send the order to its supplier here.
-            ordered += client
-                .execute(
-                    "UPDATE restock_request \
-                     SET status = 'ordered', open_product_id = NULL, \
-                     ordered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP \
-                     WHERE id = $1 AND status = 'open'",
-                    &[id.as_uuid()],
+            // A shop would send the order to its supplier here. The write
+            // finds the request only while it is open, so a request
+            // another run ordered since is ordered once.
+            ordered += requests
+                .update_many(
+                    Some(&RestockRequestFilter {
+                        id: Some(Equals::eq(request.id)),
+                        status: is_open(),
+                        ..Default::default()
+                    }),
+                    &RestockRequestUpdate {
+                        status: Some(RestockStatus::Ordered),
+                        open_product_id: Some(None),
+                        ordered_at: Some(Some(now()?)),
+                        ..Default::default()
+                    },
                 )
                 .await?;
         }

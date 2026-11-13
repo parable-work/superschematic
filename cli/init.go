@@ -353,6 +353,7 @@ var initPathKeys = []struct{ key, dir string }{
 	{"rules_typescript", "runtime/rules/typescript"},
 	{"rules_adapter_rust", "runtime/engine/rust/rules-adapter"},
 	{"rules_behaviors_rust", "runtime/engine/rust/rules-behaviors"},
+	{"migrate_rust", "runtime/migrate/rust"},
 }
 
 // initNamingFile is the naming file: the two coordinates and the [paths]

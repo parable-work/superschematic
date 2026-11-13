@@ -26,7 +26,25 @@ func customTemplateFuncs() template.FuncMap {
 		"rustBehaviorAttr":    rustBehaviorAttr,
 		"rustBehaviorField":   rustBehaviorField,
 		"rustBehaviorType":    rustBehaviorType,
+
+		"rulesAdapterCrate":   func() string { return RulesAdapterCrate },
+		"rulesBehaviorsCrate": func() string { return RulesBehaviorsCrate },
+		"rulesAdapterIdent":   func() string { return strings.ReplaceAll(RulesAdapterCrate, "-", "_") },
+		"rulesBehaviorsIdent": func() string { return strings.ReplaceAll(RulesBehaviorsCrate, "-", "_") },
+		"sentenceList":        sentenceList,
 	}
+}
+
+// sentenceList is names as a sentence lists them: `a`, `a and b`, `a, b and
+// c`.
+func sentenceList(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // rustDoc renders documentation text as `///` doc comment lines at the given

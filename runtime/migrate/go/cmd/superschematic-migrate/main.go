@@ -8,6 +8,7 @@
 //	superschematic-migrate job --job job.json|gs://bucket/job.json
 //	superschematic-migrate queue --queue queue.json|gs://bucket/queue.json [--database-url URL | --cloud-sql INSTANCE --cloud-sql-user USER --database NAME] [--result gs://bucket/result.json|result.json]
 //	superschematic-migrate describe --statements statements.json [--database-url URL]
+//	superschematic-migrate inspect [--database-url URL]
 //	superschematic-migrate version
 //
 // A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN. A job
@@ -53,6 +54,7 @@ const usage = `usage:
   superschematic-migrate queue --queue queue.json [--database-url URL | --cloud-sql INSTANCE
       --cloud-sql-user USER --database NAME] [--result result.json|gs://bucket/result.json]
   superschematic-migrate describe --statements statements.json [--database-url URL]
+  superschematic-migrate inspect [--database-url URL]
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
@@ -86,6 +88,12 @@ writes: it creates a database of its own on the Postgres the URL names,
 applies the document's create.sql there, prepares each statement and
 prints what Postgres described of its parameters and result columns as
 JSON, then drops the database. The role must be able to create one.
+
+inspect prints what the catalog of a SQLite file holds as JSON: its
+tables with their columns, indexes and foreign keys, its views and its
+triggers. It opens the file to read it alone and refuses one that does
+not exist. superschematic migrate plan --from-database reads a file
+built by hand through it.
 `
 
 func main() {
@@ -137,6 +145,8 @@ func runWith(ctx context.Context, args []string, o options) int {
 		err = queue(ctx, args[1:], o)
 	case "describe":
 		err = describe(ctx, args[1:], o)
+	case "inspect":
+		err = inspect(ctx, args[1:], o)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(o.stdout, usage)
 		return exitOK

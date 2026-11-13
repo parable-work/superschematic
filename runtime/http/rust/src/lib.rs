@@ -32,9 +32,21 @@ mod http_client;
 /// The user model's runtime (D50), with the `identity` feature.
 #[cfg(feature = "identity")]
 pub mod identity;
+// A call from one API of a process to another through the callee's handle
+// (D116), with the `http-client` feature, whose client the SDKs build
+// their requests with.
+#[cfg(feature = "http-client")]
+pub mod in_process;
 mod jws;
 mod jwt;
+// A request in and a response out with no transport, and the block_on a
+// host with no runtime drives it with (D116).
+mod handle;
 mod loopback;
+// An API's MCP endpoint (D81, D116): the stateless transport over a tool
+// set, a call's confirmation (D93, D98), and a router's tools as requests
+// to their routes.
+pub mod mcp;
 // The memory store an API lists (D75): the interface, a disabled and an
 // in-process store and the typed channels and keys, and with the
 // `memorystore-redis` feature the Redis client.
@@ -59,6 +71,10 @@ pub mod queue;
 mod ratelimit;
 mod request_id;
 mod response;
+// A database's repositories (D79, D116), with the `postgres` or `sqlite`
+// feature.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod orm;
 // The words, LIKE patterns and case folding of a SearchQuery (D62).
 pub mod search;
 mod service_auth;
@@ -89,6 +105,7 @@ pub use body::{json_body, query_values};
 pub use context::RequestContext;
 pub use controls::RouteControls;
 pub use error::ApiError;
+pub use handle::{block_on, handle};
 #[cfg(feature = "http-client")]
 pub use http_client::HttpFetcher;
 #[cfg(feature = "identity")]

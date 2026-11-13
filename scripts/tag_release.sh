@@ -11,8 +11,9 @@
 # runtime/http/go/vX.Y.Z, runtime/versiongraph/go/vX.Y.Z,
 # runtime/engine/go/vX.Y.Z, runtime/rules/go/vX.Y.Z,
 # runtime/migrate/go/vX.Y.Z, extensions/gcp/vX.Y.Z,
-# extensions/cloudflare/vX.Y.Z, extensions/pulumi/vX.Y.Z,
-# extensions/topcoat/vX.Y.Z, cmd/superschematic/vX.Y.Z) are not cut here:
+# extensions/cloudflare/vX.Y.Z, extensions/embedded/vX.Y.Z,
+# extensions/pulumi/vX.Y.Z, extensions/topcoat/vX.Y.Z,
+# cmd/superschematic/vX.Y.Z) are not cut here:
 # go-module-tag.yml cuts them at the same commit when this tag lands. See
 # CONTRIBUTING.md, "Releases".
 set -euo pipefail

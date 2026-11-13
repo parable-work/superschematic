@@ -21,6 +21,18 @@ fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Fail
         .map_err(|err| format!("database {service}, from {field}: {err}").into())
 }
 {{- end }}
+{{- if .Files }}
+
+/// Opens the SQLite file of the database field named `field`, which the
+/// environment sets as `<field>_URL`, `sqlite:<path>` (the HTTP runtime's
+/// `orm::sqlite`, D116): one writing connection and a few reading ones, in
+/// WAL mode. The file is there already: the environment's migrations made
+/// it.
+fn open_file(service: &str, field: &str, database: &Database) -> Result<Arc<SqliteFile>, Failure> {
+    sqlite::connect(database)
+        .map_err(|err| format!("database {service}, from {field}: {err}").into())
+}
+{{- end }}
 {{- if .Buckets }}
 
 /// Opens the bucket of the bucket field named `field`, which the
@@ -97,6 +109,14 @@ fn open_bucket(
     // One pool per database, which connects when it is first used.
 {{- range .Databases }}
 {{ rustLetCall .Var "connect" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
+{{- if .Files }}
+
+    // One open file per database on SQLite (D116): a write waits its turn
+    // on the file's one writing connection.
+{{- range .Files }}
+{{ rustLetCall .Var "open_file" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
 {{- range .Engines }}

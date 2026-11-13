@@ -21,7 +21,13 @@
 //! `identity-postgres` feature adds `runtime::identity::TokioPostgres` and
 //! `identity-sqlite` adds `runtime::identity::Rusqlite`, or the service
 //! binds its own `runtime::identity::Client`. A password hash runs on
-//! tokio's blocking pool, so the service runs on a tokio runtime.
+//! tokio's blocking pool, and where it stands for a host with no runtime.
+{{- if and .Deps .Deps.SQLite }}
+//!
+//! `{{ .Identity.AuthDB }}` is a SQLite file (D116): `store_on_file` builds the store
+//! on a connection of its own to the file `Deps.db` holds, which a stack's
+//! server entrypoint calls.
+{{- end }}
 
 use std::sync::Arc;
 
@@ -63,6 +69,23 @@ impl Scalars for Catalog {
 pub fn store(client: impl Client) -> Result<SqlStore, StoreError> {
     SqlStore::new(client, IDENTITY_DESCRIPTOR, Arc::new(Catalog))
 }
+{{- if and .Deps .Deps.SQLite }}
+
+/// The identity store on `db`, the SQLite file of `{{ .Identity.AuthDB }}` the API's
+/// `Deps.db` holds (D116), which a server's entrypoint builds: the store
+/// runs its statements on a connection of its own to the file, since one
+/// of its transactions holds its connection across its statements, where
+/// the file's handle lends its writer to one piece of work at a time. Its
+/// reads never wait, the file being in write-ahead logging, and its writes
+/// take their turn with the file's writer.
+pub fn store_on_file(
+    db: &{{ .RuntimeCrateIdent }}::orm::sqlite::Database,
+) -> Result<SqlStore, StoreError> {
+    let client = {{ .RuntimeCrateIdent }}::identity::Rusqlite::open(db.path())
+        .map_err(|err| StoreError::Database(Box::new(err)))?;
+    store(client)
+}
+{{- end }}
 
 /// The API's identity service over `store` with `config`: the
 /// administration routes' permissions under `PERMISSION_PREFIX`, and the

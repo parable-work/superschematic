@@ -114,10 +114,13 @@ fn mount(
         panic!("{message}");
     }
     let limits = options.rate_limits.clone();
+    // With no transport under the router (`Api::handle`, D116), each
+    // route's rate limit, body limit and timeout are its host's.
+    let transport = options.transport;
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     router = router.route("/api/events/{id}", get(handle_event_get_event));
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &["webhooks.receive"])
         .apply(post(handle_webhook_receive_github_event));
     router = router.route(
@@ -129,7 +132,7 @@ fn mount(
     );
     router = router.route("/api/webhooks/ledger", post(handle_webhook_receive_ledger_event));
     router = router.route("/api/webhooks/plaid", post(handle_webhook_receive_plaid_event));
-    let route = RouteControls::new()
+    let route = RouteControls::under(transport)
         .rate_limiter(limits.of(&crate::operations::WEBHOOK_RECEIVE_STRIPE_EVENT))
         .apply(post(handle_webhook_receive_stripe_event));
     router = router.route(
@@ -476,5 +479,72 @@ async fn handle_webhook_receive_raw_github_event(
     match manual_routes.webhook_receive_raw_github_event(ctx, request).await {
         Ok(response) => response,
         Err(err) => error_response(err),
+    }
+}
+
+/// The API with no transport under it (D116): a request in and a response
+/// out, for a host that has no HTTP server of its own to mount a router
+/// on, or wants none between itself and the API. `handle` does what the
+/// router does for a request it holds whole: it finds the route,
+/// authenticates the caller through the implementation's authenticator,
+/// admits by the route's rule, decodes and checks each argument, runs the
+/// operation and writes the envelope or the problem, through the handlers
+/// `build_router`'s routes run.
+///
+/// What needs a socket, a clock or a store shared between requests stays
+/// the host's: the listener, TLS, the body's limit (`handle` takes a body
+/// already read), timeouts, rate limits, CORS and draining. A host tells
+/// the API what it knows of a connection through the request's extensions,
+/// which the authenticator receives.
+///
+/// The implementation's methods are asynchronous. A host with no async
+/// runtime drives `handle` with the runtime's `block_on`, which polls on
+/// the calling thread: an API whose databases are SQLite files, and that
+/// calls no other server, awaits nothing that needs a reactor.
+#[derive(Clone)]
+pub struct Api {
+    router: Router,
+}
+
+impl Api {
+    /// The operations `handle` does not route, by name: the
+    /// @manualRouteRegistration ones, whose handlers a service mounts on
+    /// a router of its own (`build_router_with_manual_routes`).
+    pub const UNROUTED: &'static [&'static str] = &[
+        "webhook.receiveRawGithubEvent",
+    ];
+
+    /// The API over `implementations`.
+    ///
+    /// # Panics
+    ///
+    /// As `build_router` does.
+    pub fn new(implementations: Implementations) -> Self {
+        Self::with(implementations, RouterOptions::default())
+    }
+
+    /// `new` with `options`, but for its `transport`, which an `Api` has
+    /// none of.
+    ///
+    /// # Panics
+    ///
+    /// As `build_router` does.
+    pub fn with(implementations: Implementations, options: RouterOptions) -> Self {
+        let options = RouterOptions {
+            transport: false,
+            ..options
+        };
+        Self {
+            router: build_router_with(implementations, options),
+        }
+    }
+
+    /// Answers `request`, whose body is read already, with a response
+    /// whose body is whole.
+    pub async fn handle(
+        &self,
+        request: axum::http::Request<axum::body::Bytes>,
+    ) -> axum::http::Response<axum::body::Bytes> {
+        superschematic_http_runtime::handle(&self.router, request).await
     }
 }

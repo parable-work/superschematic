@@ -369,13 +369,14 @@ it in place of the old one, for a stamp no database has applied. It names
 a stamp a projection of the target declares, and builds a DB service
 alone, without `--with-deps`.
 
-`outputs.api.mcp: true` makes a TypeScript API's router serve the API's
-visible `@mcp` operations as MCP tools at `POST /api/mcp`, beside its
-OpenAPI document at `GET /api/openapi.json`, which every server serves
+`outputs.api.mcp: true` makes a TypeScript or a Rust API's router serve
+the API's visible `@mcp` operations as MCP tools at `POST /api/mcp`,
+beside its OpenAPI document at `GET /api/openapi.json`, which every
+server serves
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
-The Go and Rust servers serve no MCP endpoint yet, so the config fails to
-load with it on another language, `--api-language` included:
-`outputs.api.mcp is on and the API's language is RUST: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+The Go server serves no MCP endpoint yet, so the config fails to load
+with it on a Go API, `--api-language` included:
+`outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
 With a tool whose `invocationPolicy` is `"ask"`, the build needs
 `outputs.api.mcpConfirmationKey`, the `@envVars` secret the endpoint signs
 its confirmations with
@@ -541,9 +542,10 @@ out and `contract` after, each with its SQL and its hazards.
 the hazard classes, readers, renames and the runner.
 
 The previous version is another checkout of the service (`--from
-<service-dir>`), the model a database recorded (`--from <model.json>`), or
-the schemas root at a git ref (`--from-ref`); with none, the plan starts
-from an empty database. Each version loads with its dependencies resolved
+<service-dir>`), the model a database recorded (`--from <model.json>`),
+the schemas root at a git ref (`--from-ref`), or a SQLite file built by
+hand (`--from-database`); with none, the plan starts from an empty
+database. Each version loads with its dependencies resolved
 from its own schemas root, as `build --with-deps` resolves them, and with
 its own naming file when it has one: like `build-all`, it first writes a
 missing or stale sentinel there, since a config may import a sibling's.
@@ -563,6 +565,19 @@ rebuild where SQLite's `ALTER TABLE` falls short
 version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (`--from <model.json>`).
+
+`--from-database <file>`, with `--dialect sqlite`, plans from a SQLite file
+an app built by hand: `superschematic-migrate`, on `PATH` or where
+`$SUPERSCHEMATIC_MIGRATE` names it, opens the file to read it alone, and
+its tables, columns, indexes, foreign keys, checks and triggers become the
+model the plan starts from. What a table's definition holds that a model
+has no form of, such as a `UNIQUE` written in it, is dropped by a rebuild
+of the table. A view, a virtual table, a trigger that is not the schema's
+and an index of several keys with an expression among them stop the plan
+until `--drop` names each, and the plan then drops them first. With
+`--print-model` the file's model is printed, for `superschematic-migrate
+adopt` to record on the file before the plan is applied
+([A file built by hand](/superschematic/reference/migrations/#a-file-built-by-hand)).
 
 A Postgres plan of a service that declares queries (`@query`) prepares
 each of them on the new version's `create.sql` before it prints, as
@@ -588,12 +603,16 @@ superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --
 superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --rename order.total=order.amount --out plan.json
 superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
 superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
+superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --out plan.json
+superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --print-model > legacy-model.json
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--from` | none | the previous version: another checkout of the service directory, or a model JSON file as `superschematic-migrate status --model` prints it |
 | `--from-ref` | none | the previous version: the schemas root at this git ref, read with `git archive`; cannot be combined with `--from` |
+| `--from-database` | none | the previous version: a SQLite file built by hand, read into a model through `superschematic-migrate inspect`; needs `--dialect sqlite`, and cannot be combined with `--from` or `--from-ref` |
+| `--drop` | none | with `--from-database`: an object of the file that a model has no form of, for the plan to drop first, as `trigger:<name>`, `view:<name>`, `index:<name>` or `virtual-table:<name>`; repeatable |
 | `--rename` | none | a rename: `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column; repeatable |
 | `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database; repeatable |
 | `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` for a service whose `outputs.sql.dialects` lists it |
@@ -601,7 +620,7 @@ superschematic migrate plan ./schemas/services/shop-db --print-model > model.jso
 | `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
 | `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
-| `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags. With `--from-database` it prints the file's model, and takes the `--rename` and `--drop` the plan from the file is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
@@ -998,6 +1017,15 @@ quoted string. The `.superschematic` directory ignores itself in git, and
 also holds the Ed25519 key pair each server signs its calls to another
 with; no secret and no private key reaches the output root.
 
+An environment that builds as one binary (D116) runs as the one process
+it is: `--environment` names it, or it is the stack's one such
+environment when the stack has none on the local target. Dev migrates
+each database's SQLite file under the state directory with
+superschematic-migrate, from the model the file recorded to the schema's,
+builds the binary as `stack build` builds one that is no release, and
+runs it on `127.0.0.1` at the environment's port until Ctrl-C. It needs
+cargo, and Bun for a site, and no Docker.
+
 Without a directory, dev runs the working directory when it is a Stack
 service, else the one Stack service under `./schemas/services`. It needs
 Docker and Go.
@@ -1187,6 +1215,11 @@ target only when it links the target's extension and the provisioner's
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
 `prepare` reaches no target and takes its own flags.
+
+An environment that builds as one binary, as one on the `embedded` target
+does (D116), is built by `stack build` and run by `stack dev`. Every
+other command here refuses it and names `stack build`: its target makes a
+file a person installs, and rolls nothing out.
 
 A stack with an app whose `@app` names an extension the binary does not
 link (D78) is refused by `prepare`, `build` and `deploy`, a deploy with
@@ -1378,11 +1411,31 @@ $ superschematic stack build Staging --stack schemas/services/storefront-stack
 
 A build writes no deploy manifest.
 
+For an environment that builds as one binary (D116), build builds the
+stack and every service it reaches, runs the site's build, plans the step
+each database's SQLite file takes, writes the plans and the site's files
+into the environment's crate at
+`<output-root>/embedded/<stack>/<environment>/`, builds it with `cargo
+build --release --locked` in the output root's Cargo workspace, and
+prints the binary's path, alone, on its standard output. `--release`
+records each database's step in the Stack service's
+`plans/<environment>/<db>/`, numbered, and refuses one with a hazard no
+`--allow` names; without it the binary carries the step and nothing is
+recorded. `--prepared` and the other flags below do not apply to it.
+
+```sh
+$ superschematic stack build Desktop --release
+/work/notes/schemas/dist/target/release/notes-stack-desktop
+```
+
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--deployable` | every server, job and worker with a Dockerfile, and every site | build this server, job, worker or site only; repeatable |
 | `--server` | none | build this server only; repeatable. `--deployable` takes a job, a worker or a site too |
 | `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
+| `--release` | false | for an environment that builds as one binary: record the plan of each database in the Stack service's `plans/<environment>/<db>/`, to commit |
+| `--fail-on` | `all` | with `--release`: the hazard classes that stop the release unless `--allow` names each hazard; `none` for no gate |
+| `--allow` | none | with `--release`: a hazard id to acknowledge, as the refusal lists it; repeatable |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image`, `--site` and `--bundle` flags (`text`) or the result as `json` |
 | `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |

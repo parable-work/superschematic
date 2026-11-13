@@ -21,7 +21,7 @@
 //! `identity-postgres` feature adds `runtime::identity::TokioPostgres` and
 //! `identity-sqlite` adds `runtime::identity::Rusqlite`, or the service
 //! binds its own `runtime::identity::Client`. A password hash runs on
-//! tokio's blocking pool, so the service runs on a tokio runtime.
+//! tokio's blocking pool, and where it stands for a host with no runtime.
 
 use std::sync::Arc;
 

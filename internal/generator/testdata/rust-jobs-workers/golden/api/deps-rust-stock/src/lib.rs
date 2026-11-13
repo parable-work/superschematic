@@ -23,5 +23,5 @@ pub use schemas_deps_stock_db_types as database_types;
 
 pub use deps::{BoxError, Deps, Handlers, Jobs, Workers};
 pub use interfaces::*;
-pub use router::{build_router, build_router_with, RouterState};
+pub use router::{build_router, build_router_with, Api, RouterState};
 pub use superschematic_http_runtime::{request_ids, RouterOptions};

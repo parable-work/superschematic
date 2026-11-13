@@ -72,6 +72,7 @@ func Local(t *testing.T) naming.LocalPaths {
 		EngineABIRust:          filepath.Join(root, "runtime", "engine", "rust", "abi"),
 		EngineNapiRust:         filepath.Join(root, "runtime", "engine", "rust", "napi"),
 		RulesAdapterRust:       filepath.Join(root, "runtime", "engine", "rust", "rules-adapter"),
+		MigrateRust:            filepath.Join(root, "runtime", "migrate", "rust"),
 		RulesBehaviorsRust:     filepath.Join(root, "runtime", "engine", "rust", "rules-behaviors"),
 		EngineGo:               filepath.Join(root, "runtime", "engine", "go"),
 		EngineTypeScript:       filepath.Join(root, "runtime", "engine", "typescript"),

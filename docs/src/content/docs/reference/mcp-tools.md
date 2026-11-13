@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript API serves them at, and how an extension adds its rules, vendor keys and policy.
+description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript or a Rust API serves them at, and how an extension adds its rules, vendor keys and policy.
 sidebar:
   order: 4
 ---
@@ -508,7 +508,8 @@ operation OrderOpenReturnHandler replay contract: idempotency pointer "/pickup/p
 ## An API's MCP endpoint
 
 A TypeScript API serves its visible tools over MCP when its config turns
-on `outputs.api.mcp` (D81):
+on `outputs.api.mcp` (D81), and so does a Rust API
+([A Rust API's endpoint](#a-rust-apis-endpoint)):
 
 ```ts
 outputs: {
@@ -736,9 +737,82 @@ The APIs of one server share its paths, so a server serves one API with
 `mcp` on, and the stack's build refuses a second:
 `stack shop-stack: server Web serves shop-api and shop-admin, which both turn on outputs.api.mcp, and one server answers POST /api/mcp for one API; serve them from two servers, or turn mcp off in one (D81)`.
 
-The Go and Rust servers serve no MCP endpoint yet. Their config fails to
-load with `mcp` on:
-`outputs.api.mcp is on and the API's language is GO: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+The Go server serves no MCP endpoint yet. Its config fails to load with
+`mcp` on:
+`outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
+
+### A Rust API's endpoint
+
+A Rust API with `mcp` on serves the same endpoint (D116): the same tool
+table, built from the same tool documents, the same transport, held to the
+engine's recorded exchanges, and the same confirmation of a tool that
+asks, checked through the tool's route first.
+
+```ts
+outputs: {
+  types: { [TargetLanguage.Rust]: { enabled: true } },
+  api: { enabled: true, language: "RUST", mcp: true, mcpConfirmationKey: "McpKeys.MCP_CONFIRMATION_KEY" }
+}
+```
+
+The API crate then has `src/router/mcp.rs`, which holds the tool table,
+each tool naming its operation as `operations::ALL` does
+(`order.getOrder`), and `build_router_with` serves it at `POST /api/mcp`.
+A `tools/call` is a request to the route of the tool's operation,
+answered by the router's own routes through the runtime's `handle`, with
+the endpoint request's headers, its request id and what its host put in
+its extensions, so the route's authenticator establishes the caller again
+and its permission check, service clause, row rule and validation are the
+route's. The generated `Api::handle`, which answers a request with no
+transport under it, routes `POST /api/mcp` as it routes every operation.
+
+When a tool asks, the module also holds a check of every route: the
+route's controls but its rate limit, then its decoding, and no
+implementation. They are mounted on a router of their own that no client
+reaches, and a call of a tool that asks goes through it before anyone is
+asked.
+
+`RouterOptions.mcp` is the runtime's `mcp::EndpointOptions`:
+
+| `RouterOptions.mcp` | What it sets |
+| --- | --- |
+| `server_info` | the name and version `initialize` reports |
+| `instructions` | the instructions `initialize` gives the client |
+| `rate_limit_per_minute`, `timeout_seconds` | the endpoint's own rate limit and timeout; each call keeps its route's |
+| `confirmation_key` | the key the endpoint signs its confirmations with: required when a tool asks, at least 32 bytes, the same on every instance |
+| `confirmation_ttl_seconds` | how long a confirmation is good for, 600 unless set |
+| `confirmation_store` | where a confirmation is claimed so it redeems once: an `mcp::ConfirmationStore`, in the process's memory unless given |
+
+`build_router_with` panics when a tool asks and `confirmation_key` is
+absent or short, as it panics without a webhook verifier, so
+`build_router`, which takes no options, serves only an API none of whose
+tools asks. A stack's generated `main.rs` builds the router with the
+secret `outputs.api.mcpConfirmationKey` names:
+
+```rust
+let orders_router_options = orders_api::RouterOptions {
+    mcp: EndpointOptions::default()
+        .with_confirmation_key(orders_config.mcp_confirmation_key.as_str()),
+    ..orders_api::RouterOptions::default()
+};
+```
+
+One process keeps its claims in memory. A server of several instances
+passes a `confirmation_store` they share, as a TypeScript deployment
+does; the generated entrypoint passes none.
+
+Where a Rust endpoint differs from a TypeScript one:
+
+- A tool of a `@manualRouteRegistration` operation answers
+  `501 not_implemented` on a router that does not mount the manual routes
+  (`build_router_with` and `Api::handle`); `build_router_with_manual_routes`
+  serves it.
+- With no transport under the router (`Api::handle`), the endpoint's own
+  `rate_limit_per_minute` and `timeout_seconds`, like each route's
+  `@rateLimit`, `@bodyLimit` and `@timeout`, are the host's to hold.
+- A Rust app's program builds its API's router itself, and the build
+  hands it no confirmation key yet, so the stack's build refuses an app
+  whose API serves a tool that asks.
 
 ## The engine
 

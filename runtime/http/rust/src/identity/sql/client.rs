@@ -640,7 +640,29 @@ mod sqlite_binding {
     /// statement the store runs.
     const STATEMENT_CACHE: usize = 64;
 
+    /// How long a statement of a connection [`Rusqlite::open`] opened waits
+    /// for another connection's write lock: the wait the runtime's other
+    /// connections to a SQLite file take (D53, amended).
+    const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
     impl Rusqlite {
+        /// Opens a connection of the store's own to the SQLite file at
+        /// `path` and binds it (D116): what a server whose database is a
+        /// SQLite file builds its identity store over, beside the
+        /// connections its API reads and writes the file through. The file
+        /// is in write-ahead logging, so the store's reads never wait for
+        /// another connection's write, and a write of the store's waits its
+        /// turn for the file's one writer, up to five seconds, on the
+        /// thread that runs it.
+        pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, ClientError> {
+            let connection = rusqlite::Connection::open(path).map_err(client_error)?;
+            connection
+                .busy_timeout(BUSY_TIMEOUT)
+                .and_then(|()| connection.execute_batch("PRAGMA journal_mode = WAL"))
+                .map_err(client_error)?;
+            Self::new(connection)
+        }
+
         /// Binds an open connection and turns its foreign keys on, so
         /// deleting a user deletes their sessions, credential, API keys and
         /// grants.

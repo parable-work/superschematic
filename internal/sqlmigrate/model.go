@@ -6,6 +6,11 @@
 // models and returns a [Plan]: ordered steps in two phases, each with its
 // SQL and its hazards. No database is read. The runner in
 // runtime/migrate/go applies a plan; this package never does.
+//
+// A SQLite file built by hand has no version to resolve, so its model is
+// read from what it holds (D116): the runner inspects the file's catalog,
+// [ReadDatabase] turns the [Inspection] into a model, and [DiffDatabase]
+// plans from it.
 package sqlmigrate
 
 import (
@@ -142,6 +147,14 @@ type Table struct {
 	// ready message per key first marks done the ready messages it would
 	// refuse, keeping the one onDuplicate keeps.
 	Queue *QueueKey `json:"queue,omitempty"`
+
+	// Unmodeled lists what the table's definition holds that the model has
+	// no form of, each as a phrase ("UNIQUE (email) in the table's
+	// definition"). Only a model read from a database has any
+	// (ReadDatabase, D116); a table the compiler writes has none. A plan
+	// from a table with some rebuilds it as the new model writes it, which
+	// drops each.
+	Unmodeled []string `json:"unmodeled,omitempty"`
 }
 
 // QueueKey is a queue's key and what it does with it (D80).

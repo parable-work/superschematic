@@ -18157,5 +18157,198 @@ workers on SQLite and D1, which step 1's statements serve; Go on SQLite;
 and, on SQLite, a declared query, a `@versioned` table's history and
 full-text search (D62).
 
-Status: proposed, not built. Nothing here has been run. The counts of the
-application are of its source as read, and are estimates.
+Status: built in part. The counts of the application are of its source as
+read, and are estimates.
+
+Built, of steps 1 and 2. `sqlutil.SQLiteTableStatementsOf` and
+`SQLiteClauses`, with `SQLiteTableRefusal` for a table whose repository
+SQLite does not hold (`TestSQLiteTableStatementsOfALedger`,
+`TestSQLiteTableRefusal`). The HTTP runtime's `orm` module, which parses a
+database's definition and fills and runs its statements over either
+dialect's client, and `src/orm.rs` of a DB's Rust types, behind their
+`postgres` and `sqlite` features: `find_one`, `find_many`, `find_page`,
+`create_one`, `create_many`, `update_one`, `update_many`, `upsert_one`,
+`delete_one` and `hard_delete_one`, the caller's stamps, the soft delete,
+a write fenced on `_version`, a page's nulls last and a negated filter.
+On SQLite an upsert reads whether a row holds the key before its
+statement, a batch is inserted a row at a time, and an `@optimistic`
+table's write moves `_version` itself, since SQLite's trigger moves it
+after `RETURNING` has read the row. `TestRepositoriesOnSQLite` runs every
+method over fixture-ledger-db and a fenced write over
+fixture-optimistic-db, on the SQLite DDL the build writes;
+`TestTableParityOfGoAndRustOnPostgres` holds the Rust repositories to the
+Go ORM statement for statement, 33 statements over the 28 calls of the
+table parity script the Rust repositories have. Resolution places a Rust
+server's database by its DB service's first dialect
+(`TestARustAPIRunsOnItsDatabasesFirstDialect`), a Rust API's `Deps.db` is
+the runtime's SQLite file for a sqlite-first database
+(`orm::sqlite::Database`, `orm_sqlite_file.rs`), and its server's
+entrypoint opens the file (`TestRustTableOperationsServerGolden`,
+`TestRustTableOperationsServerBuilds`). rustrestgen writes `src/tables.rs`
+and the router's handlers of a `@tableOperation`, served by the runtime's
+`orm::routes`: `TestTableOperationsRustServerServesItsTables` runs the
+scenario the Go and TypeScript servers are held to, case for case,
+against the Rust server on Postgres, and
+`TestTableOperationsRustServerOnSQLite` its router over a SQLite file.
+
+Built, of steps 1 and 2, the rest. A repository writes a table that
+composes behaviors through the core: a database's Rust types bind
+`orm::sqlite::Rules` and `orm::postgres::Rules` to
+`superschematic-rules-adapter` and `superschematic-rules-behaviors`, by
+path, behind their features, so `create_one`, `create_many`, `update_one`,
+`delete_one` and `operation`, an operation of one of the table's behaviors
+by its member, run as the core's commands in the caller's transaction; on
+Postgres a client outside a transaction is refused by name
+(`TestRepositoriesWriteABehaviorTableThroughTheCore`, both dialects). A
+build that names neither crate binds no core, says so and warns
+(`TestRepositoriesBindNoCoreWithoutTheBehaviorsCrates`). The keys of an
+`Encrypted<T>` column are the runtime's `orm::fieldcrypt::FieldKeyring`,
+held to `runtime/schema/testdata/fieldcrypt_parity.json` with the Go and
+TypeScript runtimes, which a Rust API with table operations reads from its
+config (`TestTableOperationsRustServerSealsAnEncryptedColumn`,
+`TestRustTableOperationsServerOpensItsFieldKeys`).
+`TestRepositoryResultsOnSQLiteAndPostgres` holds SQLite's results to
+Postgres's, 48 calls of one script over fixture-ledger-db, 10 of them
+refusals: the TypeScript repositories have no SQLite dialect to hold them
+to, as the Repositories table has it. rustrestgen's handlers write a
+behavior table through the core as the route's caller, and serve a create
+that names its start state (D109) and a view with a `@decrypted` member
+(`TestTableOperationsRustServerWritesABehaviorTable`). acme-shop's
+`shop-stock` reads its products and writes its restock requests through
+the repositories.
+
+Built, of step 3: the generated crate's `Api`, whose `handle` answers a
+request through the routes `build_router` mounts, with a route's rate
+limit, body limit and timeout left to the host
+(`RouterOptions.transport`), and the runtime's `block_on`.
+`the_api_answers_a_request_with_no_transport_and_no_runtime_under_it`, of
+`TestTableOperationsRustServerOnSQLite`, drives it on a thread with no
+async runtime. `handle` runs through the axum router rather than one
+generated function per operation beside it, so the `server` feature is
+not built: the crate links axum, tokio and tower as before.
+
+Built, step 4. The transport, `runtime/http/rust`'s `mcp`, with D93's and
+D98's confirmation; `mcp_parity.rs` replays the 234 `/mcp` exchanges of
+the engine's corpus. `mcp::Mount` is the endpoint on a generated router: a
+call is a request to its operation's route through `handle`, with the
+endpoint request's headers and extensions, and a call of a tool that asks
+goes through the routes' checks first (`mcp_mount.rs`). `outputs.api.mcp`
+loads on a Rust API; Go stays refused. rustrestgen writes
+`src/router/mcp.rs`, the tool table `internal/generator/mcptools` builds
+for the TypeScript router too
+(`TestMCPToolsAreTheTypeScriptRoutersTools`), and, when a tool asks, a
+check of every route. `TestRustAPIServesItsMCPEndpoint` runs the scenario
+the TypeScript router is held to against the generated crate through
+`build_router_with` and through `Api::handle` with no runtime under it,
+and `TestRustServerServesItsMCPEndpoint` a generated server over a socket,
+whose `main.rs` builds the router with the secret
+`outputs.api.mcpConfirmationKey` names.
+
+Built, of step 5. The HTTP runtime's `worker::SqliteWorker`, whose `drain`
+takes a connection of the worker's own, the time and a limit, claims a
+message at a time through the queue's statements on SQLite, runs a
+`@worker`'s handler and completes or fails its message, or runs a behavior
+queue's handler in an IMMEDIATE transaction the message is spent in,
+prunes each queue by the times it is given, and answers how many it ran
+and when the next falls due; `worker::Wake`, which the runtime's SQLite
+file notifies after each write it commits; and `worker::run_drain`, the
+loop over it on tokio, a lane per connection (`worker_drain.rs`).
+rustrestgen writes a Rust API's `src/behaviors.rs` for a SQLite file: each
+`@behaviorWorker` as a `SqliteWorker` of the table's deadline, change and
+event queues, run through the rules adapter's `sqlite` module at the time
+the drain was given, and the behavior operations in a transaction of the
+file's writing connection. A Rust job and worker open the file, and a
+worker's entrypoint runs `run_drain`. `TestRustJobAndWorkerRunOnSQLite`
+builds and runs a job and a worker on a file the build's SQLite DDL
+creates, and `TestRustTimersWorkerOnSQLite` drains fixture-timers-api's
+behavior worker with no async runtime.
+
+Built, of the user model on a file. A Rust API over the user model on a
+sqlite-first database keeps its users, their sessions and their API keys
+in the runtime's identity store on the file: the API crate's
+`identity::store_on_file` builds it on a connection of the store's own
+(`identity::Rusqlite::open`), since a store's transaction holds its
+connection across its statements, and a server's entrypoint wires it
+(`TestRustIdentityEntrypointServesOnSQLite`, which registers a user, signs
+her in and serves the file again after a restart). The identity service
+hashes a password on the calling thread under a host with no runtime.
+
+Built, of step 6. The runner, `runtime/migrate/rust`, with the start a
+binary calls, the copy before a contract step and the adoption; its tests
+replay the compiler's SQLite vectors and, beside the Go runner's binary,
+every split of a chain between the two runners. `migrate plan
+--from-database`, which reads a SQLite file through the Go runner's
+`inspect` (the compiler links no SQLite driver) and plans from the model
+it reads: `TestReadDatabaseRoundTrip` reads the SQLite DDL of twenty-five
+schemas back to their models, their seeded roles aside, and
+`TestAdoptAndMigrateAFileBuiltByHand` adopts and migrates a file built by
+hand. Recorded plans: `stack build <environment> --release` writes each
+database's step into the Stack service's `plans/<environment>/<db>/`,
+numbered, and refuses a hazard no `--allow` names
+(`TestAReleaseRecordsEachStepAndABuildCarriesTheChain`,
+`TestAReleaseRefusesAHazardNoAllowNames`,
+`TestARecordedPlanIsNeverChanged`); a database's settings name its
+adoption (`TestAnAdoptionIsThePlanAChainStartsWith`); and the generated
+CI's `check` refuses a recorded plan git does not track or a build changed
+(`TestTheRecordedPlansStepRefusesAnUntrackedOrChangedPlan`).
+
+Built, of step 7. `extensions/embedded` registers the target and its
+platforms, `embedded.process`, `embedded.worker`, `embedded.sqlite` and
+`embedded.assets`, a platform holding one kind of deployable, and
+resolution refuses by name what the binary does not hold
+(`TestAnEnvironmentIsOneBinary`,
+`TestResolutionRefusesWhatTheBinaryCannotHold`). The stack's build writes
+the crate at `<output-root>/embedded/<stack>/<environment>/`, a library
+with `Embedded::open`, `handle` and `close` and a `main.rs` over it that
+listens on `127.0.0.1` at `$PORT`, on another address with `--listen`, on
+every interface only with `--every-interface`, over the data directory
+`--data` names (`TestEmbeddedCrateGolden`, `TestEmbeddedCrateBuilds`).
+`stack build <environment>` runs the site's build, carries the plans and
+the site's files into the crate, builds it and prints the binary's path;
+`stack dev` runs the environment as one process; and a call from one API
+of the binary to another is the SDK's over the runtime's
+`in_process::transport`, with the caller's loopback key. The binary runs
+its environment's workers: the library gives each `@worker` and
+`@behaviorWorker` as a `Worker` over the file the binary opened, whose
+`drain` a host with no async runtime calls and whose `run` is the loop
+`main.rs` spawns beside the server and stops within the worker's grace
+(`TestEmbeddedCrateWithABehaviorWorker`, `TestAWorkerRunsInsideTheBinary`).
+It serves an API over the user model: the library builds the identity
+store on the database's file and each API's identity service over it,
+with the identity config the target binds, a cookie without `Secure`
+(`TestEmbeddedBinaryServesTheUserModel`, in which a user registers, signs
+in, calls an authenticated route, and is still signed in after the binary
+stops and starts on the same files). The example `examples/embedded-notes` is one binary:
+`TestEmbeddedNotesIsOneBinary` builds it, starts it on a fresh data
+directory, which its recorded plans migrate, serves its APIs and its site
+on one origin, sees a message a request enqueued handled by its worker,
+stops it and starts it again on the same files, and starts it on a file
+the first release's plan made, which the second takes forward.
+
+Not built. Of steps 1 and 2: an upsert, an `update_many` and a
+`hard_delete_one` of a table that composes behaviors, each refused by
+name; typed methods per behavior operation; a repository's `reencrypt`; a
+`@tableOperation` over a projection, which stays a method with a warning,
+the Rust repositories having no projections; a calling service standing in
+at a table route, whose behavior command runs as no one; and a JSON
+column's `eq` on SQLite, which compares text. Of step 3: the `server`
+feature, and the build's list of the operations that stream a file, which
+`handle` routes as the router does. Of step 4: the confirmation key of a
+Rust app; a shared confirmation store from the generated entrypoint, which
+a project passes as `RouterOptions.mcp.confirmation_store`; and a tool of
+a manual operation where the manual routes are not mounted, which answers
+501. Of step 5: a claim reads the database's clock, so the time a drain is
+given is the time its commands run at and its next due time is measured
+from, not the time its claims go by; a drain extends no claim, and a
+handler still running when a stopping worker's grace is over is left to
+its claim's expiry; and an event handed to a `Workers` method on a SQLite
+file is compiled and not run by a test. For a Rust API on a SQLite file
+an engine, and a deriver, an engine's runner and an app stay refused by
+name, and an identity store's write that waits out the busy timeout for
+the file's writer is the store's database error, not a 503. Of step 7:
+the runtime's in-process memory store, every memory store being refused;
+in the example, a table that composes behaviors and an MCP endpoint; a
+test of a worker's `drain` driven by a host with no runtime, and of a
+cookie's sign-in from the site's page and an API key through the binary; a command that writes the target's
+authoring types; a route's own limits under `main.rs`, which reads every
+body up to 2 MiB; and the manual-route operations, which the build names.

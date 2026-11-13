@@ -38,18 +38,18 @@ func TestWriteRustAPIServiceAuthGolden(t *testing.T) {
 
 	router := generated["src/router.rs"]
 	for _, want := range []string{
-		"    let route = RouteControls::new()\n" +
+		"    let route = RouteControls::under(transport)\n" +
 			"        .require_service(Arc::clone(&state.implementations.service_authenticator), &[\"fixture-service-caller-api\"])\n" +
 			"        .authorize(Arc::clone(&state.implementations.authenticator), &[\"stock.reserve\"])\n" +
 			"        .apply(post(handle_stock_reserve_stock));\n",
-		"    let route = RouteControls::new()\n" +
+		"    let route = RouteControls::under(transport)\n" +
 			"        .allow_service(Arc::clone(&state.implementations.service_authenticator), &[\"fixture-service-caller-api\"])\n" +
 			"        .authorize(Arc::clone(&state.implementations.authenticator), &[\"stock.write\"])\n" +
 			"        .apply(post(handle_stock_release_reservation));\n",
-		"    let route = RouteControls::new()\n" +
+		"    let route = RouteControls::under(transport)\n" +
 			"        .require_service(Arc::clone(&state.implementations.service_authenticator), &[])\n" +
 			"        .apply(post(handle_stock_reindex_stock));\n",
-		"    let route = RouteControls::new()\n" +
+		"    let route = RouteControls::under(transport)\n" +
 			"        .identify_service(Arc::clone(&state.implementations.service_authenticator))\n" +
 			"        .apply(get(handle_sync_sync_status));\n",
 		"    principal: Option<Extension<Principal>>,\n    service_caller: Option<Extension<ServiceCaller>>,\n",
