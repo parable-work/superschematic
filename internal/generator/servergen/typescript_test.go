@@ -775,10 +775,10 @@ func serveTypeScriptImage(t *testing.T, repoRoot, dockerfile string) {
 	}
 	defer context.Close()
 	image := fmt.Sprintf("superschematic-servergen-ts-test:%d", time.Now().UnixNano())
-	build := exec.Command("docker", "build", "-q", "-t", image, "-f", built.Dockerfile, "-")
+	build := exec.Command("docker", "build", "--progress=plain", "-t", image, "-f", built.Dockerfile, "-")
 	build.Stdin = context
 	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("docker build: %v\n%s", err, output)
+		t.Fatalf("docker build: %v\n%s", err, buildTail(output))
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rmi", "-f", image).Run() })
 
