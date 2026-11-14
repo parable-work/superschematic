@@ -242,6 +242,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -576,6 +577,7 @@ impl<'de> Deserialize<'de> for CreateTenantInputForm {
 /// number field the app names into a select.
 #[component]
 pub async fn create_tenant_input_fields(
+    cx: &Cx,
     #[default(CreateTenantInputForm::new())] form: CreateTenantInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -715,6 +717,7 @@ impl<'de> Deserialize<'de> for TenantGetTenantArgsForm {
 /// names into a select.
 #[component]
 pub async fn tenant_get_tenant_args_fields(
+    cx: &Cx,
     #[default] form: TenantGetTenantArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -846,6 +849,7 @@ impl<'de> Deserialize<'de> for TenantListTenantsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn tenant_list_tenants_args_fields(
+    cx: &Cx,
     #[default] form: TenantListTenantsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -984,6 +988,7 @@ impl<'de> Deserialize<'de> for TenantUpdateSecretArgsForm {
 /// app names into a select.
 #[component]
 pub async fn tenant_update_secret_args_fields(
+    cx: &Cx,
     #[default] form: TenantUpdateSecretArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

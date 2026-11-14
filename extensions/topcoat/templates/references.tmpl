@@ -94,7 +94,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize};
 {{- if .PicksUse "rate_from" }}
-use topcoat::context::try_app_context;
+use topcoat::context::try_context;
 {{- end }}
 {{- if .PickControlled }}
 use topcoat::router::response::Response;
@@ -601,7 +601,7 @@ struct PickControls {
     path: &'static Path,
     rate_limit: Option<Arc<RateLimiter>>,
     /// The limiter of an API dependency's options operation (D61, amended),
-    /// which its crate's setup holds in the app context: taken at the
+    /// which its crate's setup holds in the router's context: taken at the
     /// request, none when the app does not set the crate up.
     rate_from: Option<LimiterFrom>,
     timeout: Option<Duration>,

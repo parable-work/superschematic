@@ -6,7 +6,9 @@
 //! operation serves it, and a resource under an item as a section of the
 //! item's page and as pages under it. A layout puts each page in `<main>`,
 //! after a nav of the resources the caller may list and the trail from the
-//! index to the page, each item by its title.
+//! index to the page, each item by its title. It carries the page's title
+//! too, the trail read back to the index, as Topcoat metadata, which an app
+//! whose document renders `topcoat::metadata::tags()` shows.
 //!
 //! Every page calls its operation through `operations`, so the route's
 //! rules hold: the caller admitted as the route admits it, the arguments
@@ -28,11 +30,12 @@
 //! A page's request meets the route controls (@rateLimit, @bodyLimit,
 //! @timeout) of the operation it is for, as the route's request does, and
 //! the rate limit and timeout of each options operation its references
-//! call, through the layer `route_controls` adds: a refusal is the route's
-//! 429, with `Retry-After`, 413 or 504, as the pages' refusal. A rate limit
-//! is the operation's one limiter in the app's registry (D44, amended), so
-//! a client has one budget through its JSON API route, its procedure and
-//! the pages.
+//! call, through the layer `route_controls` adds: each page says which it
+//! meets where it is declared (`#[page(.., with(Meets { .. }))]`), and a
+//! refusal is the route's 429, with `Retry-After`, 413 or 504, as the
+//! pages' refusal. A rate limit is the operation's one limiter in the app's
+//! registry (D44, amended), so a client has one budget through its JSON API
+//! route, its procedure and the pages.
 {{- end }}
 {{- if .Pages.Live }}
 //!
@@ -76,7 +79,8 @@ use serde::de::DeserializeOwned;
 {{- if .Pages.Uses "value" }}
 use serde_json::Value;
 {{- end }}
-use topcoat::context::{Cx, memoize, try_app_context};
+use topcoat::context::{Cx, memoize, try_context};
+use topcoat::metadata::Metadata;
 {{- if .Pages.Uses "form" }}
 use topcoat::router::content::Form;
 {{- end }}
@@ -91,9 +95,13 @@ use topcoat::router::{Slot, StatusCode, layout, page};
 {{- end }}
 {{- if .Pages.Uses "controls" }}
 use topcoat::router::error::ContentTooLargeError;
-use topcoat::router::request::{headers, method};
+use topcoat::router::request::headers;
 use topcoat::router::response::Response;
-use topcoat::router::{Body, BodyLimit, HeaderValue, Layer, LayerFuture, Method, Next, Path, RouterBuilder, header, to_bytes, try_endpoint};
+{{- if .Pages.ControlledShards }}
+use topcoat::router::{Body, BodyLimit, HeaderValue, Layer, LayerFn, LayerFuture, Next, Path, RouterBuilder, header, to_bytes};
+{{- else }}
+use topcoat::router::{Body, BodyLimit, HeaderValue, Layer, LayerFuture, Next, Path, RouterBuilder, header, to_bytes};
+{{- end }}
 {{- end }}
 {{- if and .Pages.Live (.Pages.Uses "sorting") }}
 use topcoat::runtime::{Event, Signal, shard, signal};
@@ -120,8 +128,8 @@ pub const RESOURCES: &[&str] = &[
 {{- end }}
 ];
 
-/// What the app tells the pages, in its app context
-/// (`.app_context(pages::Settings::new().sign_in("/sign-in"))`): the site's
+/// What the app tells the pages, in its router's context
+/// (`.with(pages::Settings::new().sign_in("/sign-in"))`): the site's
 /// title, which heads every page; its sign-in page, which a page that
 /// refuses a caller who is not signed in (401) links to, with the page to
 /// come back to as `next`; and the choices every form and display component
@@ -198,7 +206,7 @@ impl Settings {
 
     /// The settings the app put in its context, or the defaults.
     {{ .Shared }}fn of(cx: &Cx) -> Self {
-        try_app_context::<Settings>(cx).cloned().unwrap_or_default()
+        try_context::<Settings>(cx).cloned().unwrap_or_default()
     }
 
     {{ if .Shared }}/// The site's title: the app's, else the service's name in words.
@@ -227,7 +235,7 @@ impl Settings {
 /// The choices the app's `Settings` give the forms and display components
 /// of one resource's pages, `resource` its path below the prefix.
 fn choices_of(cx: &Cx, resource: &str) -> Choices {
-    try_app_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
+    try_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
@@ -542,7 +550,7 @@ fn size_pairs(pairs: &[(String, String)]) -> Vec<(String, String)> {
 /// Nothing when none applies: a list has no page's number, which a cursor
 /// cannot give.
 #[component]
-{{ .Shared }}async fn pager(base: String, first: Option<String>, prev: Option<String>, next: Option<String>, #[default] sizes: Vec<(i64, bool)>, #[default] hidden: Vec<(String, String)>) -> topcoat::Result<impl View> {
+{{ .Shared }}async fn pager(cx: &Cx, base: String, first: Option<String>, prev: Option<String>, next: Option<String>, #[default] sizes: Vec<(i64, bool)>, #[default] hidden: Vec<(String, String)>) -> topcoat::Result<impl View> {
     Ok(view! {
         if first.is_some() || prev.is_some() || next.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
@@ -974,11 +982,91 @@ async fn item_reference(cx: &Cx, key: &str, value: &str) -> Option<String> {
 }
 {{- end }}
 
+/// The trail from the index to the request's page, as the layout shows it
+/// and the page's title reads it (`page_metadata`): each step's label, its
+/// link, none for a page that does not exist and for the page itself, and
+/// whether it is the page itself, an item by its title. The request keeps
+/// it (`#[memoize]`), so the two ask once.
+#[memoize]
+async fn page_trail(cx: &Cx) -> Vec<(String, Option<String>, bool)> {
+    let title = Settings::of(cx).site_title();
+    let path = uri(cx).path().to_owned();
+{{- if and (.Pages.Uses "itemTitle") (.Pages.Uses "trailReference") }}
+    // An item's step is named by its title, else by what its route's value
+    // refers to, else by its noun and id.
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        let titled = match &crumb.item {
+            Some((key, ids)) => item_title(cx, key, ids).await,
+            None => None,
+        };
+        if let Some(title) = titled {
+            crumb.label = title;
+        } else if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
+        }
+    }
+{{- else if .Pages.Uses "itemTitle" }}
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        if let Some((key, ids)) = &crumb.item
+            && let Some(title) = item_title(cx, key, ids).await
+        {
+            crumb.label = title;
+        }
+    }
+{{- else if .Pages.Uses "trailReference" }}
+    // An item's step is named by what its route's value refers to, else by
+    // its noun and id.
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
+        }
+    }
+{{- else }}
+    let crumbs = trail(&path, &title);
+{{- end }}
+{{- if .ConsoleHooks }}
+    let crumbs: Vec<(String, Option<String>, bool)> =
+        crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
+    // A page of the console's own names its steps after the index.
+    match console_trail(cx, &path).await {
+        Some(steps) => {
+            let mut all = vec![(title.clone(), Some(PREFIX.to_owned()), false)];
+            all.extend(steps.into_iter().map(|(label, href)| (label, href, false)));
+            if let Some(last) = all.last_mut() {
+                last.1 = None;
+                last.2 = true;
+            }
+            all
+        }
+        None => crumbs,
+    }
+{{- else }}
+    crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect()
+{{- end }}
+}
+
+/// The metadata of every page under `{{ .Pages.Prefix }}`, which the layout carries in
+/// its context (`Metadata`): the page's title, the trail's steps from the
+/// page back to the index (`Ada · Customers · Shop`). An app whose document
+/// renders `topcoat::metadata::tags()` in its `<head>` gives each page its
+/// own `<title>`; one that does not is as it was.
+async fn page_metadata(cx: &Cx) -> topcoat::Result<Metadata> {
+    let steps: Vec<&str> = page_trail(cx).await.iter().rev().map(|(label, _, _)| label.as_str()).collect();
+    Ok(Metadata::new().title(steps.join(" · ")))
+}
+
 /// Every page under `{{ .Pages.Prefix }}`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the one whose
 /// path is the longest the page's begins with, the trail from the index to
 /// the page, an item by its title, then the page in `<main>`.
-#[layout({{ rustString .Pages.Prefix }})]
+#[layout({{ rustString .Pages.Prefix }}, with(Metadata::from_fn(page_metadata)))]
 pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     let title = Settings::of(cx).site_title();
     let path = uri(cx).path().to_owned();
@@ -1023,63 +1111,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
         })
         .collect();
 {{- end }}
-{{- if and (.Pages.Uses "itemTitle") (.Pages.Uses "trailReference") }}
-    // An item's step is named by its title, else by what its route's value
-    // refers to, else by its noun and id.
-    let mut crumbs = trail(&path, &title);
-    for crumb in &mut crumbs {
-        let titled = match &crumb.item {
-            Some((key, ids)) => item_title(cx, key, ids).await,
-            None => None,
-        };
-        if let Some(title) = titled {
-            crumb.label = title;
-        } else if let Some((key, value)) = &crumb.reference
-            && let Some(label) = item_reference(cx, key, value).await
-        {
-            crumb.label = label;
-        }
-    }
-{{- else if .Pages.Uses "itemTitle" }}
-    let mut crumbs = trail(&path, &title);
-    for crumb in &mut crumbs {
-        if let Some((key, ids)) = &crumb.item
-            && let Some(title) = item_title(cx, key, ids).await
-        {
-            crumb.label = title;
-        }
-    }
-{{- else if .Pages.Uses "trailReference" }}
-    // An item's step is named by what its route's value refers to, else by
-    // its noun and id.
-    let mut crumbs = trail(&path, &title);
-    for crumb in &mut crumbs {
-        if let Some((key, value)) = &crumb.reference
-            && let Some(label) = item_reference(cx, key, value).await
-        {
-            crumb.label = label;
-        }
-    }
-{{- else }}
-    let crumbs = trail(&path, &title);
-{{- end }}
-    let crumbs: Vec<(String, Option<String>, bool)> =
-        crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
-{{- if .ConsoleHooks }}
-    // A page of the console's own names its steps after the index.
-    let crumbs = match console_trail(cx, &path).await {
-        Some(steps) => {
-            let mut all = vec![(title.clone(), Some(PREFIX.to_owned()), false)];
-            all.extend(steps.into_iter().map(|(label, href)| (label, href, false)));
-            if let Some(last) = all.last_mut() {
-                last.1 = None;
-                last.2 = true;
-            }
-            all
-        }
-        None => crumbs,
-    };
-{{- end }}
+    let crumbs = page_trail(cx).await.clone();
     Ok(view! {
         <div class="ss-pages">
             <header class="ss-header"><a href=(PREFIX)>(title)</a></header>
@@ -1239,7 +1271,7 @@ fn {{ .Ident }}_item_href({{ declare .ItemParams "&str" }}) -> Option<String> {
 {{- with .List }}
 
 {{ doc (printf "The list of %s%s, when the caller may list them." $r.PluralLower (or (and $r.Filters ", filtered by the query") (and .Paged ", a page at a time") "")) }}
-#[page({{ rustString $r.Path }})]
+#[page({{ rustString $r.Path }}{{ $.Pages.With "GET" $r.Path }})]
 pub async fn {{ $r.Ident }}_list_page(cx: &Cx{{ if and .ArgForm (not $r.Live) }}, Form(filter): Form<{{ .ArgForm.Name }}>{{ end }}) -> topcoat::Result<impl View> {
 {{ reads $r.ColParams }}    let next = current(cx);
     let admitted = operations::can_{{ .Snake }}(cx).await;
@@ -1539,7 +1571,7 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
 {{- with .Detail }}
 
 {{ doc (printf "One of the %s, when the caller may read it, with the route's status when not." $r.PluralLower) }}
-#[page({{ rustString $r.ItemPath }})]
+#[page({{ rustString $r.ItemPath }}{{ $.Pages.With "GET" $r.ItemPath }})]
 pub async fn {{ $r.Ident }}_item_page(cx: &Cx) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    Ok(view! { {{ $r.Ident }}_item({{ args $r.ItemParams }}) })
 }
@@ -1629,7 +1661,7 @@ async fn {{ $r.Ident }}_item(
 {{- with .Create }}
 
 {{ doc (printf "The page that creates one of the %s, when the caller may." $r.PluralLower) }}
-#[page({{ rustString (printf "%s/new" $r.Path) }})]
+#[page({{ rustString (printf "%s/new" $r.Path) }}{{ $.Pages.With "GET" (printf "%s/new" $r.Path) }})]
 pub async fn {{ $r.Ident }}_new_page(cx: &Cx) -> topcoat::Result<impl View> {
 {{ reads $r.ColParams }}    let next = current(cx);
     let admitted = operations::can_{{ .Snake }}(cx).await;
@@ -1643,7 +1675,7 @@ pub async fn {{ $r.Ident }}_new_page(cx: &Cx) -> topcoat::Result<impl View> {
 }
 
 {{ doc (printf "Creates one of the %s from the new page's form, then goes to %s (303); a row button or a refusal renders the form again with its status." $r.PluralLower (or (and (eq .DoneBinding "created") "its page") "the page it came from")) }}
-#[page(POST {{ rustString (printf "%s/new" $r.Path) }})]
+#[page(POST {{ rustString (printf "%s/new" $r.Path) }}{{ $.Pages.With "POST" (printf "%s/new" $r.Path) }})]
 pub async fn {{ $r.Ident }}_create_page(cx: &Cx, Form(form): Form<{{ .FormName }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ColParams }}    let next = current(cx);
 {{ .SentLines }}
@@ -1674,7 +1706,7 @@ async fn {{ $r.Ident }}_new(cx: &Cx, form: {{ .FormName }}, errors: FormErrors) 
 {{- with .Update }}
 
 {{ doc (printf "The page that edits one of the %s, when the caller may: its form filled from the item, each field the item holds." $r.PluralLower) }}
-#[page({{ rustString (printf "%s/edit" $r.ItemPath) }})]
+#[page({{ rustString (printf "%s/edit" $r.ItemPath) }}{{ $.Pages.With "GET" (printf "%s/edit" $r.ItemPath) }})]
 pub async fn {{ $r.Ident }}_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
     let shown = match operations::can_{{ .Snake }}(cx).await {
@@ -1696,7 +1728,7 @@ pub async fn {{ $r.Ident }}_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
 }
 
 {{ doc (printf "Changes one of the %s from the edit page's form, then goes to its page (303); a row button or a refusal renders the form again with its status." $r.PluralLower) }}
-#[page(POST {{ rustString (printf "%s/edit" $r.ItemPath) }})]
+#[page(POST {{ rustString (printf "%s/edit" $r.ItemPath) }}{{ $.Pages.With "POST" (printf "%s/edit" $r.ItemPath) }})]
 pub async fn {{ $r.Ident }}_update_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Name }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
 {{ .SentLines }}
@@ -1727,7 +1759,7 @@ async fn {{ $r.Ident }}_edit(cx: &Cx, form: {{ .ArgForm.Name }}, errors: FormErr
 {{- with .Delete }}
 
 {{ doc (printf "The page that confirms deleting one of the %s, when the caller may." $r.PluralLower) }}
-#[page({{ rustString (printf "%s/delete" $r.ItemPath) }})]
+#[page({{ rustString (printf "%s/delete" $r.ItemPath) }}{{ $.Pages.With "GET" (printf "%s/delete" $r.ItemPath) }})]
 pub async fn {{ $r.Ident }}_delete_page(cx: &Cx) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
     let admitted = operations::can_{{ .Snake }}(cx).await;
@@ -1741,7 +1773,7 @@ pub async fn {{ $r.Ident }}_delete_page(cx: &Cx) -> topcoat::Result<impl View> {
 }
 
 {{ doc (printf "Deletes one of the %s from the confirmation's form, then goes %s (303); a refusal renders the confirmation again with its status." $r.PluralLower (or (and $r.List "to the list") "back")) }}
-#[page(POST {{ rustString (printf "%s/delete" $r.ItemPath) }})]
+#[page(POST {{ rustString (printf "%s/delete" $r.ItemPath) }}{{ $.Pages.With "POST" (printf "%s/delete" $r.ItemPath) }})]
 pub async fn {{ $r.Ident }}_destroy_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Name }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let next = current(cx);
 {{ .SentLines }}
@@ -1800,7 +1832,7 @@ async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }},
 {{- range .Actions }}
 
 {{ doc (printf "%s: posts the action's form, then goes back to the item's page (303); a refusal renders the item's page again with the form as sent, its errors and its status." .Label) }}
-#[page(POST {{ rustString (printf "%s/%s" $r.ItemPath .Verb) }})]
+#[page(POST {{ rustString (printf "%s/%s" $r.ItemPath .Verb) }}{{ $.Pages.With "POST" (printf "%s/%s" $r.ItemPath .Verb) }})]
 pub async fn {{ $r.Ident }}_{{ .Field }}_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Name }}>) -> topcoat::Result<impl View> {
 {{ reads $r.ItemParams }}    let item = {{ $r.ItemExpr }};
 {{ .SentLines }}
@@ -1820,26 +1852,59 @@ pub async fn {{ $r.Ident }}_{{ .Field }}_page(cx: &Cx, Form(form): Form<{{ .ArgF
 
 /// Adds the layer that applies, to each page's request, the traffic
 /// controls (@rateLimit, @bodyLimit, @timeout) of the operation the page is
-/// for and of the options operations its references call (D61).
+/// for and of the options operations its references call (D61), which the
+/// page names in its route's context (`Meets`).
 {{- if .Pages.ControlsUse "rate_limit" }} Each rate
 /// limit is the operation's limiter in `limits`, the app's registry, which
 /// the JSON API's routes and the procedures take from too (D44, amended).
 {{- end }}
+{{- if .Pages.ControlledShards }}
+/// A live list's shard has no values of its own (`#[shard]` takes no
+/// `with(...)`), so a layer on its path carries what it meets.
+{{- end }}
 /// `{{ .SetupMethod }}` calls it.
 pub(crate) fn route_controls(router: RouterBuilder{{ if .Pages.ControlsUse "rate_limit" }}, limits: &RateLimits{{ end }}) -> RouterBuilder {
-    router.layer(PageControls {
-        controls: vec![
+    router
+        .layer(PageControls {
+            controls: vec![
 {{- range .Pages.Controls }}
-            Controls::default(){{ range .ControlCalls }}{{ . }}{{ end }},
+                Controls::default(){{ range .ControlCalls }}{{ . }}{{ end }},
 {{- end }}
-        ],
-        pages: vec![
-{{- range .Pages.Controlled }}
-            (Method::{{ .Method }}, {{ rustString .Path }}, {{ .OwnExpr }}, {{ .CalledExpr }}),
+            ],
+        })
+{{- range .Pages.ControlledShards }}
+        .layer(LayerFn::new(Some({{ rustString .Path }}), carries).with({{ .Meets }}))
 {{- end }}
-        ],
-    })
 }
+
+/// The place in `PageControls` of the controls of each operation a page
+/// calls whose route has one, by the operation's name.
+mod place {
+{{- range $i, $c := .Pages.Controls }}
+    pub(super) const {{ $c.Place }}: usize = {{ $i }};
+{{- end }}
+}
+
+/// What a page's request meets (D61): the place of the controls of the
+/// operation it is for, none when its route has none, and those of the
+/// options operations its references call. A page's is in its route's
+/// context, from its attribute (`#[page(.., with(Meets { .. }))]`), so the
+/// page and what it meets are declared together{{ if .Pages.ControlledShards }}; a live list's shard's is
+/// its layer's (`route_controls`){{ end }}.
+#[derive(Clone, Copy)]
+struct Meets {
+    own: Option<usize>,
+    called: &'static [usize],
+}
+{{- if .Pages.ControlledShards }}
+
+/// The layer on a live list's shard, which is there for the `Meets` it
+/// carries into the shard's route's context: it does nothing to the
+/// request, which `PageControls` holds to them.
+fn carries<'a>(cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
+    next.run(cx, body)
+}
+{{- end }}
 
 {{- if .Pages.ControlsUse "rate_from" }}
 
@@ -1862,13 +1927,13 @@ struct Controls {
     /// budget with them. It counts each client by its IP address as Topcoat
     /// reads it (`client_key`), the key the route reads too.
     rate_limit: Option<Arc<RateLimiter>>,
-    /// The limit in bytes, and the Topcoat layer that lets the page read
-    /// its form up to it.
-    body_limit: Option<(usize, BodyLimit)>,
+    /// The limit in bytes, which the page's context carries too
+    /// (`BodyLimit`), so the page reads its form up to it.
+    body_limit: Option<usize>,
     timeout: Option<Duration>,
 {{- if .Pages.ControlsUse "rate_from" }}
     /// The limiter of an API dependency's operation (D61, amended), which
-    /// its crate's setup holds in the app context: taken at the request,
+    /// its crate's setup holds in the router's context: taken at the request,
     /// none when the app does not set the crate up.
     rate_from: Option<LimiterFrom>,
 {{- end }}
@@ -1905,7 +1970,7 @@ impl Controls {
     /// `@bodyLimit({ megabytes })`, in mebibytes as the route counts them.
     fn body_limit_megabytes(mut self, megabytes: usize) -> Self {
         let bytes = megabytes.saturating_mul(1024 * 1024);
-        self.body_limit = Some((bytes, BodyLimit::max(bytes)));
+        self.body_limit = Some(bytes);
         self
     }
 {{- end }}
@@ -1920,25 +1985,11 @@ impl Controls {
 }
 
 /// The controls of each operation a page calls whose route has one, which
-/// every page that calls the operation shares, and each page that meets
-/// one, by its method and the path it is registered at: the place of its
-/// operation's controls, none when its route has none, and those of the
-/// options operations its references call (D61).
+/// every page that calls the operation shares. A request meets those its
+/// route's context names (`Meets`), a HEAD's those of its GET, whose route
+/// answers it; a page that names none meets none.
 struct PageControls {
     controls: Vec<Controls>,
-    pages: Vec<(Method, &'static str, Option<usize>, &'static [usize])>,
-}
-
-impl PageControls {
-    /// The controls the page the request is for meets, a HEAD's those of
-    /// its GET: its operation's, and those of the operations its references
-    /// call; none for a page that meets none.
-    fn of(&self, cx: &Cx) -> Option<(Option<&Controls>, Vec<&Controls>)> {
-        let path = try_endpoint(cx)?.path().as_str();
-        let method = if *method(cx) == Method::HEAD { Method::GET } else { method(cx).clone() };
-        let &(_, _, own, called) = self.pages.iter().find(|(on, at, _, _)| *on == method && *at == path)?;
-        Some((own.map(|own| &self.controls[own]), called.iter().map(|&at| &self.controls[at]).collect()))
-    }
 }
 
 impl Layer for PageControls {
@@ -1948,14 +1999,15 @@ impl Layer for PageControls {
 
     fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
         Box::pin(async move {
-            let Some((own, called)) = self.of(cx) else {
+            let Some(&Meets { own, called }) = try_context::<Meets>(cx) else {
                 return next.run(cx, body).await;
             };
+            let own = own.map(|at| &self.controls[at]);
             // Each operation's limiter counts the request, the page's own
             // first, as each route would count its call; the page's own
             // operation bounds its body, which no other call carries; and
             // the tightest timeout covers the page.
-            let every = || own.into_iter().chain(called.iter().copied());
+            let every = || own.into_iter().chain(called.iter().map(|&at| &self.controls[at]));
 {{- if .Pages.ControlsUse "rate_from" }}
             for limiter in every().filter_map(|controls| controls.limiter(cx)) {
 {{- else }}
@@ -1969,18 +2021,18 @@ impl Layer for PageControls {
             }
             // The body is read up to the limit before the page decodes its
             // form: one that declares more, or sends more, is refused.
-            let (body, extractor_limit) = match own.and_then(|controls| controls.body_limit.as_ref()) {
-                Some((limit, extractor_limit)) => {
+            let (body, extractor_limit) = match own.and_then(|controls| controls.body_limit) {
+                Some(limit) => {
                     let too_large = || ApiError::payload_too_large("Request body exceeds the accepted size");
                     let declared = headers(cx)
                         .get(header::CONTENT_LENGTH)
                         .and_then(|value| value.to_str().ok())
                         .and_then(|value| value.parse::<u64>().ok());
-                    if declared.is_some_and(|length| length > *limit as u64) {
+                    if declared.is_some_and(|length| length > limit as u64) {
                         return Ok(control_refusal(&too_large()));
                     }
-                    match to_bytes(body, *limit).await {
-                        Ok(bytes) => (Body::from(bytes), Some(extractor_limit)),
+                    match to_bytes(body, limit).await {
+                        Ok(bytes) => (Body::from(bytes), Some(BodyLimit::max(limit))),
                         Err(err) if err.is::<ContentTooLargeError>() => return Ok(control_refusal(&too_large())),
                         Err(_) => return Ok(control_refusal(&ApiError::bad_request("The request body could not be read"))),
                     }
@@ -1989,7 +2041,7 @@ impl Layer for PageControls {
             };
             let page = async move {
                 match extractor_limit {
-                    Some(layer) => layer.handle(cx, body, next).await,
+                    Some(limit) => next.run(&cx.with(limit), body).await,
                     None => next.run(cx, body).await,
                 }
             };

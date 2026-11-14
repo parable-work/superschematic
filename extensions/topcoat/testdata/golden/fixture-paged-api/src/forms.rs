@@ -255,6 +255,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -950,6 +951,7 @@ impl BasketLineForm {
 /// number field the app names into a select.
 #[component]
 pub async fn basket_input_fields(
+    cx: &Cx,
     #[default(BasketInputForm::new())] form: BasketInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1183,6 +1185,7 @@ impl<'de> Deserialize<'de> for CatalogListItemsArgsForm {
 /// names into a select.
 #[component]
 pub async fn catalog_list_items_args_fields(
+    cx: &Cx,
     #[default] form: CatalogListItemsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1508,6 +1511,7 @@ impl<'de> Deserialize<'de> for CatalogListPartsArgsForm {
 /// names into a select.
 #[component]
 pub async fn catalog_list_parts_args_fields(
+    cx: &Cx,
     #[default] form: CatalogListPartsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1728,6 +1732,7 @@ impl<'de> Deserialize<'de> for CatalogListTagsArgsForm {
 /// names into a select.
 #[component]
 pub async fn catalog_list_tags_args_fields(
+    cx: &Cx,
     #[default] form: CatalogListTagsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

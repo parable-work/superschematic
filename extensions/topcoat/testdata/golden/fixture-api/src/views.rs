@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{CreateTenantInputRecord, TenantViewRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -46,7 +47,7 @@ fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (O
 /// `CreateTenantInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn create_tenant_input_detail(record: CreateTenantInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn create_tenant_input_detail(cx: &Cx, record: CreateTenantInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="CreateTenantInput" role="group">
             <dl>
@@ -70,6 +71,7 @@ pub async fn create_tenant_input_detail(record: CreateTenantInputRecord, #[defau
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn create_tenant_input_table(
+    cx: &Cx,
     rows: Vec<CreateTenantInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -111,7 +113,7 @@ pub async fn create_tenant_input_table(
 /// `TenantViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn tenant_view_detail(record: TenantViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn tenant_view_detail(cx: &Cx, record: TenantViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="TenantView" role="group">
             <dl>
@@ -139,6 +141,7 @@ pub async fn tenant_view_detail(record: TenantViewRecord, #[default] choices: Ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn tenant_view_table(
+    cx: &Cx,
     rows: Vec<TenantViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

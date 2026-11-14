@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{GreetingRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -32,7 +33,7 @@ fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
 /// `GreetingRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn greeting_detail(record: GreetingRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn greeting_detail(cx: &Cx, record: GreetingRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Greeting" role="group">
             <dl>
@@ -52,6 +53,7 @@ pub async fn greeting_detail(record: GreetingRecord, #[default] choices: Choices
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn greeting_table(
+    cx: &Cx,
     rows: Vec<GreetingRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

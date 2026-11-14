@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{NoteRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -38,7 +39,7 @@ fn text_of<'a>(choices: &'a Choices, field: &str, value: &'a str) -> &'a str {
 /// `NoteRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn note_detail(record: NoteRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn note_detail(cx: &Cx, record: NoteRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.title.as_str()), Some("Note"));
     Ok(view! {
         <div class="ss-detail" data-type="Note" role="group" aria-label=(label)>
@@ -63,6 +64,7 @@ pub async fn note_detail(record: NoteRecord, #[default] choices: Choices) -> top
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn note_table(
+    cx: &Cx,
     rows: Vec<NoteRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

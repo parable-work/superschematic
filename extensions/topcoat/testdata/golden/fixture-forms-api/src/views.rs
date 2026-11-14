@@ -25,6 +25,7 @@
 
 use crate::choices::Choices;
 use crate::records::{AccountKeyRecord, AccountViewRecord, BillingAddressRecord, BookingInputRecord, BookingViewRecord, GuestRecord, NoteInputRecord, RoomRequestRecord, SignupInputRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -238,7 +239,7 @@ pub fn plan_label(value: &str) -> &str {
 /// `AccountKeyRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn account_key_detail(record: AccountKeyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn account_key_detail(cx: &Cx, record: AccountKeyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let _ = record;
     let _ = choices;
     Ok(view! {
@@ -255,6 +256,7 @@ pub async fn account_key_detail(record: AccountKeyRecord, #[default] choices: Ch
 /// its end links nowhere.
 #[component]
 pub async fn account_key_table(
+    cx: &Cx,
     rows: Vec<AccountKeyRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -280,7 +282,7 @@ pub async fn account_key_table(
 /// `AccountViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn account_view_detail(record: AccountViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn account_view_detail(cx: &Cx, record: AccountViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="AccountView" role="group">
             <dl>
@@ -325,6 +327,7 @@ pub async fn account_view_detail(record: AccountViewRecord, #[default] choices: 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn account_view_table(
+    cx: &Cx,
     rows: Vec<AccountViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -379,7 +382,7 @@ pub async fn account_view_table(
 /// `BillingAddressRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn billing_address_detail(record: BillingAddressRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn billing_address_detail(cx: &Cx, record: BillingAddressRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="BillingAddress" role="group">
             <dl>
@@ -421,6 +424,7 @@ pub async fn billing_address_detail(record: BillingAddressRecord, #[default] cho
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn billing_address_table(
+    cx: &Cx,
     rows: Vec<BillingAddressRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -476,7 +480,7 @@ pub async fn billing_address_table(
 /// `BookingInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn booking_input_detail(record: BookingInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn booking_input_detail(cx: &Cx, record: BookingInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let currency_code = record.currency.clone();
     Ok(view! {
         <div class="ss-detail" data-type="BookingInput" role="group">
@@ -618,6 +622,7 @@ pub async fn booking_input_detail(record: BookingInputRecord, #[default] choices
 /// its end links nowhere.
 #[component]
 pub async fn booking_input_table(
+    cx: &Cx,
     rows: Vec<BookingInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -747,7 +752,7 @@ pub async fn booking_input_table(
 /// `BookingViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn booking_view_detail(record: BookingViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn booking_view_detail(cx: &Cx, record: BookingViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="BookingView" role="group">
             <dl>
@@ -771,6 +776,7 @@ pub async fn booking_view_detail(record: BookingViewRecord, #[default] choices: 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn booking_view_table(
+    cx: &Cx,
     rows: Vec<BookingViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -812,7 +818,7 @@ pub async fn booking_view_table(
 /// `GuestRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn guest_detail(record: GuestRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn guest_detail(cx: &Cx, record: GuestRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Guest" role="group">
             <dl>
@@ -845,6 +851,7 @@ pub async fn guest_detail(record: GuestRecord, #[default] choices: Choices) -> t
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn guest_table(
+    cx: &Cx,
     rows: Vec<GuestRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -893,7 +900,7 @@ pub async fn guest_table(
 /// `NoteInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn note_input_detail(record: NoteInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn note_input_detail(cx: &Cx, record: NoteInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="NoteInput" role="group">
             <dl>
@@ -928,6 +935,7 @@ pub async fn note_input_detail(record: NoteInputRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn note_input_table(
+    cx: &Cx,
     rows: Vec<NoteInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -980,7 +988,7 @@ pub async fn note_input_table(
 /// `RoomRequestRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn room_request_detail(record: RoomRequestRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn room_request_detail(cx: &Cx, record: RoomRequestRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="RoomRequest" role="group" aria-label="Room">
             <dl>
@@ -1034,6 +1042,7 @@ pub async fn room_request_detail(record: RoomRequestRecord, #[default] choices: 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn room_request_table(
+    cx: &Cx,
     rows: Vec<RoomRequestRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -1101,7 +1110,7 @@ pub async fn room_request_table(
 /// `SignupInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn signup_input_detail(record: SignupInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn signup_input_detail(cx: &Cx, record: SignupInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="SignupInput" role="group">
             <dl>
@@ -1174,6 +1183,7 @@ pub async fn signup_input_detail(record: SignupInputRecord, #[default] choices: 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn signup_input_table(
+    cx: &Cx,
     rows: Vec<SignupInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

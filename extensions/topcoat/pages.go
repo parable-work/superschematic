@@ -104,8 +104,9 @@ type pagesModel struct {
 	LeftOut []leftOut
 	// Controls are the route controls of each operation a page calls
 	// whose route has one: the operation it is for, and the options
-	// operations its references call (D61); Controlled each page that
-	// meets one, by its method and path, with their places in Controls.
+	// operations its references call (D61); Controlled each page, and
+	// each live list's shard, that meets one, with their places in
+	// Controls.
 	Controls   []routeControls
 	Controlled []controlledPage
 	// Trails are the steps of the trail a reference names, an item's by
@@ -119,31 +120,72 @@ type pagesModel struct {
 // controlledPage is a page whose request meets route controls: its
 // method, its path as it is registered, the place in pagesModel.Controls
 // of its operation's controls, -1 when its route has none, and those of
-// the other operations it calls whose routes have one.
+// the other operations it calls whose routes have one. Shard is a live
+// list's shard, which `#[shard]` gives no values of its own, so a layer on
+// its path carries what it meets; a page carries its own (`with(...)`).
 type controlledPage struct {
 	Method string
 	Path   string
 	Own    int
 	Called []int
+	Shard  bool
 }
 
-// OwnExpr is the Rust Option of the place of the page's operation's
-// controls.
-func (p controlledPage) OwnExpr() string {
-	if p.Own < 0 {
-		return "None"
+// Place is the constant in pages.rs's `place` that names where the
+// controls are in `PageControls`: the operation's OperationInfo constant,
+// after its crate for an API dependency's, whose operation may share the
+// name of one of the service's own.
+func (p routeControls) Place() string {
+	if p.Crate == "" {
+		return p.Const
 	}
-	return fmt.Sprintf("Some(%d)", p.Own)
+	return strings.ToUpper(p.Crate) + "_" + p.Const
 }
 
-// CalledExpr is the Rust slice of the places of the controls of the other
-// operations it calls.
-func (p controlledPage) CalledExpr() string {
+// meets is the Rust of what the page meets, a `Meets` of the places of
+// its operation's controls and of those of the other operations it calls.
+func (m *pagesModel) meets(p controlledPage) string {
+	own := "None"
+	if p.Own >= 0 {
+		own = "Some(place::" + m.Controls[p.Own].Place() + ")"
+	}
 	places := make([]string, len(p.Called))
 	for i, at := range p.Called {
-		places[i] = fmt.Sprintf("%d", at)
+		places[i] = "place::" + m.Controls[at].Place()
 	}
-	return "&[" + strings.Join(places, ", ") + "]"
+	return "Meets { own: " + own + ", called: &[" + strings.Join(places, ", ") + "] }"
+}
+
+// With is what the attribute of the page at method and path says after
+// its path: `, with(Meets { .. })`, what its request meets, in its route's
+// context, where `PageControls` reads it; empty for a page that meets no
+// control.
+func (m *pagesModel) With(method, path string) string {
+	for _, p := range m.Controlled {
+		if !p.Shard && p.Method == method && p.Path == path {
+			return ", with(" + m.meets(p) + ")"
+		}
+	}
+	return ""
+}
+
+// shardMeets is a live list's shard that meets route controls: its path
+// and its `Meets`, as Rust.
+type shardMeets struct {
+	Path  string
+	Meets string
+}
+
+// ControlledShards are the live lists' shards that meet a route control,
+// each with what it meets.
+func (m *pagesModel) ControlledShards() []shardMeets {
+	var shards []shardMeets
+	for _, p := range m.Controlled {
+		if p.Shard {
+			shards = append(shards, shardMeets{Path: p.Path, Meets: m.meets(p)})
+		}
+	}
+	return shards
 }
 
 // Live reports whether a list updates in place through a shard.
@@ -197,11 +239,10 @@ func (m *pagesModel) importName(module, name string) {
 	m.imports[module][name] = true
 }
 
-// routeParam is a page route's parameter: its name in the route and the
-// path_param! type that reads it.
+// routeParam is a page route's parameter: its name in the route, which is
+// also the function its path_param! writes to read it (`project_id(cx)`).
 type routeParam struct {
 	Name string // project_id
-	Type string // ProjectId
 }
 
 // pageResource is one resource's pages.
@@ -581,7 +622,7 @@ func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, 
 		}
 	}
 	for _, name := range sortedKeys(b.params) {
-		m.Params = append(m.Params, routeParam{Name: name, Type: pascalCase(name)})
+		m.Params = append(m.Params, routeParam{Name: name})
 	}
 	for _, name := range sortedKeys(b.prefills) {
 		m.Prefills = append(m.Prefills, b.prefills[name])
@@ -622,7 +663,7 @@ func (b *pageBuilder) controls() {
 	}
 	// add records a page, o the operation it is for, or nil, and refs the
 	// choices and labels functions it calls.
-	add := func(method, path string, o *pageOp, refs ...string) {
+	add := func(method, path string, o *pageOp, refs ...string) *controlledPage {
 		page := controlledPage{Method: method, Path: path, Own: -1}
 		if o != nil {
 			own := controlsOf(o.c.d.endpoint)
@@ -637,9 +678,11 @@ func (b *pageBuilder) controls() {
 				}
 			}
 		}
-		if page.Own >= 0 || len(page.Called) > 0 {
-			m.Controlled = append(m.Controlled, page)
+		if page.Own < 0 && len(page.Called) == 0 {
+			return nil
 		}
+		m.Controlled = append(m.Controlled, page)
+		return &m.Controlled[len(m.Controlled)-1]
 	}
 	choices := func(o *pageOp) string {
 		if o == nil {
@@ -664,7 +707,9 @@ func (b *pageBuilder) controls() {
 		if r.List != nil {
 			add("GET", r.Path, r.List, slices.Concat(list, above)...)
 			if r.Live {
-				add("POST", r.LivePath, r.List, list...)
+				if shard := add("POST", r.LivePath, r.List, list...); shard != nil {
+					shard.Shard = true
+				}
 			}
 		}
 		if r.Detail != nil {
@@ -1673,7 +1718,7 @@ var pageFuncs = map[string]any{
 	"reads": func(params []string) string {
 		var b strings.Builder
 		for _, param := range params {
-			b.WriteString("    let " + param + " = path_param::<" + pascalCase(param) + ">(cx).to_owned();\n")
+			b.WriteString("    let " + param + " = " + param + "(cx).to_owned();\n")
 		}
 		return b.String()
 	},

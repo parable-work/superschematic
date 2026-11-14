@@ -27,7 +27,7 @@
 //! offers and a display component labels.
 //! `pages` serves a page per resource the operations describe, under
 //! `/console`, with a layout and a nav; the app's `.discover()`
-//! registers them, and `pages::Settings` in its app context names its
+//! registers them, and `pages::Settings` in its router's context names its
 //! sign-in page and its choices.
 //! `engine_pages` serves the engine's types under `/console/engine`, an
 //! instance's behaviors in `engine_panels`' panels, each page calling the
@@ -58,7 +58,7 @@ use api::runtime::{ApiError, ClientIp, RateLimits};
 use api::{build_router_with, Implementations, RouterOptions};
 use api::runtime::{OperationInfo, Principal};
 use async_trait::async_trait;
-use topcoat::context::{Cx, memoize, try_app_context};
+use topcoat::context::{Cx, memoize, try_context};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
@@ -72,7 +72,7 @@ pub trait PageAuthenticator: Send + Sync + 'static {
     async fn principal(&self, cx: &Cx) -> Result<Option<Principal>, ApiError>;
 }
 
-/// What `fixture_engine_api` keeps in the app context for the in-process calls.
+/// What `fixture_engine_api` keeps in the router's context for the in-process calls.
 pub struct Setup {
     pub implementations: Implementations,
     pub page_authenticator: Arc<dyn PageAuthenticator>,
@@ -98,7 +98,7 @@ pub trait RouterBuilderFixtureEngineApiExt {
     /// `implementations` and `page_authenticator` for the in-process calls of
     /// `operations`.
     /// Mounts the routes of `engine`, the engine of fixture-engine-db (D58), at
-    /// `/engine/{*rest}` (`engine::routes`), and keeps it in the app context.
+    /// `/engine/{*rest}` (`engine::routes`), and keeps it in the router's context.
     #[must_use]
     fn fixture_engine_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator, engine: Arc<superschematic_engine::Engine>) -> Self;
 
@@ -125,7 +125,7 @@ impl RouterBuilderFixtureEngineApiExt for RouterBuilder {
 /// The app's router with the crate's setup: a new registry of the
 /// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
 /// its routes given the client's address and their limiters from the
-/// registry, the engine's routes at `/engine/{*rest}` when `api`, `Setup` in the app context.
+/// registry, the engine's routes at `/engine/{*rest}` when `api`, `Setup` in the router's context.
 fn set_up(router: RouterBuilder, implementations: Implementations, page_authenticator: Arc<dyn PageAuthenticator>, engine: Arc<superschematic_engine::Engine>, api: bool) -> RouterBuilder {
     let rate_limits = RateLimits::new();
     let router = if api {
@@ -144,7 +144,7 @@ fn set_up(router: RouterBuilder, implementations: Implementations, page_authenti
     } else {
         router
     };
-    router.app_context(Setup {
+    router.with(Setup {
         implementations,
         page_authenticator,
         rate_limits,
@@ -158,7 +158,7 @@ fn set_up(router: RouterBuilder, implementations: Implementations, page_authenti
 /// set up some of them, so a call into one it did not set up is refused,
 /// not a panic.
 pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
-    try_app_context::<Setup>(cx).ok_or_else(|| {
+    try_context::<Setup>(cx).ok_or_else(|| {
         ApiError::internal("the app does not host fixture-engine-api: its router builder calls neither fixture_engine_api nor fixture_engine_api_without_api")
     })
 }

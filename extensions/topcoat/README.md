@@ -187,11 +187,11 @@ let implementations = implementations(shop, Arc::clone(&users));
 let authenticator = IdentityPageAuthenticator::of(&implementations);
 let builder = Router::builder()
     .discover()
-    .app_context(users)
-    .app_context(console_settings())
+    .with(users)
+    .with(console_settings())
     .shop_orders(implementations, authenticator);
 match assets {
-    Some(assets) => builder.assets(assets).runtime().build(),
+    Some(assets) => builder.assets(assets).layer(RuntimeLayer::new()).build(),
     None => builder.build(),
 }
 ```
@@ -200,7 +200,7 @@ match assets {
 API serves, and a `PageAuthenticator` when an operation needs a caller.
 It makes one registry of the operations' rate limiters, which the JSON
 API's routes, the procedures and the pages take theirs from, and keeps it
-in the app context as `Setup.rate_limits`: an app that mounts the API's
+in the router's context as `Setup.rate_limits`: an app that mounts the API's
 router again (`RouterOptions { rate_limits: setup.rate_limits.clone(), ..
 }`), or a page of another crate that calls an operation
 (`setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)`), shares the
@@ -210,9 +210,9 @@ pages count by, so the client is one client on every way in:
 
 ```rust
 use acme_shop_orders_topcoat::{api, client_key, Setup};
-use topcoat::context::app_context;
+use topcoat::context::context;
 
-let setup: &Setup = app_context(cx);
+let setup: &Setup = context(cx);
 // None for an operation without a @rateLimit.
 if let Some(limiter) = setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)
     && let Err(retry_after) = limiter.take(&client_key(cx))
@@ -248,7 +248,7 @@ core or of the project's engine crate, and defines and publishes the
 document's schemas. The setup method then takes the engine, mounts its
 routes, its event stream and its MCP endpoint at `/engine/{*rest}`, each
 request's caller the one the API's `Authenticator` establishes, and keeps
-it in the app context (`Setup::engine`), which a page calls in-process on
+it in the router's context (`Setup::engine`), which a page calls in-process on
 the blocking pool:
 
 ```rust
@@ -290,7 +290,7 @@ Router::builder()
     .build()
 ```
 
-Each call reads its crate's `Setup` from the app context. A crate the app
+Each call reads its crate's `Setup` from the router's context. A crate the app
 links but does not set up answers each call with a 500, `the app does not
 host fixture-console-suppliers-api: its router builder calls neither
 fixture_console_suppliers_api nor fixture_console_suppliers_api_without_api`,
@@ -594,11 +594,11 @@ route's 401 or 403, and a cancel the operation refuses its 409, as the JSON
 API would answer:
 
 ```rust
-path_param!(id: types::IdentityUUID, error = not_found);
+path_param!(id: types::IdentityUUID else not_found);
 
 #[page(POST "/orders/{id}/cancel")]
 async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
-    let form = OrderCancelOrderArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
+    let form = OrderCancelOrderArgsForm { id: Some(id(cx)?.to_string()), ..form };
     let refused = match form.submit(cx).await {
         Ok(_) => return Err(see_other("/orders").into()),
         Err(refused) => refused,
@@ -919,7 +919,7 @@ it acts for, forwarding the signed-in reader:
 #[page(POST "/stock/{id}/reserve")]
 async fn reserve(cx: &Cx, Form(form): Form<StockReserveStockArgsForm>) -> topcoat::Result<impl View> {
     let orders = ServiceCaller::in_process("shop-app", ["shop-orders"]);
-    let form = StockReserveStockArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
+    let form = StockReserveStockArgsForm { id: Some(id(cx)?.to_string()), ..form };
     let refused = match form.submit_as(cx, &orders).await {
         Ok(_) => return Err(see_other("/stock").into()),
         Err(refused) => refused,
@@ -1281,7 +1281,7 @@ async fn new_order(cx: &Cx) -> topcoat::Result<impl View> {
 
 #[page("/orders/{id}")]
 async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
-    let args = OrderGetOrderArgs { id: path_param::<Id>(cx)?.clone() };
+    let args = OrderGetOrderArgs { id: id(cx)?.clone() };
     let order = OrderViewRecord::from(operations::order_get_order(cx, args).await?);
     let labels = references::order_view_labels(cx, std::slice::from_ref(&order), Choices::new()).await;
     Ok(view! { order_view_detail(record: order, choices: labels) })
@@ -1534,6 +1534,15 @@ calls ask: the nav's guards are permission checks of one caller. The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
 
+The layout carries each page's title too, as Topcoat metadata in its
+context (`with(Metadata::from_fn(..))`): the trail read from the page
+back to the index, `Edit · Apollo · Projects · Projects console`, from the
+same reading of the trail the layout shows, so the item's title is asked
+for once. The layout renders no `<head>`, so an app shows the title by
+rendering `topcoat::metadata::tags()` in its own document's
+([Live lists](#live-lists) has one); an app that does not is as it was.
+A page outside the prefix keeps the app's own metadata.
+
 A link of the nav and the index starts with its resource's icon when the
 list's element type, else the detail's, declares one with
 `@display({ icon })` ([D48](../../docs/DECISIONS.md)): an empty span the
@@ -1564,12 +1573,12 @@ which the app's `.discover()` registers, as it registers the procedures:
 let choices = Choices::new().with("lines.productId", catalog.iter().map(|product| (product.id().to_string(), product.name)));
 Router::builder()
     .discover()
-    .app_context(pages::Settings::new().title("Shop console").sign_in("/sign-in").choices(choices))
+    .with(pages::Settings::new().title("Shop console").sign_in("/sign-in").choices(choices))
     .shop_orders(implementations, page_authenticator)
     .build()
 ```
 
-`pages::Settings`, which the app puts in its app context, names the
+`pages::Settings`, which the app puts in its router's context, names the
 site's title (the service's name in words without it), its sign-in page
 (a 401 links to it with the page to come back to as `next`, the item's
 page for an action; without it a 401 has no link), and the
@@ -1595,7 +1604,7 @@ let settings = pages::Settings::new()
 
 The page functions and their path parameters are public, so an app's own
 page can link to one with
-`href!(pages::projects_item_page, pages::ProjectId(id))`.
+`href!(pages::projects_item_page, pages::project_id: id)`.
 
 An app that mounts two services' pages gives each a prefix of its own,
 as the [table](#the-config) requires: each crate registers its index and
@@ -1607,9 +1616,10 @@ twice.
 A page's request meets the `@rateLimit`, `@bodyLimit` and `@timeout` of
 the operation it is for, in the route's order, as the route's request
 does, and of the options operations its references call, so the console
-is no unlimited twin of a route ([D44](../../docs/DECISIONS.md)). `<service>(...)` adds one layer at the
-prefix, `PageControls`, which finds the page by its method and the path
-it is registered at:
+is no unlimited twin of a route ([D44](../../docs/DECISIONS.md)). Each page names what it meets where
+it is declared, in its route's context
+(`#[page("/console/orders", with(Meets { .. }))]`), and `<service>(...)`
+adds one layer at the prefix, `PageControls`, which reads it there:
 
 - a post meets the controls of the operation it submits: the new page's
   create, the edit page's update, the delete page's delete, an action's
@@ -1618,7 +1628,8 @@ it is registered at:
   an item's page, its edit page and its delete page the detail's. The
   index calls no operation, and meets none. A GET page carries no body
   for a body limit to refuse;
-- a [live list](#live-lists)'s shard meets its list's, and a [search
+- a [live list](#live-lists)'s shard meets its list's, which a layer on
+  its path names, since `#[shard]` takes no `with(...)`, and a [search
   picker](#a-search-picker)'s shard its options operation's rate limit and
   timeout, through a layer on its path, `references::route_controls`;
 - a page whose forms or records hold a
@@ -1710,17 +1721,21 @@ procedure would need the form's fields as a record the browser builds.
 
 An app loads the runtime once, for all its pages. The console's layout
 renders no `<html>`, so the app's own root layout gives the document its
-head and the runtime's script, around the console's layout, and the
+head, each page's title in it (`topcoat::metadata::tags()`), and the
+runtime's script, around the console's layout, and the
 router serves the asset bundle (`topcoat asset bundle` builds it beside
 the binary) and the runtime's layer:
 
 ```rust
 #[layout("/")]
-async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
+async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     Ok(view! {
         <!DOCTYPE html>
         <html>
-            <head>topcoat::runtime::script()</head>
+            <head>
+                topcoat::metadata::tags()
+                topcoat::runtime::script()
+            </head>
             <body>(slot)</body>
         </html>
     })
@@ -1728,10 +1743,10 @@ async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
 
 Router::builder()
     .discover()
-    .app_context(settings)
+    .with(settings)
     .shop_orders(implementations, page_authenticator)
     .assets(AssetBundle::load()?)
-    .runtime()
+    .layer(RuntimeLayer::new())
     .build()
 ```
 

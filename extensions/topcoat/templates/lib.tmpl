@@ -63,7 +63,7 @@
 {{- if .Pages }}
 //! `pages` serves a page per resource the operations describe, under
 //! `{{ .Pages.Prefix }}`, with a layout and a nav; the app's `.discover()`
-//! registers them, and `pages::Settings` in its app context names its
+//! registers them, and `pages::Settings` in its router's context names its
 //! sign-in page and its choices.
 {{- end }}
 {{- if .EnginePages }}
@@ -139,9 +139,9 @@ use api::runtime::ServiceCaller;
 use api::runtime::identity;
 {{- end }}
 use async_trait::async_trait;
-use topcoat::context::{Cx, memoize, try_app_context};
+use topcoat::context::{Cx, memoize, try_context};
 {{- else }}
-use topcoat::context::{Cx, try_app_context};
+use topcoat::context::{Cx, try_context};
 {{- end }}
 use topcoat::router::request::{client_ip, parts};
 {{- if .Identity }}
@@ -215,7 +215,7 @@ impl PageAuthenticator for IdentityPageAuthenticator {
 }
 {{- end }}
 
-/// What `{{ .SetupMethod }}` keeps in the app context for the in-process calls.
+/// What `{{ .SetupMethod }}` keeps in the router's context for the in-process calls.
 pub struct Setup {
     pub implementations: Implementations,
 {{- if .HasAuth }}
@@ -257,7 +257,7 @@ pub trait {{ .ExtTrait }} {
 {{- end }}
 {{- with .Engine }}
     /// Mounts the routes of `engine`, the engine of {{ .Database }} (D58), at
-    /// `{{ engineMount }}/{*rest}` (`engine::routes`), and keeps it in the app context.
+    /// `{{ engineMount }}/{*rest}` (`engine::routes`), and keeps it in the router's context.
 {{- end }}
     #[must_use]
     fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self;
@@ -375,7 +375,7 @@ fn set_up_parts(router: RouterBuilder, parts: AppParts{{ if and .HasAuth (not .I
 /// The app's router with the crate's setup: a new registry of the
 /// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
 /// its routes given the client's address and their limiters from the
-/// registry{{ if .Engine }}, the engine's routes at `{{ engineMount }}/{*rest}` when `api`{{ end }}, `Setup` in the app context{{ if .SetupLayers }}, and the layers of the routes'
+/// registry{{ if .Engine }}, the engine's routes at `{{ engineMount }}/{*rest}` when `api`{{ end }}, `Setup` in the router's context{{ if .SetupLayers }}, and the layers of the routes'
 /// controls{{ end }}.
 fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth }}, page_authenticator: Arc<dyn PageAuthenticator>{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}, api: bool) -> RouterBuilder {
     let rate_limits = RateLimits::new();
@@ -404,9 +404,9 @@ fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth 
         router
     };
 {{- if .SetupLayers }}
-    let router = router.app_context(Setup {
+    let router = router.with(Setup {
 {{- else }}
-    router.app_context(Setup {
+    router.with(Setup {
 {{- end }}
         implementations,
 {{- if .HasAuth }}
@@ -430,7 +430,7 @@ fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth 
 /// set up some of them, so a call into one it did not set up is refused,
 /// not a panic.
 pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
-    try_app_context::<Setup>(cx).ok_or_else(|| {
+    try_context::<Setup>(cx).ok_or_else(|| {
         ApiError::internal({{ rustString (printf "the app does not host %s: its router builder calls neither %s nor %s_without_api" .SchemaName .SetupMethod .SetupMethod) }})
     })
 }

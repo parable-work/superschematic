@@ -416,6 +416,7 @@ impl<'de> Deserialize<'de> for {{ .Name }} {
 {{ doc (printf "The controls of `%s`: each argument's, with its label, its value as sent, the attributes its rules give it and its errors, a path argument's a hidden input%s. `choices` turns a text or number control the app names into a select." .Name (or (and .Input "; then the input's fields") "")) }}
 #[component]
 pub async fn {{ .Component }}(
+    cx: &Cx,
     #[default] form: {{ .Name }},
     #[default] errors: FormErrors,
     #[default] choices: Choices,
