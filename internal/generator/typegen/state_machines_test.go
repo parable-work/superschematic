@@ -23,7 +23,7 @@ const (
 	stateMachineEnumService = "fixture-state-machine-enums"
 )
 
-// stateMachineAllows is D117's rule, read from the IR alone: an unchanged
+// stateMachineAllows is D118's rule, read from the IR alone: an unchanged
 // value is no move and is allowed, null to null among them; from null a
 // field takes a fromNull state; no move leaves a terminal state; and any
 // other move is allowed only when the machine lists it, to null where the
@@ -147,7 +147,7 @@ func stateMachineEdges() *ir.Schema {
 
 // TestGeneratedStateMachineHelpers generates the Go types modules of the
 // state machine fixture and of stateMachineEdges, and runs in each a test
-// of its helpers (D117): for every machine, every pair of states, null
+// of its helpers (D118): for every machine, every pair of states, null
 // among them on a nullable field, is asked of <Type>CanTransition<Field>
 // and held to stateMachineAllows on the IR, and <Type><Field>Terminal
 // returns the machine's terminal states, a new slice a call. A state is
@@ -446,7 +446,7 @@ func TestStateMachinesFollowTheLoadedOrder(t *testing.T) {
 
 // A base declares a machine and the module writes no struct for it: its
 // helpers are written all the same, since they name the field's enum
-// alone (D117).
+// alone (D118).
 func TestStateMachineOfABaseKeepsItsHelpers(t *testing.T) {
 	schema := ir.NewSchema("bases", ir.SchemaKindGeneral)
 	schema.Enums["Step"] = &ir.EnumDef{Name: "Step", Values: []ir.EnumValueDef{{Name: "A"}, {Name: "B"}}}

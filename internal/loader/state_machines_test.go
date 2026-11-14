@@ -11,7 +11,7 @@ import (
 // stateMachineFixture is a database whose Ticket declares a machine on a
 // field with a default, on two nullable fields and on a field typed by a
 // dependency's enum, beside a @jsonField type with a machine of its own
-// (D117).
+// (D118).
 const stateMachineFixture = "tsreader/testdata/services/fixture-state-machine-db"
 
 // transitionsFrom lists the states a machine's transitions leave, in
@@ -28,7 +28,7 @@ func transitionsFrom(m *ir.StateMachine) string {
 // machine's transitions are in the order of its enum's members, the
 // schema's own and the dependency's, whatever order the decorator's
 // object wrote them in, and each list of states keeps the order written;
-// and the loaded IR is held to its golden (D117).
+// and the loaded IR is held to its golden (D118).
 func TestStateMachineFixtureLoads(t *testing.T) {
 	db, err := LoadService(filepath.FromSlash(stateMachineFixture))
 	if err != nil {
@@ -94,7 +94,7 @@ func stateMachineService(t *testing.T, machines string) string {
 
 // TestStateMachineLoadsFromADataForm: a JSON schema file writes a type's
 // machines under stateMachines, each state as its member's value, and the
-// loader gives the transitions the enum's order there too (D117).
+// loader gives the transitions the enum's order there too (D118).
 func TestStateMachineLoadsFromADataForm(t *testing.T) {
 	dir := stateMachineService(t, `[
 		{"field": "state", "terminal": ["closed"], "transitions": [
@@ -125,7 +125,7 @@ func TestStateMachineLoadsFromADataForm(t *testing.T) {
 }
 
 // TestStateMachineRefusedInADataForm: what the build refuses of a machine
-// a JSON schema file writes (D117): the JSON Schema an empty fromNull,
+// a JSON schema file writes (D118): the JSON Schema an empty fromNull,
 // ir.Schema.Validate what the declaration decides alone, and verification
 // what needs the field and its enum, a dependency's enum among it, which
 // a data form has no resolver for.
@@ -159,7 +159,7 @@ func TestStateMachineRefusedInADataForm(t *testing.T) {
 
 // TestStateMachineRefusedOnABehaviorsField: a table's Workflow owns its
 // status, whose moves are the behavior's, so a @stateMachine on it is
-// refused with the behavior's name (D117).
+// refused with the behavior's name (D118).
 func TestStateMachineRefusedOnABehaviorsField(t *testing.T) {
 	dir := writeService(t, map[string]string{
 		"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {}}`,

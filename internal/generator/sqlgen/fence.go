@@ -9,7 +9,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// A table's @fenced counter (D118): a trigger that refuses an update that
+// A table's @fenced counter (D119): a trigger that refuses an update that
 // does not advance the fence as the declaration says, whatever writes the
 // row. It is built as a @stateMachine's guard is (state_guard.go): on
 // Postgres a plpgsql function and the trigger that executes it, on SQLite
@@ -34,7 +34,7 @@ import (
 // column; its trigger's is that name after trg_.
 const fenceSuffix = "_fence"
 
-// Fence is a table's trigger of one @fenced declaration (D118).
+// Fence is a table's trigger of one @fenced declaration (D119).
 type Fence struct {
 	// Origin is the table's type and Field the fence's field.
 	Origin string
@@ -128,7 +128,7 @@ func fence(td *ir.TypeDef, decl *ir.Fence, table *Table) (Fence, error) {
 	}
 	// The trigger's name is the longer of the two.
 	if len(f.TriggerName) > sqlutil.PostgresIdentifierLimit {
-		return f, fmt.Errorf("sqlgen: @fenced on %s.%s: the fence's trigger on table %s is %s, %d bytes, over PostgreSQL's %d-byte limit; give the table or the field's column a shorter name (D118)",
+		return f, fmt.Errorf("sqlgen: @fenced on %s.%s: the fence's trigger on table %s is %s, %d bytes, over PostgreSQL's %d-byte limit; give the table or the field's column a shorter name (D119)",
 			td.Name, decl.Field, table.Name, f.TriggerName, len(f.TriggerName), sqlutil.PostgresIdentifierLimit)
 	}
 	for _, field := range decl.Covers {
@@ -187,10 +187,10 @@ func (f Fence) FunctionSQL() string {
 	}
 	var b strings.Builder
 	if f.CoversRow() {
-		fmt.Fprintf(&b, "BEGIN\n  -- The @fenced counter %s.%s (D118):\n  -- every update of a row sets it to the stored value plus one.\n", f.Origin, f.Field)
+		fmt.Fprintf(&b, "BEGIN\n  -- The @fenced counter %s.%s (D119):\n  -- every update of a row sets it to the stored value plus one.\n", f.Origin, f.Field)
 		b.WriteString(advance("  "))
 	} else {
-		fmt.Fprintf(&b, "BEGIN\n  -- The @fenced counter %s.%s (D118):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n", f.Origin, f.Field)
+		fmt.Fprintf(&b, "BEGIN\n  -- The @fenced counter %s.%s (D119):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n", f.Origin, f.Field)
 		fmt.Fprintf(&b, "  IF %s IS DISTINCT FROM %s THEN\n", f.coveredRow("NEW"), f.coveredRow("OLD"))
 		b.WriteString(advance("    "))
 		fmt.Fprintf(&b, "  ELSIF %s IS DISTINCT FROM %s THEN\n", after, before)

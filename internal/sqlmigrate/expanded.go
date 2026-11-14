@@ -19,7 +19,7 @@ import (
 //     ever dropped;
 //   - the new model's functions, triggers and views, and those of the
 //     previous model contract drops or replaces, without the triggers
-//     contract creates, which refuse a write (D117);
+//     contract creates, which refuse a write (D118);
 //   - the version graphs of both models (expandedGraphs);
 //   - the new model's raw SQL, then the previous model's pieces contract
 //     undoes, in the order they ran (D83);

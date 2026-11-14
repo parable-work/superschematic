@@ -40,7 +40,7 @@ another service.';
 
 CREATE OR REPLACE FUNCTION ticket_account_status_transition_guard() RETURNS trigger AS $$
 BEGIN
-  -- The @stateMachine of Ticket.accountStatus (D117): an update that leaves the
+  -- The @stateMachine of Ticket.accountStatus (D118): an update that leaves the
   -- column's value is no move, and any other must be one the machine lists.
   IF NEW.account_status IS NOT DISTINCT FROM OLD.account_status THEN
     RETURN NEW;
@@ -65,7 +65,7 @@ CREATE TRIGGER trg_ticket_account_status_transition_guard
 
 CREATE OR REPLACE FUNCTION ticket_escalation_transition_guard() RETURNS trigger AS $$
 BEGIN
-  -- The @stateMachine of Ticket.escalation (D117): an update that leaves the
+  -- The @stateMachine of Ticket.escalation (D118): an update that leaves the
   -- column's value is no move, and any other must be one the machine lists.
   IF NEW.escalation IS NOT DISTINCT FROM OLD.escalation THEN
     RETURN NEW;
@@ -87,7 +87,7 @@ CREATE TRIGGER trg_ticket_escalation_transition_guard
 
 CREATE OR REPLACE FUNCTION ticket_review_transition_guard() RETURNS trigger AS $$
 BEGIN
-  -- The @stateMachine of Ticket.review (D117): an update that leaves the
+  -- The @stateMachine of Ticket.review (D118): an update that leaves the
   -- column's value is no move, and any other must be one the machine lists.
   IF NEW.review IS NOT DISTINCT FROM OLD.review THEN
     RETURN NEW;
@@ -112,7 +112,7 @@ CREATE TRIGGER trg_ticket_review_transition_guard
 
 CREATE OR REPLACE FUNCTION ticket_state_transition_guard() RETURNS trigger AS $$
 BEGIN
-  -- The @stateMachine of Ticket.state (D117): an update that leaves the
+  -- The @stateMachine of Ticket.state (D118): an update that leaves the
   -- column's value is no move, and any other must be one the machine lists.
   IF NEW.state IS NOT DISTINCT FROM OLD.state THEN
     RETURN NEW;

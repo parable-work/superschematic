@@ -1,4 +1,4 @@
-// Type-level checks of @stateMachine (D117). Nothing imports this file:
+// Type-level checks of @stateMachine (D118). Nothing imports this file:
 // `bun run typecheck`, which `make ts` runs, checks it, and fails on an
 // expected error (@ts-expect-error) that no longer errors.
 import { stateMachine } from "./decorators";

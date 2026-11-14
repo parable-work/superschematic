@@ -24,7 +24,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The parity of a @stateMachine (D117). Six things answer whether a field
+// The parity of a @stateMachine (D118). Six things answer whether a field
 // may move from one state to another: the helpers generated for Go,
 // TypeScript, Python and Rust, and the guards of the field's column on
 // Postgres and on SQLite. TestStateMachineParity asks each of them every
@@ -46,7 +46,7 @@ const (
 // stateMachineParties are the six that answer, in the order they are asked.
 var stateMachineParties = []string{"go", "typescript", "python", "rust", "postgres", "sqlite"}
 
-// stateMachineAllows is D117's rule, read from the IR alone: an unchanged
+// stateMachineAllows is D118's rule, read from the IR alone: an unchanged
 // value is no move and is allowed, null to null among them; from null a
 // field takes a fromNull state; no move leaves a terminal state; and any
 // other move is allowed only when the machine lists it, to null where the
@@ -523,7 +523,7 @@ func askGuards(t *testing.T, bin, dialect, where, create string, tables []guarde
 // from one state to another, for every machine of the state machine
 // fixture and every pair of its field's states, null among them where the
 // field is nullable, and holds each answer to stateMachineAllows on the
-// IR (D117). The helpers of Go, TypeScript, Python and Rust are asked from
+// IR (D118). The helpers of Go, TypeScript, Python and Rust are asked from
 // the types module, package and crate a build writes; the guards are asked
 // by an update of the column, from each pair's first state to its second,
 // on a Postgres and a SQLite database the service's create.sql made

@@ -15,7 +15,7 @@ import (
 )
 
 // fenceCase is the writes TestFences makes on a service's @fenced tables
-// (D118), in order, as TestFencesOnSQLite in the sqlmigrate package writes
+// (D119), in order, as TestFencesOnSQLite in the sqlmigrate package writes
 // them to fences.json beside the service's sqlite/create.sql.
 type fenceCase struct {
 	Writes []fenceWrite `json:"writes"`
@@ -76,7 +76,7 @@ func shownRows(ctx context.Context, conn *sql.Conn, query string) (string, error
 }
 
 // TestFences runs the writes of each case under SQLITECONVERGE_FENCES on a
-// database its create.sql made (D118). A write a fence allows passes, and
+// database its create.sql made (D119). A write a fence allows passes, and
 // one it does not fails with the fence's message as
 // SQLITE_CONSTRAINT_TRIGGER (1811); one a foreign key refuses fails with
 // the key's message, and not with a fence's; either way the rows then

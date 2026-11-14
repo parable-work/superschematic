@@ -82,7 +82,7 @@ ALTER TABLE delivery
 
 CREATE OR REPLACE FUNCTION delivery_plan_version_fence() RETURNS trigger AS $$
 BEGIN
-  -- The @fenced counter Delivery.planVersion (D118):
+  -- The @fenced counter Delivery.planVersion (D119):
   -- an update that changes a column it covers sets it to the stored value
   -- plus one, and any other keeps it or adds one.
   IF ROW(NEW.address, NEW.courier_id) IS DISTINCT FROM ROW(OLD.address, OLD.courier_id) THEN
@@ -106,7 +106,7 @@ CREATE TRIGGER trg_delivery_plan_version_fence
 
 CREATE OR REPLACE FUNCTION delivery_run_version_fence() RETURNS trigger AS $$
 BEGIN
-  -- The @fenced counter Delivery.runVersion (D118):
+  -- The @fenced counter Delivery.runVersion (D119):
   -- an update that changes a column it covers sets it to the stored value
   -- plus one, and any other keeps it or adds one.
   IF ROW(NEW.attempts, NEW.proof) IS DISTINCT FROM ROW(OLD.attempts, OLD.proof) THEN
@@ -130,7 +130,7 @@ CREATE TRIGGER trg_delivery_run_version_fence
 
 CREATE OR REPLACE FUNCTION depot_revision_fence() RETURNS trigger AS $$
 BEGIN
-  -- The @fenced counter Depot.revision (D118):
+  -- The @fenced counter Depot.revision (D119):
   -- an update that changes a column it covers sets it to the stored value
   -- plus one, and any other keeps it or adds one.
   IF ROW(NEW."name", NEW.deleted_at) IS DISTINCT FROM ROW(OLD."name", OLD.deleted_at) THEN
@@ -154,7 +154,7 @@ CREATE TRIGGER trg_depot_revision_fence
 
 CREATE OR REPLACE FUNCTION parcel_version_fence() RETURNS trigger AS $$
 BEGIN
-  -- The @fenced counter Parcel.version (D118):
+  -- The @fenced counter Parcel.version (D119):
   -- every update of a row sets it to the stored value plus one.
   IF NEW.version IS DISTINCT FROM OLD.version + 1 THEN
     RAISE EXCEPTION 'parcel.version must advance from % to %, not to %', OLD.version, OLD.version + 1, NEW.version

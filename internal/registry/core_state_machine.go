@@ -8,7 +8,7 @@ import (
 
 // stateMachineDecorator returns @stateMachine, from @superschematic/schema
 // and in a schema of any kind: the moves one enum field of the class may
-// make (D117). Apply reads the declaration's shape, and every state as
+// make (D118). Apply reads the declaration's shape, and every state as
 // the value its enum member serializes to, which is what the argument
 // evaluator makes of a member. ir.Schema.Validate checks what the
 // declaration alone decides, and verification checks it against the field

@@ -1,4 +1,4 @@
-// fixture-fenced-db's @fenced fields on Postgres (D118): the repositories
+// fixture-fenced-db's @fenced fields on Postgres (D119): the repositories
 // advance each counter themselves, by one, in a write of a column the
 // fence covers, and every counter is read back at its exact value after
 // every write. create.sql holds the fences' triggers, so each write here

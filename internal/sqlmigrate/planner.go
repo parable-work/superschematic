@@ -219,7 +219,7 @@ func (d *differ) rebuilds(phase Phase, changes []*change) map[string]*tableRebui
 // and in expand also the previous model's that contract drops, on a table
 // that keeps its name, since their definitions name it. Expand leaves
 // neither a trigger contract creates nor one expand itself drops, as a
-// trigger that refuses a write is placed (D117).
+// trigger that refuses a write is placed (D118).
 func (d *differ) phaseTriggers(phase Phase, table string) []*Trigger {
 	var out []*Trigger
 	named := map[string]bool{}

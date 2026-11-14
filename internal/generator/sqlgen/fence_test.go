@@ -33,7 +33,7 @@ func fenceSchema(typeName, fieldName string, covers ...string) *ir.Schema {
 // trigger, by table and column, named after both, that fires before every
 // update of a row and refuses a write; its covers are the columns of the
 // fields the declaration lists, a relation's its key's; and a table
-// without a fence, Courier, gets none (D118).
+// without a fence, Courier, gets none (D119).
 func TestFencesOfTheFixture(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-fenced-db"))
 	if err != nil {
@@ -90,7 +90,7 @@ func TestFencesOfTheFixture(t *testing.T) {
 // one, and any other keeps it or adds one. A fence without covers holds
 // every update to the stored value plus one. Postgres raises
 // check_violation with the fence's constraint and the stored, the expected
-// and the written value, and SQLite fails with a fixed message (D118).
+// and the written value, and SQLite fails with a fixed message (D119).
 func TestFenceRule(t *testing.T) {
 	quoted := func(name string) string { return `"` + name + `"` }
 	f := Fence{
@@ -101,7 +101,7 @@ func TestFenceRule(t *testing.T) {
 	}
 	wantPG := "CREATE OR REPLACE FUNCTION delivery_plan_version_fence() RETURNS trigger AS $$\n" +
 		"BEGIN\n" +
-		"  -- The @fenced counter Delivery.planVersion (D118):\n" +
+		"  -- The @fenced counter Delivery.planVersion (D119):\n" +
 		"  -- an update that changes a column it covers sets it to the stored value\n" +
 		"  -- plus one, and any other keeps it or adds one.\n" +
 		"  IF ROW(NEW.address, NEW.courier_id) IS DISTINCT FROM ROW(OLD.address, OLD.courier_id) THEN\n" +
@@ -142,7 +142,7 @@ func TestFenceRule(t *testing.T) {
 	}
 	wantPG = "CREATE OR REPLACE FUNCTION parcel_version_fence() RETURNS trigger AS $$\n" +
 		"BEGIN\n" +
-		"  -- The @fenced counter Parcel.version (D118):\n" +
+		"  -- The @fenced counter Parcel.version (D119):\n" +
 		"  -- every update of a row sets it to the stored value plus one.\n" +
 		"  IF NEW.version IS DISTINCT FROM OLD.version + 1 THEN\n" +
 		"    RAISE EXCEPTION 'parcel.version must advance from % to %, not to %', OLD.version, OLD.version + 1, NEW.version\n" +
@@ -164,7 +164,7 @@ func TestFenceRule(t *testing.T) {
 
 // TestFenceInTheScripts: create.sql creates each fence's function, then
 // its trigger, and drop.sql drops the trigger, then the function, before
-// the tables (D118).
+// the tables (D119).
 func TestFenceInTheScripts(t *testing.T) {
 	out, err := Generate(fenceSchema("Task", "revision", "title"), Options{SchemaName: "fences-db"})
 	if err != nil {
@@ -196,7 +196,7 @@ func TestFenceInTheScripts(t *testing.T) {
 // TestFenceQuotesNames: a column named by a keyword is quoted wherever the
 // rule names it, a relation is covered as its key's column, and a name
 // that holds a quote, a percent sign or a dollar quote is written so that
-// the function's message and constraint hold it as it is (D118).
+// the function's message and constraint hold it as it is (D119).
 func TestFenceQuotesNames(t *testing.T) {
 	s := fenceSchema("Task", "count", "order", "owner")
 	fieldNamed := func(name string) *ir.FieldDef {
@@ -250,7 +250,7 @@ func TestFenceQuotesNames(t *testing.T) {
 
 // TestFenceNameLimit: a fence's trigger is named after its table and its
 // column, and one over PostgreSQL's 63 bytes fails the build, naming the
-// type, the field and the table; one of 63 bytes builds (D118).
+// type, the field and the table; one of 63 bytes builds (D119).
 func TestFenceNameLimit(t *testing.T) {
 	// trg_ and _fence take 10 bytes, and the underscore between the table
 	// and the column one more: 52 are left for the two names.
@@ -273,7 +273,7 @@ func TestFenceNameLimit(t *testing.T) {
 		"@fenced on " + typeName + ".revision",
 		"table " + table,
 		"trg_" + table + "_revision_fence, 64 bytes, over PostgreSQL's 63-byte limit",
-		"(D118)",
+		"(D119)",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error lacks %q: %v", want, err)

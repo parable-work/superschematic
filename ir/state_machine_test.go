@@ -11,7 +11,7 @@ import (
 
 // ticketSchema is a DB schema with a Ticket whose state, a required field
 // with a default, moves among four states, and whose review, a nullable
-// field, starts at null and may return to it (D117).
+// field, starts at null and may return to it (D118).
 func ticketSchema() *Schema {
 	s := NewSchema("support-db", SchemaKindDB)
 	s.Scalars["Identity.UUID"] = &ScalarDef{Name: "Identity.UUID", LanguagePrimitive: LanguageString}
@@ -242,7 +242,7 @@ func TestEnumMemberSerializedAs(t *testing.T) {
 	}
 }
 
-// A machine is written under stateMachines, with the keys D117 names, in
+// A machine is written under stateMachines, with the keys D118 names, in
 // JSON and in YAML, and reads back as it was.
 func TestStateMachineJSONAndYAMLRoundTrip(t *testing.T) {
 	td := ticketSchema().Types["Ticket"]

@@ -22,7 +22,7 @@ const (
 	stateMachineEnumService = "fixture-state-machine-enums"
 )
 
-// stateMachineAllows is D117's rule, read from the IR alone: an unchanged
+// stateMachineAllows is D118's rule, read from the IR alone: an unchanged
 // value is no move and is allowed, null to null among them; from null a
 // field takes a fromNull state; no move leaves a terminal state; and any
 // other move is allowed only when the machine lists it, to null where the
@@ -101,7 +101,7 @@ type pythonMachineCase struct {
 	Type   string `json:"type"`
 	Field  string `json:"field"`
 	Enum   string `json:"enum"`
-	// Const and Method are D117's names, written here from the field's.
+	// Const and Method are D118's names, written here from the field's.
 	Const  string `json:"const"`
 	Method string `json:"method"`
 	// Transitions holds, per state that has a move, the states it may
@@ -207,7 +207,7 @@ func pythonMachineCases(t *testing.T, module string, schema *ir.Schema, deps map
 }
 
 // stateMachineProbe checks every machine of the cases it reads as JSON
-// (D117). A move is asked with the enum's members and with their values,
+// (D118). A move is asked with the enum's members and with their values,
 // which a model built with use_enum_values holds, and the two constants
 // are held to the IR's lists and to being read-only. A model keeps its
 // fields: the constants are no field of it.
@@ -259,7 +259,7 @@ for case in cases:
 
 // TestGeneratedStateMachineHelpers generates the Python types packages of
 // the state machine fixture and of stateMachineEdges and runs
-// stateMachineProbe on them (D117): for every machine, every pair of
+// stateMachineProbe on them (D118): for every machine, every pair of
 // states and null is asked of can_transition_<field> and held to
 // stateMachineAllows on the IR, and <FIELD>_TRANSITIONS and
 // <FIELD>_TERMINAL to the IR's lists.

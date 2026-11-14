@@ -1107,7 +1107,7 @@ func (r *ParcelRepository) upsertRow(ctx context.Context, input *types.Parcel, o
 
 		// Set updated_by
 
-		// Each fence the update's columns advance moves on by one (D118).
+		// Each fence the update's columns advance moves on by one (D119).
 		setClauses = append(setClauses, fenceBumps(parcelFences, setClauses)...)
 
 	}
@@ -1295,7 +1295,7 @@ func (r *ParcelRepository) upsertBatches(ctx context.Context, inputs []*types.Pa
 			assignments = append(assignments, key.keep)
 		} else {
 			// Each fence the update's columns advance moves on by one
-			// (D118).
+			// (D119).
 			assignments = append(assignments, fenceBumps(parcelFences, assignments)...)
 		}
 		query := fmt.Sprintf(
@@ -1604,7 +1604,7 @@ func (r *ParcelRepository) CreateMany(ctx context.Context, inputs []*types.Parce
 
 // UpdateOne updates a single Parcel record by ID.
 // It advances each @fenced field that covers a column the update sets by
-// one, and writes one the update sets itself as it stands (D118).
+// one, and writes one the update sets itself as it stands (D119).
 func (r *ParcelRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, update *ParcelUpdate) (*types.Parcel, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -1640,7 +1640,7 @@ func (r *ParcelRepository) UpdateOne(ctx context.Context, id types.IdentityUUID,
 
 	// Set updated_by
 
-	// Each fence the update's columns advance moves on by one (D118).
+	// Each fence the update's columns advance moves on by one (D119).
 	setClauses = append(setClauses, fenceBumps(parcelFences, setClauses)...)
 
 	if len(setClauses) == 0 {
@@ -1708,7 +1708,7 @@ func (r *ParcelRepository) UpdateOne(ctx context.Context, id types.IdentityUUID,
 // UpdateMany updates multiple Parcel records matching the filter.
 // It advances each @fenced field that covers a column the update sets by
 // one in every row it updates, and writes one the update sets itself as
-// it stands (D118), so a filter on that field compares what a caller read.
+// it stands (D119), so a filter on that field compares what a caller read.
 func (r *ParcelRepository) UpdateMany(ctx context.Context, filter *ParcelFilter, update *ParcelUpdate) (int, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -1744,7 +1744,7 @@ func (r *ParcelRepository) UpdateMany(ctx context.Context, filter *ParcelFilter,
 
 	// Set updated_by
 
-	// Each fence the update's columns advance moves on by one (D118).
+	// Each fence the update's columns advance moves on by one (D119).
 	setClauses = append(setClauses, fenceBumps(parcelFences, setClauses)...)
 
 	if len(setClauses) == 0 {

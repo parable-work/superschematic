@@ -11,7 +11,7 @@ import (
 
 // jobSchema is a DB schema with a Job two parties write: a planner, whose
 // writes of label and priority advance version, and a worker, whose writes
-// of claimedBy and progress advance executionVersion (D118).
+// of claimedBy and progress advance executionVersion (D119).
 func jobSchema() *Schema {
 	s := NewSchema("jobs-db", SchemaKindDB)
 	s.Scalars["Identity.UUID"] = &ScalarDef{Name: "Identity.UUID", LanguagePrimitive: LanguageString}
@@ -146,7 +146,7 @@ func TestFenceOfFindsTheFieldsFence(t *testing.T) {
 	}
 }
 
-// A fence is written under fences, with the keys D118 names, in JSON and
+// A fence is written under fences, with the keys D119 names, in JSON and
 // in YAML, and reads back as it was; one with no covers writes its field
 // alone.
 func TestFenceJSONAndYAMLRoundTrip(t *testing.T) {

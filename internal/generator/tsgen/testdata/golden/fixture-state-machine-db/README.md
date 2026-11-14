@@ -71,7 +71,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - `types/` - Pure TypeScript types (no runtime); use `@schemas/fixture-state-machine-db-types/types` for zero-runtime imports
 - `validators/` - Validation functions; use `@schemas/fixture-state-machine-db-types/validators/scalars/<name>` for granular imports
 - `mask/` - Secret-masking helpers for types with @secret fields
-- `state-machines.ts` - for each field a `@stateMachine` governs (D117): `<type><Field>Transitions`, each state and the states it may move to; `<type><Field>Terminal`, the states no move leaves; and `<type>CanTransition<Field>(from, to)`, whether a move is one the machine lists, as the table's guard decides it in the database
+- `state-machines.ts` - for each field a `@stateMachine` governs (D118): `<type><Field>Transitions`, each state and the states it may move to; `<type><Field>Terminal`, the states no move leaves; and `<type>CanTransition<Field>(from, to)`, whether a move is one the machine lists, as the table's guard decides it in the database
 - `index.ts` - Main export (re-exports all; backward compatible)
 
 ## Type System

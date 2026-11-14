@@ -476,7 +476,7 @@ type TableModel struct {
 	ToMany []ToMany
 
 	// Fences are the table's @fenced counters, in the order declared, which
-	// its statements advance (D118, FenceBumps); none for most tables.
+	// its statements advance (D119, FenceBumps); none for most tables.
 	Fences []FenceModel
 }
 

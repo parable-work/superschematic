@@ -8,7 +8,7 @@ import (
 )
 
 // StateMachineInfo is one @stateMachine declaration as state_machines.go
-// writes its helpers (D117): <Type><Field>Terminal and
+// writes its helpers (D118): <Type><Field>Terminal and
 // <Type>CanTransition<Field>. Every state is the Go constant of the
 // enum's member, which enums.go declares for the schema's own enum and
 // aliases for a dependency's.
@@ -67,7 +67,7 @@ func (o *ModuleOutput) HasStateMachines() bool {
 }
 
 // buildStateMachines returns the helpers of every @stateMachine the
-// schema declares (D117), the types in name order. A type the module
+// schema declares (D118), the types in name order. A type the module
 // writes no struct for, a base among them, keeps its helpers: they name
 // the field's enum alone. A dependency's enum is named as a field of its
 // type names it, by the alias and the constants enums.go binds to the

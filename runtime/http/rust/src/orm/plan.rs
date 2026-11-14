@@ -52,7 +52,7 @@ pub fn fill(format: &str, args: &[&dyn Display]) -> Result<String, Error> {
 }
 
 /// The assignments that advance `fences` in an update whose assignments
-/// are `sets`, each of which begins with its column and ` = ` (D118): the
+/// are `sets`, each of which begins with its column and ` = ` (D119): the
 /// bump of each fence that covers a column one of them sets, or of a fence
 /// with no covers when they set any, once. Whether a value differs from
 /// the stored one is not asked, which the statement cannot know. A fence
@@ -1066,7 +1066,7 @@ impl<'a> Plan<'a> {
     }
 
     /// Adds to an update's assignments, its stamps among them, the bump
-    /// of each fence they advance (D118).
+    /// of each fence they advance (D119).
     fn advance(&self, sets: &mut Vec<String>) {
         let bumps = fence_bumps(&self.table.fences, sets);
         sets.extend(bumps);
@@ -1746,7 +1746,7 @@ mod tests {
     }
 
     /// The fences of fixture-fenced-db's tables, as its types crate's
-    /// definition holds them (D118); rustgen's tests run the repositories
+    /// definition holds them (D119); rustgen's tests run the repositories
     /// over them on SQLite and on Postgres.
     #[test]
     fn an_update_advances_each_fence_that_covers_a_column_it_sets() {

@@ -56,7 +56,7 @@ type TypeImport struct {
 	TypeNames  []string
 
 	// Required is set when a state machine of a model names the members
-	// of an enum the module owns (D117). types.py then imports the module
+	// of an enum the module owns (D118). types.py then imports the module
 	// with no fallback: bound to Any, the enum would have no members, and
 	// a missing dependency is the clearer error.
 	Required bool
@@ -83,7 +83,7 @@ type ModuleOutput struct {
 	readUnions map[string]bool
 
 	// stateMachines are the @stateMachine declarations each model carries
-	// (D117), by type name; StateMachinesOf reads them.
+	// (D118), by type name; StateMachinesOf reads them.
 	stateMachines map[string][]StateMachineInfo
 
 	// ImportedEnumNames lists imported enum names so templates and default

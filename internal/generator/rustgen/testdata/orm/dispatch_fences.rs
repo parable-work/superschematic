@@ -1,5 +1,5 @@
 //! The repositories of fixture-fenced-db on a SQLite file and on Postgres
-//! (D118): one script of writes runs through each dialect's repositories,
+//! (D119): one script of writes runs through each dialect's repositories,
 //! over the DDL the build writes for it, and reads every @fenced counter's
 //! exact value after every write. A write of a column a fence covers
 //! advances that fence by one and leaves the table's other fence as it

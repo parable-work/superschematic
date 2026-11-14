@@ -15,7 +15,7 @@ import (
 )
 
 // guardCase is one table whose @stateMachine guards TestGuards runs
-// (D117), as TestStateMachineGuardsOnSQLite in the sqlmigrate package
+// (D118), as TestStateMachineGuardsOnSQLite in the sqlmigrate package
 // writes it to guards.json beside the service's sqlite/create.sql.
 type guardCase struct {
 	Table string `json:"table"`
@@ -66,7 +66,7 @@ func quoted(name string) string {
 const constraintTrigger = 1811
 
 // TestGuards runs the guards of each case under SQLITECONVERGE_GUARDS on a
-// database its create.sql made (D117). For every guarded column and every
+// database its create.sql made (D118). For every guarded column and every
 // pair of its values, null among them, it inserts a row in the first
 // state, which no guard holds, updates another column, which no guard
 // hears, and moves the column to the second: a move the machine lists and

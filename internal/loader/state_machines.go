@@ -5,7 +5,7 @@ import (
 )
 
 // orderStateMachines gives each @stateMachine's transitions the order of
-// the members of the enum that types its field (D117), the schema's own
+// the members of the enum that types its field (D118), the schema's own
 // or a dependency's, which the TypeScript reader hands over
 // (verify.Input.ExternalEnums). The loader runs it on every authoring form
 // before the verification pass: a TypeScript object's keys reach a

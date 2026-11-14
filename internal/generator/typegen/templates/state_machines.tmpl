@@ -5,7 +5,7 @@ package {{.PackageName}}
 {{range .StateMachines}}
 // {{.TerminalFunc}} returns the terminal states of
 // {{.TypeName}}.{{.FieldName}}, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func {{.TerminalFunc}}() []{{.EnumType}} {
 	return []{{.EnumType}}{
 	{{- range .Terminal}}
@@ -17,7 +17,7 @@ func {{.TerminalFunc}}() []{{.EnumType}} {
 {{if .Nullable}}
 // {{.CanTransitionFunc}} reports whether
 // {{.TypeName}}.{{.FieldName}} may move from one state to another, as the
-// field's state machine declares (D117). nil is null. An unchanged value
+// field's state machine declares (D118). nil is null. An unchanged value
 // is no move and is allowed, listed or not. No move leaves a terminal
 // state, and any other move is allowed only when the machine lists it.
 func {{.CanTransitionFunc}}(from, to *{{.EnumType}}) bool {
@@ -59,7 +59,7 @@ func {{.CanTransitionFunc}}(from, to *{{.EnumType}}) bool {
 {{else}}
 // {{.CanTransitionFunc}} reports whether
 // {{.TypeName}}.{{.FieldName}} may move from one state to another, as the
-// field's state machine declares (D117). An unchanged value is no move
+// field's state machine declares (D118). An unchanged value is no move
 // and is allowed, listed or not. No move leaves a terminal state, and
 // any other move is allowed only when the machine lists it.
 func {{.CanTransitionFunc}}(from, to {{.EnumType}}) bool {

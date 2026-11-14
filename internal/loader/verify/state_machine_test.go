@@ -11,7 +11,7 @@ import (
 // machineSchema is a DB schema with a Ticket whose state, a required field
 // with a default, moves among four states; whose review, a nullable field,
 // starts at null and may return to it; and whose tier is typed by an enum
-// a dependency owns, which the reader hands over (D117).
+// a dependency owns, which the reader hands over (D118).
 func machineSchema() (*ir.Schema, Input) {
 	schema := ir.NewSchema("support-db", ir.SchemaKindDB)
 	schema.Enums["TicketState"] = &ir.EnumDef{Name: "TicketState", Values: []ir.EnumValueDef{

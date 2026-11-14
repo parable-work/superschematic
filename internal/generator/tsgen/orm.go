@@ -158,7 +158,7 @@ type ORMTable struct {
 
 	SoftDelete   bool
 	HistoryActor bool
-	// Fences are the table's @fenced fields (D118), sqlutil's FenceModel,
+	// Fences are the table's @fenced fields (D119), sqlutil's FenceModel,
 	// which the runtime's repositories advance in an update, an updateMany
 	// and an upsert's update; a soft delete and a reseal carry the bump in
 	// their statements.

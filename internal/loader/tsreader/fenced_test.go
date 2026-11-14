@@ -11,7 +11,7 @@ import (
 // TestFencesAreRead: each @fenced of a class is recorded in the order
 // written, with the fields it covers in theirs, a relation by its field's
 // name; a fence with no covers holds its field alone; and a class with no
-// @fenced holds none (D118).
+// @fenced holds none (D119).
 func TestFencesAreRead(t *testing.T) {
 	schema, _, err := LoadService("testdata/services/fixture-fenced-db")
 	if err != nil {
@@ -49,7 +49,7 @@ func describeFences(fences []*ir.Fence) string {
 
 // TestFencedRefusesAFieldTwoFencesCover: the compiler takes a field in the
 // covers of two fences, so the build refuses it, with the type, the fence
-// and the field (D118).
+// and the field (D119).
 func TestFencedRefusesAFieldTwoFencesCover(t *testing.T) {
 	_, _, err := LoadService("testdata/services/broken-fenced-shared-cover")
 	if err == nil {

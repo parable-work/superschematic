@@ -9,7 +9,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// A table's @stateMachine guard (D117): a trigger that refuses an update
+// A table's @stateMachine guard (D118): a trigger that refuses an update
 // of the machine's column that makes a move the machine does not declare,
 // whatever writes the row. It is built as @enqueueOnChange's trigger is
 // (enqueue.go): on Postgres a plpgsql function and the trigger that
@@ -33,7 +33,7 @@ import (
 // and column; its trigger's is that name after trg_.
 const stateGuardSuffix = "_transition_guard"
 
-// StateGuard is a table's guard of one @stateMachine (D117).
+// StateGuard is a table's guard of one @stateMachine (D118).
 type StateGuard struct {
 	// Origin is the table's type and Field the field the machine governs.
 	Origin string
@@ -124,7 +124,7 @@ func stateGuard(td *ir.TypeDef, machine *ir.StateMachine, table *Table) (StateGu
 	}
 	// The trigger's name is the longer of the two.
 	if len(g.TriggerName) > sqlutil.PostgresIdentifierLimit {
-		return g, fmt.Errorf("sqlgen: @stateMachine on %s.%s: the guard's trigger on table %s is %s, %d bytes, over PostgreSQL's %d-byte limit; give the table or the field's column a shorter name (D117)",
+		return g, fmt.Errorf("sqlgen: @stateMachine on %s.%s: the guard's trigger on table %s is %s, %d bytes, over PostgreSQL's %d-byte limit; give the table or the field's column a shorter name (D118)",
 			td.Name, machine.Field, table.Name, g.TriggerName, len(g.TriggerName), sqlutil.PostgresIdentifierLimit)
 	}
 	for _, tr := range machine.Transitions {
@@ -218,7 +218,7 @@ func dollarQuote(body string) string {
 func (g StateGuard) FunctionSQL() string {
 	before, after := "OLD."+g.QuotedColumn, "NEW."+g.QuotedColumn
 	var b strings.Builder
-	fmt.Fprintf(&b, "BEGIN\n  -- The @stateMachine of %s.%s (D117): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n", g.Origin, g.Field)
+	fmt.Fprintf(&b, "BEGIN\n  -- The @stateMachine of %s.%s (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n", g.Origin, g.Field)
 	fmt.Fprintf(&b, "  IF %s IS NOT DISTINCT FROM %s THEN\n    RETURN NEW;\n  END IF;\n", after, before)
 	if len(g.Terminal) > 0 {
 		fmt.Fprintf(&b, "  IF %s IN (%s) THEN\n    RAISE EXCEPTION '%s is terminal at %%: it cannot move to %%', %s, %s\n      USING ERRCODE = 'check_violation';\n  END IF;\n",

@@ -8,7 +8,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// A table's fences as its statements advance them (D118). A @fenced field
+// A table's fences as its statements advance them (D119). A @fenced field
 // is a counter every covered write sets to the stored value plus one, and
 // a trigger refuses a write that does not, so the repositories advance it
 // themselves: a statement whose columns are fixed, a soft delete's and a
@@ -40,7 +40,7 @@ func Assigns(assignment, column string) bool {
 	return strings.HasPrefix(assignment, column+AssignmentInfix)
 }
 
-// FenceModel is a fence of a table: a @fenced field (D118).
+// FenceModel is a fence of a table: a @fenced field (D119).
 type FenceModel struct {
 	// Field is the fence's field.
 	Field string
@@ -105,7 +105,7 @@ func (t *TableModel) columnOfField(field string) *ColumnModel {
 
 // FenceBumps are the assignments that advance the table's fences in a
 // write that sets columns, each as a statement names it, in the fences'
-// order (D118): the Bump of each fence that covers one of them, or of a
+// order (D119): the Bump of each fence that covers one of them, or of a
 // fence with no covers when the write sets any column, but of no fence
 // whose own column the write sets.
 func (t *TableModel) FenceBumps(columns ...string) []string {

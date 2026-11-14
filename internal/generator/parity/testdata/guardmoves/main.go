@@ -1,5 +1,5 @@
 // Command guardmoves asks a database which moves of a @stateMachine's
-// column it lets an update make (D117), and writes what it answered:
+// column it lets an update make (D118), and writes what it answered:
 //
 //	guardmoves postgres <admin-url> <create.sql> <moves.json> <answers.json>
 //	guardmoves sqlite <database-file> <create.sql> <moves.json> <answers.json>

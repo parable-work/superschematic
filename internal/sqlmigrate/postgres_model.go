@@ -126,7 +126,7 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
-	// A @stateMachine's guard (D117): its function, and the trigger that
+	// A @stateMachine's guard (D118): its function, and the trigger that
 	// refuses a move the machine does not list, which the planner places by
 	// Trigger.Refuses.
 	for _, g := range out.StateGuards {
@@ -138,7 +138,7 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
-	// A @fenced counter (D118): its function, and the trigger that refuses
+	// A @fenced counter (D119): its function, and the trigger that refuses
 	// an update that does not advance the fence, placed as a guard's is.
 	for _, f := range out.Fences {
 		m.Functions = append(m.Functions, &Function{Name: f.FunctionName, Definition: f.FunctionSQL(), Origin: f.Origin})

@@ -8,7 +8,7 @@ import (
 
 // sqlDialects reads the dialects a DB service's config lists
 // (outputs.sql.dialects), which the verification pass holds a table's
-// fences to (D118, verify.Input.Dialects): postgres alone when the config
+// fences to (D119, verify.Input.Dialects): postgres alone when the config
 // lists none, as registry.Outputs.SQLDialects has it. The generators own
 // the outputs block and its checks (registry.ParseOutputs), so a list
 // they would refuse is read as far as it names dialects, and a config of

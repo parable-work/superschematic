@@ -13,11 +13,11 @@ import (
 // fencedFixture is a database of both dialects whose Parcel has one fence
 // with no covers, whose Delivery has two, each over its own fields, a
 // relation among them, and whose Depot's fence covers the column a soft
-// delete sets (D118).
+// delete sets (D119).
 const fencedFixture = "tsreader/testdata/services/fixture-fenced-db"
 
 // TestFencedFixtureLoads: the fixture loads and verifies, each table's
-// fences as written, and the loaded IR is held to its golden (D118).
+// fences as written, and the loaded IR is held to its golden (D119).
 func TestFencedFixtureLoads(t *testing.T) {
 	db, err := LoadService(filepath.FromSlash(fencedFixture))
 	if err != nil {
@@ -107,7 +107,7 @@ const bothDialects = `["postgres", "sqlite"]`
 
 // TestFencesLoadFromADataForm: a JSON and a YAML schema file write a
 // type's fences under fences, each a field and the fields it covers, a
-// relation among them (D118).
+// relation among them (D119).
 func TestFencesLoadFromADataForm(t *testing.T) {
 	want := []*ir.Fence{
 		{Field: "planVersion", Covers: []string{"label", "priority", "owner"}},
@@ -166,7 +166,7 @@ types:
 }
 
 // TestFencesRefusedInADataForm: what the build refuses of a fence a JSON
-// schema file writes (D118): the JSON Schema an empty covers,
+// schema file writes (D119): the JSON Schema an empty covers,
 // ir.Schema.Validate what the declarations decide alone, and verification
 // what needs the fields, the table and the service's dialects.
 func TestFencesRefusedInADataForm(t *testing.T) {
@@ -221,7 +221,7 @@ func TestFencesRefusedInADataForm(t *testing.T) {
 }
 
 // TestFencedReadsTheDialectsOfAYAMLConfig: the dialects a fence is held to
-// are read from a YAML config as from a JSON one (D118): the same table
+// are read from a YAML config as from a JSON one (D119): the same table
 // loads for postgres alone and is refused once the config lists sqlite.
 func TestFencedReadsTheDialectsOfAYAMLConfig(t *testing.T) {
 	service := func(dialects string) string {
@@ -256,7 +256,7 @@ types:
 // TestFencedRefusedBesideABehavior: the behaviors' core writes the rows of
 // a table that composes a behavior, the table's own fields among them,
 // with statements that advance no fence, so the build refuses every fence
-// of such a table, once for the class (D118): with a field-anchored use
+// of such a table, once for the class (D119): with a field-anchored use
 // and with an implements one, with covers of the table's own fields, with
 // none, and with the behavior's field among them. The same table with no
 // behavior loads.
@@ -305,7 +305,7 @@ func TestFencedRefusedBesideABehavior(t *testing.T) {
 // it names is deleted, a write that advances no fence. So the build
 // refuses a fence that covers it, and a fence with no covers on its
 // table, and takes the same table with the relation left out of covers
-// or with a delete action that updates no row (D118).
+// or with a delete action that updates no row (D119).
 func TestFencedRefusesARelationTheDatabaseRewrites(t *testing.T) {
 	const setNull = `{"type": "Owner", "onDelete": "SET NULL"}`
 	const why = "so the database sets owner's column itself when the Owner it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), "
@@ -356,7 +356,7 @@ func TestFencedRefusesARelationTheDatabaseRewrites(t *testing.T) {
 }
 
 // TestFencedRefusedInTypeScript: what the compiler takes of a @fenced and
-// verification refuses (D118): a fence typed by a plain number, whose
+// verification refuses (D119): a fence typed by a plain number, whose
 // column holds no whole number exactly, and a fence with no covers on an
 // @optimistic table of a service whose config lists sqlite, which the
 // loader reads the dialects of.
@@ -376,7 +376,7 @@ func TestFencedRefusedInTypeScript(t *testing.T) {
 
 // TestSQLDialectsReadsTheConfig: the dialects verification holds a fence
 // to are the ones a DB service's config lists, postgres alone when it
-// lists none, and none for a service of another kind (D118).
+// lists none, and none for a service of another kind (D119).
 func TestSQLDialectsReadsTheConfig(t *testing.T) {
 	db := func(outputs map[string]any) *schemaconfig.SchemaConfig {
 		return &schemaconfig.SchemaConfig{Name: "temp-db", Kind: ir.SchemaKindDB, Outputs: outputs}

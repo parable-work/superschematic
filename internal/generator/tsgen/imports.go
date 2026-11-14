@@ -25,7 +25,7 @@ type resolvedImports struct {
 	enumNames map[string]bool
 
 	// enumDefs are the imported enums by name, whose members a state
-	// machine on a field of one names its states by (D117).
+	// machine on a field of one names its states by (D118).
 	enumDefs map[string]*ir.EnumDef
 }
 

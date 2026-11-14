@@ -707,7 +707,7 @@ var planCases = []planCase{
 			fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100)
 		}},
 
-	// A table's @stateMachine (D117). Its guard refuses a write, so a plan
+	// A table's @stateMachine (D118). Its guard refuses a write, so a plan
 	// creates it in contract, drops a changed one in expand, before its
 	// function is replaced, and creates it in contract, and drops a
 	// removed one in contract.
@@ -763,7 +763,7 @@ var planCases = []planCase{
 			typeNamed(s, "Order").SQLName = "purchaseOrder"
 		}},
 
-	// A table's @fenced counter (D118). Its trigger refuses a write, so a
+	// A table's @fenced counter (D119). Its trigger refuses a write, so a
 	// plan places it as it places a guard: created in contract, a changed
 	// one dropped in expand, before its function is replaced, and created
 	// in contract, and a removed one dropped in contract. A fence with
@@ -966,7 +966,7 @@ func enqueueShip(s *ir.Schema, on []string, fields ...string) {
 	}}
 }
 
-// orderMachine declares the @stateMachine of Order.status (D117), over the
+// orderMachine declares the @stateMachine of Order.status (D118), over the
 // states addOrderStatus gives OrderStatus: a null status may become placed,
 // placed moves to each state of to, and each of those is terminal.
 func orderMachine(s *ir.Schema, to ...string) {
@@ -985,7 +985,7 @@ func addOrderRevision(s *ir.Schema) {
 	addField(s, "Order", &ir.FieldDef{Name: "revision", TypeRef: int64Ref, Required: true, Default: &zero})
 }
 
-// orderFence declares the @fenced counter Order.revision (D118) over the
+// orderFence declares the @fenced counter Order.revision (D119) over the
 // fields of covers, or over every update of a row when there are none.
 func orderFence(s *ir.Schema, covers ...string) {
 	typeNamed(s, "Order").Fences = []*ir.Fence{{Field: "revision", Covers: covers}}

@@ -114,7 +114,7 @@ describe("a raw query's rows", () => {
 
 describe("a table's fences", () => {
   // The fences of fixture-fenced-db's tables, as its ./orm entry holds them
-  // (D118); the Postgres test of the generated package runs the
+  // (D119); the Postgres test of the generated package runs the
   // repositories over them.
   const plan = 'plan_version = delivery.plan_version + 1';
   const run = 'run_version = delivery.run_version + 1';

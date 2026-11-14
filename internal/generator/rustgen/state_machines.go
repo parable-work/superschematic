@@ -12,11 +12,11 @@ import (
 )
 
 // StateMachinesFile is the generated module that holds a schema's state
-// machines (D117), under src/.
+// machines (D118), under src/.
 const StateMachinesFile = "state_machines.rs"
 
 // StateMachineInfo is one @stateMachine of a type as src/state_machines.rs
-// writes it (D117): the names of its constant and its helper, the field's
+// writes it (D118): the names of its constant and its helper, the field's
 // enum, and the helper's match. A state is written as the enum's variant,
 // `TicketState::InProgress`, which the IR holds by its serialized value.
 type StateMachineInfo struct {
@@ -96,7 +96,7 @@ func (o *ModuleOutput) StateMachineImports() []string {
 }
 
 // stateMachines builds the schema's machines for src/state_machines.rs
-// (D117): every type's, a table's or not, by type name and then in the
+// (D118): every type's, a table's or not, by type name and then in the
 // order declared. enums are the schema's enums and the ones it imports
 // from its dependencies, which src/types.rs aliases.
 func stateMachines(schema *ir.Schema, enums []codegen.EnumInfo) ([]StateMachineInfo, error) {

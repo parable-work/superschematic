@@ -139,7 +139,7 @@ type ormTable struct {
 	Behaviors    *ormBehaviors           `json:"behaviors,omitempty"`
 }
 
-// ormFence is a fence of a table, a @fenced field (D118), the runtime's
+// ormFence is a fence of a table, a @fenced field (D119), the runtime's
 // orm::Fence: sqlutil's FenceModel, whose bump an update, an update_many
 // and an upsert's update add to their assignments.
 type ormFence struct {

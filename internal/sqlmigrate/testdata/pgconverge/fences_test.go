@@ -13,7 +13,7 @@ import (
 )
 
 // fenceCase is the writes TestFences makes on a service's @fenced tables
-// (D118), in order, as TestFencesOnPostgres in the sqlmigrate package
+// (D119), in order, as TestFencesOnPostgres in the sqlmigrate package
 // writes them to fences.json beside the service's create.sql and drop.sql.
 type fenceCase struct {
 	Writes []fenceWrite `json:"writes"`
@@ -62,7 +62,7 @@ func shownRows(ctx context.Context, conn *pgx.Conn, query string) (string, error
 }
 
 // TestFences runs the writes of each case under PGCONVERGE_FENCES on a
-// database its create.sql made (D118). A write a fence allows passes, and
+// database its create.sql made (D119). A write a fence allows passes, and
 // one it does not is refused with check_violation (23514), the fence's
 // constraint and its message, which holds the stored, the expected and the
 // written value; one a foreign key refuses fails with the key's

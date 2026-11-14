@@ -252,7 +252,7 @@ pub struct Table {
     /// A @versioned table whose hard deletes set the history actor.
     #[serde(default)]
     pub history_actor: bool,
-    /// The table's @fenced fields, in the order declared (D118); none for
+    /// The table's @fenced fields, in the order declared (D119); none for
     /// most tables.
     #[serde(default)]
     pub fences: Vec<Fence>,
@@ -280,7 +280,7 @@ pub struct Table {
     pub behaviors: Option<Behaviors>,
 }
 
-/// A fence of a table, a @fenced field (D118): a counter every write of a
+/// A fence of a table, a @fenced field (D119): a counter every write of a
 /// column it covers sets to the stored value plus one, which a trigger
 /// holds every writer to. An update, an update of many rows and an
 /// upsert's update add its bump to their assignments

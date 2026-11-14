@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 else:
 {{- range .TypeImports}}
 {{- if .Required}}
-    # A state machine names the members of an enum of this package (D117).
+    # A state machine names the members of an enum of this package (D118).
     from {{.ModuleName}} import (
         {{range $i, $name := .TypeNames}}{{if $i}},
         {{end}}{{$name}}{{end}}
@@ -392,7 +392,7 @@ class {{.Name}}(BaseModel):
     {{end}}
 {{- range $.StateMachinesOf .Name}}
 
-    # The state machine of {{.FieldName}} (D117): each state that has a move and
+    # The state machine of {{.FieldName}} (D118): each state that has a move and
     # the states it may move to.{{if .Nullable}} None is null.{{end}}
     {{.Const}}_TRANSITIONS: ClassVar[Mapping[{{.StateType}}, frozenset[{{.StateType}}]]] = MappingProxyType({{"{"}}{{if .Transitions}}
         {{- range .Transitions}}
@@ -407,7 +407,7 @@ class {{.Name}}(BaseModel):
     def {{.Method}}(cls, current: {{.StateType}}, target: {{.StateType}}) -> bool:
         """
         Report whether {{.FieldName}} may move from current to target, as its
-        state machine declares (D117).{{if .Nullable}} None is null.{{end}}
+        state machine declares (D118).{{if .Nullable}} None is null.{{end}}
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the

@@ -36,7 +36,7 @@ func withoutScalarDefaults(t *testing.T, schema *ir.Schema) *ir.Schema {
 }
 
 // TestWritersRoundTripFences: every writer writes a table's @fenced
-// declarations and the reader reads them back (D118). The TypeScript
+// declarations and the reader reads them back (D119). The TypeScript
 // writer writes each as the decorator, a fence with no covers as its field
 // alone and the covered fields in the order written, a relation by its
 // field's name; the data forms write the same list under fences.

@@ -9,7 +9,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// StateMachineInfo is one @stateMachine declaration (D117) as a type
+// StateMachineInfo is one @stateMachine declaration (D118) as a type
 // generator writes its helpers: the type and the field it governs, the
 // field's enum, and every state as the enum's member. The IR holds a state
 // as the member's serialized value; a member's Name is what a language's
@@ -64,7 +64,7 @@ type StateTransitionInfo struct {
 }
 
 // ExtractStateMachines returns the schema's @stateMachine declarations
-// (D117) with each field's enum resolved, the types in name order and a
+// (D118) with each field's enum resolved, the types in name order and a
 // type's machines in the order it declares them. deps holds the loaded
 // schema of every service the schema imports from, by service name: a
 // field's enum may be a dependency's, which schema.Enums does not hold.

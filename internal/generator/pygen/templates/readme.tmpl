@@ -73,7 +73,7 @@ This package includes custom scalar types with built-in validation:
 {{end}}{{end}}{{if .HasStateMachines}}
 ## State machines
 
-A model whose type declares a `@stateMachine` (D117) carries, for the field it governs, `<FIELD>_TRANSITIONS`, each state and the states it may move to; `<FIELD>_TERMINAL`, the states no move leaves; and the classmethod `can_transition_<field>(current, target)`, whether a move is one the machine lists, as the table's guard decides it in the database.
+A model whose type declares a `@stateMachine` (D118) carries, for the field it governs, `<FIELD>_TRANSITIONS`, each state and the states it may move to; `<FIELD>_TERMINAL`, the states no move leaves; and the classmethod `can_transition_<field>(current, target)`, whether a move is one the machine lists, as the table's guard decides it in the database.
 
 {{range .Types}}{{$type := .Name}}{{range $.StateMachinesOf .Name}}- `{{$type}}.{{.Method}}`
 {{end}}{{end}}{{end}}

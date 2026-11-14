@@ -9,7 +9,7 @@ import (
 )
 
 // StateMachineInfo is one @stateMachine declaration as types.py writes it
-// on the type's model (D117): <Const>_TRANSITIONS, <Const>_TERMINAL and
+// on the type's model (D118): <Const>_TRANSITIONS, <Const>_TERMINAL and
 // the classmethod Method. Every state is a member of the field's enum,
 // which the module imports from enums.py, or from the package of the
 // dependency that owns it, as a field of its type names it.
@@ -61,7 +61,7 @@ func (o *ModuleOutput) StateMachinesOf(typeName string) []StateMachineInfo {
 }
 
 // buildStateMachines gives each model of output the state machines its
-// type declares (D117). A type the module writes no model for has none to
+// type declares (D118). A type the module writes no model for has none to
 // carry. A machine on a dependency's enum names the enum's members, so the
 // import of the dependency's package loses its Any fallback
 // (TypeImport.Required).

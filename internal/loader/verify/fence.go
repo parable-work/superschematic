@@ -11,7 +11,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// checkFences checks a schema's @fenced declarations (D118) against the
+// checkFences checks a schema's @fenced declarations (D119) against the
 // class each is on, its fields and the service, in every form.
 //
 // A fence is a trigger on a table and a bump in the statements of the

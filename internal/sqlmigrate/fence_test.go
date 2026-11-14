@@ -13,9 +13,9 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The tests of a @fenced counter's triggers (D118): what they refuse on a
+// The tests of a @fenced counter's triggers (D119): what they refuse on a
 // real Postgres and a real SQLite, and where a plan places them, by the
-// rule of a trigger that refuses a write (Trigger.Refuses, D117).
+// rule of a trigger that refuses a write (Trigger.Refuses, D118).
 
 // fencedFixture is the service whose tables declare fences: Parcel one
 // over the row, Delivery two, each over its own columns, a relation's key
@@ -365,7 +365,7 @@ func runFences(t *testing.T, module string, env ...string) {
 }
 
 // TestFencesOnPostgres runs the fixture's fences on a real Postgres, from
-// the service's create.sql (D118). A write that changes a covered column
+// the service's create.sql (D119). A write that changes a covered column
 // passes when it sets the fence to the stored value plus one, and is
 // refused when it leaves the fence, adds two or moves it back, with
 // check_violation (23514), the fence's constraint and the three values,
@@ -420,7 +420,7 @@ func TestFencesOnSQLite(t *testing.T) {
 }
 
 // TestFencePhases: a plan places a fence's trigger by the rule of a
-// trigger that refuses a write (D117, D118), in both dialects. A new one
+// trigger that refuses a write (D118, D119), in both dialects. A new one
 // is created in contract, when no server of the previous version, whose
 // repositories advance nothing, is left; Postgres creates its function in
 // expand, where nothing executes it. A fence whose covers change is
@@ -569,7 +569,7 @@ func TestFenceFollowsRenames(t *testing.T) {
 // TestFencesOfAnEmptyDatabase: the fixture's model holds a trigger that
 // refuses a write for each fence, and the plan from an empty database,
 // which create.sql is, creates each in expand, with its table, and has no
-// contract step (D118).
+// contract step (D119).
 func TestFencesOfAnEmptyDatabase(t *testing.T) {
 	schema := planCase{base: fencedFixture}.load(t, nil)
 	declared := 0

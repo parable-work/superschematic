@@ -17,7 +17,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The state machine services (D117): the DB's Ticket has a machine on a
+// The state machine services (D118): the DB's Ticket has a machine on a
 // required field that lists a move to the same state, two on nullable
 // fields, one of which only returns to null from a state, and one on a
 // field typed by an enum of the enums service; its SignOff is a
@@ -178,7 +178,7 @@ func machineCases(t *testing.T, schema *ir.Schema, deps ...*ir.Schema) []machine
 	return cases
 }
 
-// mayMove is D117's rule for a move, read from the IR: an unchanged value
+// mayMove is D118's rule for a move, read from the IR: an unchanged value
 // is no move and passes; no move leaves a terminal state; a null takes a
 // fromNull state; and any other move is one the machine lists, to null
 // where the transition has toNull.
@@ -310,7 +310,7 @@ func TestStateMachinesFileIsWrittenForAMachine(t *testing.T) {
 // TestStateMachinesRefuseWhatTheyCannotName: a machine whose field no enum
 // of the schema or of a dependency it imports types, and one with a state
 // that is no member, fail the generation with the type and the field.
-// The build's checks refuse both first (D117); the generator does not
+// The build's checks refuse both first (D118); the generator does not
 // write a helper it cannot name the states of.
 func TestStateMachinesRefuseWhatTheyCannotName(t *testing.T) {
 	for _, tc := range []struct {
@@ -387,7 +387,7 @@ console.log(JSON.stringify(answers));
 // TestStateMachineHelpers type-checks the state machine services' packages,
 // and a package of the shapes they have none of, and runs every machine's
 // helper under bun on every pair of its field's states, null among them
-// where the field is nullable: each answer is D117's rule read from the
+// where the field is nullable: each answer is D118's rule read from the
 // IR, and the transitions and terminal states are the IR's, as the enum's
 // values. Skips when bun is unavailable.
 func TestStateMachineHelpers(t *testing.T) {

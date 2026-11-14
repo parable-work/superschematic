@@ -167,8 +167,8 @@ func parseTrigger(t *Trigger) (timing, function string, ok bool) {
 }
 
 // prevColumnNames are the names a trigger named after a column of its
-// table (trg_<table>_<column>_...), as the guard of a @stateMachine (D117)
-// and the trigger of a @fenced counter (D118) are, had before that
+// table (trg_<table>_<column>_...), as the guard of a @stateMachine (D118)
+// and the trigger of a @fenced counter (D119) are, had before that
 // column's rename, for each of names: the name with the old column's in
 // place of the new one's.
 func (d *differ) prevColumnNames(table, prevTable string, names []string) []string {
@@ -284,7 +284,7 @@ func (d *differ) diffTriggers() {
 }
 
 // placeRefusing places tt, a trigger of the new model that refuses a write
-// (Trigger.Refuses), or whose previous one ft did (D117). A server of the
+// (Trigger.Refuses), or whose previous one ft did (D118). A server of the
 // previous version runs until the contract phase and may make a write the
 // new trigger refuses, and a server of the new version runs from the end
 // of expand and may make one the previous trigger refuses. So a new

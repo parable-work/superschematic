@@ -304,7 +304,7 @@ type ModuleOutput struct {
 	// depends on the HTTP runtime, whose ormOf runs them.
 	ORM *ORMInfo
 
-	// StateMachines are the schema's @stateMachine declarations (D117),
+	// StateMachines are the schema's @stateMachine declarations (D118),
 	// which state-machines.ts writes as each one's transitions, terminal
 	// states and helper, index.ts re-exports and package.json exports as
 	// "./state-machines". Nil writes no state-machines.ts.

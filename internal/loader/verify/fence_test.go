@@ -12,7 +12,7 @@ import (
 // fenceSchema is a DB schema with a Job two parties write: a planner,
 // whose writes of label, priority and owner advance version, and a
 // worker, whose writes of claimedBy and progress advance executionVersion
-// (D118). Its owner is a relation, its tasks a list of another table's
+// (D119). Its owner is a relation, its tasks a list of another table's
 // rows, which stores no column, and its site a POINT. The input lists
 // both dialects.
 func fenceSchema() (*ir.Schema, Input) {

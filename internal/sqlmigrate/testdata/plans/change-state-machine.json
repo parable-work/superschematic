@@ -1,8 +1,8 @@
 {
   "dialect": "postgres",
-  "expanded": "1dd19c03350654b8794cd66a93a3af51a59a943f6f3a357053c9bf4268b1032f",
-  "from": "c9f8454e2cc52d9f3489deef0b77a7d35a2c384867558d59d127f4c34638048f",
-  "hash": "4dfd39e03719d5054dc3ccb1585eac60051e617ff1c970149a01aca8e789cf05",
+  "expanded": "28eacf41cafd79efe3888092de10a925ea5c35db6f48f9e038a9badea8ac415a",
+  "from": "30137e2d90239d3d027556f5dc5ba2232925bd61e638b5e7099299e836c6111b",
+  "hash": "33bb9cdb75591f20e5d78d5985837a567c69b67638feedd2ba4abb4402e39aa2",
   "service": "shop-db",
   "steps": [
     {
@@ -20,7 +20,7 @@
       "op": "replaceFunction",
       "phase": "expand",
       "statements": [
-        "CREATE OR REPLACE FUNCTION order_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D117): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('shipped', 'cancelled') THEN\n    RAISE EXCEPTION 'order.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status IS NULL AND NEW.status IN ('placed'))\n    OR (OLD.status = 'placed' AND NEW.status IN ('shipped', 'cancelled'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+        "CREATE OR REPLACE FUNCTION order_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('shipped', 'cancelled') THEN\n    RAISE EXCEPTION 'order.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status IS NULL AND NEW.status IN ('placed'))\n    OR (OLD.status = 'placed' AND NEW.status IN ('shipped', 'cancelled'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
       ],
       "subject": "function/order_status_transition_guard",
       "transactional": true
@@ -36,7 +36,7 @@
       "transactional": true
     }
   ],
-  "to": "8fb414c038c1589ec4409831703fe1cbe2a36bf285caa120a0fdea1b35c92b2b",
+  "to": "d2e10c3cc65600a89ac60cb86c97da73f3f7381f7069cdc935726e4e08f6307d",
   "toModel": null,
   "version": 1
 }

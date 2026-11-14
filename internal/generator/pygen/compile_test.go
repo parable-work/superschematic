@@ -64,7 +64,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		}
 		cases = append(cases, fixtureCase{name: name, schema: schema})
 	}
-	// A model's state machines, one over an enum of a dependency (D117).
+	// A model's state machines, one over an enum of a dependency (D118).
 	stateMachineEnums, err := loader.LoadService(filepath.Join(fixturesDir, stateMachineEnumService))
 	if err != nil {
 		t.Fatalf("load %s: %v", stateMachineEnumService, err)

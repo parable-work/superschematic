@@ -8,7 +8,7 @@ import (
 
 // fencedDecorator returns @fenced, from @superschematic/schema and only in
 // DB schemas: an integer field of the class's table that every write the
-// fence covers advances by one (D118). Apply reads the declaration's
+// fence covers advances by one (D119). Apply reads the declaration's
 // shape. ir.Schema.Validate checks what the declarations alone decide, and
 // verification checks them against the fields, the table and the service,
 // in every authoring form.

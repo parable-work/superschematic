@@ -295,7 +295,7 @@ type ModuleOutput struct {
 	// (D58), written as src/behaviors.rs. Nil when no type composes one.
 	Behaviors []behaviortypes.Type
 
-	// StateMachines are the schema's @stateMachine declarations (D117),
+	// StateMachines are the schema's @stateMachine declarations (D118),
 	// which src/state_machines.rs writes as each one's terminal states and
 	// helper. Nil writes no src/state_machines.rs.
 	StateMachines []StateMachineInfo

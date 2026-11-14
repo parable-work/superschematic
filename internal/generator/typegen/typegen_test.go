@@ -39,10 +39,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-optimistic-db"},
 		{service: "fixture-user-model-db"},
 		{service: "fixture-nested-arrays-api"},
-		// @stateMachine (D117): one machine on an enum of a dependency.
+		// @stateMachine (D118): one machine on an enum of a dependency.
 		{service: "fixture-state-machine-enums"},
 		{service: "fixture-state-machine-db", deps: []string{"fixture-state-machine-enums"}},
-		// @fenced fields (D118), which are fields as any other in the types.
+		// @fenced fields (D119), which are fields as any other in the types.
 		{service: "fixture-fenced-db"},
 		// Types that compose behaviors: behaviors.go (D58).
 		{service: behaviortypestest.Service},

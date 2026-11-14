@@ -1,7 +1,7 @@
 import { defineConfig, SchemaKind, service, TargetLanguage } from "@superschematic/schema-config";
 
 // A support desk's tickets, whose fields move as their state machines say
-// (D117): the database refuses any other move, on Postgres and on SQLite,
+// (D118): the database refuses any other move, on Postgres and on SQLite,
 // and the types of each language carry the same moves.
 export default defineConfig({
   name: "fixture-state-machine-db",

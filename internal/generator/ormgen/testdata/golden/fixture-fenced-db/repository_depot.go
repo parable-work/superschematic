@@ -1069,7 +1069,7 @@ func (r *DepotRepository) upsertRow(ctx context.Context, input *types.Depot, on 
 
 		// Set updated_by
 
-		// Each fence the update's columns advance moves on by one (D118).
+		// Each fence the update's columns advance moves on by one (D119).
 		setClauses = append(setClauses, fenceBumps(depotFences, setClauses)...)
 
 	}
@@ -1256,7 +1256,7 @@ func (r *DepotRepository) upsertBatches(ctx context.Context, inputs []*types.Dep
 			assignments = append(assignments, key.keep)
 		} else {
 			// Each fence the update's columns advance moves on by one
-			// (D118).
+			// (D119).
 			assignments = append(assignments, fenceBumps(depotFences, assignments)...)
 		}
 		query := fmt.Sprintf(
@@ -1559,7 +1559,7 @@ func (r *DepotRepository) CreateMany(ctx context.Context, inputs []*types.Depot)
 
 // UpdateOne updates a single Depot record by ID.
 // It advances each @fenced field that covers a column the update sets by
-// one, and writes one the update sets itself as it stands (D118).
+// one, and writes one the update sets itself as it stands (D119).
 func (r *DepotRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, update *DepotUpdate) (*types.Depot, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -1585,7 +1585,7 @@ func (r *DepotRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 
 	// Set updated_by
 
-	// Each fence the update's columns advance moves on by one (D118).
+	// Each fence the update's columns advance moves on by one (D119).
 	setClauses = append(setClauses, fenceBumps(depotFences, setClauses)...)
 
 	if len(setClauses) == 0 {
@@ -1648,7 +1648,7 @@ func (r *DepotRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 // UpdateMany updates multiple Depot records matching the filter.
 // It advances each @fenced field that covers a column the update sets by
 // one in every row it updates, and writes one the update sets itself as
-// it stands (D118), so a filter on that field compares what a caller read.
+// it stands (D119), so a filter on that field compares what a caller read.
 func (r *DepotRepository) UpdateMany(ctx context.Context, filter *DepotFilter, update *DepotUpdate) (int, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -1674,7 +1674,7 @@ func (r *DepotRepository) UpdateMany(ctx context.Context, filter *DepotFilter, u
 
 	// Set updated_by
 
-	// Each fence the update's columns advance moves on by one (D118).
+	// Each fence the update's columns advance moves on by one (D119).
 	setClauses = append(setClauses, fenceBumps(depotFences, setClauses)...)
 
 	if len(setClauses) == 0 {

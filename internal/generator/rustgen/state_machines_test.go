@@ -19,7 +19,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The state machine services (D117): the DB's Ticket has a machine on a
+// The state machine services (D118): the DB's Ticket has a machine on a
 // required field that lists a move to the same state, two on nullable
 // fields, one of which only returns to null from a state, and one on a
 // field typed by an enum of the enums service; its SignOff is a
@@ -138,7 +138,7 @@ func machineCases(t *testing.T, schema *ir.Schema, deps ...*ir.Schema) []machine
 	return cases
 }
 
-// mayMove is D117's rule for a move, read from the IR: an unchanged value
+// mayMove is D118's rule for a move, read from the IR: an unchanged value
 // is no move and passes; no move leaves a terminal state; a null takes a
 // fromNull state; and any other move is one the machine lists, to null
 // where the transition has toNull.
@@ -290,7 +290,7 @@ func TestStateMachineArms(t *testing.T) {
 // TestStateMachinesRefuseWhatTheyCannotName: a machine whose field no enum
 // of the schema or of a dependency it imports types, one with a state that
 // is no member, and one on a field the type lacks fail the generation with
-// the type and the field. The build's checks refuse each first (D117); the
+// the type and the field. The build's checks refuse each first (D118); the
 // generator does not write a helper it cannot name the states of.
 func TestStateMachinesRefuseWhatTheyCannotName(t *testing.T) {
 	for _, tc := range []struct {
@@ -335,7 +335,7 @@ func TestStateMachinesRefuseWhatTheyCannotName(t *testing.T) {
 
 // stateMachinesRustTest writes a Rust test per machine of cases, which
 // output's machines name in the same order: the helper has the field's
-// type, each of its answers on every pair of the field's states is D117's
+// type, each of its answers on every pair of the field's states is D118's
 // rule read from the IR, and the terminal states are the IR's. The states
 // are the enum's ALL, with None first on a nullable field, held to the
 // IR's by their as_str.
@@ -403,7 +403,7 @@ func stateMachinesRustTest(t *testing.T, output *ModuleOutput, cases []machineCa
 // a crate of the shapes they have none of, without a warning from rustc or
 // clippy, and runs every machine's helper on every pair of its field's
 // states, None among them where the field is nullable: each answer is
-// D117's rule read from the IR. Skips when cargo is unavailable.
+// D118's rule read from the IR. Skips when cargo is unavailable.
 func TestStateMachineHelpers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compiled state machine check in short mode")

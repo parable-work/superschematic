@@ -40,6 +40,6 @@ if errors.HasErrors() {
 | `scalars.go` | Scalar type aliases onto the scalar library |
 | `enums.go` | Enum types with validation |
 | `types.go` | Object/input structs with validators and codecs |
-| `state_machines.go` | `<Type><Field>Terminal` and `<Type>CanTransition<Field>` for each `@stateMachine` (D117): the terminal states of the field, and whether it may move from one state to another |
+| `state_machines.go` | `<Type><Field>Terminal` and `<Type>CanTransition<Field>` for each `@stateMachine` (D118): the terminal states of the field, and whether it may move from one state to another |
 
 Generated at 2026-01-02T03:04:05Z.

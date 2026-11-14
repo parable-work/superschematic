@@ -7,7 +7,7 @@ import "strings"
 // A @fenced field of a table is a counter that every write of a column it
 // covers sets to the stored value plus one, so a writer that compares it
 // knows no covered write came between its read and its write, and a
-// trigger refuses a write that does not (D118). The repositories advance
+// trigger refuses a write that does not (D119). The repositories advance
 // it themselves. An update, an UpdateMany and an upsert's update add each
 // fence's bump to their assignments (fenceBumps); a soft delete and a
 // reseal, whose columns are fixed, carry it in their statements.

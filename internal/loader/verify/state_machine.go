@@ -9,7 +9,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// checkStateMachines checks a schema's @stateMachine declarations (D117)
+// checkStateMachines checks a schema's @stateMachine declarations (D118)
 // against the field each governs and the enum that types it, in every
 // form: the type has the field, and one enum types it, the schema's own or
 // a dependency's (Input.ExternalEnums); every state is a member, by the

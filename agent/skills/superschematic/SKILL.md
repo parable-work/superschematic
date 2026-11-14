@@ -305,7 +305,7 @@ Most are load errors; knowing them saves a build round-trip:
   migration, a seed or a handler.
 - A status no writer may move out of order, and that needs no permission
   (a ledger entry, a payment, a run), is an enum field with a
-  `@stateMachine` on its class, from `@superschematic/schema` (D117), not
+  `@stateMachine` on its class, from `@superschematic/schema` (D118), not
   a Workflow field: `@stateMachine<Ticket>({ field: "state", transitions:
   { [TicketState.Open]: [TicketState.Resolved, TicketState.Closed],
   [TicketState.Resolved]: [TicketState.Open, TicketState.Closed] },
@@ -329,7 +329,7 @@ Most are load errors; knowing them saves a build round-trip:
   TypeScript schema only. A migration plan creates the guard in
   `contract`, and drops a changed one in `expand`.
 - A row writers compare and set on a counter gets `@fenced` on its table,
-  from `@superschematic/schema` (D118): `@fenced<Parcel>({ field:
+  from `@superschematic/schema` (D119): `@fenced<Parcel>({ field:
   "version" })`, the fence a required integer field, `version:
   Default<Generic.Int64, 0>`. Every update of a row then advances it by
   one: the generated repositories add the bump themselves, a

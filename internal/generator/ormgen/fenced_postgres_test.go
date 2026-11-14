@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-// fencedFixture is the fixture whose tables hold @fenced fields (D118).
+// fencedFixture is the fixture whose tables hold @fenced fields (D119).
 const fencedFixture = "fixture-fenced-db"
 
 // TestFencesOnPostgres generates the ORM module of fixture-fenced-db, then
 // builds, vets and tests it. Its generated test, against the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL (it skips without the database),
 // writes through the repositories and reads each counter's exact value
-// after every write (D118):
+// after every write (D119):
 //
 //   - an update of a column a fence covers advances that fence by one and
 //     leaves the table's other fence as it was, a relation's key and a

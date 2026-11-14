@@ -33,7 +33,7 @@ func ownStateMachines(t *testing.T, schema *ir.Schema) *ir.Schema {
 }
 
 // TestWritersRoundTripStateMachines: every writer writes a type's
-// @stateMachine declarations and the reader reads them back (D117). The
+// @stateMachine declarations and the reader reads them back (D118). The
 // TypeScript writer writes each as the decorator, its states the enum's
 // members and a return to null as null, on a table and on a @jsonField
 // type; the data forms write the same list under stateMachines.
@@ -94,7 +94,7 @@ func TestWritersRoundTripStateMachines(t *testing.T) {
 // TestTSWriterRefusesAStateMachineOnADependencysEnum: the IR holds a state
 // as its member's value, and a dependency's enum is not the schema's to
 // hold, so the TypeScript writer cannot name the members and says so
-// rather than leave the machine out (D117).
+// rather than leave the machine out (D118).
 func TestTSWriterRefusesAStateMachineOnADependencysEnum(t *testing.T) {
 	schema, err := loader.LoadService(tsFixtures + "/fixture-state-machine-db")
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 // TestStateMachinesAreRead: each @stateMachine of a class is recorded in
 // the order written, every state as the value its enum member serializes
 // to, a null in a state's list as a return to null, and each list of
-// states as written (D117). An object's keys reach the decorator in no
+// states as written (D118). An object's keys reach the decorator in no
 // order, so the reader writes a machine's transitions by their state's
 // value; the loader gives them the enum's order.
 func TestStateMachinesAreRead(t *testing.T) {
@@ -103,7 +103,7 @@ func describeStateMachines(machines []*ir.StateMachine) string {
 
 // TestStateMachineRefusesASpreadInTransitions: the compiler takes a spread
 // in transitions, whose moves the static read cannot see where the
-// decorator is written, so the reader refuses it at the spread (D117).
+// decorator is written, so the reader refuses it at the spread (D118).
 func TestStateMachineRefusesASpreadInTransitions(t *testing.T) {
 	_, _, err := LoadService("testdata/services/broken-state-machine-spread")
 	if err == nil {
@@ -116,7 +116,7 @@ func TestStateMachineRefusesASpreadInTransitions(t *testing.T) {
 
 // TestStateMachineRefusesATerminalStateWithATransition: the compiler takes
 // a graph whose terminal state has a transition, so the build refuses it,
-// with the type, the field and the state (D117).
+// with the type, the field and the state (D118).
 func TestStateMachineRefusesATerminalStateWithATransition(t *testing.T) {
 	_, _, err := LoadService("testdata/services/broken-state-machine-terminal-exit")
 	if err == nil {

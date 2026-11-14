@@ -13,7 +13,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The tests of a @stateMachine's guards (D117): what they refuse on a real
+// The tests of a @stateMachine's guards (D118): what they refuse on a real
 // Postgres and a real SQLite, and where a plan places a trigger that
 // refuses a write (Trigger.Refuses).
 
@@ -176,7 +176,7 @@ func runGuards(t *testing.T, module string, env ...string) {
 }
 
 // TestStateMachineGuardsOnPostgres runs each machine of the fixture on a
-// real Postgres, from the service's create.sql (D117): every pair of a
+// real Postgres, from the service's create.sql (D118): every pair of a
 // column's values, null among them, is tried, and exactly the moves the
 // machine lists and the ones that change nothing pass; any other is
 // refused with check_violation (23514) and the two values; an insert in any
@@ -251,7 +251,7 @@ func stepLines(plan *Plan) []string {
 }
 
 // TestStateMachineGuardPhases: a plan places a machine's guard by the rule
-// of a trigger that refuses a write (D117), in both dialects. A new guard
+// of a trigger that refuses a write (D118), in both dialects. A new guard
 // is created in contract, when no server of the previous version is left;
 // Postgres creates its function in expand, where nothing executes it. A
 // changed one is dropped in expand, before its function is replaced, and
@@ -286,7 +286,7 @@ func TestStateMachineGuardPhases(t *testing.T) {
 
 // TestSQLiteRebuildPlacesGuards: a rebuild creates the triggers its phase
 // leaves on the table (D80), and a guard is left by contract alone
-// (D117). Widening the enum rebuilds order in expand, without the guard,
+// (D118). Widening the enum rebuilds order in expand, without the guard,
 // which contract creates in a step of its own; narrowing it rebuilds order
 // in contract, with the new guard, which expand dropped.
 func TestSQLiteRebuildPlacesGuards(t *testing.T) {
@@ -407,7 +407,7 @@ func refusingModel(refuses bool, definitions map[string]string, tables ...string
 
 // TestRefusingTriggerPhases: the rule of a trigger that refuses a write is
 // Trigger.Refuses's, whatever the trigger is and whatever it is named
-// (D117). On a table the previous model has it is created in contract,
+// (D118). On a table the previous model has it is created in contract,
 // and one that changes is dropped in expand and created in contract; one
 // the new model lacks is dropped in contract; one that stays as it was has
 // no step; and on a table the plan creates it is created with the table, in
@@ -492,7 +492,7 @@ func TestRefusingTriggerPhases(t *testing.T) {
 
 // TestGuardsOfAnEmptyDatabase: the plan from an empty database, which
 // create.sql is, creates every guard in expand, with its table, and has no
-// contract step (D117).
+// contract step (D118).
 func TestGuardsOfAnEmptyDatabase(t *testing.T) {
 	schema := planCase{base: stateMachineFixture}.load(t, nil)
 	for _, dialect := range []Dialect{Postgres, SQLite} {
@@ -530,7 +530,7 @@ func TestGuardsOfAnEmptyDatabase(t *testing.T) {
 }
 
 // TestEnqueueTriggerPhasesUnchanged: a trigger that refuses no write is
-// placed as it was before D117's rule, in both dialects: an
+// placed as it was before D118's rule, in both dialects: an
 // @enqueueOnChange's is created in expand, changed in expand, in place, and
 // dropped in contract.
 func TestEnqueueTriggerPhasesUnchanged(t *testing.T) {
@@ -571,7 +571,7 @@ func TestEnqueueTriggerPhasesUnchanged(t *testing.T) {
 }
 
 // TestSQLiteTriggerRefuses: a read of a SQLite file takes whether a trigger
-// refuses a write from its statement (D116, D117): it does when the
+// refuses a write from its statement (D116, D118): it does when the
 // statement calls RAISE, in any case, and does not when RAISE is text or a
 // name; and the statements the model writes say what the model says.
 func TestSQLiteTriggerRefuses(t *testing.T) {

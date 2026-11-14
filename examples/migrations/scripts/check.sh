@@ -27,7 +27,7 @@
 #      status shows the contract pending;
 #      apply --phase contract drops comment.legacy_id and creates the guard
 #      of the status's state machine, which then refuses the move from
-#      archived back to active (D117);
+#      archived back to active (D118);
 #      the database is then at v2's model, a plan from it has no steps, a
 #      second apply does nothing, and a database with no recorded model
 #      refuses the plan;
@@ -166,7 +166,7 @@ apply_plan() {
   # v1 wrote takes the default, and a value outside the enum is refused.
   test "$("$sql" "SELECT status FROM project")" = active
   fails "$OUT/status-check.$dialect.txt" "$sql" "UPDATE project SET status = 'paused'"
-  # The status's state machine (D117) lets an active project be archived
+  # The status's state machine (D118) lets an active project be archived
   # and none be reopened. Its guard refuses a write, so contract creates
   # it: between the phases nothing holds the move back.
   "$sql" "UPDATE project SET status = 'archived'"

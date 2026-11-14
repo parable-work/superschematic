@@ -88,7 +88,7 @@ type TableStatements struct {
 	// and Returning last. UpdateMany sets %s on the rows of the WHERE %s.
 	// UpdatedAt and UpdatedBy are the assignments an update stamps. On a
 	// table with a @fenced field, the assignments %s of Update, UpdateMany
-	// and Upsert end with the bump of each fence they advance (D118,
+	// and Upsert end with the bump of each fence they advance (D119,
 	// TableModel.FenceBumps), which the repository that fills them adds.
 	Update       string
 	VersionFence string
@@ -112,7 +112,7 @@ type TableStatements struct {
 	// table without deletedBy; SoftDeleteIfVersion fences it on _version
 	// too. SoftDeleteMany stamps the rows of the WHERE %s, whose parameters
 	// follow those. Each also advances a @fenced field that covers a column
-	// it stamps, or that covers the row (D118). Empty for a table without
+	// it stamps, or that covers the row (D119). Empty for a table without
 	// deletedAt.
 	SoftDelete          string
 	SoftDeleteIfVersion string
@@ -139,7 +139,7 @@ type TableStatements struct {
 	// parameter after them, when each still holds what Stale read, the
 	// parameters after that: a write between the two, which sealed under
 	// the current key, is left as it is. Reseal also advances a @fenced
-	// field that covers an encrypted column, or that covers the row (D118).
+	// field that covers an encrypted column, or that covers the row (D119).
 	Stale  string
 	Reseal string
 
@@ -420,7 +420,7 @@ func tableStatements(table *TableModel, d tableDialect) TableStatements {
 		s.LiveCondition = t + "." + deletedAt + " IS NULL"
 		s.Version += s.Live
 		if table.DeletedBy {
-			// The stamps, then each fence they advance (D118).
+			// The stamps, then each fence they advance (D119).
 			stamps := deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + table.fenced(deletedAt, deletedBy)
 			s.SoftDelete = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(3) + " AND " + deletedAt + " IS NULL"
 			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(3) + " AND _version = " + p(4) + " AND " + deletedAt + " IS NULL"
@@ -457,7 +457,7 @@ func tableStatements(table *TableModel, d tableDialect) TableStatements {
 // resealStatements are Stale and Reseal of table, whose name is t and key
 // column key, both quoted, in the dialect d; empty for a table without an
 // Encrypted<T> column. Reseal sets every encrypted column, and with them
-// advances each fence they move (D118).
+// advances each fence they move (D119).
 func resealStatements(table *TableModel, t, key string, d tableDialect) (stale, reseal string) {
 	encrypted := table.EncryptedColumns()
 	if len(encrypted) == 0 {

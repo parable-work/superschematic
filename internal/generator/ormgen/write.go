@@ -129,7 +129,7 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		return fmt.Errorf("failed to remove encrypted.go: %w", err)
 	}
 	// fences.go holds the fences of each table with a @fenced field and
-	// the rule by which a write advances them (D118); a schema without one
+	// the rule by which a write advances them (D119); a schema without one
 	// has none, so a file an earlier build wrote goes.
 	fencesFile := filepath.Join(outputDir, "fences.go")
 	if output.HasFences {

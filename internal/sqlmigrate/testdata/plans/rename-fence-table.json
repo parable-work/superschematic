@@ -1,8 +1,8 @@
 {
   "dialect": "postgres",
-  "expanded": "c926066cb219ba3d2c7d1b3d67c8e15e312678469cb65d104cbd5a87d68e6406",
-  "from": "83eb77131371137c30e7cd3dcab126d44b5fd941b7b3c069f88250dd540ad653",
-  "hash": "5b28f45530ff05c536147697195399610ae5cb1afa62e5e5663a253d53cb3d94",
+  "expanded": "74600a89ef2df7785ba4f36ae14efd8aae88c03d5a49bfd241bbbd83673cac06",
+  "from": "67b00861c8030aae70e96960b765f9232bb64285f86d832296abb96f1fdee4fe",
+  "hash": "18e6900905cb2bfade7820cb89c2baaf81ee0c8fdff96e14ca9fd59678133b97",
   "service": "shop-db",
   "steps": [
     {
@@ -172,7 +172,7 @@
       "op": "replaceFunction",
       "phase": "expand",
       "statements": [
-        "CREATE OR REPLACE FUNCTION \"purchaseOrder_revision_fence\"() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Order.revision (D118):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.note, NEW.customer_id) IS DISTINCT FROM ROW(OLD.note, OLD.customer_id) THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'purchaseOrder.revision must advance from % to %, not to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'purchaseOrder_revision_fence';\n    END IF;\n  ELSIF NEW.revision IS DISTINCT FROM OLD.revision THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'purchaseOrder.revision must stay at % or advance to %, not move to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'purchaseOrder_revision_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+        "CREATE OR REPLACE FUNCTION \"purchaseOrder_revision_fence\"() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Order.revision (D119):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.note, NEW.customer_id) IS DISTINCT FROM ROW(OLD.note, OLD.customer_id) THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'purchaseOrder.revision must advance from % to %, not to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'purchaseOrder_revision_fence';\n    END IF;\n  ELSIF NEW.revision IS DISTINCT FROM OLD.revision THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'purchaseOrder.revision must stay at % or advance to %, not move to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'purchaseOrder_revision_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
       ],
       "subject": "function/purchaseOrder_revision_fence",
       "transactional": true
@@ -198,7 +198,7 @@
       "transactional": true
     }
   ],
-  "to": "c45e90334b916e58c3c2d36bb2aaf163096e9af25eb730182d2ef414581b8dcf",
+  "to": "d5b497ffa7ebf4faf92fe8bb5397bd0b2d310495da1e36f35b74fbbe73da8836",
   "toModel": null,
   "version": 1
 }

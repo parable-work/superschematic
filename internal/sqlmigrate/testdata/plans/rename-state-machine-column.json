@@ -1,8 +1,8 @@
 {
   "dialect": "postgres",
-  "expanded": "717c2ac8f7872300e3169fe24e6d7e0770208b8b3f4e1e2a8cd501ad35faa5de",
-  "from": "de129ac64f6830e2b552600d4bb0134daf36dc28194e7f4cf0a383431c0dac01",
-  "hash": "42300469a124d7f6ec8edba9816514c50cfc11dfd08b7977b2ce505eecfad24c",
+  "expanded": "349f7b92b2643931931f09300aa8b674b9cfb343afb091493ed20d7a206f8290",
+  "from": "2a94cd047b37bc4e29cce4300ab774ad47e5d7ad8a54dd33d4f1ba56fa773b61",
+  "hash": "bb25098734382aa0182e0a509bc37346b688123ad8eaf2384749a0d6a3b9a581",
   "service": "shop-db",
   "steps": [
     {
@@ -48,7 +48,7 @@
       "op": "createFunction",
       "phase": "expand",
       "statements": [
-        "CREATE OR REPLACE FUNCTION order_stage_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D117): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.stage IS NOT DISTINCT FROM OLD.stage THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.stage IN ('shipped') THEN\n    RAISE EXCEPTION 'order.stage is terminal at %: it cannot move to %', OLD.stage, NEW.stage\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.stage IS NULL AND NEW.stage IN ('placed'))\n    OR (OLD.stage = 'placed' AND NEW.stage IN ('shipped'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.stage cannot move from % to %', OLD.stage, NEW.stage\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+        "CREATE OR REPLACE FUNCTION order_stage_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.stage IS NOT DISTINCT FROM OLD.stage THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.stage IN ('shipped') THEN\n    RAISE EXCEPTION 'order.stage is terminal at %: it cannot move to %', OLD.stage, NEW.stage\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.stage IS NULL AND NEW.stage IN ('placed'))\n    OR (OLD.stage = 'placed' AND NEW.stage IN ('shipped'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.stage cannot move from % to %', OLD.stage, NEW.stage\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
       ],
       "subject": "function/order_stage_transition_guard",
       "transactional": true
@@ -74,7 +74,7 @@
       "transactional": true
     }
   ],
-  "to": "5b3f6a4ff886566f1b27e2b693c3f35cb5325ca5c56ced1d0919ccb43b60f2f8",
+  "to": "ffb440fad4bdf4a5ee2a25e8602e1b1de52a88affc10fe202f18885cbeb91daa",
   "toModel": null,
   "version": 1
 }

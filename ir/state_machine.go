@@ -6,7 +6,7 @@ import (
 	"sort"
 )
 
-// StateMachine is a `@stateMachine` declaration of a type (D117): the
+// StateMachine is a `@stateMachine` declaration of a type (D118): the
 // moves one enum field of the type may make. Every state is the enum
 // member's serialized value, which is what a column of the field holds
 // and what FieldDef.Default carries, so a generator writes a state as it
@@ -91,7 +91,7 @@ func (td *TypeDef) StateMachineOf(field string) *StateMachine {
 }
 
 // OrderTransitions puts the machine's transitions in the order of enum's
-// members (D117), so the IR, and every guard and helper written from it,
+// members (D118), so the IR, and every guard and helper written from it,
 // is the same whatever order the author's form kept: a TypeScript object's
 // keys reach a decorator in no order. A transition from a state that is
 // no member, which verification refuses, follows the members' and keeps
@@ -116,7 +116,7 @@ func (m *StateMachine) OrderTransitions(enum *EnumDef) {
 	})
 }
 
-// validateStateMachines checks td's @stateMachine declarations (D117) for
+// validateStateMachines checks td's @stateMachine declarations (D118) for
 // what the declarations alone decide, in every authoring form: one machine
 // per field, one entry per state, each move once, no transition out of a
 // terminal state, no entry without a target, no empty fromNull, and no

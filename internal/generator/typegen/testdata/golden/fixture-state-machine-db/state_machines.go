@@ -4,7 +4,7 @@ package types
 
 // SignOffStepTerminal returns the terminal states of
 // SignOff.step, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func SignOffStepTerminal() []SignOffStep {
 	return []SignOffStep{
 		SignOffStep_Granted,
@@ -14,7 +14,7 @@ func SignOffStepTerminal() []SignOffStep {
 
 // SignOffCanTransitionStep reports whether
 // SignOff.step may move from one state to another, as the
-// field's state machine declares (D117). An unchanged value is no move
+// field's state machine declares (D118). An unchanged value is no move
 // and is allowed, listed or not. No move leaves a terminal state, and
 // any other move is allowed only when the machine lists it.
 func SignOffCanTransitionStep(from, to SignOffStep) bool {
@@ -33,7 +33,7 @@ func SignOffCanTransitionStep(from, to SignOffStep) bool {
 
 // TicketStateTerminal returns the terminal states of
 // Ticket.state, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func TicketStateTerminal() []TicketState {
 	return []TicketState{
 		TicketState_Closed,
@@ -42,7 +42,7 @@ func TicketStateTerminal() []TicketState {
 
 // TicketCanTransitionState reports whether
 // Ticket.state may move from one state to another, as the
-// field's state machine declares (D117). An unchanged value is no move
+// field's state machine declares (D118). An unchanged value is no move
 // and is allowed, listed or not. No move leaves a terminal state, and
 // any other move is allowed only when the machine lists it.
 func TicketCanTransitionState(from, to TicketState) bool {
@@ -71,7 +71,7 @@ func TicketCanTransitionState(from, to TicketState) bool {
 
 // TicketReviewTerminal returns the terminal states of
 // Ticket.review, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func TicketReviewTerminal() []ReviewOutcome {
 	return []ReviewOutcome{
 		ReviewOutcome_APPROVED,
@@ -81,7 +81,7 @@ func TicketReviewTerminal() []ReviewOutcome {
 
 // TicketCanTransitionReview reports whether
 // Ticket.review may move from one state to another, as the
-// field's state machine declares (D117). nil is null. An unchanged value
+// field's state machine declares (D118). nil is null. An unchanged value
 // is no move and is allowed, listed or not. No move leaves a terminal
 // state, and any other move is allowed only when the machine lists it.
 func TicketCanTransitionReview(from, to *ReviewOutcome) bool {
@@ -115,14 +115,14 @@ func TicketCanTransitionReview(from, to *ReviewOutcome) bool {
 
 // TicketEscalationTerminal returns the terminal states of
 // Ticket.escalation, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func TicketEscalationTerminal() []Escalation {
 	return []Escalation{}
 }
 
 // TicketCanTransitionEscalation reports whether
 // Ticket.escalation may move from one state to another, as the
-// field's state machine declares (D117). nil is null. An unchanged value
+// field's state machine declares (D118). nil is null. An unchanged value
 // is no move and is allowed, listed or not. No move leaves a terminal
 // state, and any other move is allowed only when the machine lists it.
 func TicketCanTransitionEscalation(from, to *Escalation) bool {
@@ -156,7 +156,7 @@ func TicketCanTransitionEscalation(from, to *Escalation) bool {
 
 // TicketAccountStatusTerminal returns the terminal states of
 // Ticket.accountStatus, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func TicketAccountStatusTerminal() []AccountStatus {
 	return []AccountStatus{
 		AccountStatus_Closed,
@@ -165,7 +165,7 @@ func TicketAccountStatusTerminal() []AccountStatus {
 
 // TicketCanTransitionAccountStatus reports whether
 // Ticket.accountStatus may move from one state to another, as the
-// field's state machine declares (D117). An unchanged value is no move
+// field's state machine declares (D118). An unchanged value is no move
 // and is allowed, listed or not. No move leaves a terminal state, and
 // any other move is allowed only when the machine lists it.
 func TicketCanTransitionAccountStatus(from, to AccountStatus) bool {

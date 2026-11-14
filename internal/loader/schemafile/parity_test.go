@@ -397,7 +397,7 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"an unknown key on a behavior entry", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "extra": 1}]}`},
 	{"a behavior entry without its name", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"config": {"aisles": 1}}]}`},
 	{"a behavior name that is not a string", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": 3}]}`},
-	// A type's state machines (D117): each a field, the moves of its
+	// A type's state machines (D118): each a field, the moves of its
 	// states, its terminal states and, on a nullable field, its null start,
 	// which lists a state when it is written.
 	{"a type's state machines", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [
@@ -408,7 +408,7 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a state machine without its field", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"terminal": ["closed"]}]}`},
 	{"a state machine's transition without its state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": [{"to": ["closed"]}]}]}`},
 	{"a state machine's transitions keyed by state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": {"open": ["closed"]}}]}`},
-	// A type's fences (D118): each a field and, when it lists them, the
+	// A type's fences (D119): each a field and, when it lists them, the
 	// fields it covers, which is a list of at least one.
 	{"a type's fences", "core", `{"name": "Job", "role": "DBTable", "fences": [
 		{"field": "version", "covers": ["label", "owner"]},

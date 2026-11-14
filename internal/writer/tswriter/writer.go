@@ -435,7 +435,7 @@ func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
 	return def.Queue + ", " + objectLiteral(parts)
 }
 
-// stateMachineArgs renders @stateMachine's options (D117): the field, each
+// stateMachineArgs renders @stateMachine's options (D118): the field, each
 // state's moves keyed by the state, the terminal states and, when the
 // machine has one, the null start. The IR holds a state as the value its
 // enum member serializes to; TypeScript names the member, as a field's
@@ -494,7 +494,7 @@ func (e *emitter) stateMachineArgs(def *ir.TypeDef, machine *ir.StateMachine) st
 	return objectLiteral(parts)
 }
 
-// fencedArgs renders @fenced's options (D118): the fence's field and, when
+// fencedArgs renders @fenced's options (D119): the fence's field and, when
 // it lists them, the fields it covers, in the order written.
 func fencedArgs(fence *ir.Fence) string {
 	parts := []string{"field: " + quote(fence.Field)}

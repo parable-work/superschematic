@@ -335,7 +335,7 @@ type ModuleOutput struct {
 	// (D58), written as behaviors.go. Nil when no type composes one.
 	Behaviors []behaviortypes.Type
 
-	// StateMachines are the schema's @stateMachine declarations (D117),
+	// StateMachines are the schema's @stateMachine declarations (D118),
 	// each with the terminal states and the moves its helpers in
 	// state_machines.go answer by. Nil when no type declares one.
 	StateMachines []StateMachineInfo

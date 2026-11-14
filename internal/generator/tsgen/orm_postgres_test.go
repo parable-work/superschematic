@@ -48,7 +48,7 @@ type repositoryCase struct {
 // refused and resealed; fixture-actor-db's acting user, the caller of the
 // operation being run and the system actor (D87); and fixture-vectors-db's
 // decimals, vectors and nearest (D84), on the Postgres with pgvector; and
-// fixture-fenced-db's @fenced fields (D118), which each write advances.
+// fixture-fenced-db's @fenced fields (D119), which each write advances.
 // fixture-workflow-db's tables whose fields are behaviors (D103) have a
 // test of their own, on bun:sqlite and Postgres: TestWorkflowTablesEndToEnd;
 // and so do fixture-timers-db's, which implement Timers:

@@ -268,10 +268,10 @@ type DDLOutput struct {
 	// behaviors hear, by table (changes.go, D103).
 	ChangeTriggers []ChangeTrigger
 	// StateGuards are the guards of the tables' @stateMachine declarations,
-	// by table and column (state_guard.go, D117).
+	// by table and column (state_guard.go, D118).
 	StateGuards []StateGuard
 	// Fences are the triggers of the tables' @fenced declarations, by table
-	// and column (fence.go, D118).
+	// and column (fence.go, D119).
 	Fences      []Fence
 	Projections []ProjectionView
 	Timestamp   string

@@ -1,7 +1,7 @@
 import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
 
 // A dispatch desk's tables, whose counters every covered write advances by
-// one (D118): the database refuses a write that does not, on Postgres and
+// one (D119): the database refuses a write that does not, on Postgres and
 // on SQLite, and the repositories of each language advance them
 // themselves.
 export default defineConfig({

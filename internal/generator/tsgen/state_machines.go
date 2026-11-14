@@ -11,11 +11,11 @@ import (
 )
 
 // StateMachinesFile is the generated file that holds a schema's state
-// machines (D117), beside index.ts.
+// machines (D118), beside index.ts.
 const StateMachinesFile = "state-machines.ts"
 
 // StateMachineInfo is one @stateMachine of a type as state-machines.ts
-// writes it (D117): the names of its three exports, the field's enum, and
+// writes it (D118): the names of its three exports, the field's enum, and
 // every member of the enum with the moves the machine gives it. A state is
 // written as the enum's member, `TicketState.InProgress`, which the IR
 // holds by its serialized value.
@@ -106,7 +106,7 @@ func (o *ModuleOutput) StateMachineEnums() []string {
 	return names
 }
 
-// stateMachines builds the schema's machines for state-machines.ts (D117):
+// stateMachines builds the schema's machines for state-machines.ts (D118):
 // every type's, a table's or not, by type name and then in the order
 // declared. dependencyEnums are the enums the schema imports from its
 // dependencies, by name, which types/types.ts exports beside the schema's

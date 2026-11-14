@@ -30,7 +30,7 @@ func fencedTables(t *testing.T) map[string]*TableModel {
 }
 
 // TestTablesOfModelsFences holds the fences every language's repositories
-// advance (D118): each fence's column, the columns it covers in the order
+// advance (D119): each fence's column, the columns it covers in the order
 // declared, a relation as its key's column, and the assignment that
 // advances it, which reads the stored value by the table's name. A table
 // with no fence has none.
@@ -68,7 +68,7 @@ func TestTablesOfModelsFences(t *testing.T) {
 }
 
 // TestFenceBumpsOfAWrite holds the rule each language's repositories write
-// (D118): a write advances each fence that covers a column it sets, once,
+// (D119): a write advances each fence that covers a column it sets, once,
 // and a fence with no covers on any column; a write of uncovered columns
 // alone advances none; and a write that sets a fence's own column leaves
 // that fence to its caller.
@@ -108,7 +108,7 @@ func TestFenceBumpsOfAWrite(t *testing.T) {
 }
 
 // TestAssignmentsBeginWithTheirColumn holds what a repository reads the
-// columns a write sets from (D118): every assignment sqlutil writes begins
+// columns a write sets from (D119): every assignment sqlutil writes begins
 // with its column and AssignmentInfix, on Postgres and on SQLite, so
 // Assigns tells which column one sets, and a column whose name another's
 // begins with is not taken for it.
@@ -152,7 +152,7 @@ func TestAssignmentsBeginWithTheirColumn(t *testing.T) {
 }
 
 // TestTableStatementsCarryTheFixedBumps holds the statements whose columns
-// are fixed (D118), on Postgres and on SQLite: Depot's soft deletes stamp
+// are fixed (D119), on Postgres and on SQLite: Depot's soft deletes stamp
 // deleted_at, which its fence covers, so each carries the bump; the
 // statements a repository fills carry none, since their assignments say
 // what they advance; and a table with no fence is written as before.
@@ -208,7 +208,7 @@ func TestTableStatementsCarryTheFixedBumps(t *testing.T) {
 }
 
 // TestResealAdvancesTheFenceOverAnEncryptedColumn holds Reseal (D85) on a
-// table with a fence (D118): it sets every encrypted column, so it carries
+// table with a fence (D119): it sets every encrypted column, so it carries
 // the bump of a fence that covers one, or the row, once, and of no fence
 // that covers other columns alone.
 func TestResealAdvancesTheFenceOverAnEncryptedColumn(t *testing.T) {

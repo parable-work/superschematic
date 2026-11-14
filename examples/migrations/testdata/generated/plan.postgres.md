@@ -3,9 +3,9 @@
 13 steps (11 expand, 2 contract), 6 hazards (1 destructive, 1 blocking, 2 compat, 1 data-dependent, 1 raw-sql).
 
 - From: `5114b56a847c1f1aead0821a376bc6f01951f6e79419bb66fff1bec1de0dd120`
-- To: `cfb8597dfc0750c84a20f5bb196960b4a7f4abb424af76251d981c21ba2acca1`
-- Between the phases (expanded): `d82ab463bc0dc48148b886c2d7bb03c500988adc8d3f9e75bb9451c77cf7824b`
-- Plan: `a4c8cd4414214c3e6417b37449f720fb259c13f05e3fa68e668c5ceb38ca2b4a`
+- To: `d719fff56003c10344b9baf6bff0a08d02ace119e4e1a1ec27224fac7f073b8a`
+- Between the phases (expanded): `02cd6aba13ed5ac5b95fd279925144877ed4c615bf36f90beef425f3e57da74f`
+- Plan: `ed50759b998ab1bf718e085fae9943433910f563237af7f23c33cc8f6da7f2bf`
 - Renames: `task.title=task.summary`
 
 | Class | Subject | Reader | Reason | ID |
@@ -83,7 +83,7 @@ ALTER TABLE project VALIDATE CONSTRAINT ck_project_status;
 ```sql
 CREATE OR REPLACE FUNCTION project_status_transition_guard() RETURNS trigger AS $$
 BEGIN
-  -- The @stateMachine of Project.status (D117): an update that leaves the
+  -- The @stateMachine of Project.status (D118): an update that leaves the
   -- column's value is no move, and any other must be one the machine lists.
   IF NEW.status IS NOT DISTINCT FROM OLD.status THEN
     RETURN NEW;

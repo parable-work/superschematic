@@ -62,7 +62,7 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		{name: identitytest.Service, schema: identitytest.Schema(t, identitytest.Options{Roles: true, Name: "displayName"})},
 		{name: "fixture-user-model-db", schema: userModelSchema},
 		// state_machines.go: a machine's helpers, one over an enum of a
-		// dependency (D117).
+		// dependency (D118).
 		{name: stateMachineEnumService, schema: stateMachineEnums},
 		{name: stateMachineService, schema: stateMachineDB, deps: map[string]*ir.Schema{stateMachineEnumService: stateMachineEnums}},
 		// behaviors.go: each behavior's fields (D58).

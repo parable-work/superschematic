@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// Fence is a `@fenced` declaration of a DB table (D118): an integer field
+// Fence is a `@fenced` declaration of a DB table (D119): an integer field
 // of the table, the fence, that every update the fence covers sets to the
 // stored value plus one. A writer that compares the fence in its WHERE
 // clause then knows no covered write came between its read and its write.
@@ -47,7 +47,7 @@ func (td *TypeDef) FenceOf(field string) *Fence {
 	return nil
 }
 
-// validateFences checks td's @fenced declarations (D118) for what the
+// validateFences checks td's @fenced declarations (D119) for what the
 // declarations alone decide, in every authoring form: one fence per field,
 // none on a field a @stateMachine governs, covers on every fence of a type
 // with several, no empty covers, and no covered field that is listed

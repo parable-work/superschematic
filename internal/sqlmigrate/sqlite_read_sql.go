@@ -514,7 +514,7 @@ func unwrap(tokens []sqlToken) []sqlToken {
 }
 
 // sqliteTriggerRefuses reports whether a CREATE TRIGGER statement makes a
-// trigger that refuses a write (Trigger.Refuses, D117): one of its
+// trigger that refuses a write (Trigger.Refuses, D118): one of its
 // statements, or its WHEN, calls RAISE, which fails the write that fired
 // the trigger or, with IGNORE, leaves it out. It reads the statement's
 // tokens, so a RAISE inside a string or a quoted name is none.

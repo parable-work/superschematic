@@ -14,7 +14,7 @@ import (
 )
 
 // guardCase is one table whose @stateMachine guards TestGuards runs
-// (D117), as TestStateMachineGuardsOnPostgres in the sqlmigrate package
+// (D118), as TestStateMachineGuardsOnPostgres in the sqlmigrate package
 // writes it to guards.json beside the service's create.sql and drop.sql.
 type guardCase struct {
 	Table string `json:"table"`
@@ -55,7 +55,7 @@ func shown(v *string) string {
 }
 
 // TestGuards runs the guards of each case under PGCONVERGE_GUARDS on a
-// database its create.sql made (D117). For every guarded column and every
+// database its create.sql made (D118). For every guarded column and every
 // pair of its values, null among them, it inserts a row in the first
 // state, which no guard holds, updates another column, which no guard
 // hears, and moves the column to the second: a move the machine lists and

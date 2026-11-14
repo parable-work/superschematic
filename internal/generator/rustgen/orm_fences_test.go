@@ -14,7 +14,7 @@ var dispatchFencesTest string
 // TestFencesOnSQLiteAndPostgres generates the Rust types of
 // fixture-fenced-db with both dialects' repositories, builds the database
 // from the SQLite DDL and from the Postgres DDL the build writes, and runs
-// one script of writes through each (D118), reading every @fenced
+// one script of writes through each (D119), reading every @fenced
 // counter's exact value after every write: an update, an update of many
 // rows and an upsert's update advance the fence that covers a column they
 // set by one, and no other; a write of uncovered columns alone advances

@@ -9,7 +9,7 @@ This crate contains Rust types generated from the `fixture-state-machine-db` sch
 - `src/scalars.rs` - scalar aliases
 - `src/enums.rs` - enum definitions
 - `src/types.rs` - object/input structs and imported type aliases
-- `src/state_machines.rs` - for each field a `@stateMachine` governs (D117): `<TYPE>_<FIELD>_TERMINAL`, the states no move leaves, and `<type>_can_transition_<field>(from, to)`, whether a move is one the machine lists, as the table's guard decides it in the database
+- `src/state_machines.rs` - for each field a `@stateMachine` governs (D118): `<TYPE>_<FIELD>_TERMINAL`, the states no move leaves, and `<type>_can_transition_<field>(from, to)`, whether a move is one the machine lists, as the table's guard decides it in the database
 
 - `schemas/<Type>.json` - the schema IR of each `@jsonField` payload type and the definitions it reaches
 

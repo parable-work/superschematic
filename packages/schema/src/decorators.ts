@@ -137,7 +137,7 @@ export type StateMachineConfig<T> = {
 }[keyof T];
 
 /**
- * Declares the moves an enum field of the class may make (D117). A class
+ * Declares the moves an enum field of the class may make (D118). A class
  * takes one per field:
  *
  * ```ts
@@ -189,7 +189,7 @@ export interface FencedConfig<T> {
 
 /**
  * Names a counter of a DB table that every write it covers advances by one
- * (D118), so a writer that compares the counter in its WHERE clause knows
+ * (D119), so a writer that compares the counter in its WHERE clause knows
  * no other covered write came between its read and its write:
  *
  * ```ts

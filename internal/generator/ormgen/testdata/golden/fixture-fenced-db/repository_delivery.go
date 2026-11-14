@@ -1560,7 +1560,7 @@ func (r *DeliveryRepository) upsertRow(ctx context.Context, input *types.Deliver
 
 		// Set updated_by
 
-		// Each fence the update's columns advance moves on by one (D118).
+		// Each fence the update's columns advance moves on by one (D119).
 		setClauses = append(setClauses, fenceBumps(deliveryFences, setClauses)...)
 
 	}
@@ -1794,7 +1794,7 @@ func (r *DeliveryRepository) upsertBatches(ctx context.Context, inputs []*types.
 			values = append(values, time.Now())
 			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
 			// Each fence the update's columns advance moves on by one
-			// (D118).
+			// (D119).
 			assignments = append(assignments, fenceBumps(deliveryFences, assignments)...)
 		}
 		query := fmt.Sprintf(
@@ -2146,7 +2146,7 @@ func (r *DeliveryRepository) CreateMany(ctx context.Context, inputs []*types.Del
 
 // UpdateOne updates a single Delivery record by ID.
 // It advances each @fenced field that covers a column the update sets by
-// one, and writes one the update sets itself as it stands (D118).
+// one, and writes one the update sets itself as it stands (D119).
 func (r *DeliveryRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, update *DeliveryUpdate) (*types.Delivery, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -2211,7 +2211,7 @@ func (r *DeliveryRepository) UpdateOne(ctx context.Context, id types.IdentityUUI
 
 	// Set updated_by
 
-	// Each fence the update's columns advance moves on by one (D118).
+	// Each fence the update's columns advance moves on by one (D119).
 	setClauses = append(setClauses, fenceBumps(deliveryFences, setClauses)...)
 
 	if len(setClauses) == 0 {
@@ -2296,7 +2296,7 @@ func (r *DeliveryRepository) UpdateOne(ctx context.Context, id types.IdentityUUI
 // UpdateMany updates multiple Delivery records matching the filter.
 // It advances each @fenced field that covers a column the update sets by
 // one in every row it updates, and writes one the update sets itself as
-// it stands (D118), so a filter on that field compares what a caller read.
+// it stands (D119), so a filter on that field compares what a caller read.
 func (r *DeliveryRepository) UpdateMany(ctx context.Context, filter *DeliveryFilter, update *DeliveryUpdate) (int, error) {
 	// Build UPDATE query
 	var setClauses []string
@@ -2361,7 +2361,7 @@ func (r *DeliveryRepository) UpdateMany(ctx context.Context, filter *DeliveryFil
 
 	// Set updated_by
 
-	// Each fence the update's columns advance moves on by one (D118).
+	// Each fence the update's columns advance moves on by one (D119).
 	setClauses = append(setClauses, fenceBumps(deliveryFences, setClauses)...)
 
 	if len(setClauses) == 0 {

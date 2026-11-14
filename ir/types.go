@@ -226,14 +226,14 @@ type TypeDef struct {
 	// every other type. See [EnqueueOnChange].
 	EnqueueOnChange []*EnqueueOnChange `json:"enqueueOnChange,omitempty" yaml:"enqueueOnChange,omitempty"`
 
-	// StateMachines are the @stateMachine declarations of the type (D117):
+	// StateMachines are the @stateMachine declarations of the type (D118):
 	// each the moves one enum field may make, at most one per field. A
 	// type of any schema kind may declare them; a DB table also gets a
 	// guard that refuses every other move. Empty for every other type.
 	// See [StateMachine].
 	StateMachines []*StateMachine `json:"stateMachines,omitempty" yaml:"stateMachines,omitempty"`
 
-	// Fences are the @fenced declarations of a DB table (D118): each an
+	// Fences are the @fenced declarations of a DB table (D119): each an
 	// integer field every write the fence covers advances by one, which a
 	// trigger holds every writer to and the generated repositories do
 	// themselves. A table has several only when each lists the fields it

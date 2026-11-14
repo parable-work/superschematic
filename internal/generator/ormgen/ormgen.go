@@ -56,7 +56,7 @@ type ORMOutput struct {
 	HasOptimisticTables bool
 
 	// HasFences is true when a repository's table has a @fenced field
-	// (D118); it writes fences.go, each such table's fences and the rule by
+	// (D119); it writes fences.go, each such table's fences and the rule by
 	// which a write advances them, which reads an assignment's column as
 	// the text before FenceAssignmentInfix (sqlutil.AssignmentInfix).
 	HasFences            bool
@@ -328,7 +328,7 @@ type Repository struct {
 	Table *sqlutil.TableModel
 	SQL   sqlutil.TableStatements
 
-	// Fences are the table's @fenced fields (D118), sqlutil's FenceModel:
+	// Fences are the table's @fenced fields (D119), sqlutil's FenceModel:
 	// an update, an UpdateMany and an upsert's update add the bump of each
 	// fence their assignments advance (fences.go), and a soft delete and a
 	// reseal carry it in SQL's statements.

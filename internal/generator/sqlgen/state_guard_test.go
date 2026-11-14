@@ -34,7 +34,7 @@ func guardSchema(typeName, fieldName string, states ...string) *ir.Schema {
 
 // TestStateGuardsOfTheFixture: each @stateMachine of a table gets a guard,
 // by table and column, named after both, whose trigger refuses a write; a
-// class that is no table, the @jsonField SignOff, gets none (D117).
+// class that is no table, the @jsonField SignOff, gets none (D118).
 func TestStateGuardsOfTheFixture(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-state-machine-db"))
 	if err != nil {
@@ -77,7 +77,7 @@ func TestStateGuardsOfTheFixture(t *testing.T) {
 // passes first, a terminal state is not left, a null takes a state of
 // fromNull, and a state moves to its targets or back to null; Postgres
 // raises check_violation with the two values, and SQLite fails with a
-// fixed message (D117).
+// fixed message (D118).
 func TestStateGuardRule(t *testing.T) {
 	g := StateGuard{
 		Origin: "Ticket", Field: "review", Table: "ticket", QuotedTable: "ticket", Column: "review", QuotedColumn: "review",
@@ -128,7 +128,7 @@ func TestStateGuardRule(t *testing.T) {
 
 // TestStateGuardQuotesStates: a state is written as a string literal, its
 // quote doubled; a function whose body holds $$ is quoted with a tag the
-// body does not hold; and a column named by a keyword is quoted (D117).
+// body does not hold; and a column named by a keyword is quoted (D118).
 func TestStateGuardQuotesStates(t *testing.T) {
 	out, err := Generate(guardSchema("Task", "order", "it's", "a$$b", "$guard$"), Options{SchemaName: "guards-db"})
 	if err != nil {
@@ -161,7 +161,7 @@ func TestStateGuardQuotesStates(t *testing.T) {
 
 // TestStateGuardNameLimit: a guard's trigger is named after its table and
 // its column, and one over PostgreSQL's 63 bytes fails the build, naming
-// the type, the field and the table; one of 63 bytes builds (D117).
+// the type, the field and the table; one of 63 bytes builds (D118).
 func TestStateGuardNameLimit(t *testing.T) {
 	// trg_ and _transition_guard take 21 bytes, and the underscore between
 	// the table and the column one more: 41 are left for the two names.

@@ -161,7 +161,7 @@ func TestHazardClasses(t *testing.T) {
 			reason: "stack queue backfill"},
 		{plan: "add-enqueue-on-change-backfill-per-key", op: "createTrigger", phase: Expand, want: []HazardClass{blockingClass}},
 
-		// A @stateMachine's guard refuses a write (D117): it is created in
+		// A @stateMachine's guard refuses a write (D118): it is created in
 		// contract, a changed one is dropped in expand, before its function
 		// is replaced, and a removed one is dropped in contract, with no
 		// hazard.
@@ -173,7 +173,7 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "drop-state-machine", op: "dropTrigger", phase: Contract},
 		{plan: "drop-state-machine", op: "dropFunction", phase: Contract},
 
-		// A @fenced counter's trigger refuses a write too (D118), and is
+		// A @fenced counter's trigger refuses a write too (D119), and is
 		// placed the same, with no hazard.
 		{plan: "add-fence", op: "createFunction", phase: Expand},
 		{plan: "add-fence", op: "createTrigger", phase: Contract},

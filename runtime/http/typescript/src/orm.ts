@@ -224,7 +224,7 @@ export interface TableStatements {
   readonly updatedAt: string;
   readonly updatedBy: string;
   readonly upsert: string;
-  /** A soft delete of one row and of many, which also advance a fence that covers a column they stamp (D118). */
+  /** A soft delete of one row and of many, which also advance a fence that covers a column they stamp (D119). */
   readonly softDelete: string;
   readonly softDeleteMany: string;
   readonly delete: string;
@@ -320,7 +320,7 @@ export interface TableDefinition {
   readonly softDelete?: boolean;
   /** A @versioned table whose hard deletes set the history actor. */
   readonly historyActor?: boolean;
-  /** The table's @fenced fields, in the order declared (D118); absent for a table with none. */
+  /** The table's @fenced fields, in the order declared (D119); absent for a table with none. */
   readonly fences?: readonly FenceDefinition[];
   /** The search column, qualified, of a table with search fields, or of a view's source with them (D99). */
   readonly search?: string;
@@ -336,7 +336,7 @@ export interface TableDefinition {
 }
 
 /**
- * A fence of a table, a @fenced field (D118), sqlutil.FenceModel: a counter
+ * A fence of a table, a @fenced field (D119), sqlutil.FenceModel: a counter
  * every write of a column it covers sets to the stored value plus one,
  * which a trigger holds every writer to. An update, an updateMany and an
  * upsert's update add its bump to their assignments (fenceBumps); a soft
@@ -353,7 +353,7 @@ export interface FenceDefinition {
 
 /**
  * The assignments that advance fences in an update whose assignments are
- * sets, each of which begins with its column and " = " (D118): the bump of
+ * sets, each of which begins with its column and " = " (D119): the bump of
  * each fence that covers a column one of them sets, or of a fence with no
  * covers when they set any, once. Whether a value differs from the stored
  * one is not asked, which the statement cannot know. A fence the update
@@ -2017,7 +2017,7 @@ class TableRepository {
     const args: unknown[] = [];
     const sets = this.setClauses(this.sealedUpdate(update, id, 'update'), args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
-    // Each fence the assignments advance, their stamps among them (D118).
+    // Each fence the assignments advance, their stamps among them (D119).
     sets.push(...fenceBumps(this.def.fences, sets));
     args.push(this.encode(id, this.keyColumn(), 'key'));
     const s = this.def.statements;
@@ -2035,7 +2035,7 @@ class TableRepository {
     const args: unknown[] = [];
     const sets = this.setClauses(update, args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
-    // Each fence the assignments advance, their stamps among them (D118).
+    // Each fence the assignments advance, their stamps among them (D119).
     sets.push(...fenceBumps(this.def.fences, sets));
     const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length)), false);
     const { rowCount } = await run(this.runner, fill(this.def.statements.updateMany, sets.join(', '), where), args);

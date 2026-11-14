@@ -564,7 +564,7 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings go to WithWarnings's function or print to
 // [WarningWriter], errors fail the load. Each @stateMachine's transitions
-// are put in the order of its enum's members first (D117,
+// are put in the order of its enum's members first (D118,
 // orderStateMachines). The fields its field-anchored
 // behaviors own join their tables before the pass (D103,
 // behaviorfields.Expand), once the behaviors' own checks hold what that
@@ -590,7 +590,7 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 		reg = registry.New(vin.Naming.OrDefault())
 	}
 	// A @stateMachine's transitions take the order of its enum's members
-	// (D117), so the pass and the generators read one order from every
+	// (D118), so the pass and the generators read one order from every
 	// form.
 	orderStateMachines(schema, vin.ExternalEnums)
 	// A @source view of another service's table reads the fields its

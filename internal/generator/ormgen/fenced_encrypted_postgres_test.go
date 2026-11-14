@@ -10,7 +10,7 @@ import (
 const fencedVaultService = "fenced-vault"
 
 // fencedVaultSchema is a table whose fence covers an Encrypted<T> field
-// (D85, D118): a write of the secret advances rotation, and a write of the
+// (D85, D119): a write of the secret advances rotation, and a write of the
 // label alone does not.
 const fencedVaultSchema = `{
   "name": "fenced-vault",
@@ -40,7 +40,7 @@ const fencedVaultSchema = `{
 // fencedVaultSchema, then builds, vets and tests it. Its generated test,
 // against the Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL (it skips
 // without the database), holds the writes of an encrypted field to the
-// fence that covers it (D118), under the fence's trigger: an update of the
+// fence that covers it (D119), under the fence's trigger: an update of the
 // secret advances rotation by one; an upsert's second statement, which
 // sets the secret sealed under the key of the row it updates (D89), is an
 // UpdateOne and advances it as one; and Reencrypt's reseal, whose columns

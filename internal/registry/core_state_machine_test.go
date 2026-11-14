@@ -23,7 +23,7 @@ func applyStateMachine(t *testing.T, td *ir.TypeDef, args ...any) error {
 
 // TestStateMachineIsASchemaPackageDecoratorOfEveryKind: @stateMachine comes
 // from @superschematic/schema and stands on a class of any schema kind
-// (D117).
+// (D118).
 func TestStateMachineIsASchemaPackageDecoratorOfEveryKind(t *testing.T) {
 	spec, ok := New(naming.Naming{}).Decorator("stateMachine", TargetType)
 	if !ok {
@@ -42,7 +42,7 @@ func TestStateMachineIsASchemaPackageDecoratorOfEveryKind(t *testing.T) {
 // TestStateMachineApplyReadsTheDeclaration: Apply records the field, each
 // state's moves with a null as a return to null, the terminal states and
 // the null start, the transitions by their state's value whatever order
-// the object's keys came in, and every list as written (D117).
+// the object's keys came in, and every list as written (D118).
 func TestStateMachineApplyReadsTheDeclaration(t *testing.T) {
 	td := &ir.TypeDef{Name: "Ticket"}
 	err := applyStateMachine(t, td, map[string]any{
@@ -100,7 +100,7 @@ func describeMachines(machines []*ir.StateMachine) string {
 
 // TestStateMachineApplyRefusesAMalformedDeclaration: each shape Apply
 // refuses, with the type and the field once it knows it, and what to
-// write (D117). An empty fromNull is refused here, since the IR's JSON
+// write (D118). An empty fromNull is refused here, since the IR's JSON
 // would leave it out.
 func TestStateMachineApplyRefusesAMalformedDeclaration(t *testing.T) {
 	valid := func() map[string]any {

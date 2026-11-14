@@ -33,7 +33,7 @@ if TYPE_CHECKING:
         AccountStatus
     )
 else:
-    # A state machine names the members of an enum of this package (D117).
+    # A state machine names the members of an enum of this package (D118).
     from schemas_types_fixture_state_machine_enums import (
         AccountStatus
     )
@@ -98,7 +98,7 @@ class SignOff(BaseModel):
 
     note: Optional[str] = Field(default=None, alias="note", serialization_alias="note")
 
-    # The state machine of step (D117): each state that has a move and
+    # The state machine of step (D118): each state that has a move and
     # the states it may move to.
     STEP_TRANSITIONS: ClassVar[Mapping[SignOffStep, frozenset[SignOffStep]]] = MappingProxyType({
         SignOffStep.Requested: frozenset({SignOffStep.Granted, SignOffStep.Refused}),
@@ -111,7 +111,7 @@ class SignOff(BaseModel):
     def can_transition_step(cls, current: SignOffStep, target: SignOffStep) -> bool:
         """
         Report whether step may move from current to target, as its
-        state machine declares (D117).
+        state machine declares (D118).
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the
@@ -309,7 +309,7 @@ class Ticket(BaseModel):
 
     updated_at: TemporalDateTime = Field(..., alias="updatedAt", serialization_alias="updatedAt")
 
-    # The state machine of state (D117): each state that has a move and
+    # The state machine of state (D118): each state that has a move and
     # the states it may move to.
     STATE_TRANSITIONS: ClassVar[Mapping[TicketState, frozenset[TicketState]]] = MappingProxyType({
         TicketState.Open: frozenset({TicketState.Open, TicketState.InProgress, TicketState.Resolved, TicketState.Closed}),
@@ -324,7 +324,7 @@ class Ticket(BaseModel):
     def can_transition_state(cls, current: TicketState, target: TicketState) -> bool:
         """
         Report whether state may move from current to target, as its
-        state machine declares (D117).
+        state machine declares (D118).
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the
@@ -336,7 +336,7 @@ class Ticket(BaseModel):
             return False
         return target in cls.STATE_TRANSITIONS.get(current, frozenset())
 
-    # The state machine of review (D117): each state that has a move and
+    # The state machine of review (D118): each state that has a move and
     # the states it may move to. None is null.
     REVIEW_TRANSITIONS: ClassVar[Mapping[Optional[ReviewOutcome], frozenset[Optional[ReviewOutcome]]]] = MappingProxyType({
         None: frozenset({ReviewOutcome.RETRY, ReviewOutcome.APPROVED, ReviewOutcome.REJECTED}),
@@ -350,7 +350,7 @@ class Ticket(BaseModel):
     def can_transition_review(cls, current: Optional[ReviewOutcome], target: Optional[ReviewOutcome]) -> bool:
         """
         Report whether review may move from current to target, as its
-        state machine declares (D117). None is null.
+        state machine declares (D118). None is null.
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the
@@ -362,7 +362,7 @@ class Ticket(BaseModel):
             return False
         return target in cls.REVIEW_TRANSITIONS.get(current, frozenset())
 
-    # The state machine of escalation (D117): each state that has a move and
+    # The state machine of escalation (D118): each state that has a move and
     # the states it may move to. None is null.
     ESCALATION_TRANSITIONS: ClassVar[Mapping[Optional[Escalation], frozenset[Optional[Escalation]]]] = MappingProxyType({
         None: frozenset({Escalation.Raised}),
@@ -377,7 +377,7 @@ class Ticket(BaseModel):
     def can_transition_escalation(cls, current: Optional[Escalation], target: Optional[Escalation]) -> bool:
         """
         Report whether escalation may move from current to target, as its
-        state machine declares (D117). None is null.
+        state machine declares (D118). None is null.
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the
@@ -389,7 +389,7 @@ class Ticket(BaseModel):
             return False
         return target in cls.ESCALATION_TRANSITIONS.get(current, frozenset())
 
-    # The state machine of accountStatus (D117): each state that has a move and
+    # The state machine of accountStatus (D118): each state that has a move and
     # the states it may move to.
     ACCOUNT_STATUS_TRANSITIONS: ClassVar[Mapping[AccountStatus, frozenset[AccountStatus]]] = MappingProxyType({
         AccountStatus.Active: frozenset({AccountStatus.Suspended, AccountStatus.Closed}),
@@ -403,7 +403,7 @@ class Ticket(BaseModel):
     def can_transition_account_status(cls, current: AccountStatus, target: AccountStatus) -> bool:
         """
         Report whether accountStatus may move from current to target, as its
-        state machine declares (D117).
+        state machine declares (D118).
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the

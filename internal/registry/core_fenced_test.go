@@ -23,7 +23,7 @@ func applyFenced(t *testing.T, td *ir.TypeDef, args ...any) error {
 
 // TestFencedIsASchemaPackageDecoratorOfADBSchema: @fenced comes from
 // @superschematic/schema and stands in a DB schema alone, whose tables a
-// fence's trigger watches (D118).
+// fence's trigger watches (D119).
 func TestFencedIsASchemaPackageDecoratorOfADBSchema(t *testing.T) {
 	spec, ok := New(naming.Naming{}).Decorator("fenced", TargetType)
 	if !ok {
@@ -47,7 +47,7 @@ func TestFencedIsASchemaPackageDecoratorOfADBSchema(t *testing.T) {
 
 // TestFencedApplyReadsTheDeclaration: Apply records the field and the
 // covered fields in the order written, a fence with no covers as its field
-// alone, and each declaration of a class after the last (D118).
+// alone, and each declaration of a class after the last (D119).
 func TestFencedApplyReadsTheDeclaration(t *testing.T) {
 	td := &ir.TypeDef{Name: "Job"}
 	if err := applyFenced(t, td, map[string]any{"field": "version", "covers": []any{"priority", "label", "owner"}}); err != nil {
@@ -82,7 +82,7 @@ func describeFences(fences []*ir.Fence) string {
 }
 
 // TestFencedApplyRefusesAMalformedDeclaration: each shape Apply refuses,
-// with the type and the field once it knows it, and what to write (D118).
+// with the type and the field once it knows it, and what to write (D119).
 // An empty covers is refused here, since the IR's JSON would leave it out.
 func TestFencedApplyRefusesAMalformedDeclaration(t *testing.T) {
 	valid := func() map[string]any {

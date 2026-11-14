@@ -798,7 +798,7 @@ of a table with `updatedBy` need an acting user too, so a nullable
 An enum column's `CHECK` says which values the column holds. It does not
 say which value may follow which. `@stateMachine`, from
 `@superschematic/schema`, declares the moves an enum field may make
-([D117](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+([D118](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
 On a table, the database then refuses every other move, whatever writes
 the row: a repository, a job's own SQL, a script or `psql`. The generated
 types carry the same moves in Go, TypeScript, Python and Rust, so a
@@ -959,7 +959,7 @@ update that sets the column:
 ```sql
 CREATE OR REPLACE FUNCTION ticket_state_transition_guard() RETURNS trigger AS $$
 BEGIN
-  -- The @stateMachine of Ticket.state (D117): an update that leaves the
+  -- The @stateMachine of Ticket.state (D118): an update that leaves the
   -- column's value is no move, and any other must be one the machine lists.
   IF NEW.state IS NOT DISTINCT FROM OLD.state THEN
     RETURN NEW;
@@ -1049,7 +1049,7 @@ lists it. The ticket's:
 ```go
 // TicketStateTerminal returns the terminal states of
 // Ticket.state, which no update leaves, as the field's state
-// machine declares them (D117). Each call returns a new slice.
+// machine declares them (D118). Each call returns a new slice.
 func TicketStateTerminal() []TicketState {
 	return []TicketState{
 		TicketState_Closed,
@@ -1058,7 +1058,7 @@ func TicketStateTerminal() []TicketState {
 
 // TicketCanTransitionState reports whether
 // Ticket.state may move from one state to another, as the
-// field's state machine declares (D117). An unchanged value is no move
+// field's state machine declares (D118). An unchanged value is no move
 // and is allowed, listed or not. No move leaves a terminal state, and
 // any other move is allowed only when the machine lists it.
 func TicketCanTransitionState(from, to TicketState) bool {
@@ -1121,7 +1121,7 @@ export function ticketCanTransitionReview(from: ReviewOutcome | null, to: Review
 class Ticket(BaseModel):
     ...
 
-    # The state machine of state (D117): each state that has a move and
+    # The state machine of state (D118): each state that has a move and
     # the states it may move to.
     STATE_TRANSITIONS: ClassVar[Mapping[TicketState, frozenset[TicketState]]] = MappingProxyType({
         TicketState.Open: frozenset({TicketState.Open, TicketState.InProgress, TicketState.Resolved, TicketState.Closed}),
@@ -1136,7 +1136,7 @@ class Ticket(BaseModel):
     def can_transition_state(cls, current: TicketState, target: TicketState) -> bool:
         """
         Report whether state may move from current to target, as its
-        state machine declares (D117).
+        state machine declares (D118).
 
         An unchanged value is no move and is allowed, listed or not. No move
         leaves a terminal state, and any other move is allowed only when the
@@ -1235,7 +1235,7 @@ write, as long as every writer advances the counter. One writer that
 forgets breaks every such compare, and nothing reports it. `@fenced`,
 from `@superschematic/schema`, names the counter, the fence, on a table
 of a DB schema
-([D118](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+([D119](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
 The database then refuses a write that does not advance it, whatever
 writes the row, and the generated repositories advance it themselves.
 

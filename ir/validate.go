@@ -49,7 +49,7 @@ func WithStrictScalarResolution() ValidateOption {
 // verifies that every import is a named import. It also checks the TypeRef
 // invariants of an array of arrays: isArrayOfArrays requires isArray and
 // excludes isMap, and what a type's @stateMachine and @fenced declarations
-// decide alone (D117, validateStateMachines; D118, validateFences). The
+// decide alone (D118, validateStateMachines; D119, validateFences). The
 // checks that read hydrated scalar metadata are [Schema.ValidateHydrated]'s.
 //
 // Resolution sources (checked in order):
