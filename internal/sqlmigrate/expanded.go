@@ -18,7 +18,8 @@ import (
 //   - every extension and pool schema of either model, since neither is
 //     ever dropped;
 //   - the new model's functions, triggers and views, and those of the
-//     previous model contract drops or replaces;
+//     previous model contract drops or replaces, without the triggers
+//     contract creates, which refuse a write (D118);
 //   - the version graphs of both models (expandedGraphs);
 //   - the new model's raw SQL, then the previous model's pieces contract
 //     undoes, in the order they ran (D83);
@@ -67,14 +68,18 @@ func (d *differ) expandedModel() (*Model, error) {
 	}
 
 	// A trigger contract replaces or drops is the previous one, on its
-	// table as renamed and under the name expand gave it.
+	// table as renamed and under the name expand gave it, and one contract
+	// creates is not there yet.
 	contractTriggers := map[string]*Trigger{}
+	created := map[string]bool{}
 	var dropped []*Trigger
 	for _, c := range d.changes {
 		if c.phase != Contract {
 			continue
 		}
 		switch c.op {
+		case opCreateTrigger:
+			created[c.trigger.Table+"/"+c.trigger.Name] = true
 		case opReplaceTrigger:
 			old, err := d.renamedTrigger(c.oldTrigger, c.table, c.trigger.Name)
 			if err != nil {
@@ -90,6 +95,9 @@ func (d *differ) expandedModel() (*Model, error) {
 		}
 	}
 	for _, t := range d.to.Triggers {
+		if created[t.Table+"/"+t.Name] {
+			continue
+		}
 		if old := contractTriggers[t.Table+"/"+t.Name]; old != nil {
 			t = old
 		}

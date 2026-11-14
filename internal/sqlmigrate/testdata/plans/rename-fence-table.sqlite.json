@@ -1,0 +1,123 @@
+{
+  "dialect": "sqlite",
+  "expanded": "edd0725a7775af509edd88a5c818c2de77e83360f8dd5099991ce4197d1e3309",
+  "from": "abde65df483ec908fc3c999741cf3b916913dccc78efe2635af1727dd440a950",
+  "hash": "05a5a2dea135607a54be019f85bbd0987ca8b0c9ae51816dc68c19596e6a93ee",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder",
+          "reason": "Table order is renamed to purchaseOrder, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME TO \"purchaseOrder\""
+      ],
+      "subject": "table/purchaseOrder",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder_label",
+          "reason": "Table order_label is renamed to purchaseOrder_label, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder_label"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_label\" RENAME TO \"purchaseOrder_label\""
+      ],
+      "subject": "table/purchaseOrder_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/purchaseOrder_id",
+          "reason": "order_line.order_id is renamed to order_line.purchaseOrder_id, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/order_line/column/purchaseOrder_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_line\" RENAME COLUMN \"order_id\" TO \"purchaseOrder_id\""
+      ],
+      "subject": "table/order_line/column/purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder_label/column/purchaseOrder_id",
+          "reason": "order_label.order_id is renamed to purchaseOrder_label.purchaseOrder_id, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder_label/column/purchaseOrder_id"
+        }
+      ],
+      "index": 4,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder_label\" RENAME COLUMN \"order_id\" TO \"purchaseOrder_id\""
+      ],
+      "subject": "table/purchaseOrder_label/column/purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with purchaseOrder.",
+          "subject": "table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at"
+        }
+      ],
+      "index": 5,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_customer_placed_at\"",
+        "CREATE INDEX \"idx_purchaseOrder_customer_placed_at\" ON \"purchaseOrder\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_revision_fence\""
+      ],
+      "subject": "trigger/purchaseOrder/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_purchaseOrder_revision_fence\" BEFORE UPDATE ON \"purchaseOrder\" FOR EACH ROW\nWHEN NEW.\"revision\" IS NOT OLD.\"revision\" + 1 AND (\n  NEW.\"revision\" IS NOT OLD.\"revision\"\n  OR NEW.\"note\" IS NOT OLD.\"note\"\n  OR NEW.\"customer_id\" IS NOT OLD.\"customer_id\")\nBEGIN\n  SELECT RAISE(ABORT, 'purchaseOrder.revision is fenced: an update that changes a column it covers must add one to it, and any other must keep it or add one');\nEND"
+      ],
+      "subject": "trigger/purchaseOrder/trg_purchaseOrder_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "c096b9e196806a29da69ac2730420ffb124a17a104cd838fa14ba4af7bb73cd9",
+  "toModel": null,
+  "version": 1
+}

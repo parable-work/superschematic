@@ -394,11 +394,15 @@ func stringLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// SQLiteTrigger is one of an EnqueueTrigger's triggers on SQLite.
+// SQLiteTrigger is a trigger on SQLite, which holds its statements: one of
+// an EnqueueTrigger's or a ChangeTrigger's, a StateGuard's or a Fence's.
 type SQLiteTrigger struct {
 	Name       string
 	Table      string
 	Definition string
+	// Refuses is set on a trigger that fails a write it does not allow
+	// (Trigger.Refuses).
+	Refuses bool
 }
 
 // SQLiteTriggers renders the declaration's triggers on SQLite, one per

@@ -242,6 +242,12 @@ an `enum` with one serde rename per member. A value outside the enum fails
 validation with the `enum` rule, and a DB table's column of the enum has a
 `CHECK` that its members' values hold it to.
 
+Which member may follow which is a `@stateMachine` on the class that
+holds the field, in a schema of any kind: the types of each language get
+the terminal states and a function that says whether a move is listed,
+and a DB table's database refuses any other move
+([State machines](/superschematic/guides/database-tables/#state-machines)).
+
 A member may take a title, the label a UI shows for it in place of its
 name in words. An enum member takes no decorator, so the title is a JSDoc
 tag on the member:

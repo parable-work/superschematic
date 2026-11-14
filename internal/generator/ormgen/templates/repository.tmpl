@@ -3143,6 +3143,11 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 		}{{ end }}
 		{{- end }}
 		{{- end }}
+		{{- if .Fences }}
+
+		// Each fence the update's columns advance moves on by one (D119).
+		setClauses = append(setClauses, fenceBumps({{ lowerFirst .TypeName }}Fences, setClauses)...)
+		{{- end }}
 
 
 	}
@@ -3417,6 +3422,11 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 				assignments = append(assignments, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, len(values)))
 			}
 			{{- end }}
+			{{- end }}
+			{{- if .Fences }}
+			// Each fence the update's columns advance moves on by one
+			// (D119).
+			assignments = append(assignments, fenceBumps({{ lowerFirst .TypeName }}Fences, assignments)...)
 			{{- end }}
 		}
 		{{- end }}
@@ -3846,6 +3856,10 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 {{- else }}
 
 // UpdateOne updates a single {{ .TypeName }} record by ID
+{{- if .Fences }}.
+// It advances each @fenced field that covers a column the update sets by
+// one, and writes one the update sets itself as it stands (D119).
+{{- end }}
 func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	{{- if .HasVersion }}
 	return r.updateOne(ctx, id, update, nil)
@@ -3988,6 +4002,11 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	}{{ end }}
 	{{- end }}
 	{{- end }}
+	{{- if .Fences }}
+
+	// Each fence the update's columns advance moves on by one (D119).
+	setClauses = append(setClauses, fenceBumps({{ lowerFirst .TypeName }}Fences, setClauses)...)
+	{{- end }}
 
 	if len(setClauses) == 0 {
 		return nil, fmt.Errorf("no fields to update")
@@ -4087,6 +4106,11 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 {{- end }}
 
 // UpdateMany updates multiple {{ .TypeName }} records matching the filter
+{{- if .Fences }}.
+// It advances each @fenced field that covers a column the update sets by
+// one in every row it updates, and writes one the update sets itself as
+// it stands (D119), so a filter on that field compares what a caller read.
+{{- end }}
 func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Filter, update *{{ .TypeName }}Update) (int, error) {
 	{{- if .GenericJSONListFields }}
 	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
@@ -4192,6 +4216,11 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		return 0, ErrNoUserInContext
 	}{{ end }}
 	{{- end }}
+	{{- end }}
+	{{- if .Fences }}
+
+	// Each fence the update's columns advance moves on by one (D119).
+	setClauses = append(setClauses, fenceBumps({{ lowerFirst .TypeName }}Fences, setClauses)...)
 	{{- end }}
 
 	if len(setClauses) == 0 {
