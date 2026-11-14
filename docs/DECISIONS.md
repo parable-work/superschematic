@@ -13626,13 +13626,13 @@ This entry records the design before any of it is built.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| A project defines its types at build time or at run time, never both. A runtime type never references a build-time row, a build-time table never holds a runtime type's id, and no runtime schema adds fields to a build-time table. | A project of both: references across two layouts, transactions that span them, and custom fields on a build-time table |
-| A runtime project keeps its types in fixed tables: schema versions, instances with a schema column and a JSON `data` column, and one shared sub-table, keyed by schema and id, for each behavior the project lets its types compose. The DB service's migrations create them, from the behaviors it lists. Publishing writes rows and never a table, so servers keep D46's grants of SELECT, INSERT, UPDATE and DELETE alone, and the engine role and schema of D58's amendment go. A new version may only add, as D16 has it. The core and the adapter are the build-time project's; only the layout differs. | Tables created when a schema is published, which needs DDL from servers that hold none |
+| A project defines its types at build time or at run time, never both. A runtime type never references a build-time row, a build-time table never holds a runtime type's id, and no runtime schema adds fields to a build-time table. (Amended by D117: three modes, development, runtime and compiled, with a database in one.) | A project of both: references across two layouts, transactions that span them, and custom fields on a build-time table |
+| A runtime project keeps its types in fixed tables: schema versions, instances with a schema column and a JSON `data` column, and one shared sub-table, keyed by schema and id, for each behavior the project lets its types compose. The DB service's migrations create them, from the behaviors it lists. Publishing writes rows and never a table, so servers keep D46's grants of SELECT, INSERT, UPDATE and DELETE alone, and the engine role and schema of D58's amendment go. A new version may only add, as D16 has it. The core and the adapter are the build-time project's; only the layout differs. (Amended by D117: this layout is development mode's. A runtime type is a table of its own, whose DDL a publish plans and the migration runner applies, so servers still hold no DDL.) | Tables created when a schema is published, which needs DDL from servers that hold none |
 | A runtime type has `Relation<>` to another runtime type, held as an id in its JSON and checked by the adapter; `@unique`, `@key`, `@index` and list filters, through tables of their own as the engine keeps them now; `@searchField`, through a shared full-text table; and vectors, through a shared table keyed by schema, id and field. It has no reports, projections or queues. A feature reaches runtime types only once it has a build-time counterpart, so a runtime project expresses nothing a build-time one cannot. | Every schema feature over the shared tables at once |
 | Its routes (define, publish, the instance operations, the behaviors' operations, describe, the event stream and MCP) come from a Rust request handler that is pure as well: a request and its caller in, reads asked, a response and a change set out. D58 made the layer neutral to the transport; this makes it free of I/O. The access policy stays data, as D58 has it. | The routes in each language, which D58 turned down |
 | Its users are D50's: the fixed tables include its user, role and session shapes, and it serves the session routes every server serves. | Identity of the runtime project's own |
 | A library in each language mounts the handler and runs the adapter, for a server written by hand, as `examples/engine-notes` is; a prebuilt server image runs one with no code. It deploys through a stack: the infrastructure stays declared at build time, and only its data types are defined at run time. | A runtime project outside the stack model, with a deploy of its own |
-| A whole runtime project converts, once, into a build-time project, for performance: each published schema is written as a class (`format --to=ts`), its behaviors as `implements` and field types; the build writes its tables; a generated data migration moves each type's rows from the shared tables into its own, and each behavior's rows into the type's sub-tables; and clients move to the generated routes. | Converting a type at a time, a project of both until the last; runtime routes kept for a converted type |
+| A whole runtime project converts, once, into a build-time project, for performance: each published schema is written as a class (`format --to=ts`), its behaviors as `implements` and field types; the build writes its tables; a generated data migration moves each type's rows from the shared tables into its own, and each behavior's rows into the type's sub-tables; and clients move to the generated routes. (Amended by D117: a runtime database already holds the tables a build writes, so the move to compiled copies no rows.) | Converting a type at a time, a project of both until the last; runtime routes kept for a converted type |
 
 ### What it amends
 
@@ -18383,3 +18383,118 @@ test of a worker's `drain` driven by a host with no runtime, and of a
 cookie's sign-in from the site's page and an API key through the binary; a command that writes the target's
 authoring types; a route's own limits under `main.rs`, which reads every
 body up to 2 MiB; and the manual-route operations, which the build names.
+
+## D117. A project's schemas run in one of three modes, development, runtime and compiled: development keeps rows as JSON, a runtime type is a table whose DDL a publish plans and applies, and compiled is the build (D16, D27, D46, D103 amended)
+
+D103 gave a project two ways to define its types, at build time or at
+run time, and gave a runtime project fixed tables: instances with a
+schema column and a JSON `data` column, so that publishing writes rows
+and no server runs DDL. That put two needs in one layout.
+
+One is a person working out a schema. They change it every few minutes,
+make a handful of sample rows and look at whether the shape is right.
+Nothing they store matters tomorrow, and a store that asks for a
+migration at each change is in their way.
+
+The other is an application that runs where no build can: an interactive
+environment, a hosted builder say, where the schemas are TypeScript that
+a person or an agent edits, and a change has to take effect with no
+generator, no compiler of the generated code and no CI between the edit
+and the running app. Its rows do matter. For it the JSON column is the
+store D103 took the behaviors off: a relation is an id nothing in the
+database holds to a row, a unique field is an expression index, a report
+or a projection has no columns to read, and leaving for a build is a data
+migration of every row.
+
+So the JSON layout is right for the first and wrong for the second, and
+D103's rule that servers hold no DDL, which chose it, is answered another
+way below. This entry names three modes and gives the second one tables.
+D103's steps 6 and 7 are not built, so nothing built is undone: the
+engine's store as it stands (D16, D58) is what development mode is built
+from. It records the design before any of it is built.
+
+### Three modes
+
+| Mode | It is for | Rows live in | A schema change is | Served by |
+|------|-----------|--------------|--------------------|-----------|
+| development | working out schemas against sample data: low volume, fast iteration | fixed tables, each instance's own fields a JSON `data` column, or a database in memory | a publish that writes rows and takes effect at once | D103's runtime handler |
+| runtime | an environment that cannot generate and compile code, a hosted builder say, whose schemas change while it runs | the type's own table, as a build would write it | a publish that plans DDL (D27) and applies it | D103's runtime handler, over those tables |
+| compiled | a standard project: generated code, a build, CI and a deploy | the type's own table | a migration plan a deploy applies | generated servers |
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A mode is how an environment holds and serves a project's types. The schemas are the same in all three: tables written as classes in the schema language, with their behaviors as field types and `implements` (D103), or the documents `format --to=json` writes from them. Nothing in a schema names a mode. | A schema form per mode, which makes moving between modes a rewrite; a decorator that names the store, which puts a deployment's choice in a declaration |
+| A database is in one mode. No table of a compiled or runtime database holds the id of a development row, and no publish adds a field to a table a build owns. A project may run in different modes in different environments: a development store beside a person's editor, a runtime environment its users reach. | D103's two kinds of project, which made the sketch and the running app one thing; modes mixed in one database, which is D103's project of both, with references and transactions across two layouts |
+| A mode expresses nothing the next cannot: what development accepts runtime accepts, and what runtime accepts a build accepts, with the same meaning. A schema feature reaches development or runtime only once compiled has it, as D103 has it. So a project moves one way, development to runtime to compiled, and never has to be rewritten to move. | A feature of runtime's own, which strands a project there |
+| Where the store is opened says the mode: an option of the library that mounts the handler, and for a database a stack places, a setting of the environment. A database that names none is compiled. | A mode inferred from what the database holds, which a half-migrated file answers wrongly |
+
+### Development mode
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Development mode is D103's runtime layout, kept under this name: schema versions, instances with a schema column and a JSON `data` column, and one shared sub-table per behavior, in a SQLite file, a Postgres schema, or a SQLite database in memory that goes with its process. Publishing writes rows and never a table, so it needs no migration, no DDL and no compiler beside it. | Tables per type here too, which puts a plan between every edit and its sample row |
+| It has no compatibility rule. D16's rule, that a new version may only add, protects rows that matter, and these do not: a publish may rename, retype, remove and tighten. A publish that stored rows no longer satisfy changes nothing and lists them with what each fails, unless it says to discard them; then they are deleted in the publish's transaction. | D16's rule, which stops a person at their first rename; keeping rows the type no longer describes, which every read then has to explain; discarding without being told to |
+| It promises a table's answers and not a table's speed. A unique field refuses a second holder, a relation refuses an id no row has, and a filter, a sort and a search answer as runtime's would, by whatever means the store has. Nothing in it is tuned for volume, and the documentation and the agent skill (D76) say it is not where an application's data goes. Nothing refuses a person who puts it there. | Development answers that differ from a table's, which makes the sample misleading; a row limit that refuses, which leaves no way out |
+
+### Runtime mode
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A runtime type is a table: the table sqlgen writes for the class. A field is a column, a relation a foreign key, a behavior's fields columns of the table and its collections sub-tables (D103, "A build-time project"), and indexes and constraints DDL (D83). The database holds the runner's two state tables and the model it was last taken to (D27). It cannot be told from a compiled project's database. | D103's fixed tables, which are development's now; a third layout of runtime's own, which keeps the data migration at the move to compiled |
+| A publish is a migration. It plans from the model the database recorded to the model of the schemas published (D27), and the runner applies the plan, expand and contract back to back as `local` runs them: no server built against the old columns exists, since the handler reads its layout from the recorded model and reads it again when the model's hash moves. Every server of the environment follows a publish with no restart. A publish takes the database's schemas whole, a model being a database's and not a type's. | DDL the handler composes field by field, a second writer of DDL beside sqlgen whose tables then differ from a build's; a publish per type, which cannot add two tables that refer to each other |
+| D27's hazards replace D16's compatibility rule. A plan is asked for without applying it, a route and a tool beside publish, and shows its steps and each one's hazards. A publish names the hazards it allows and the renames it means, as `--allow` and `--rename` do, and one with a `destructive` or `data-dependent` hazard nobody allowed is refused with the hazard's id. | The add-only rule, which refuses the rename, the drop and the tightening this mode exists to make; applying whatever the diff says, which drops a column on a typo |
+| The planner is the compiler's: its reader, sqlgen's model and D27's diff. A runtime environment carries the `superschematic` binary and runs those and nothing else of it: no generator and no language toolchain. The same binary reads the TypeScript a person edits into documents. `migrate plan` takes documents and a recorded model, with no service directory and no git ref. | A second planner in Rust beside the core, some 13,000 lines of Go to hold a port to, whose model's hash must equal sqlgen's for the move to compiled to be free; a small planner of additions only, which is the add-only rule again |
+| A publish carries its plan. Where the compiler runs beside the handler, the library makes the plan there; where it cannot, on a Worker say, the plan is made where the compiler is, a CLI or the platform's own service, and sent with the schemas. The runner refuses a plan whose `from` is not the recorded model, as it does any (D27), so a plan made elsewhere is held to the database it meets. | Refusing runtime mode on a platform with no process to spawn; the planner compiled to WebAssembly first, which may follow |
+| The plan is applied by the environment's migration runner, the one a deploy uses, and never over a serving connection: the process itself on a SQLite file (D116), `superschematic-migrate` beside a local Postgres, the migration job on gcp (D46). Servers keep D46's grants of SELECT, INSERT, UPDATE and DELETE, which the runner extends to a new table as it does after a deploy's phase. | DDL granted to every server, D58's engine role, which D103 removed; a role per server that owns one schema, which each new platform then has to learn |
+| The handler and the adapter are D103's: the pure request handler, with the access policy as data, and the adapter answering the core's reads and applying its change sets. The adapter reads the build-time layout from the recorded model where a compiled server reads it from generated code. | Generated repositories, which need the build this mode has none of |
+| A runtime type has every schema feature whose effect is DDL a plan carries and reads the handler makes from the layout: relations, unique fields, indexes, constraints, search fields, vectors, and the views of reports and projections. What needs code a build or a person writes stays compiled's: an operation with a body, a queue's handler, a job. | D103's list for runtime types, which was drawn for the JSON layout |
+
+### Moving between modes
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Development to runtime is a publish of the same schemas to a runtime database, whose first plan starts from an empty database. Sample rows stay behind unless asked for; when asked, each is replayed as a create through the type's rules, and the ones refused are listed. | Copying rows across layouts by SQL, around the rules; carrying sample data by default |
+| Runtime to compiled moves no rows. The schemas are the classes the project already has, or `format --to=ts` writes them (D103); the build's first plan starts from the model the database recorded, which `--from` takes (D27), and is empty unless the compiler changed; and the generated servers take over the tables. Clients move to the generated routes, as D103 has it. | D103's conversion, a generated data migration from the shared tables into each type's own, which is needed now only for an engine file of today's |
+| A General schema of D16's, one instance type and its behaviors, publishes as the table `format --to=ts` writes it as, so `engine-notes` and `engine-jobs` run in development and in runtime mode with their schemas as they are. | A second document form for runtime mode |
+
+### What it amends
+
+D103: "a project defines its types at build time or at run time, never
+both" becomes three modes, with a database in one. Its build-time project
+is compiled mode, unchanged. Its runtime project divides: the fixed tables
+and "publishing writes rows and never a table" are development mode's,
+and runtime mode has the build-time layout. "A new version may only add"
+holds in neither: development has no rule and runtime has hazards. The
+conversion keeps its classes and its routes and loses its data migration.
+The handler, the adapter, the library, the image and the user model are
+as D103 has them, in both modes. D16: the compatibility rule goes with
+the store it protected, once development mode replaces that store. D27: a
+plan may be made at run time, from documents, by a publish. D46: a
+publish reaches the migration runner, and a server still holds no DDL.
+D116 stands: an embedded binary carries recorded plans and no compiler,
+and an embedded environment is compiled.
+
+### Left to the change that builds each
+
+- A namespace (D16) in runtime mode: a Postgres schema or a file of its
+  own, each with its model, or a column of every table.
+- An API service's `@tableOperation` methods (D106) served by the handler
+  with no build, so that a runtime environment's routes are the compiled
+  project's and clients do not move at the conversion.
+- Which platforms run runtime mode first, and a publish's wait where the
+  migration runner is a job.
+- The setting's name, and the modes' own.
+
+### The order of the work
+
+1. Development mode: D103's step 6 as written, under this name, with the
+   database in memory and a publish that discards.
+2. The planner from documents: `migrate plan` over schema documents and a
+   recorded model, and the plan as a route and a tool.
+3. Runtime mode on a SQLite file and a local Postgres: the adapter's
+   layout read from a recorded model, the handler over it, and a publish
+   through the runner. Then a platform whose runner is a job.
+4. The moves: development to runtime with rows, runtime to compiled by
+   the recorded model, and D103's step 7.
+
+The names and rules are reversible until the first release.

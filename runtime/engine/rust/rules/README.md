@@ -706,7 +706,9 @@ A build-time project's layout is the type's own table (D103, "A build-time
 project"); a runtime project's is its fixed tables, an instance's own fields
 in a JSON column and each behavior's rows in a shared sub-table keyed by
 schema and id ("A runtime project"). The core and the adapter are the same
-for both; only the layout differs.
+for both; only the layout differs. D117 names that fixed layout
+development mode's, and gives runtime mode the build-time layout, read
+from the model the database recorded; neither is built.
 
 ## The adapter
 
