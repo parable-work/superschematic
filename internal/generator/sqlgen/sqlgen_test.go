@@ -23,7 +23,7 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 // against their golden copies. Regenerate with:
 // go test ./internal/generator/sqlgen -run TestWriteDDLGolden -update
 func TestWriteDDLGolden(t *testing.T) {
-	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db", "fixture-version-graph-db", "fixture-optimistic-db", "fixture-list-defaults-db", "fixture-user-model-db", "fixture-queue-db", "fixture-ddl-db", "fixture-vault-db", "fixture-naming-db", "fixture-vectors-db", "fixture-queries-db", "fixture-workflow-db", "fixture-timers-db", "fixture-reactions-db", "fixture-approvals-db", "fixture-agents-db", "fixture-seats-db", "fixture-schedules-db"} {
+	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db", "fixture-version-graph-db", "fixture-optimistic-db", "fixture-list-defaults-db", "fixture-user-model-db", "fixture-queue-db", "fixture-ddl-db", "fixture-vault-db", "fixture-naming-db", "fixture-vectors-db", "fixture-queries-db", "fixture-workflow-db", "fixture-timers-db", "fixture-reactions-db", "fixture-approvals-db", "fixture-agents-db", "fixture-seats-db", "fixture-schedules-db", "fixture-state-machine-db", "fixture-fenced-db"} {
 		t.Run(svc, func(t *testing.T) {
 			schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 			if err != nil {

@@ -45,6 +45,9 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		t.Fatalf("load fixture-user-model-db: %v", err)
 	}
 
+	stateMachineEnums, _ := loadFixture(t, stateMachineEnumService)
+	stateMachineDB, _ := loadFixture(t, stateMachineService)
+
 	behaviorsSchema, behaviorsRegistry := loadFixture(t, behaviortypestest.Service)
 
 	cases := []struct {
@@ -58,6 +61,10 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		// A User table adds identity.go, which declares IdentityDescriptor.
 		{name: identitytest.Service, schema: identitytest.Schema(t, identitytest.Options{Roles: true, Name: "displayName"})},
 		{name: "fixture-user-model-db", schema: userModelSchema},
+		// state_machines.go: a machine's helpers, one over an enum of a
+		// dependency (D118).
+		{name: stateMachineEnumService, schema: stateMachineEnums},
+		{name: stateMachineService, schema: stateMachineDB, deps: map[string]*ir.Schema{stateMachineEnumService: stateMachineEnums}},
 		// behaviors.go: each behavior's fields (D58).
 		{name: behaviortypestest.Service, schema: behaviorsSchema, registry: behaviorsRegistry},
 	}

@@ -118,6 +118,13 @@ type Input struct {
 	// values without treating dependency enums as local declarations.
 	ExternalEnums map[string]*ir.EnumDef
 
+	// Dialects are the SQL dialects a DB service's config lists
+	// (outputs.sql.dialects), which the loader reads from the config. A
+	// fence's checks read them (D119): on SQLite an @optimistic table's
+	// bump is an update of its own. Nil when the loader has no config to
+	// read them from, which leaves the dialects' rules unchecked.
+	Dialects []string
+
 	// Naming supplies the npm scope that marks an import as a schema
 	// service reference. The loader fills it from loader.WithNaming; empty
 	// fields fall back to naming.Default().
@@ -265,6 +272,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkJobs(schema, r)
 	checkQueues(schema, r)
 	checkEnqueueOnChange(schema, r)
+	checkStateMachines(schema, in, r)
+	checkFences(schema, in, r)
 	checkWorkers(schema, r)
 	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)

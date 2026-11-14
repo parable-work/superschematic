@@ -105,6 +105,9 @@ type differ struct {
 	// droppedFunctions are the ones the new model does not have.
 	functionTo       map[string]string
 	droppedFunctions map[string]bool
+	// replacedFunctions are the new model's functions whose definition the
+	// plan replaces in place, by name.
+	replacedFunctions map[string]bool
 
 	// alterations are the column changes that may need views or generated
 	// columns taken down around them; they become changes once grouped.
@@ -127,18 +130,19 @@ func newDiffer(from, to *Model, opts Options, impl dialect) (*differ, error) {
 		return nil, err
 	}
 	return &differ{
-		from:             from,
-		to:               to,
-		opts:             opts,
-		dialect:          impl,
-		renames:          r,
-		fromTables:       tablesByName(from),
-		toTables:         tablesByName(to),
-		dropped:          map[string]bool{},
-		functionTo:       map[string]string{},
-		droppedFunctions: map[string]bool{},
-		regenerated:      map[string]bool{},
-		seeds:            map[string]*change{},
+		from:              from,
+		to:                to,
+		opts:              opts,
+		dialect:           impl,
+		renames:           r,
+		fromTables:        tablesByName(from),
+		toTables:          tablesByName(to),
+		dropped:           map[string]bool{},
+		functionTo:        map[string]string{},
+		droppedFunctions:  map[string]bool{},
+		replacedFunctions: map[string]bool{},
+		regenerated:       map[string]bool{},
+		seeds:             map[string]*change{},
 	}, nil
 }
 

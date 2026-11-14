@@ -1,11 +1,11 @@
 ## Migration plan for `tasks-db` (sqlite)
 
-4 steps (3 expand, 1 contract), 7 hazards (2 destructive, 2 blocking, 2 compat, 1 copy-table).
+5 steps (3 expand, 2 contract), 7 hazards (2 destructive, 2 blocking, 2 compat, 1 copy-table).
 
 - From: `288da563a4c63dd5f6805bd32a1509d3501ad56808f1feefc1b419c76c5190d8`
-- To: `90b86dd1598f2aa16a543dabf48c1b96a8e578ad9575b62d6387781bfeec0297`
+- To: `c0386a186512d9f720437b2b2512ae0cdac9b297981d04995a5d641ebeb9ca50`
 - Between the phases (expanded): `d709077e86ae51c5261ddbd645ac68d3022b605a4af5ddf50a9a326955e3d355`
-- Plan: `6500e9f6f4eb3fbb6b1cdc16309e474e425f93608beb7e266a7293316bc57b8c`
+- Plan: `6d385d9c8129d0c4610bfd0d398c1a366ef04c934eb236271030ecc396a3e1a2`
 - Renames: `task.title=task.summary`
 
 | Class | Subject | Reader | Reason | ID |
@@ -77,7 +77,20 @@ CREATE INDEX "idx_task_summary_lower" ON "task" ((lower(summary)));
 
 Runs after the new servers roll out.
 
-**4. dropColumn** `table/comment/column/legacy_id`. Hazards: destructive, blocking.
+**4. createTrigger** `trigger/project/trg_project_status_transition_guard`.
+
+```sql
+CREATE TRIGGER "trg_project_status_transition_guard" BEFORE UPDATE OF "status" ON "project" FOR EACH ROW
+WHEN NEW."status" IS NOT OLD."status" AND (
+  OLD."status" IN ('archived')
+  OR NOT COALESCE(
+    (OLD."status" IS 'active' AND NEW."status" IN ('archived')), 0))
+BEGIN
+  SELECT RAISE(ABORT, 'project.status cannot make this move: its state machine does not list it');
+END;
+```
+
+**5. dropColumn** `table/comment/column/legacy_id`. Hazards: destructive, blocking.
 
 ```sql
 ALTER TABLE "comment" DROP COLUMN "legacy_id";

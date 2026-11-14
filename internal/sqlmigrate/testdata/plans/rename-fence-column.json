@@ -1,0 +1,70 @@
+{
+  "dialect": "postgres",
+  "expanded": "a402030387b66c9702fc9c171173bd10102c97ff3db4ef07168f1a698228bcd6",
+  "from": "67b00861c8030aae70e96960b765f9232bb64285f86d832296abb96f1fdee4fe",
+  "hash": "0c08e2dcb9f3d77c66489b6cb05b97e8ac5e253a737a095c9e464a88a78d6fea",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/rev",
+          "reason": "order.revision is renamed to order.rev, following Order.revision's @column: servers built from the previous version still use the old name.",
+          "subject": "table/order/column/rev"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN revision TO rev"
+      ],
+      "subject": "table/order/column/rev",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_revision_fence ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_revision_fence",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_rev_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Order.revision (D119):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.note, NEW.customer_id) IS DISTINCT FROM ROW(OLD.note, OLD.customer_id) THEN\n    IF NEW.rev IS DISTINCT FROM OLD.rev + 1 THEN\n      RAISE EXCEPTION 'order.rev must advance from % to %, not to %', OLD.rev, OLD.rev + 1, NEW.rev\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'order_rev_fence';\n    END IF;\n  ELSIF NEW.rev IS DISTINCT FROM OLD.rev THEN\n    IF NEW.rev IS DISTINCT FROM OLD.rev + 1 THEN\n      RAISE EXCEPTION 'order.rev must stay at % or advance to %, not move to %', OLD.rev, OLD.rev + 1, NEW.rev\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'order_rev_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_rev_fence",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_rev_fence\n  BEFORE UPDATE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_rev_fence()"
+      ],
+      "subject": "trigger/order/trg_order_rev_fence",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION order_revision_fence()"
+      ],
+      "subject": "function/order_revision_fence",
+      "transactional": true
+    }
+  ],
+  "to": "ecdfe3a85279d09013db540c6daa87d43a9b829148672a60a274f8c6ce1edfd1",
+  "toModel": null,
+  "version": 1
+}

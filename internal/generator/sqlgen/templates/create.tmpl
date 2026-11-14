@@ -181,6 +181,30 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 {{ $change.Trigger.SQL }};
 {{- end }}
 {{- end }}
+{{- if .StateGuards }}
+
+-- Create the functions and triggers that guard a @stateMachine's column:
+-- an update that makes a move the machine does not declare is refused,
+-- whatever writes it
+{{- range $guard := .StateGuards }}
+
+{{ $guard.FunctionSQL }};
+
+{{ $guard.Trigger.SQL }};
+{{- end }}
+{{- end }}
+{{- if .Fences }}
+
+-- Create the functions and triggers that hold a @fenced counter: an update
+-- that does not advance it as its declaration says is refused, whatever
+-- writes it
+{{- range $fence := .Fences }}
+
+{{ $fence.FunctionSQL }};
+
+{{ $fence.Trigger.SQL }};
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Create projection views: read-only relations over the tables above. A

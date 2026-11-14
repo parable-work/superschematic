@@ -1,0 +1,69 @@
+{
+  "name": "fixture-state-machine-db",
+  "kind": "General",
+  "rootType": "SignOff",
+  "types": {
+    "SignOff": {
+      "name": "SignOff",
+      "owner": "src/ticket.schema.ts",
+      "comment": "The sign-off a ticket's refund carries, kept as JSON. It is no table, so\nthe database guards nothing of it, and the types still say which step\nfollows which.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "step",
+          "typeRef": {
+            "name": "SignOffStep"
+          },
+          "required": true,
+          "default": "requested"
+        },
+        {
+          "name": "note",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ],
+      "jsonField": true,
+      "stateMachines": [
+        {
+          "field": "step",
+          "transitions": [
+            {
+              "from": "requested",
+              "to": [
+                "granted",
+                "refused"
+              ]
+            }
+          ],
+          "terminal": [
+            "granted",
+            "refused"
+          ]
+        }
+      ]
+    }
+  },
+  "enums": {
+    "SignOffStep": {
+      "name": "SignOffStep",
+      "owner": "fixture-state-machine-db",
+      "comment": "A step of a refund's sign-off.",
+      "values": [
+        {
+          "name": "Requested",
+          "serializedAs": "requested"
+        },
+        {
+          "name": "Granted",
+          "serializedAs": "granted"
+        },
+        {
+          "name": "Refused",
+          "serializedAs": "refused"
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ormOf, type Clauses, type OrmDefinition, type OrmPool, type OrmQueryable, type OrmTx } from './orm';
+import { fenceBumps, ormOf, type Clauses, type FenceDefinition, type OrmDefinition, type OrmPool, type OrmQueryable, type OrmTx } from './orm';
 import type { RowField } from './pgcodec';
 
 // The statements an ORM's transaction runs around its function (D89),
@@ -109,5 +109,40 @@ describe("a raw query's rows", () => {
     const inTx = await orm.transaction((tx: OrmTx<Record<string, never>>) => tx.query<{ id: string }>({ text: 'SELECT id FROM t', values: [] }, undefined, { decode: fields }));
     expect(inTx.rows[0]!.id).toBe('TKbHsHDO6x9RCjbs5c2u4');
     expect(await orm.exec('UPDATE t SET x = 1')).toBe(1);
+  });
+});
+
+describe("a table's fences", () => {
+  // The fences of fixture-fenced-db's tables, as its ./orm entry holds them
+  // (D119); the Postgres test of the generated package runs the
+  // repositories over them.
+  const plan = 'plan_version = delivery.plan_version + 1';
+  const run = 'run_version = delivery.run_version + 1';
+  const delivery: FenceDefinition[] = [
+    { column: 'plan_version', covers: ['address', 'courier_id'], bump: plan },
+    { column: 'run_version', covers: ['attempts', 'proof'], bump: run },
+  ];
+  const parcel: FenceDefinition[] = [{ column: 'version', bump: 'version = parcel.version + 1' }];
+  const depot: FenceDefinition[] = [{ column: 'revision', covers: ['"name"', 'deleted_at'], bump: 'revision = depot.revision + 1' }];
+
+  test('an update advances each fence that covers a column it sets, once, and none it sets itself', () => {
+    const cases: [FenceDefinition[], string[], string[]][] = [
+      [delivery, ['address = $1', 'updated_at = $2'], [plan]],
+      [delivery, ['courier_id = NULL'], [plan]],
+      [delivery, ['proof = EXCLUDED.proof', 'address = EXCLUDED.address'], [plan, run]],
+      [delivery, ['attempts = $1', 'proof = $2'], [run]],
+      [delivery, ['note = $1', 'updated_at = $2'], []],
+      [delivery, ['address = $1', 'plan_version = $2', 'attempts = $3'], [run]],
+      [delivery, ['plan_version = $1'], []],
+      [delivery, [], []],
+      [parcel, ['note = NULL'], ['version = parcel.version + 1']],
+      [parcel, ['note = $1', 'version = $2'], []],
+      [parcel, [], []],
+      [depot, ['capacity = $1'], []],
+      [depot, ['"name" = $1'], ['revision = depot.revision + 1']],
+      // A column is read whole: name_note is no write of name.
+      [depot, ['"name_note" = $1', 'name = $2'], []],
+    ];
+    for (const [fences, sets, want] of cases) expect(fenceBumps(fences, sets)).toEqual(want);
   });
 });

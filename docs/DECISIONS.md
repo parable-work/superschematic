@@ -18498,3 +18498,112 @@ and an embedded environment is compiled.
    the recorded model, and D103's step 7.
 
 The names and rules are reversible until the first release.
+
+## D118. A class declares the moves an enum field may make with `@stateMachine`: the build checks the graph, a DB table refuses any other move in a trigger on Postgres and SQLite, and the types say the same in Go, TypeScript, Python and Rust (D27, D83 amended)
+
+A ledger's row has a status: an enum, a column with the enum's CHECK
+(D83). Which status may follow which is said nowhere a build reads. It is
+a list in the SQL of a hand-written trigger, a set in each service that
+asks whether a row is finished, and a paragraph of prose, and the four
+drift: a state added to the enum is terminal in one and open in another.
+
+A table's Workflow (D103) is not the answer for such a row. Its states
+are text a config lists, its moves carry a permission and a `by`, and the
+behaviors' core makes them on an operation's path, so a script, a job's
+own SQL or psql moves the column as it likes. A ledger wants the
+opposite: no permission, no core, and a rule that holds whatever writes
+the row. A table takes one or the other for a field: a Workflow where
+people move a record and rules hear it, a state machine where the
+database must refuse a move no writer should make.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@stateMachine<T>({ field, transitions, terminal, fromNull? })`, from `@superschematic/schema`, on a class of any schema kind, once per field. `field` is a field typed by an enum: `E`, `Nullable<E>` or `Default<E, V>`. `transitions` maps a state to the states it may move to; `terminal` lists the states no update leaves; on a `Nullable` field `fromNull` lists the states a null may take, and `null` in a transition's list returns the field to null. TypeScript holds every state to the field's enum (`StateOf`, which reads the enum through `Wrapped<T>`), and `state-machine.typecheck.ts` holds what it refuses. | A member of `@superschematic/db` alone: an API or General type's status has the same graph, and its types the same helpers. A Workflow option that turns the permission off, which keeps its text states, its core and its operations. Naming the machine on the field (`status: StateMachine<E, {...}>`), where a transition keyed by an enum member is a type no decorator argument is. |
+| The IR holds it as written: `TypeDef.StateMachines`, each a `Field`, `Transitions` (a `From`, its `To` in the order written, and `ToNull`), `Terminal` and `FromNull`, every state the enum member's serialized value, which is what the column holds. The data forms write the same list under `stateMachines`. A TypeScript object's keys reach a decorator in no order, so the loader orders `Transitions` by the enum's members, in every form. | The member's name, which a generator would map back for every literal it writes. Keeping the order of the object's keys, which would need a second evaluator beside the one every decorator's argument goes through. |
+| An unchanged value is no move: every guard and every helper passes it, listed or not. An insert is not held: a row is born in the state its writer gives it. | A guard on INSERT, which needs a rule for a row created mid-way, as a backfill or a restore creates one. |
+| The build refuses, naming the type, the field and the state: a field the class lacks, or one no enum types, or a list or map of one; a state that is no member; a field with two machines, a state with two entries, a move listed twice; a terminal state with a transition; a transition with no target; `fromNull` or a return to null on a required field; an empty `fromNull`; a return to null with no `fromNull`, after which the row could not change; and a state the machine cannot reach from the field's `Default`, or from the null start when it has no default. A field with neither is not walked. What needs only the declaration is `ir.Schema.Validate`'s, and what needs the field and its enum is verification's (`verify.checkStateMachines`), which reads a dependency's enum from `Input.ExternalEnums`. | Warnings. Each is a guard that refuses every write, or a state no row reaches. |
+| On a DB service it also refuses: an engine type, whose instances no trigger watches; a `@queue` class; and a field a behavior owns, with the behavior's name, since that field's moves are the behavior's. A class that is no table (a `JsonField` type, a base, a projection) keeps the helpers and gets no guard, and a base's machine is its own, as its `@index` is: a table that extends it declares the machine again to be guarded. | A guard under a Workflow's status, two rules for one column that only one of them reports. |
+| A DB table gets, per machine, a guard in each dialect the service lists. Postgres: the function `<table>_<column>_transition_guard()` and the trigger `trg_<table>_<column>_transition_guard`, `BEFORE UPDATE OF` the column, which raise `check_violation` (23514) when the old value is terminal or the pair is not declared, with the two values in the message. SQLite has no trigger function: one trigger of the same name whose `WHEN` is the same rule and whose body is `SELECT RAISE(ABORT, ...)` with a fixed message, since `RAISE` takes a literal. A name over 63 bytes fails the build. | Postgres alone, which leaves a service of both dialects guarded in one. A CHECK, which cannot see the old value. |
+| The migration planner (D27) carries a guard as it carries a `@versioned` table's triggers, with one rule of its own, for any trigger that refuses a write (`Trigger.Refuses`): it is created in the contract phase, when no server of the previous version is left to make a move the new schema refuses; a changed one is dropped in expand and created in contract, so neither version's servers are refused a move their schema lists between the two; and a dropped one goes in contract, as every trigger does. A rename of the guard's table or column is a change, since the guard's name and its function read both; one on a table the plan itself creates is created with the table, in expand, since no server of a previous version writes a table it has never had, and so a plan from nothing, which is `create.sql`, has no contract step. On Postgres the trigger's statement does not change when the machine does, so a change is the function's: the planner asks whether the function a trigger executes is replaced. | Creating it in expand, as a trigger that only adds work is: the previous version's servers would be refused from the first step. Replacing in place, which refuses the new servers' new moves until contract or the old servers' old ones from expand. A guard of both versions' moves between the phases, which is the tighter rule and needs the planner to read a machine, not a trigger's text: left below. |
+| The types say the same, from one walk of the IR. Go, in the types module's `state_machines.go`: `<Type><Field>Terminal() []E`, a new slice a call, and `<Type>CanTransition<Field>(from, to) bool`, over `*E` on a nullable machine. Python, on the model: `<FIELD>_TRANSITIONS`, `<FIELD>_TERMINAL` and the classmethod `can_transition_<field>`. TypeScript, in the types package's `state-machines.ts`: `<type><Field>Transitions`, `<type><Field>Terminal` and `<type>CanTransition<Field>(from, to)`, over `E \| null` on a nullable machine. Rust, in the types crate's `state_machines.rs`: `<TYPE>_<FIELD>_TERMINAL` and `<type>_can_transition_<field>(from, to)`, over `Option<E>`. An enum a dependency owns is named as a field of its type names it, its members read from the dependency's schema (`codegen.ExtractStateMachines`), and a machine whose enum no schema of the build holds fails the build; the Python module imports that dependency outright, without the `Any` it falls back to for a type it only annotates, since the class body names the enum's members. The two tables that are data keep their language's shape: Python's lists the states that have a move, null among its keys when the machine has a `fromNull`, and TypeScript's is a `Record` of every member, empty for one with no move, with no entry for null, which `<type>CanTransition<Field>` answers for. A helper whose name is another helper's, or a type's, an enum's or a model's field's, fails the build with both named. A class the language writes no type for has no helper there: a base has them in Go, TypeScript and Rust, and none in Python, where they are the model's. | Go and Python alone, the two the ledger's services are written in: the four languages validate alike everywhere else, and a TypeScript or Rust service would copy the list again. A table of the machine as data in each, read at run time, where a `switch` or a `match` is checked by its compiler. |
+| One test holds them to one another: for a fixture's machines, every pair of states, null among them, is asked of the four helpers and tried against the guard on Postgres and on SQLite, and the six answers are one (`internal/generator/parity`). | A test per tier against its own golden, which passes while two tiers disagree. |
+| The TypeScript writer writes a machine back as the decorator, its states as the enum's members, and `superschematic catalog` lists it from the registry. | |
+
+Left: a generated server answers a guard's refusal as it answers any
+refused write it does not know, where a 409 that names the two states
+would say more; a `@tableOperation` update that asks the helper before it
+writes; between a migration's phases, a guard of both versions' moves in
+place of none; a machine on an imported enum in a JSON or YAML schema
+file, which has no resolver for a dependency's enum and is refused there;
+a SQLite file read with a rename of a guarded column, whose guard of the
+old name is then a trigger the read does not know and the plan is told to
+drop; and a team's own names for a machine's states.
+
+Status: built. The declaration's rules are held by `ir/state_machine_test.go`,
+the field's and the enum's by `internal/loader/verify/state_machine_test.go`,
+and the three authoring forms by `internal/loader/state_machines_test.go`
+and `internal/writer/state_machine_test.go`, over the fixture
+`fixture-state-machine-db`, whose `accountStatus` is typed by the enum of
+`fixture-state-machine-enums`. `TestStateMachineGuardsOnPostgres` and
+`TestStateMachineGuardsOnSQLite` (`internal/sqlmigrate`) try every pair
+of values against the guards, `TestStateMachineGuardPhases`,
+`TestRefusingTriggerPhases` and `TestEnqueueTriggerPhasesUnchanged` hold
+the planner's rule, and the plan cases converge on both databases.
+`TestGeneratedStateMachineHelpers` (`typegen`, `pygen`) and
+`TestStateMachineHelpers` (`tsgen`, `rustgen`) run the helpers in their
+languages, and `TestStateMachineParity` (`internal/generator/parity`)
+holds the four helpers and the two guards to one answer on every pair.
+`examples/migrations` adds a machine in its second version, and its check
+finds no guard between the phases and the guard after `contract`.
+
+## D119. A table names a counter every covered write advances by one with `@fenced`: a trigger on Postgres and SQLite refuses a write that does not, and the generated repositories advance it themselves (D27, D79, D116 amended)
+
+A writer that compares a counter in its WHERE clause, `WHERE id = $1 AND
+version = $2`, knows no other write came between its read and its write,
+if every writer advances the counter. Nothing makes one: a writer that
+forgets the bump breaks every compare-and-set that reads the row, in
+silence.
+
+`@optimistic` (D17) is one such counter, `_version`, which the database
+itself bumps on every update. It is the whole row's, and a row has one. A
+ledger's row is written by two parties that do not wait on one another: a
+planner moves the plan's columns, a worker the execution's. Under one
+counter each would fail the other's compare. Such a row holds two
+counters the schema declares, each over its own columns, and a writer
+advances the one whose columns it writes: that is in the write, where a
+trigger can check it and cannot do it, since a trigger does not know
+which writer it is.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@fenced<T>({ field, covers? })`, from `@superschematic/schema`, on a table of a DB schema. `field` is a required integer field of the class, the fence. Without `covers`, every update of a row sets the fence to the stored value plus one. With `covers`, a list of the class's fields, an update that changes one of them does, and any other update keeps the fence or adds one: it never skips a value, moves it back or sets it null. A class has several fences only when each lists its `covers`, and no field is in two lists. An insert is not fenced. TypeScript holds `field` to a number that is never null (`FenceFieldOf`) and `covers` to the class's fields. | Options on `@optimistic`, whose counter is the database's to bump and is no field of the class. A trigger that advances the fence itself: with two fences it advances both or guesses, and a writer that named the value it read would be refused for adding one. |
+| The IR holds `TypeDef.Fences`, each a `Field` and its `Covers`, and the data forms write the same under `fences`. | |
+| The build refuses, naming the type and the field: a fence field the class lacks, one that is nullable, one whose column is not `SMALLINT`, `INTEGER` or `BIGINT`, a relation among them, one a `@stateMachine` (D118) governs, and one two fences name; a class with several fences where one has no `covers`; an empty `covers`; and a covered field that the class lacks, that stores no column, whose column `IS DISTINCT FROM` cannot compare (`POINT`, a PostGIS type, as in D80), that is listed twice, that is a fence's own field or another fence's, or that two fences cover. A relation is its key's column, as in `@enqueueOnChange` (D80), and one the database itself rewrites is refused: a covered relation whose `onDelete` is `SET NULL`, and a fence without `covers` on a table that has one. `CASCADE`, `RESTRICT` and `NO ACTION` update no row and are taken; the check lists those, so an action the IR gains later is refused until it is listed. That action is an update no writer makes, so it advances nothing, and the trigger would refuse the delete of the row it names. | Passing a referential action in the trigger, which SQLite cannot tell from any other update, and which would change a covered column under a reader that compared the fence. |
+| It also refuses what no generated writer would follow: a class that is no table, a `@queue` class and an engine type; a member of a version graph, whose engines write its rows; a table that composes a behavior, since the behaviors' core then writes its rows, the table's own fields among them, with statements of its own that advance no fence, and the repository's update, upsert and soft delete go through it; and, in a service that lists `sqlite`, a fence without `covers` on an `@optimistic` table, whose bump there is an update of its own that sets `_version` alone. | Advancing a fence in the core's three adapters, which is their statements, their layouts and both recorded corpora: left below. |
+| A table gets, per fence, a trigger in each dialect the service lists. Postgres: the function `<table>_<column>_fence()` and the trigger `trg_<table>_<column>_fence`, `BEFORE UPDATE` of the row, which raise `check_violation` with the constraint `<table>_<column>_fence` and the stored, the expected and the written value in the message; covered columns are compared as one row, `ROW(NEW...) IS DISTINCT FROM ROW(OLD...)`. SQLite: one trigger of the same name whose `WHEN` is the same rule, column by column with `IS NOT`, and whose body is `SELECT RAISE(ABORT, ...)` with a fixed message. A name over 63 bytes fails the build. The rule is of values, not of statements: a covered column set to the value it holds is no change, and passes with the bump or without; a write of the fence alone passes when it keeps the value or adds one, and with no `covers` only when it adds one; and a null fence is the trigger's to refuse, since it fires before the column's NOT NULL. The stored value plus one is worked out only for a write it decides, so an update of other columns passes on a row whose fence is at its type's last value. | |
+| The migration planner places a fence's trigger by D118's rule for a trigger that refuses a write: created in contract, a changed one dropped in expand and created in contract, dropped in contract. So the previous version's servers, whose repositories advance nothing, are never refused. | |
+| The generated repositories advance a fence themselves, in Go, TypeScript and Rust, on each dialect they run. `sqlutil` writes it once, as it writes every statement (D79): a table's model lists its fences, and an update, an `UpdateMany` and the update half of an upsert add `<fence> = <table>.<fence> + 1` once when the columns they set include one the fence covers, or any column when it has no `covers`; the stored value is named by its table, since Postgres reads a bare column in `ON CONFLICT DO UPDATE` as ambiguous. Which columns a write sets is known when it runs, so each language holds the rule once, over the table's fences as data: `fenceBumps` in the Go module's `fences.go`, `fenceBumps` in the TypeScript runtime and `plan::fence_bumps` in the Rust one. A stamp the repository adds (`updated_at`) is a column the write sets, and counts when a fence covers it. A column the write sets to the value it holds counts, which the trigger allows. A soft delete and a reseal, whose columns are fixed, carry the bump in their statement when a fence covers them. So a `@tableOperation` (D106), which writes through the repository, needs nothing of its own. | Leaving the bump to the caller, as a hand-written writer has it: every update through a repository would be refused, and with it every table operation, until each caller read the row and wrote the counter. Advancing only when a covered column's value changed, which the statement cannot know without the row. |
+| A write that sets the fence field itself is written as it stands, with no bump added, and the trigger judges it. So a caller that read 4 may write 5, and its compare is a filter on the fence field (`UpdateMany`). A snapshot update, which sets every field from its input, sets the fence so, and its caller writes the next value. An upsert that sets an encrypted field beside a covered one is two statements (D79), and each advances the fence. | Leaving the field out of an update's type, which takes away the one way to write the value a caller compared. A second assignment beside the caller's, which SQL refuses. |
+
+Left: the behaviors' core advancing a fence, and with it a fence on a
+table that composes a behavior; a compare-and-set of a repository's own,
+`UpdateOneIf<Field>`, as `UpdateOneIfVersion` is `_version`'s; a fence on
+a version graph's member; and a generated server's answer to a fence's
+refusal, which is any refused write's.
+
+Status: built. The declaration's rules are held by `ir/fence_test.go`,
+the table's, the fields' and the service's by
+`internal/loader/verify/fence_test.go`, and the three authoring forms by
+`internal/loader/fences_test.go` and `internal/writer/fenced_test.go`,
+over the fixture `fixture-fenced-db`. `TestFencesOnPostgres` and
+`TestFencesOnSQLite` (`internal/sqlmigrate`) run one script of writes
+against the triggers, the statements the repositories send among them,
+and `TestFencePhases` and `TestFenceFollowsRenames` hold the plans.
+`internal/generator/sqlutil/fence_test.go` holds the rule the three
+repositories share. The Go repositories are run under the triggers on
+Postgres by `TestFencesOnPostgres` and
+`TestFenceOverAnEncryptedFieldOnPostgres` (`ormgen`), the TypeScript ones
+by `TestRepositoriesOnPostgres/fixture-fenced-db` (`tsgen`), and the Rust
+ones on SQLite and Postgres by `TestFencesOnSQLiteAndPostgres`
+(`rustgen`); a Go or a TypeScript repository runs on Postgres alone, as
+before, so SQLite's are Rust's.

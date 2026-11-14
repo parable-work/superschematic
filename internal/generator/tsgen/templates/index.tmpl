@@ -48,3 +48,8 @@ export * from './mask';
 // Re-export the identity descriptor
 export { identityDescriptor } from './identity';
 {{- end}}
+{{- if .StateMachines}}
+
+// Re-export the state machines
+export * from './state-machines';
+{{- end}}
