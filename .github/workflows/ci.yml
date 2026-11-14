@@ -131,7 +131,8 @@ jobs:
     # and runs every generated module, and its packages queue on one Cargo
     # target directory, so it needs longer than an hour: at sixty minutes
     # the release candidate was cancelled in the root module's tests, with
-    # the ten modules after it and every later step not started.
+    # the ten modules after it and every later step not started. The root
+    # module's tests alone take about a hundred minutes there.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 240 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -418,8 +419,11 @@ jobs:
           # the shared target directory, and the wait counts against each
           # package's limit: in the full tier cli and internal/generator
           # each waited out thirty minutes with no test of theirs running
-          # for more than half a minute.
-          GO_TEST_TIMEOUT: ${{ github.event_name == 'pull_request' && '30m' || '150m' }}
+          # for more than half a minute. With the wait, the longest there,
+          # internal/generator/servergen, takes fifty-six minutes, and cli,
+          # internal/generator and internal/sqlmigrate thirty-three to
+          # thirty-six each.
+          GO_TEST_TIMEOUT: ${{ github.event_name == 'pull_request' && '30m' || '90m' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/rules-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/pulumi extensions/topcoat cmd/superschematic; do

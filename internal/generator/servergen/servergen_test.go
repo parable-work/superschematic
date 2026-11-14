@@ -1646,9 +1646,14 @@ func TestTheReleaseDockerfileBuildsAnImageThatServes(t *testing.T) {
 		t.Fatalf("%s does not pin the archives' digest %s: %v\n%s", dockerfile, r.Archives[platform], err, data)
 	}
 
-	server := docker(t, "run", "-d", "-p", "127.0.0.1::80", "busybox:1.37", "sh", "-c", "mkdir -p /www && exec httpd -f -p 80 -h /www")
+	// The file server holds the tarball before it starts: docker cp makes
+	// /www of the tarball's directory in the created container, where a
+	// copy into a running one raced the command that made the directory
+	// and lost on a slow runner.
+	server := docker(t, "create", "-p", "127.0.0.1::80", "busybox:1.37", "httpd", "-f", "-p", "80", "-h", "/www")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", server).Run() })
-	docker(t, "cp", tarball, server+":/www/")
+	docker(t, "cp", filepath.Dir(tarball)+"/.", server+":/www")
+	docker(t, "start", server)
 	address := firstLine(docker(t, "port", server, "80/tcp"))
 
 	image := fmt.Sprintf("superschematic-servergen-test:%d", stamp)
