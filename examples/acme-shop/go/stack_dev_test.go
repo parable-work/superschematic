@@ -1339,11 +1339,13 @@ func startStackDev(t *testing.T, binary, stack string, flags ...string) *stackDe
 // resolved into outputRoot and checks each server's /readyz. A first run
 // in an output root compiles every crate shop-stock's server, worker and
 // job build with; later runs reuse them from the environment's Cargo
-// target directory there, until the output root is emptied.
+// target directory there, until the output root is emptied. The first run's
+// release builds take about ten minutes on a hosted CI runner with nothing
+// cached, so the stack has twenty to come up.
 func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, servers ...string) environment {
 	t.Helper()
 	started := time.Now()
-	deadline := started.Add(10 * time.Minute)
+	deadline := started.Add(20 * time.Minute)
 	for !strings.Contains(dev.output.String(), "is running:") {
 		select {
 		case err := <-dev.exited:
@@ -1352,7 +1354,7 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the stack did not come up in 10 minutes")
+			t.Fatal("the stack did not come up in 20 minutes")
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

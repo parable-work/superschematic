@@ -127,7 +127,12 @@ jobs:
     name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The quick tier finishes in about fifty minutes. The full tier compiles
+    # and runs every generated module, and its packages queue on one Cargo
+    # target directory, so it needs longer than an hour: at sixty minutes
+    # the release candidate was cancelled in the root module's tests, with
+    # the ten modules after it and every later step not started.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 240 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -409,13 +414,17 @@ jobs:
           # The quick tier: -short skips the tests that compile and run
           # generated Go, TypeScript, Rust and Python modules.
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
+          # A package's limit. Packages that run cargo queue on its lock of
+          # the shared target directory, and the wait counts against each
+          # package's limit: in the full tier cli and internal/generator
+          # each waited out thirty minutes with no test of theirs running
+          # for more than half a minute.
+          GO_TEST_TIMEOUT: ${{ github.event_name == 'pull_request' && '30m' || '150m' }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/rules-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/pulumi extensions/topcoat cmd/superschematic; do
             echo "==> $m"
-            # Packages that run cargo queue on its lock of the shared target
-            # directory, and the wait counts against each package's timeout.
-            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout 30m -short="$GO_TEST_SHORT" ./...)
+            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout "$GO_TEST_TIMEOUT" -short="$GO_TEST_SHORT" ./...)
           done
 
       - name: gofmt
@@ -591,10 +600,12 @@ jobs:
 
   acme:
     name: acme (example extension builds without core edits)
-    # The full tier: every step builds the example end to end.
+    # The full tier: every step builds the example end to end. acme-shop's
+    # check takes about half an hour of it, and up to fifteen minutes more
+    # when its stack's Rust servers compile with nothing cached.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1518,9 +1529,12 @@ jobs:
       - name: Install Rust toolchain
         # The three archives, the addon and the Rust servers are built with
         # this one toolchain (tools.env says why); the Rust entrypoint test
-        # runs clippy and rustfmt on the servers it builds.
+        # runs clippy and rustfmt on the servers it builds. The wasm32
+        # target builds superscalar's browser and workerd builds (D64),
+        # which scripts/superscalar-dep.sh builds with the TypeScript
+        # binding the TypeScript servers import.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy --component rustfmt
           rustup default "$RUST_VERSION"
 
       - name: Cache Rust dependencies
@@ -1529,6 +1543,22 @@ jobs:
           workspaces: |
             runtime/engine/rust
             runtime/versiongraph/rust
+
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64), and stops without
+        # it. This job runs in the full tier alone, so a pull request never
+        # showed the step missing.
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
       - name: Build the superscalar dependency and the version graph's and the engine's archives
         run: |
