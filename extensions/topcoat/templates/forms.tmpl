@@ -69,7 +69,7 @@ use serde_json::Value;
 {{- if .FormsUse "picks" }}
 use crate::references::{ {{- .PickShards -}} };
 {{- end }}
-{{- if .ArgForms }}
+{{- if .HoldsForms }}
 use topcoat::context::Cx;
 {{- end }}
 {{- if .FormsUse "query" }}
@@ -308,6 +308,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -1466,6 +1467,7 @@ impl<'de> Deserialize<'de> for {{ .Name }} {
 /// number field the app names into a select.
 #[component]
 pub async fn {{ .Component }}(
+    cx: &Cx,
     #[default({{ .Name }}::new())] form: {{ .Name }},
     #[default] errors: FormErrors,
     #[default] choices: Choices,

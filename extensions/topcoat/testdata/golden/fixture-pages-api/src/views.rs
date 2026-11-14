@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{CommentRecord, DocumentInputRecord, DocumentRecord, MemberRecord, MilestoneInputRecord, MilestoneRecord, ProjectInputRecord, ProjectPatchRecord, ProjectRecord, ShelfRecord, TaskInputRecord, TaskRecord, ViewerRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -102,7 +103,7 @@ pub fn project_status_label(value: &str) -> &str {
 /// `CommentRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn comment_detail(cx: &Cx, record: CommentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Comment" role="group">
             <dl>
@@ -126,6 +127,7 @@ pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn comment_table(
+    cx: &Cx,
     rows: Vec<CommentRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -167,7 +169,7 @@ pub async fn comment_table(
 /// `DocumentRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn document_detail(record: DocumentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn document_detail(cx: &Cx, record: DocumentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(record.title.as_deref(), None);
     Ok(view! {
         <div class="ss-detail" data-type="Document" role="group" aria-label=(label)>
@@ -206,6 +208,7 @@ pub async fn document_detail(record: DocumentRecord, #[default] choices: Choices
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn document_table(
+    cx: &Cx,
     rows: Vec<DocumentRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -260,7 +263,7 @@ pub async fn document_table(
 /// `DocumentInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn document_input_detail(record: DocumentInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn document_input_detail(cx: &Cx, record: DocumentInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="DocumentInput" role="group">
             <dl>
@@ -294,6 +297,7 @@ pub async fn document_input_detail(record: DocumentInputRecord, #[default] choic
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn document_input_table(
+    cx: &Cx,
     rows: Vec<DocumentInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -346,7 +350,7 @@ pub async fn document_input_table(
 /// `MemberRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn member_detail(record: MemberRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn member_detail(cx: &Cx, record: MemberRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Member" role="group">
             <dl>
@@ -370,6 +374,7 @@ pub async fn member_detail(record: MemberRecord, #[default] choices: Choices) ->
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn member_table(
+    cx: &Cx,
     rows: Vec<MemberRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -411,7 +416,7 @@ pub async fn member_table(
 /// `MilestoneRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn milestone_detail(record: MilestoneRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn milestone_detail(cx: &Cx, record: MilestoneRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Milestone" role="group">
             <dl>
@@ -440,6 +445,7 @@ pub async fn milestone_detail(record: MilestoneRecord, #[default] choices: Choic
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn milestone_table(
+    cx: &Cx,
     rows: Vec<MilestoneRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -486,7 +492,7 @@ pub async fn milestone_table(
 /// `MilestoneInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn milestone_input_detail(record: MilestoneInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn milestone_input_detail(cx: &Cx, record: MilestoneInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="MilestoneInput" role="group" aria-label="Milestone">
             <dl>
@@ -515,6 +521,7 @@ pub async fn milestone_input_detail(record: MilestoneInputRecord, #[default] cho
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn milestone_input_table(
+    cx: &Cx,
     rows: Vec<MilestoneInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -561,7 +568,7 @@ pub async fn milestone_input_table(
 /// `ProjectRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn project_detail(record: ProjectRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn project_detail(cx: &Cx, record: ProjectRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.name.as_str()), Some("Project"));
     Ok(view! {
         <div class="ss-detail" data-type="Project" role="group" aria-label=(label)>
@@ -644,6 +651,7 @@ pub async fn project_detail(record: ProjectRecord, #[default] choices: Choices) 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn project_table(
+    cx: &Cx,
     rows: Vec<ProjectRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -690,7 +698,7 @@ pub async fn project_table(
 /// `ProjectInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn project_input_detail(record: ProjectInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn project_input_detail(cx: &Cx, record: ProjectInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="ProjectInput" role="group">
             <dl>
@@ -746,6 +754,7 @@ pub async fn project_input_detail(record: ProjectInputRecord, #[default] choices
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn project_input_table(
+    cx: &Cx,
     rows: Vec<ProjectInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -811,7 +820,7 @@ pub async fn project_input_table(
 /// `ProjectPatchRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn project_patch_detail(record: ProjectPatchRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn project_patch_detail(cx: &Cx, record: ProjectPatchRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="ProjectPatch" role="group">
             <dl>
@@ -894,6 +903,7 @@ pub async fn project_patch_detail(record: ProjectPatchRecord, #[default] choices
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn project_patch_table(
+    cx: &Cx,
     rows: Vec<ProjectPatchRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -980,7 +990,7 @@ pub async fn project_patch_table(
 /// `ShelfRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn shelf_detail(record: ShelfRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn shelf_detail(cx: &Cx, record: ShelfRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Shelf" role="group">
             <dl>
@@ -1004,6 +1014,7 @@ pub async fn shelf_detail(record: ShelfRecord, #[default] choices: Choices) -> t
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn shelf_table(
+    cx: &Cx,
     rows: Vec<ShelfRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -1045,7 +1056,7 @@ pub async fn shelf_table(
 /// `TaskRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn task_detail(record: TaskRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn task_detail(cx: &Cx, record: TaskRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.title.as_str()), Some("Task"));
     Ok(view! {
         <div class="ss-detail" data-type="Task" role="group" aria-label=(label)>
@@ -1074,6 +1085,7 @@ pub async fn task_detail(record: TaskRecord, #[default] choices: Choices) -> top
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn task_table(
+    cx: &Cx,
     rows: Vec<TaskRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -1118,7 +1130,7 @@ pub async fn task_table(
 /// `TaskInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn task_input_detail(record: TaskInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn task_input_detail(cx: &Cx, record: TaskInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="TaskInput" role="group">
             <dl>
@@ -1138,6 +1150,7 @@ pub async fn task_input_detail(record: TaskInputRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn task_input_table(
+    cx: &Cx,
     rows: Vec<TaskInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -1177,7 +1190,7 @@ pub async fn task_input_table(
 /// `ViewerRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn viewer_detail(record: ViewerRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn viewer_detail(cx: &Cx, record: ViewerRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Viewer" role="group">
             <dl>
@@ -1197,6 +1210,7 @@ pub async fn viewer_detail(record: ViewerRecord, #[default] choices: Choices) ->
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn viewer_table(
+    cx: &Cx,
     rows: Vec<ViewerRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

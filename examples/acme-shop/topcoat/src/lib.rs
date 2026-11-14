@@ -68,14 +68,15 @@ use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, revie
 use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages, references};
 use serde::Deserialize;
 use topcoat::asset::{AssetConfig, RouterBuilderAssetExt};
-use topcoat::context::{Cx, app_context, try_app_context};
+use topcoat::context::{Cx, context, try_context};
+use topcoat::metadata::Metadata;
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::header::SET_COOKIE;
 use topcoat::router::request::parts;
 use topcoat::router::response::response_headers;
 use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, Slot, StatusCode, layout, page, path_param};
-use topcoat::runtime::{RouterBuilderRuntimeExt, RuntimeSetup, shard};
+use topcoat::runtime::{RuntimeLayer, RuntimeSetup, shard};
 use topcoat::view::{Child, View, component, view};
 
 /// The one product the shop sells, at 19.99.
@@ -218,29 +219,31 @@ pub fn app<S: ShopImplementation>(
     let authenticator = IdentityPageAuthenticator::of(&implementations);
     let builder = Router::builder()
         .discover()
-        .app_context(users)
-        .app_context(console_settings())
+        .with(users)
+        .with(console_settings())
         .shop_orders(implementations, authenticator, engine);
     match assets {
-        Some(assets) => builder.assets(assets).runtime().build(),
+        Some(assets) => builder.assets(assets).layer(RuntimeLayer::new()).build(),
         None => builder.build(),
     }
 }
 
 /// The document every page renders in, around the console's layout and the
-/// shop's pages: the runtime's script in its head when the router set the
-/// runtime up (`RuntimeSetup`), which a live list of the console
-/// (`pages_live`) needs to render again in place. Without it, a filter and
-/// a page's links load the page.
-#[layout("/")]
+/// shop's pages. Its head has each page's metadata (`tags()`): the shop's
+/// title, which the document carries, and under the console the page's own,
+/// its trail back to the index, which the console's layout carries. It has
+/// the runtime's script when the router set the runtime up
+/// (`RuntimeSetup`), which a live list of the console (`pages_live`) needs
+/// to render again in place. Without it, a filter and a page's links load
+/// the page.
+#[layout("/", with(Metadata::new().title("Acme shop")))]
 async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
-    let live = try_app_context::<RuntimeSetup>(cx).is_some();
+    let live = try_context::<RuntimeSetup>(cx).is_some();
     Ok(view! {
         <!DOCTYPE html>
         <html lang="en">
             <head>
-                <meta charset="utf-8">
-                <title>"Acme shop"</title>
+                topcoat::metadata::tags()
                 if live {
                     topcoat::runtime::script()
                 }
@@ -276,7 +279,7 @@ pub struct SignInForm {
 /// password.
 #[page(POST "/sign-in")]
 async fn sign_in(cx: &Cx, Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
-    let users: &Arc<Service> = app_context(cx);
+    let users: &Arc<Service> = context(cx);
     let input = LoginInput { login: form.login.clone(), password: form.password, session: "cookie".to_owned() };
     let signed_in = match users.check_cookie_login(parts(cx), &input.session) {
         Ok(()) => users.login(&input).await,
@@ -306,7 +309,7 @@ fn is_local(next: &str) -> bool {
 /// The sign-in page, which a page's sign-in button opens with the page to
 /// come back to in its query (`next`).
 #[page("/sign-in")]
-async fn show_sign_in(Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
+async fn show_sign_in(cx: &Cx, Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
     Ok(view! { sign_in_page(next: form.next) })
 }
 
@@ -314,6 +317,7 @@ async fn show_sign_in(Form(form): Form<SignInForm>) -> topcoat::Result<impl View
 /// why the sign-in was refused.
 #[component]
 async fn sign_in_page(
+    cx: &Cx,
     #[default] login: String,
     #[default] next: String,
     #[default] refused: Option<String>,
@@ -341,7 +345,7 @@ async fn sign_in_page(
 /// The frame of each page: the links between them, then its heading and
 /// its content.
 #[component]
-async fn shop_page(title: &str, #[default] child: Child<'_>) -> topcoat::Result<impl View> {
+async fn shop_page(cx: &Cx, title: &str, #[default] child: Child<'_>) -> topcoat::Result<impl View> {
     Ok(view! {
         <nav>
             <a href="/reviews">"Reviews"</a>
@@ -360,7 +364,7 @@ async fn shop_page(title: &str, #[default] child: Child<'_>) -> topcoat::Result<
 /// The sign-in button, which opens the sign-in page, which comes back to
 /// `next`.
 #[component]
-async fn sign_in_button(#[into] next: String) -> topcoat::Result<impl View> {
+async fn sign_in_button(cx: &Cx, #[into] next: String) -> topcoat::Result<impl View> {
     Ok(view! {
         <form method="get" action="/sign-in" class="sign-in">
             <input type="hidden" name="next" value=(next)>
@@ -373,7 +377,7 @@ async fn sign_in_button(#[into] next: String) -> topcoat::Result<impl View> {
 /// route's status and message, and the sign-in button when the operation
 /// needs a signed-in caller (401).
 #[component]
-async fn refusal(err: ApiError, #[into] next: String) -> topcoat::Result<impl View> {
+async fn refusal(cx: &Cx, err: ApiError, #[into] next: String) -> topcoat::Result<impl View> {
     let signed_out = err.status == StatusCode::UNAUTHORIZED;
     Ok(view! {
         (err.status)
@@ -394,7 +398,7 @@ fn needs_sign_in(admitted: Result<Option<Principal>, ApiError>) -> bool {
 /// `review_view_detail` lists its fields, labeled as `ReviewView` declares
 /// them and named by its title.
 #[shard("/shards/review")]
-async fn review_card(review: ReviewViewRecord) -> topcoat::Result<impl View> {
+async fn review_card(cx: &Cx, review: ReviewViewRecord) -> topcoat::Result<impl View> {
     Ok(view! {
         <article class="review">
             review_view_detail(record: review)
@@ -447,7 +451,7 @@ async fn reviews_page(
 }
 
 #[page("/reviews")]
-async fn show_reviews() -> topcoat::Result<impl View> {
+async fn show_reviews(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { reviews_page() })
 }
 
@@ -536,7 +540,7 @@ fn orders_href(filter: &OrderListOrdersArgsForm, cursor: Option<&str>) -> String
 /// later one, and "Next page" while another follows. A cursor names no
 /// page before it, so there is no previous page.
 #[component]
-async fn pager(first: Option<String>, next: Option<String>) -> topcoat::Result<impl View> {
+async fn pager(cx: &Cx, first: Option<String>, next: Option<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         if first.is_some() || next.is_some() {
             <nav class="pager" aria-label="Pages">
@@ -554,7 +558,7 @@ async fn pager(first: Option<String>, next: Option<String>) -> topcoat::Result<i
 /// Orders as `order_view_table` renders them, a column per summary field
 /// `OrderView` declares, then a link to each one's page.
 #[component]
-async fn order_list(orders: Vec<types::OrderView>, unfiltered: bool) -> topcoat::Result<impl View> {
+async fn order_list(cx: &Cx, orders: Vec<types::OrderView>, unfiltered: bool) -> topcoat::Result<impl View> {
     let links: Vec<(String, String)> = orders
         .iter()
         .map(|order| (format!("/orders/{}", order.id), format!("Order {}", order.id)))
@@ -578,7 +582,7 @@ async fn order_list(orders: Vec<types::OrderView>, unfiltered: bool) -> topcoat:
     })
 }
 
-path_param!(id: types::IdentityUUID, error = not_found);
+path_param!(id: types::IdentityUUID else not_found);
 
 /// One order, as `order_view_detail` renders it, which needs `orders.read`,
 /// each line's product by its name, which `references::order_view_labels`
@@ -626,7 +630,7 @@ async fn order_page(
 
 #[page("/orders/{id}")]
 async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = *path_param::<Id>(cx)?;
+    let id = *id(cx)?;
     Ok(view! { order_page(id: id) })
 }
 
@@ -638,7 +642,7 @@ async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
 /// form's own message.
 #[page(POST "/orders/{id}/cancel")]
 async fn cancel_order(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
-    let id = *path_param::<Id>(cx)?;
+    let id = *id(cx)?;
     let form = OrderCancelOrderArgsForm { id: Some(id.to_string()), ..form };
     let refused = match form.submit(cx).await {
         Ok(order) => return Err(see_other(format!("/orders/{}", order.id)).into()),
@@ -682,7 +686,7 @@ async fn place_order_page(
 }
 
 #[page("/orders/new")]
-async fn new_order() -> topcoat::Result<impl View> {
+async fn new_order(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { place_order_page() })
 }
 

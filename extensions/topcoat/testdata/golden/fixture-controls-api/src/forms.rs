@@ -240,6 +240,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -505,6 +506,7 @@ impl<'de> Deserialize<'de> for OrderHoldOrderArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_hold_order_args_fields(
+    cx: &Cx,
     #[default] form: OrderHoldOrderArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -626,6 +628,7 @@ impl<'de> Deserialize<'de> for OrderListOrdersArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_list_orders_args_fields(
+    cx: &Cx,
     #[default] form: OrderListOrdersArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -734,6 +737,7 @@ impl<'de> Deserialize<'de> for StockReleaseReservationArgsForm {
 /// app names into a select.
 #[component]
 pub async fn stock_release_reservation_args_fields(
+    cx: &Cx,
     #[default] form: StockReleaseReservationArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -854,6 +858,7 @@ impl<'de> Deserialize<'de> for StockReserveStockArgsForm {
 /// app names into a select.
 #[component]
 pub async fn stock_reserve_stock_args_fields(
+    cx: &Cx,
     #[default] form: StockReserveStockArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

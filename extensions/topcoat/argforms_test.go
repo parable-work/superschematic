@@ -209,7 +209,7 @@ impl ProductReviewsImplementation for Shop {
 }
 
 #[page("/cancel")]
-async fn cancel_page() -> topcoat::Result<impl View> {
+async fn cancel_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! {
         <form method=(OrderCancelOrderArgsForm::METHOD)>order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER))<button type="submit">"Send"</button></form>
     })
@@ -232,7 +232,7 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
 
 /// The cancel form with the reasons the shop offers.
 #[page("/cancel/choices")]
-async fn cancel_choices_page() -> topcoat::Result<impl View> {
+async fn cancel_choices_page(cx: &Cx) -> topcoat::Result<impl View> {
     let choices = Choices::new().with("reason", [("Found it cheaper", "I found it cheaper"), ("Too slow", "It is too slow")]);
     Ok(view! {
         <form method="post">order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER), choices: choices)<button type="submit">"Send"</button></form>
@@ -240,7 +240,7 @@ async fn cancel_choices_page() -> topcoat::Result<impl View> {
 }
 
 #[page("/hold")]
-async fn hold_page() -> topcoat::Result<impl View> {
+async fn hold_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <form method="post">order_hold_order_args_fields(form: OrderHoldOrderArgsForm::new(ORDER))<button type="submit">"Send"</button></form> })
 }
 
@@ -311,7 +311,7 @@ async fn filter_page(cx: &Cx) -> topcoat::Result<impl View> {
 }
 
 #[page("/filter/new")]
-async fn new_filter_page() -> topcoat::Result<impl View> {
+async fn new_filter_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <form method="get">order_list_orders_args_fields(form: OrderListOrdersArgsForm::new())<button type="submit">"Send"</button></form> })
 }
 
@@ -331,7 +331,7 @@ async fn review(cx: &Cx, Form(form): Form<ProductReviewsWriteReviewArgsForm>) ->
 }
 
 #[page("/review")]
-async fn review_page() -> topcoat::Result<impl View> {
+async fn review_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! {
         <form method="post">product_reviews_write_review_args_fields(form: ProductReviewsWriteReviewArgsForm::new(PRODUCT))<button type="submit">"Send"</button></form>
     })

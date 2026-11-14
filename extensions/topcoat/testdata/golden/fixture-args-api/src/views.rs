@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{OrderNoteInputRecord, OrderViewRecord, ReviewViewRecord, WriteReviewInputRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -58,7 +59,7 @@ pub fn order_status_label(value: &str) -> &str {
 /// `OrderNoteInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_note_input_detail(record: OrderNoteInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_note_input_detail(cx: &Cx, record: OrderNoteInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderNoteInput" role="group">
             <dl>
@@ -78,6 +79,7 @@ pub async fn order_note_input_detail(record: OrderNoteInputRecord, #[default] ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_note_input_table(
+    cx: &Cx,
     rows: Vec<OrderNoteInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -117,7 +119,7 @@ pub async fn order_note_input_table(
 /// `OrderViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_view_detail(cx: &Cx, record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderView" role="group">
             <dl>
@@ -150,6 +152,7 @@ pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_view_table(
+    cx: &Cx,
     rows: Vec<OrderViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -198,7 +201,7 @@ pub async fn order_view_table(
 /// `ReviewViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn review_view_detail(record: ReviewViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn review_view_detail(cx: &Cx, record: ReviewViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="ReviewView" role="group">
             <dl>
@@ -226,6 +229,7 @@ pub async fn review_view_detail(record: ReviewViewRecord, #[default] choices: Ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn review_view_table(
+    cx: &Cx,
     rows: Vec<ReviewViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -269,7 +273,7 @@ pub async fn review_view_table(
 /// `WriteReviewInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn write_review_input_detail(record: WriteReviewInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn write_review_input_detail(cx: &Cx, record: WriteReviewInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="WriteReviewInput" role="group">
             <dl>
@@ -292,6 +296,7 @@ pub async fn write_review_input_detail(record: WriteReviewInputRecord, #[default
 /// its end links nowhere.
 #[component]
 pub async fn write_review_input_table(
+    cx: &Cx,
     rows: Vec<WriteReviewInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

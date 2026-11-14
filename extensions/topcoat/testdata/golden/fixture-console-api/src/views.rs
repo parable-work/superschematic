@@ -25,6 +25,7 @@
 
 use crate::choices::Choices;
 use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ProductRecord, ReviewRecord, SitePageRecord, SupplierRecord};
+use topcoat::context::Cx;
 use topcoat::runtime::{Event, Signal};
 use topcoat::view::{View, component, view};
 
@@ -102,7 +103,7 @@ pub fn order_status_label(value: &str) -> &str {
 /// `OrderRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_detail(record: OrderRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_detail(cx: &Cx, record: OrderRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.number.as_str()), Some("Order"));
     Ok(view! {
         <div class="ss-detail" data-type="Order" role="group" aria-label=(label)>
@@ -155,6 +156,7 @@ pub async fn order_detail(record: OrderRecord, #[default] choices: Choices) -> t
 /// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn order_table(
+    cx: &Cx,
     rows: Vec<OrderRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -217,7 +219,7 @@ pub async fn order_table(
 /// `OrderInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_input_detail(record: OrderInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_input_detail(cx: &Cx, record: OrderInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderInput" role="group">
             <dl>
@@ -255,6 +257,7 @@ pub async fn order_input_detail(record: OrderInputRecord, #[default] choices: Ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_input_table(
+    cx: &Cx,
     rows: Vec<OrderInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -308,7 +311,7 @@ pub async fn order_input_table(
 /// `OrderLineRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_line_detail(record: OrderLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_line_detail(cx: &Cx, record: OrderLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderLine" role="group" aria-label="Line">
             <dl>
@@ -332,6 +335,7 @@ pub async fn order_line_detail(record: OrderLineRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_line_table(
+    cx: &Cx,
     rows: Vec<OrderLineRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -373,7 +377,7 @@ pub async fn order_line_table(
 /// `OrderLineInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_line_input_detail(record: OrderLineInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_line_input_detail(cx: &Cx, record: OrderLineInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderLineInput" role="group" aria-label="Line">
             <dl>
@@ -397,6 +401,7 @@ pub async fn order_line_input_detail(record: OrderLineInputRecord, #[default] ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_line_input_table(
+    cx: &Cx,
     rows: Vec<OrderLineInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -438,7 +443,7 @@ pub async fn order_line_input_table(
 /// `ProductRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn product_detail(record: ProductRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn product_detail(cx: &Cx, record: ProductRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.name.as_str()), Some("Product"));
     Ok(view! {
         <div class="ss-detail" data-type="Product" role="group" aria-label=(label)>
@@ -477,6 +482,7 @@ pub async fn product_detail(record: ProductRecord, #[default] choices: Choices) 
 /// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn product_table(
+    cx: &Cx,
     rows: Vec<ProductRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -548,7 +554,7 @@ pub async fn product_table(
 /// `ReviewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn review_detail(record: ReviewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn review_detail(cx: &Cx, record: ReviewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.title.as_str()), Some("Review"));
     Ok(view! {
         <div class="ss-detail" data-type="Review" role="group" aria-label=(label)>
@@ -583,6 +589,7 @@ pub async fn review_detail(record: ReviewRecord, #[default] choices: Choices) ->
 /// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn review_table(
+    cx: &Cx,
     rows: Vec<ReviewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -652,7 +659,7 @@ pub async fn review_table(
 /// `SitePageRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn site_page_detail(record: SitePageRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn site_page_detail(cx: &Cx, record: SitePageRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.title.as_str()), Some("Page"));
     Ok(view! {
         <div class="ss-detail" data-type="SitePage" role="group" aria-label=(label)>
@@ -677,6 +684,7 @@ pub async fn site_page_detail(record: SitePageRecord, #[default] choices: Choice
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn site_page_table(
+    cx: &Cx,
     rows: Vec<SitePageRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -719,7 +727,7 @@ pub async fn site_page_table(
 /// `SupplierRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn supplier_detail(record: SupplierRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn supplier_detail(cx: &Cx, record: SupplierRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.name.as_str()), Some("Supplier"));
     Ok(view! {
         <div class="ss-detail" data-type="Supplier" role="group" aria-label=(label)>
@@ -744,6 +752,7 @@ pub async fn supplier_detail(record: SupplierRecord, #[default] choices: Choices
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn supplier_table(
+    cx: &Cx,
     rows: Vec<SupplierRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

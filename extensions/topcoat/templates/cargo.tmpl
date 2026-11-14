@@ -47,7 +47,7 @@ tokio = { version = "1.52.2", features = [{{ if .EnginePages }}"rt", {{ end }}"t
 # The blocking pool the engine's pages call the engine on.
 tokio = { version = "1.52.2", features = ["rt"] }
 {{- end }}
-topcoat = { version = "0.10", features = ["tower"] }
+topcoat = { version = "0.12.1", features = ["tower"] }
 {{- with .Engine }}
 # The engine of {{ .Database }} (D58), in-process on SQLite: its routes as an
 # axum router, the behaviors it runs, and the engine document of the

@@ -154,7 +154,7 @@ func TestThePagesServeUnderTheirPrefix(t *testing.T) {
 	pages := files["pages.rs"]
 	for _, want := range []string{
 		`pub const PREFIX: &str = "/admin/shop";`,
-		`#[layout("/admin/shop")]`,
+		`#[layout("/admin/shop", with(Metadata::from_fn(page_metadata)))]`,
 		`#[page("/admin/shop")]`,
 		`#[page("/admin/shop/projects")]`,
 		`#[page("/admin/shop/projects/{project_id}")]`,
@@ -371,7 +371,7 @@ func TestATableLinksItsRows(t *testing.T) {
 			"                                </a>\n                            } else {\n                                " + value + "\n"
 	}
 	for _, want := range []string{
-		"pub async fn order_view_table(\n    rows: Vec<OrderViewRecord>,\n    #[default] choices: Choices,\n    #[default] hrefs: Vec<String>,\n)",
+		"pub async fn order_view_table(\n    cx: &Cx,\n    rows: Vec<OrderViewRecord>,\n    #[default] choices: Choices,\n    #[default] hrefs: Vec<String>,\n)",
 		"let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();",
 		"<th scope=\"row\" data-field=\"reference\">" + linked("reference", "reference"),
 		"<td data-field=\"text\">" + linked("text", "text"),
@@ -408,8 +408,11 @@ use schemas_fixture_pages_api_topcoat::choices::Choices;
 use schemas_fixture_pages_api_topcoat::pages::Settings;
 use schemas_fixture_pages_api_topcoat::{PageAuthenticator, RouterBuilderFixturePagesApiExt};
 use topcoat::context::Cx;
+use topcoat::metadata::metadata;
 use topcoat::router::request::parts;
-use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::router::{
+    header, to_bytes, Body, HeaderValue, LayerFn, LayerFuture, Next, Router, RouterBuilderDiscoverExt, StatusCode,
+};
 
 #[path = "support/enter.rs"]
 mod enter;
@@ -723,7 +726,7 @@ fn implementations(store: &Arc<Store>) -> Implementations {
 fn app(store: &Arc<Store>) -> Router {
     Router::builder()
         .discover()
-        .app_context(Settings::new().title("Projects console").sign_in("/sign-in").choices(owners()))
+        .with(Settings::new().title("Projects console").sign_in("/sign-in").choices(owners()))
         .fixture_pages_api(implementations(store), Callers::default())
         .build()
 }
@@ -1314,6 +1317,54 @@ async fn a_render_authenticates_its_caller_once() {
     }
 }
 
+// Reads the page's metadata before the page renders, as a document whose
+// head renders topcoat::metadata::tags() does, and answers its title
+// in a header.
+fn titled<'a>(cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
+    Box::pin(async move {
+        let title = metadata(cx).await?.title().map(|title| title.resolve(cx).into_owned());
+        let mut response = next.run(cx, body).await?;
+        if let Some(title) = title {
+            response.headers_mut().insert("x-title", HeaderValue::from_str(&title).unwrap());
+        }
+        Ok(response)
+    })
+}
+
+#[tokio::test]
+async fn a_pages_title_is_its_trail_from_the_page_to_the_index() {
+    let store = Store::new();
+    let callers = Callers::default();
+    let asked = Arc::clone(&callers.asked);
+    let app = Router::builder()
+        .discover()
+        .with(Settings::new().title("Projects console"))
+        .layer(LayerFn::new(None::<&str>, titled))
+        .fixture_pages_api(implementations(&store), callers)
+        .build();
+    for (path, caller, want) in [
+        ("/console".to_owned(), "reader", "Projects console".to_owned()),
+        ("/console/projects".to_owned(), "reader", "Projects · Projects console".to_owned()),
+        ("/console/projects/new".to_owned(), "writer", "Start a project · Projects · Projects console".to_owned()),
+        (format!("/console/projects/{APOLLO}"), "reader", "Apollo · Projects · Projects console".to_owned()),
+        (format!("/console/projects/{APOLLO}/edit"), "writer", "Edit · Apollo · Projects · Projects console".to_owned()),
+        (format!("/console/projects/{APOLLO}/tasks"), "reader", "Tasks · Apollo · Projects · Projects console".to_owned()),
+    ] {
+        asked.store(0, Ordering::SeqCst);
+        let request = http::Request::builder().uri(&path).header("x-caller", caller).body(Body::empty()).unwrap();
+        let response = app.handle(request).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let title = response.headers().get("x-title").map(|value| String::from_utf8(value.as_bytes().to_vec()).unwrap());
+        assert_eq!(title.as_deref(), Some(want.as_str()), "{path}");
+        // The title and the layout's trail are one reading of the trail:
+        // the item's title is read, and its caller asked for, once.
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "{path} asked for its caller more than once");
+    }
+    // A request outside the pages has no title of theirs.
+    let request = http::Request::builder().uri("/elsewhere").body(Body::empty()).unwrap();
+    assert!(app.handle(request).await.headers().get("x-title").is_none());
+}
+
 #[tokio::test]
 async fn a_resources_own_choices_win_on_its_pages() {
     let store = Store::new();
@@ -1321,7 +1372,7 @@ async fn a_resources_own_choices_win_on_its_pages() {
         .choices(owners().with("title", [("Build the rocket", "The rocket")]))
         .choices_for("projects", Choices::new().with("ownerId", [("ada", "Countess Ada")]))
         .choices_for("projects/{project_id}/tasks", Choices::new().with("title", [("Build the rocket", "Rocket building")]));
-    let app = Router::builder().discover().app_context(settings).fixture_pages_api(implementations(&store), Callers::default()).build();
+    let app = Router::builder().discover().with(settings).fixture_pages_api(implementations(&store), Callers::default()).build();
     // The projects' own choice of an owner is the only one their pages
     // take for the field, so a value it does not name shows as it is.
     let list = get(&app, "/console/projects", "reader").await;

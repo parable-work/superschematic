@@ -252,6 +252,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -723,6 +724,7 @@ impl<'de> Deserialize<'de> for WriteReviewInputForm {
 /// number field the app names into a select.
 #[component]
 pub async fn order_note_input_fields(
+    cx: &Cx,
     #[default(OrderNoteInputForm::new())] form: OrderNoteInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -752,6 +754,7 @@ pub async fn order_note_input_fields(
 /// number field the app names into a select.
 #[component]
 pub async fn write_review_input_fields(
+    cx: &Cx,
     #[default(WriteReviewInputForm::new())] form: WriteReviewInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -893,6 +896,7 @@ impl<'de> Deserialize<'de> for OrderCancelOrderArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_cancel_order_args_fields(
+    cx: &Cx,
     #[default] form: OrderCancelOrderArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1036,6 +1040,7 @@ impl<'de> Deserialize<'de> for OrderHoldOrderArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_hold_order_args_fields(
+    cx: &Cx,
     #[default] form: OrderHoldOrderArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1216,6 +1221,7 @@ impl<'de> Deserialize<'de> for OrderListOrdersArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_list_orders_args_fields(
+    cx: &Cx,
     #[default] form: OrderListOrdersArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1412,6 +1418,7 @@ impl<'de> Deserialize<'de> for OrderNoteOrderArgsForm {
 /// or number control the app names into a select.
 #[component]
 pub async fn order_note_order_args_fields(
+    cx: &Cx,
     #[default] form: OrderNoteOrderArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1534,6 +1541,7 @@ impl<'de> Deserialize<'de> for OrderTagOrderArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_tag_order_args_fields(
+    cx: &Cx,
     #[default] form: OrderTagOrderArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1656,6 +1664,7 @@ impl<'de> Deserialize<'de> for ProductReviewsWriteReviewArgsForm {
 /// turns a text or number control the app names into a select.
 #[component]
 pub async fn product_reviews_write_review_args_fields(
+    cx: &Cx,
     #[default] form: ProductReviewsWriteReviewArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

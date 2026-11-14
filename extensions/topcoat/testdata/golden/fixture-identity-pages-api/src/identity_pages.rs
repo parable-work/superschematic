@@ -331,6 +331,7 @@ async fn role_of<'a>(cx: &'a Cx, id: &str) -> Result<&'a IdentityRole, Refusal> 
 /// A text control, its label, and its messages.
 #[component]
 async fn text_field(
+    cx: &Cx,
     id: &'static str,
     name: &'static str,
     label: &'static str,
@@ -355,6 +356,7 @@ async fn text_field(
 /// a password sent is never rendered again.
 #[component]
 async fn password_field(
+    cx: &Cx,
     id: &'static str,
     name: &'static str,
     label: &'static str,
@@ -375,7 +377,7 @@ async fn password_field(
 
 /// The messages above a form's controls.
 #[component]
-async fn form_errors(messages: Vec<String>) -> topcoat::Result<impl View> {
+async fn form_errors(cx: &Cx, messages: Vec<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         for message in messages {
             <p class="form-error">(message)</p>
@@ -395,7 +397,7 @@ pub struct SignInForm {
 /// The sign-in page: the login, the password and the page to go on to,
 /// which its query's `next` names.
 #[page("/console/sign-in")]
-pub async fn identity_sign_in_page(Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
+pub async fn identity_sign_in_page(cx: &Cx, Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
     Ok(view! { sign_in_form(login: form.login, next: form.next, errors: FormErrors::default()) })
 }
 
@@ -434,7 +436,7 @@ async fn sign_in_with(cx: &Cx, form: &SignInForm) -> Result<(), Refusal> {
 
 /// The sign-in form, the login as sent and never the password.
 #[component]
-async fn sign_in_form(login: String, next: String, errors: FormErrors) -> topcoat::Result<impl View> {
+async fn sign_in_form(cx: &Cx, login: String, next: String, errors: FormErrors) -> topcoat::Result<impl View> {
     let messages = unshown(&errors, &["login", "password"]);
     Ok(view! {
         <h1>"Sign in"</h1>
@@ -539,7 +541,7 @@ async fn change_password(cx: &Cx, form: &ChangePasswordForm) -> Result<(), Refus
 /// The account: the caller's login, name and roles, and the change-password
 /// form, which never renders a password sent.
 #[component]
-async fn account_view(me: CurrentUser, errors: FormErrors) -> topcoat::Result<impl View> {
+async fn account_view(cx: &Cx, me: CurrentUser, errors: FormErrors) -> topcoat::Result<impl View> {
     let CurrentUser { user, roles, .. } = me;
     let roles: Vec<String> = roles.into_iter().map(|role| role.name).collect();
     let roles = if roles.is_empty() { "None".to_owned() } else { roles.join(", ") };
@@ -610,7 +612,7 @@ fn state_of(disabled: bool, pending: bool) -> &'static str {
 
 /// The users as a table: a row per user, its login linked to their page.
 #[component]
-async fn users_list(users: Vec<IdentityUser>, writes: bool) -> topcoat::Result<impl View> {
+async fn users_list(cx: &Cx, users: Vec<IdentityUser>, writes: bool) -> topcoat::Result<impl View> {
     let rows: Vec<(String, String, String, String, &'static str)> = users
         .into_iter()
         .map(|user| {
@@ -710,7 +712,7 @@ async fn create_user(cx: &Cx, form: &NewUserForm) -> Result<IdentityUser, Refusa
 /// The new-user form, the login and the name as sent and never the
 /// password.
 #[component]
-async fn new_user_form(login: String, name: String, errors: FormErrors) -> topcoat::Result<impl View> {
+async fn new_user_form(cx: &Cx, login: String, name: String, errors: FormErrors) -> topcoat::Result<impl View> {
     let messages = unshown(&errors, &["login", "name", "password"]);
     Ok(view! {
         <h1>"New user"</h1>
@@ -769,7 +771,7 @@ async fn user_page(cx: &Cx, id: &str) -> Result<UserPage, Refusal> {
 /// grant or revoke a role.
 #[page("/console/users/{user_id}")]
 pub async fn identity_user_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<UserId>(cx).to_owned();
+    let id = user_id(cx).to_owned();
     let found = user_page(cx, &id).await;
     Ok(view! {
         match found {
@@ -800,7 +802,7 @@ async fn user_posted(cx: &Cx, id: &str, form: &'static str, sent: Result<(), Ref
 /// A post's answer that renders: the user's page again, or a refusal
 /// alone.
 #[component]
-async fn user_answer(id: String, shown: UserShown) -> topcoat::Result<impl View> {
+async fn user_answer(cx: &Cx, id: String, shown: UserShown) -> topcoat::Result<impl View> {
     Ok(view! {
         match shown {
             Err(refusal) => refused(refusal: refusal, next: user_href(&id)),
@@ -817,7 +819,7 @@ async fn user_answer(id: String, shown: UserShown) -> topcoat::Result<impl View>
 /// refused (403) at the form.
 #[page(POST "/console/users/{user_id}/disable")]
 pub async fn identity_disable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<UserId>(cx).to_owned();
+    let id = user_id(cx).to_owned();
     let sent = set_disabled(cx, &id, true).await;
     let shown = user_posted(cx, &id, "access", sent).await?;
     Ok(view! { user_answer(id: id, shown: shown) })
@@ -827,7 +829,7 @@ pub async fn identity_disable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// a permission the caller does not is refused (403) at the form.
 #[page(POST "/console/users/{user_id}/enable")]
 pub async fn identity_enable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<UserId>(cx).to_owned();
+    let id = user_id(cx).to_owned();
     let sent = set_disabled(cx, &id, false).await;
     let shown = user_posted(cx, &id, "access", sent).await?;
     Ok(view! { user_answer(id: id, shown: shown) })
@@ -852,7 +854,7 @@ pub struct SetPasswordForm {
 /// refused (403) at the password.
 #[page(POST "/console/users/{user_id}/password")]
 pub async fn identity_set_password_page(cx: &Cx, Form(form): Form<SetPasswordForm>) -> topcoat::Result<impl View> {
-    let id = path_param::<UserId>(cx).to_owned();
+    let id = user_id(cx).to_owned();
     let sent = set_password(cx, &id, &form).await;
     let shown = user_posted(cx, &id, "password", sent).await?;
     Ok(view! { user_answer(id: id, shown: shown) })
@@ -879,7 +881,7 @@ pub struct RoleChoiceForm {
 /// form.
 #[page(POST "/console/users/{user_id}/grant")]
 pub async fn identity_grant_role_page(cx: &Cx, Form(form): Form<RoleChoiceForm>) -> topcoat::Result<impl View> {
-    let id = path_param::<UserId>(cx).to_owned();
+    let id = user_id(cx).to_owned();
     let sent = grant(cx, &id, &form.role, true).await;
     let shown = user_posted(cx, &id, "grant", sent).await?;
     Ok(view! { user_answer(id: id, shown: shown) })
@@ -888,7 +890,7 @@ pub async fn identity_grant_role_page(cx: &Cx, Form(form): Form<RoleChoiceForm>)
 /// Revokes the role from the user, then goes back to their page (303).
 #[page(POST "/console/users/{user_id}/revoke")]
 pub async fn identity_revoke_role_page(cx: &Cx, Form(form): Form<RoleChoiceForm>) -> topcoat::Result<impl View> {
-    let id = path_param::<UserId>(cx).to_owned();
+    let id = user_id(cx).to_owned();
     let sent = grant(cx, &id, &form.role, false).await;
     let shown = user_posted(cx, &id, "revoke", sent).await?;
     Ok(view! { user_answer(id: id, shown: shown) })
@@ -909,7 +911,7 @@ async fn grant(cx: &Cx, id: &str, role: &str, grant: bool) -> Result<(), Refusal
 /// the grant form, and the forms that disable or enable them and set their
 /// password, each for a caller who may.
 #[component]
-async fn user_details(page: UserPage, failed: Failed) -> topcoat::Result<impl View> {
+async fn user_details(cx: &Cx, page: UserPage, failed: Failed) -> topcoat::Result<impl View> {
     let UserPage { user, grantable, writes_users, writes_roles } = page;
     let href = user_href(&user.id);
     let heading = user_label(&user);
@@ -1019,7 +1021,7 @@ async fn roles(cx: &Cx) -> Result<(Vec<IdentityRole>, bool), Refusal> {
 
 /// The roles as a table: a row per role, its name linked to its page.
 #[component]
-async fn roles_list(roles: Vec<IdentityRole>, writes: bool) -> topcoat::Result<impl View> {
+async fn roles_list(cx: &Cx, roles: Vec<IdentityRole>, writes: bool) -> topcoat::Result<impl View> {
     let rows: Vec<(String, String, String)> =
         roles.into_iter().map(|role| (role_href(&role.id), role.name, role.permissions.join(", "))).collect();
     Ok(view! {
@@ -1119,7 +1121,7 @@ async fn create_role(cx: &Cx, form: &RoleForm) -> Result<(), Refusal> {
 /// to delete it; for one who may read them, its name and permissions.
 #[page("/console/roles/{role_id}")]
 pub async fn identity_role_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<RoleId>(cx).to_owned();
+    let id = role_id(cx).to_owned();
     let found = role_page(cx, &id).await;
     let href = role_href(&id);
     Ok(view! {
@@ -1142,7 +1144,7 @@ async fn role_page(cx: &Cx, id: &str) -> Result<(IdentityRole, bool), Refusal> {
 /// a refusal renders the form again with its status, as adding one does.
 #[page(POST "/console/roles/{role_id}")]
 pub async fn identity_update_role_page(cx: &Cx, Form(form): Form<RoleForm>) -> topcoat::Result<impl View> {
-    let id = path_param::<RoleId>(cx).to_owned();
+    let id = role_id(cx).to_owned();
     let refusal = match update_role(cx, &id, &form).await {
         Ok(()) => return Err(see_other(ROLES).into()),
         Err(refusal) => refusal,
@@ -1170,7 +1172,7 @@ async fn update_role(cx: &Cx, id: &str, form: &RoleForm) -> Result<(), Refusal> 
 
 /// A role's name and permissions, for a caller who may not change it.
 #[component]
-async fn role_detail(role: IdentityRole) -> topcoat::Result<impl View> {
+async fn role_detail(cx: &Cx, role: IdentityRole) -> topcoat::Result<impl View> {
     let IdentityRole { name, permissions, .. } = role;
     let permissions = if permissions.is_empty() { "None".to_owned() } else { permissions.join(", ") };
     Ok(view! {
@@ -1189,7 +1191,7 @@ async fn role_detail(role: IdentityRole) -> topcoat::Result<impl View> {
 /// A role's form: its name, and its permissions as rows of text in one
 /// control; with `delete`, the link to the page that deletes it.
 #[component]
-async fn role_form(heading: String, action: String, form: RoleForm, errors: FormErrors, delete: Option<String>) -> topcoat::Result<impl View> {
+async fn role_form(cx: &Cx, heading: String, action: String, form: RoleForm, errors: FormErrors, delete: Option<String>) -> topcoat::Result<impl View> {
     let messages = unshown(&errors, &["name", "permissions"]);
     let permissions_errors = errors.of("permissions");
     let invalid = (!permissions_errors.is_empty()).then_some("true");
@@ -1217,7 +1219,7 @@ async fn role_form(heading: String, action: String, form: RoleForm, errors: Form
 /// the form that confirms.
 #[page("/console/roles/{role_id}/delete")]
 pub async fn identity_delete_role_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<RoleId>(cx).to_owned();
+    let id = role_id(cx).to_owned();
     let found = deletable(cx, &id).await;
     Ok(view! {
         match found {
@@ -1231,7 +1233,7 @@ pub async fn identity_delete_role_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// refusal renders the page again with its status.
 #[page(POST "/console/roles/{role_id}/delete")]
 pub async fn identity_destroy_role_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<RoleId>(cx).to_owned();
+    let id = role_id(cx).to_owned();
     let refusal = match destroy_role(cx, &id).await {
         Ok(()) => return Err(see_other(ROLES).into()),
         Err(refusal) => refusal,
@@ -1262,7 +1264,7 @@ async fn destroy_role(cx: &Cx, id: &str) -> Result<(), Refusal> {
 
 /// The confirmation of a role's deletion.
 #[component]
-async fn delete_role_form(role: IdentityRole, errors: FormErrors) -> topcoat::Result<impl View> {
+async fn delete_role_form(cx: &Cx, role: IdentityRole, errors: FormErrors) -> topcoat::Result<impl View> {
     let href = role_href(&role.id);
     let messages = unshown(&errors, &[]);
     Ok(view! {

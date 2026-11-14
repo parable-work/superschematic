@@ -1715,7 +1715,7 @@ fn uuid(text: &str) -> types::IdentityUUID {
 }
 
 #[page("/signup")]
-async fn signup_form() -> topcoat::Result<impl View> {
+async fn signup_form(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <form method="post">signup_input_fields()<button type="submit">"Sign up"</button></form> })
 }
 
@@ -1735,14 +1735,14 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
 }
 
 #[page("/book")]
-async fn booking_form() -> topcoat::Result<impl View> {
+async fn booking_form(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <form method="post">booking_input_fields()<button type="submit">"Book"</button></form> })
 }
 
 /// The booking form with the rooms a page offers: every row's, and the
 /// second row's own, and a row holding a room no choice is.
 #[page("/book/choices")]
-async fn booking_form_with_choices() -> topcoat::Result<impl View> {
+async fn booking_form_with_choices(cx: &Cx) -> topcoat::Result<impl View> {
     let mut form = BookingInputForm::new();
     form.rooms.push(RoomRequestForm::new());
     form.rooms.push(RoomRequestForm { room_id: Some(BOOKED.to_owned()), ..RoomRequestForm::new() });
@@ -1779,7 +1779,7 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
 /// The annotate form, its input's fields beside the account's id: the
 /// note's text, a textarea by its multiline hint, and its tags, rows.
 #[page("/annotate")]
-async fn annotate_form() -> topcoat::Result<impl View> {
+async fn annotate_form(cx: &Cx) -> topcoat::Result<impl View> {
     let form = AccountAnnotateArgsForm::new(ACCOUNT);
     Ok(view! { <form method="post">account_annotate_args_fields(form: form)<button type="submit">"Save the note"</button></form> })
 }
@@ -1807,13 +1807,13 @@ async fn annotate(cx: &Cx, Form(form): Form<AccountAnnotateArgsForm>) -> topcoat
 /// The draft form, whose input is optional, with its tag rows; a row
 /// button renders it again.
 #[page("/draft")]
-async fn draft_form() -> topcoat::Result<impl View> {
+async fn draft_form(cx: &Cx) -> topcoat::Result<impl View> {
     let form = AccountDraftNoteArgsForm::new(ACCOUNT);
     Ok(view! { <form method="post">account_draft_note_args_fields(form: form)<button type="submit">"Save the draft"</button></form> })
 }
 
 #[page(POST "/draft")]
-async fn draft(Form(form): Form<AccountDraftNoteArgsForm>) -> topcoat::Result<impl View> {
+async fn draft(cx: &Cx, Form(form): Form<AccountDraftNoteArgsForm>) -> topcoat::Result<impl View> {
     let mut form = form;
     form.apply_action();
     Ok(view! { <form method="post">account_draft_note_args_fields(form: form)<button type="submit">"Save the draft"</button></form> })
@@ -2604,6 +2604,7 @@ use schemas_fixture_views_api_topcoat::views::{
     time_text,
 };
 use serde_json::json;
+use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
 
@@ -2665,34 +2666,34 @@ fn invoice(billed_in: Option<&str>) -> InvoiceRecord {
 }
 
 #[page("/invoice")]
-async fn show_invoice() -> topcoat::Result<impl View> {
+async fn show_invoice(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { invoice_detail(record: invoice(Some("EUR"))) })
 }
 
 #[page("/invoices")]
-async fn show_invoices() -> topcoat::Result<impl View> {
+async fn show_invoices(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { invoice_table(rows: vec![invoice(Some("EUR")), invoice(None)]) })
 }
 
 #[page("/order")]
-async fn show_order() -> topcoat::Result<impl View> {
+async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { order_view_detail(record: order("A-1001", "on_hold", true)) })
 }
 
 #[page("/bare-order")]
-async fn show_bare_order() -> topcoat::Result<impl View> {
+async fn show_bare_order(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { order_view_detail(record: bare_order()) })
 }
 
 #[page("/orders")]
-async fn show_orders() -> topcoat::Result<impl View> {
+async fn show_orders(cx: &Cx) -> topcoat::Result<impl View> {
     let mut forged = order("A-1002", "shipped", false);
     forged.status = "x\" onclick=\"steal()".to_string();
     Ok(view! { order_view_table(rows: vec![order("A-1001", "on_hold", true), forged]) })
 }
 
 #[page("/thread")]
-async fn show_thread() -> topcoat::Result<impl View> {
+async fn show_thread(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { comment_detail(record: thread()) })
 }
 
@@ -2700,7 +2701,7 @@ async fn show_thread() -> topcoat::Result<impl View> {
 /// quantity, a line's price's currency two records down, a tag, and the
 /// city of the address shipped to; a label is text, escaped.
 #[page("/order/choices")]
-async fn show_order_with_choices() -> topcoat::Result<impl View> {
+async fn show_order_with_choices(cx: &Cx) -> topcoat::Result<impl View> {
     let choices = Choices::new()
         .with("lines.sku", [("anvil", "Anvil <heavy>")])
         .with("lines.quantity", [("2", "Two")])
@@ -2715,7 +2716,7 @@ async fn show_order_with_choices() -> topcoat::Result<impl View> {
 /// Orders whose references and recipients the app's choices name, one of
 /// each: the other row shows its own values.
 #[page("/orders/choices")]
-async fn show_orders_with_choices() -> topcoat::Result<impl View> {
+async fn show_orders_with_choices(cx: &Cx) -> topcoat::Result<impl View> {
     let choices = Choices::new()
         .with("reference", [("A-1001", "First order")])
         .with("shipTo.recipient", [("Ada Lovelace", "Ada")]);
@@ -2727,7 +2728,7 @@ async fn show_orders_with_choices() -> topcoat::Result<impl View> {
 
 /// An order placed at a time with an offset, which shows in UTC.
 #[page("/order/offset")]
-async fn show_order_at_an_offset() -> topcoat::Result<impl View> {
+async fn show_order_at_an_offset(cx: &Cx) -> topcoat::Result<impl View> {
     let record = OrderViewRecord { placed_at: "2026-01-01T00:15:00+01:00".to_string(), ..order("A-1004", "pending", false) };
     Ok(view! { order_view_detail(record: record) })
 }
@@ -3595,7 +3596,7 @@ async fn app(trusted: &[&str]) -> Router {
     let implementations = implementations().await;
     let pages = IdentityPageAuthenticator::of(&implementations);
     Router::builder()
-        .origin_policy(OriginPolicy::new().trust_origins(trusted.iter().copied()))
+        .with(OriginPolicy::trust_origins(trusted.iter().copied()))
         .discover()
         .fixture_user_routes_api(implementations, pages)
         .build()

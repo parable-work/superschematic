@@ -855,6 +855,9 @@ async fn the_console_shows_what_the_shopper_may_list() {
     // The shop's own pages link the console.
     let reviews = send(&router, "GET", "/reviews", None, None).await;
     assert!(reviews.body.contains(r#"<a href="/console">Console</a>"#), "{}", reviews.body);
+    // The document's head has each page's title: the shop's on its own
+    // pages, and under the console the page's trail back to the index.
+    assert!(reviews.body.contains("<title>Acme shop</title>"), "{}", reviews.body);
 
     // Signed out, the console lists the products, which anyone may list,
     // and offers to sign in, and the orders answer 401 with a sign-in link
@@ -862,6 +865,9 @@ async fn the_console_shows_what_the_shopper_may_list() {
     let index = send(&router, "GET", "/console", None, None).await;
     assert_eq!(index.status, StatusCode::OK);
     assert!(index.body.contains(r#"<header class="ss-header"><a href="/console">Acme shop console</a></header>"#), "{}", index.body);
+    assert!(index.body.contains("<title>Acme shop console</title>"), "{}", index.body);
+    let listed = send(&router, "GET", "/console/products", None, None).await;
+    assert!(listed.body.contains("<title>Products · Acme shop console</title>"), "{}", listed.body);
     // Each link starts with its type's icon, which the app's stylesheet
     // draws.
     let products = r#"<li><a href="/console/products"><span class="ss-icon" data-icon="package" aria-hidden="true"></span>Products</a></li>"#;

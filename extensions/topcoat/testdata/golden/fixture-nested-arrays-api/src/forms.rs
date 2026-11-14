@@ -242,6 +242,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -549,6 +550,7 @@ impl<'de> Deserialize<'de> for SaveGridInputForm {
 /// number field the app names into a select.
 #[component]
 pub async fn save_grid_input_fields(
+    cx: &Cx,
     #[default(SaveGridInputForm::new())] form: SaveGridInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -697,6 +699,7 @@ impl<'de> Deserialize<'de> for GridGridLabelsArgsForm {
 /// names into a select.
 #[component]
 pub async fn grid_grid_labels_args_fields(
+    cx: &Cx,
     #[default] form: GridGridLabelsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -820,6 +823,7 @@ impl<'de> Deserialize<'de> for GridReplaceLabelsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn grid_replace_labels_args_fields(
+    cx: &Cx,
     #[default] form: GridReplaceLabelsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

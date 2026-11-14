@@ -14,7 +14,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 # The blocking pool the engine's pages call the engine on.
 tokio = { version = "1.52.2", features = ["rt"] }
-topcoat = { version = "0.10", features = ["tower"] }
+topcoat = { version = "0.12.1", features = ["tower"] }
 # The engine of fixture-engine-db (D58), in-process on SQLite: its routes as an
 # axum router, the behaviors it runs, and the engine document of the
 # database's Rust types.

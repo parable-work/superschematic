@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{NoteCountRecord, NoteTitleRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -82,7 +83,7 @@ pub fn money_text(amount: i64, currency: &str) -> String {
 /// `NoteCountRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn note_count_detail(record: NoteCountRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn note_count_detail(cx: &Cx, record: NoteCountRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="NoteCount" role="group">
             <dl>
@@ -101,6 +102,7 @@ pub async fn note_count_detail(record: NoteCountRecord, #[default] choices: Choi
 /// its end links nowhere.
 #[component]
 pub async fn note_count_table(
+    cx: &Cx,
     rows: Vec<NoteCountRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -133,7 +135,7 @@ pub async fn note_count_table(
 /// `NoteTitleRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn note_title_detail(record: NoteTitleRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn note_title_detail(cx: &Cx, record: NoteTitleRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="NoteTitle" role="group">
             <dl>
@@ -157,6 +159,7 @@ pub async fn note_title_detail(record: NoteTitleRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn note_title_table(
+    cx: &Cx,
     rows: Vec<NoteTitleRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

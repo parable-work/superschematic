@@ -101,7 +101,7 @@ use http::request::Parts;
 use schemas_fixture_engine_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
 use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation, NotesListNotesArgs};
 use schemas_fixture_engine_api_topcoat::{engine, PageAuthenticator, RouterBuilderFixtureEngineApiExt, Setup};
-use topcoat::context::{Cx, app_context};
+use topcoat::context::{Cx, context};
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
@@ -150,7 +150,7 @@ impl NotesImplementation for Notes {
 // version of Note the open deployed.
 #[page("/notes/schema")]
 async fn note_schema(cx: &Cx) -> topcoat::Result<impl View> {
-    let setup: &Setup = app_context(cx);
+    let setup: &Setup = context(cx);
     let engine = Arc::clone(&setup.engine);
     let principal = superschematic_engine::Principal::new("ada", ["Note"]);
     let target = superschematic_engine::SchemaTarget { namespace: Some("fixture-engine-db") };

@@ -25,6 +25,7 @@
 
 use crate::choices::Choices;
 use crate::records::{BasketInputRecord, BasketLineRecord, BasketViewRecord, ItemViewRecord, PartViewRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// A table's sortable headers (D44, amended): the column its rows are in
@@ -219,7 +220,7 @@ pub fn part_kind_label(value: &str) -> &str {
 /// `BasketInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn basket_input_detail(record: BasketInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn basket_input_detail(cx: &Cx, record: BasketInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="BasketInput" role="group">
             <dl>
@@ -239,6 +240,7 @@ pub async fn basket_input_detail(record: BasketInputRecord, #[default] choices: 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn basket_input_table(
+    cx: &Cx,
     rows: Vec<BasketInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -278,7 +280,7 @@ pub async fn basket_input_table(
 /// `BasketLineRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn basket_line_detail(record: BasketLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn basket_line_detail(cx: &Cx, record: BasketLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="BasketLine" role="group">
             <dl>
@@ -302,6 +304,7 @@ pub async fn basket_line_detail(record: BasketLineRecord, #[default] choices: Ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn basket_line_table(
+    cx: &Cx,
     rows: Vec<BasketLineRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -343,7 +346,7 @@ pub async fn basket_line_table(
 /// `BasketViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn basket_view_detail(record: BasketViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn basket_view_detail(cx: &Cx, record: BasketViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="BasketView" role="group">
             <dl>
@@ -367,6 +370,7 @@ pub async fn basket_view_detail(record: BasketViewRecord, #[default] choices: Ch
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn basket_view_table(
+    cx: &Cx,
     rows: Vec<BasketViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -408,7 +412,7 @@ pub async fn basket_view_table(
 /// `ItemViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn item_view_detail(record: ItemViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn item_view_detail(cx: &Cx, record: ItemViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.name.as_str()), Some("Item"));
     Ok(view! {
         <div class="ss-detail" data-type="ItemView" role="group" aria-label=(label)>
@@ -443,6 +447,7 @@ pub async fn item_view_detail(record: ItemViewRecord, #[default] choices: Choice
 /// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn item_view_table(
+    cx: &Cx,
     rows: Vec<ItemViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -496,7 +501,7 @@ pub async fn item_view_table(
 /// `PartViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn part_view_detail(record: PartViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn part_view_detail(cx: &Cx, record: PartViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="PartView" role="group">
             <dl>
@@ -564,6 +569,7 @@ pub async fn part_view_detail(record: PartViewRecord, #[default] choices: Choice
 /// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn part_view_table(
+    cx: &Cx,
     rows: Vec<PartViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

@@ -25,7 +25,7 @@ acme-shop-stock-api = { path = "../../schemas/dist/api/shop-stock" }
 # RouterBuilderShopStockExt::shop_stock_with_parts sets up from the parts.
 acme-shop-stock-topcoat = { path = "../../schemas/dist/topcoat/shop-stock" }
 tokio = { version = "1", features = ["net"] }
-topcoat = "0.10"
+topcoat = "0.12.1"
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]
