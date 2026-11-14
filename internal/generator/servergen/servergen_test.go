@@ -1646,10 +1646,13 @@ func TestTheReleaseDockerfileBuildsAnImageThatServes(t *testing.T) {
 		t.Fatalf("%s does not pin the archives' digest %s: %v\n%s", dockerfile, r.Archives[platform], err, data)
 	}
 
-	// The file server holds the tarball before it starts: docker cp makes
-	// /www of the tarball's directory in the created container, where a
-	// copy into a running one raced the command that made the directory
-	// and lost on a slow runner.
+	// The file server's image is pulled first: docker create and docker
+	// run report a pull they make before the container's id, and docker
+	// gives back both, so where the image was not there yet the id read
+	// here named no container. The server holds the tarball before it
+	// starts: docker cp makes /www of the tarball's directory in the
+	// created container, so no copy waits on a command that makes it.
+	docker(t, "pull", "-q", "busybox:1.37")
 	server := docker(t, "create", "-p", "127.0.0.1::80", "busybox:1.37", "httpd", "-f", "-p", "80", "-h", "/www")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", server).Run() })
 	docker(t, "cp", filepath.Dir(tarball)+"/.", server+":/www")
@@ -1762,12 +1765,23 @@ func dockerRepo(t *testing.T) string {
 // it when the test ends.
 func dockerBuild(t *testing.T, root, image string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("docker", append(append([]string{"build", "-q", "-t", image}, args...), ".")...)
+	cmd := exec.Command("docker", append(append([]string{"build", "--progress=plain", "-t", image}, args...), ".")...)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("docker build: %v\n%s", err, out)
+		t.Fatalf("docker build: %v\n%s", err, buildTail(out))
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rmi", "-f", image).Run() })
+}
+
+// buildTail is the end of what a failed docker build wrote with
+// --progress=plain: the step that failed and what its command printed,
+// which -q leaves out, so a build that fails on a runner alone says why.
+func buildTail(out []byte) string {
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) > 120 {
+		lines = append([]string{"..."}, lines[len(lines)-120:]...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // firstLine is s up to its first newline.
