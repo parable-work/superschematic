@@ -29,6 +29,13 @@
 // off. TestRejects runs the cases under SQLITECONVERGE_REJECTS, laid out
 // the same with a want.txt: each must fail to apply, with an error that
 // contains the text of want.txt.
+//
+// TestGuards (guards_test.go) runs a service's @stateMachine guards on a
+// database its sqlite/create.sql made; TestStateMachineGuardsOnSQLite runs
+// it with SQLITECONVERGE_GUARDS, the directory holding its cases.
+//
+// TestFences (fences_test.go) runs a service's @fenced counters the same
+// way; TestFencesOnSQLite runs it with SQLITECONVERGE_FENCES.
 package sqliteconverge
 
 import (

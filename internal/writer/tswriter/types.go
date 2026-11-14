@@ -267,6 +267,12 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		e.recordHeritageImports(change.Queue)
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("enqueueOnChange"), enqueueOnChangeArgs(change))
 	}
+	for _, machine := range def.StateMachines {
+		fmt.Fprintf(&e.body, "@%s<%s>(%s)\n", e.use("stateMachine"), def.Name, e.stateMachineArgs(def, machine))
+	}
+	for _, fence := range def.Fences {
+		fmt.Fprintf(&e.body, "@%s<%s>(%s)\n", e.use("fenced"), def.Name, fencedArgs(fence))
+	}
 	if len(def.SeedRoles) > 0 {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}

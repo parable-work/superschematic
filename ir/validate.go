@@ -48,8 +48,9 @@ func WithStrictScalarResolution() ValidateOption {
 // member lists, verifying that each resolves to a known definition, and
 // verifies that every import is a named import. It also checks the TypeRef
 // invariants of an array of arrays: isArrayOfArrays requires isArray and
-// excludes isMap. The checks that read hydrated scalar metadata are
-// [Schema.ValidateHydrated]'s.
+// excludes isMap, and what a type's @stateMachine and @fenced declarations
+// decide alone (D118, validateStateMachines; D119, validateFences). The
+// checks that read hydrated scalar metadata are [Schema.ValidateHydrated]'s.
 //
 // Resolution sources (checked in order):
 //   - schema.Scalars
@@ -165,6 +166,8 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 	if err := ValidateTypeDisplay(td.Display); err != nil {
 		errs = append(errs, fmt.Errorf("type %s: %w", td.Name, err))
 	}
+	errs = append(errs, s.validateStateMachines(td)...)
+	errs = append(errs, s.validateFences(td)...)
 	return errs
 }
 

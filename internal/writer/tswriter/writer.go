@@ -119,7 +119,7 @@ var symbolPackages = map[string]string{
 	"decrypted":         "@superschematic/schema",
 	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema", "allowUnknownFields": "@superschematic/schema",
 	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema", "display": "@superschematic/schema",
-	"uiControl": "@superschematic/schema",
+	"uiControl": "@superschematic/schema", "stateMachine": "@superschematic/schema", "fenced": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
 	// @superschematic/schema import so General schemas (which do not stage @superschematic/db)
 	// round-trip.
@@ -433,6 +433,75 @@ func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
 		parts = append(parts, "backfill: true")
 	}
 	return def.Queue + ", " + objectLiteral(parts)
+}
+
+// stateMachineArgs renders @stateMachine's options (D118): the field, each
+// state's moves keyed by the state, the terminal states and, when the
+// machine has one, the null start. The IR holds a state as the value its
+// enum member serializes to; TypeScript names the member, as a field's
+// Default does, and writes a return to null as null. The enum is the
+// field's, imported when another file of the schema declares it, as the
+// field's own type is. A machine on a dependency's enum is not written:
+// the schema does not hold that enum's members.
+func (e *emitter) stateMachineArgs(def *ir.TypeDef, machine *ir.StateMachine) string {
+	owner := fmt.Sprintf("type %s: @stateMachine on %s", def.Name, machine.Field)
+	var field *ir.FieldDef
+	for _, fd := range def.Fields {
+		if fd.Name == machine.Field {
+			field = fd
+		}
+	}
+	if field == nil {
+		e.failf("%s: %s has no field %s", owner, def.Name, machine.Field)
+		return "{}"
+	}
+	enum := e.lookupEnum(field.TypeRef.Name)
+	if enum == nil {
+		e.failf("%s: the field is typed by %s, which the schema does not declare, so the members its states name are not known; a machine on a dependency's enum has no TypeScript writer", owner, field.TypeRef.Name)
+		return "{}"
+	}
+	// The field may be one a base class of another file declares.
+	enumName := e.renderTypeName(field.TypeRef.Name, owner)
+	member := func(state string) string {
+		if value := enum.MemberSerializedAs(state); value != nil {
+			return enumName + "." + value.Name
+		}
+		e.failf("%s: state %q is not a member of enum %s", owner, state, enum.Name)
+		return quote(state)
+	}
+	members := func(states []string, toNull bool) string {
+		items := make([]string, 0, len(states)+1)
+		if toNull {
+			items = append(items, "null")
+		}
+		for _, state := range states {
+			items = append(items, member(state))
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	}
+	transitions := make([]string, 0, len(machine.Transitions))
+	for _, tr := range machine.Transitions {
+		transitions = append(transitions, "["+member(tr.From)+"]: "+members(tr.To, tr.ToNull))
+	}
+	parts := []string{
+		"field: " + quote(machine.Field),
+		"transitions: " + objectLiteral(transitions),
+		"terminal: " + members(machine.Terminal, false),
+	}
+	if len(machine.FromNull) > 0 {
+		parts = append(parts, "fromNull: "+members(machine.FromNull, false))
+	}
+	return objectLiteral(parts)
+}
+
+// fencedArgs renders @fenced's options (D119): the fence's field and, when
+// it lists them, the fields it covers, in the order written.
+func fencedArgs(fence *ir.Fence) string {
+	parts := []string{"field: " + quote(fence.Field)}
+	if len(fence.Covers) > 0 {
+		parts = append(parts, "covers: "+stringListLiteral(fence.Covers))
+	}
+	return objectLiteral(parts)
 }
 
 // seedRolesArgs renders @seedRoles's list (D88): each role's name and

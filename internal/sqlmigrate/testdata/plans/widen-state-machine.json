@@ -1,0 +1,63 @@
+{
+  "dialect": "postgres",
+  "expanded": "28eacf41cafd79efe3888092de10a925ea5c35db6f48f9e038a9badea8ac415a",
+  "from": "2a94cd047b37bc4e29cce4300ab774ad47e5d7ad8a54dd33d4f1ba56fa773b61",
+  "hash": "3094c955ae83a6dddf2a1bc5514dfeaef83dd7e3f32710a56a18884b7a60946d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_status_transition_guard ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT ck_order_status",
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_status CHECK (status IN ('placed', 'shipped', 'cancelled')) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "validateCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_status"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('shipped', 'cancelled') THEN\n    RAISE EXCEPTION 'order.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status IS NULL AND NEW.status IN ('placed'))\n    OR (OLD.status = 'placed' AND NEW.status IN ('shipped', 'cancelled'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_status_transition_guard\n  BEFORE UPDATE OF status ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_status_transition_guard()"
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "d2e10c3cc65600a89ac60cb86c97da73f3f7381f7069cdc935726e4e08f6307d",
+  "toModel": null,
+  "version": 1
+}

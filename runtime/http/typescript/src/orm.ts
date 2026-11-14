@@ -224,6 +224,7 @@ export interface TableStatements {
   readonly updatedAt: string;
   readonly updatedBy: string;
   readonly upsert: string;
+  /** A soft delete of one row and of many, which also advance a fence that covers a column they stamp (D119). */
   readonly softDelete: string;
   readonly softDeleteMany: string;
   readonly delete: string;
@@ -319,6 +320,8 @@ export interface TableDefinition {
   readonly softDelete?: boolean;
   /** A @versioned table whose hard deletes set the history actor. */
   readonly historyActor?: boolean;
+  /** The table's @fenced fields, in the order declared (D119); absent for a table with none. */
+  readonly fences?: readonly FenceDefinition[];
   /** The search column, qualified, of a table with search fields, or of a view's source with them (D99). */
   readonly search?: string;
   /** A view's: the condition its search words' conditions sit in, %s their WHERE, the view's key in the keys of the source's rows they keep (D99). */
@@ -330,6 +333,43 @@ export interface TableDefinition {
   readonly relations?: readonly RelationDefinition[];
   /** The one-to-many relations a read includes (D90). */
   readonly many?: readonly ManyDefinition[];
+}
+
+/**
+ * A fence of a table, a @fenced field (D119), sqlutil.FenceModel: a counter
+ * every write of a column it covers sets to the stored value plus one,
+ * which a trigger holds every writer to. An update, an updateMany and an
+ * upsert's update add its bump to their assignments (fenceBumps); a soft
+ * delete and a reseal carry it in their statements.
+ */
+export interface FenceDefinition {
+  /** The fence's column, as a statement names it. */
+  readonly column: string;
+  /** The columns a write of which advances the fence, as a statement names them; absent for a fence that counts every update of the row. */
+  readonly covers?: readonly string[];
+  /** The assignment that advances the fence by one. */
+  readonly bump: string;
+}
+
+/**
+ * The assignments that advance fences in an update whose assignments are
+ * sets, each of which begins with its column and " = " (D119): the bump of
+ * each fence that covers a column one of them sets, or of a fence with no
+ * covers when they set any, once. Whether a value differs from the stored
+ * one is not asked, which the statement cannot know. A fence the update
+ * sets itself gets none: its caller is driving the counter, and the
+ * fence's trigger judges the value written. A table with no fences has
+ * none to advance.
+ */
+export function fenceBumps(fences: readonly FenceDefinition[] | undefined, sets: readonly string[]): string[] {
+  const assigned = (column: string): boolean => sets.some(set => set.startsWith(`${column} = `));
+  const bumps: string[] = [];
+  for (const fence of fences ?? []) {
+    if (assigned(fence.column)) continue;
+    const covers = fence.covers ?? [];
+    if (covers.length === 0 ? sets.length > 0 : covers.some(assigned)) bumps.push(fence.bump);
+  }
+  return bumps;
 }
 
 /** A to-one relation of a table to another of its database (D90). */
@@ -1977,6 +2017,8 @@ class TableRepository {
     const args: unknown[] = [];
     const sets = this.setClauses(this.sealedUpdate(update, id, 'update'), args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
+    // Each fence the assignments advance, their stamps among them (D119).
+    sets.push(...fenceBumps(this.def.fences, sets));
     args.push(this.encode(id, this.keyColumn(), 'key'));
     const s = this.def.statements;
     const text = fill(s.update, sets.join(', '), args.length) + s.live + s.returning;
@@ -1993,6 +2035,8 @@ class TableRepository {
     const args: unknown[] = [];
     const sets = this.setClauses(update, args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
+    // Each fence the assignments advance, their stamps among them (D119).
+    sets.push(...fenceBumps(this.def.fences, sets));
     const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length)), false);
     const { rowCount } = await run(this.runner, fill(this.def.statements.updateMany, sets.join(', '), where), args);
     return rowCount;
@@ -2191,7 +2235,10 @@ class TableRepository {
     const compared = { current: [] as string[], next: [] as string[] };
     const sets = this.setClauses(plain, args, false, compared);
     const assignments = sets.length === 0 ? [key.keep] : [...sets];
-    if (sets.length > 0) this.stamp(assignments, update, args);
+    if (sets.length > 0) {
+      this.stamp(assignments, update, args);
+      assignments.push(...fenceBumps(this.def.fences, assignments));
+    }
     const where = this.upsertWhere(compared.current, compared.next, onlyIfChanged || sets.length === 0);
     const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), `(${placeholders.join(', ')})`, key.conflict, assignments.join(', '), where), args);
     let result: UpsertResult<Values>;
@@ -2244,7 +2291,10 @@ class TableRepository {
       const current = plain.map(column => this.compareAs(column, column.qualified));
       const next = plain.map(column => this.compareAs(column, fill(c.excluded, column.column)));
       const assignments = sets.length === 0 ? [key.keep] : [...sets];
-      if (sets.length > 0) this.stamp(assignments, {}, args);
+      if (sets.length > 0) {
+        this.stamp(assignments, {}, args);
+        assignments.push(...fenceBumps(this.def.fences, assignments));
+      }
       const where = sets.length === 0 ? this.upsertWhere([], [], true) : this.upsertWhere(current, next, onlyIfChanged);
       const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), tuples.join(', '), key.conflict, assignments.join(', '), where), args);
       // A row is its input's by the key's values; an input that sets none

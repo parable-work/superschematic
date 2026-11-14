@@ -218,6 +218,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin = *tsInput
 		vin.Naming = o.naming
 		vin.Registry = reg
+		vin.Dialects = sqlDialects(cfg)
 
 		if len(dataFiles) == 0 {
 			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
@@ -273,6 +274,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		}
 		vin.Naming = o.naming
 		vin.Registry = reg
+		vin.Dialects = sqlDialects(cfg)
 	}
 
 	var errs []error
@@ -561,7 +563,9 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings go to WithWarnings's function or print to
-// [WarningWriter], errors fail the load. The fields its field-anchored
+// [WarningWriter], errors fail the load. Each @stateMachine's transitions
+// are put in the order of its enum's members first (D118,
+// orderStateMachines). The fields its field-anchored
 // behaviors own join their tables before the pass (D103,
 // behaviorfields.Expand), once the behaviors' own checks hold what that
 // relies on (verify.CheckBehaviors), so an index, a uniqueness, a display
@@ -585,6 +589,10 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	if reg == nil {
 		reg = registry.New(vin.Naming.OrDefault())
 	}
+	// A @stateMachine's transitions take the order of its enum's members
+	// (D118), so the pass and the generators read one order from every
+	// form.
+	orderStateMachines(schema, vin.ExternalEnums)
 	// A @source view of another service's table reads the fields its
 	// behaviors own as the table's own (D103).
 	behaviorfields.ExpandExternal(vin.ExternalTypes, reg)

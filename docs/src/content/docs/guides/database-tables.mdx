@@ -1,6 +1,6 @@
 ---
 title: Database tables
-description: Keys, columns, table and column names, relations, one-to-many, indexes, text search, JSON columns, encrypted fields, upserts and soft delete in a DB schema, what the SQL, the Go ORM and the TypeScript repositories make of them, and how a database that holds data changes.
+description: Keys, columns, table and column names, relations, one-to-many, indexes, text search, JSON columns, encrypted fields, upserts, soft delete, state machines and fences in a DB schema, what the SQL, the Go ORM and the TypeScript repositories make of them, and how a database that holds data changes.
 sidebar:
   order: 2
 ---
@@ -94,7 +94,9 @@ held to them:
   code's.
 
 A check is named `ck_<table>_<column>`, and `NULL` passes it. A list, a
-map and a JSON value get neither a default nor a check. A decimal's
+map and a JSON value get neither a default nor a check. Which value of an
+enum column may follow which is a `@stateMachine`'s to say
+([State machines](#state-machines)). A decimal's
 `precision` and `scale` are its column's type, `NUMERIC(p,s)`, which
 refuses a value with too many digits before the point and rounds one with
 too many after it, which the validators refuse first.
@@ -164,8 +166,10 @@ view's columns and a projection's joins, the user model's tables, and
 both ORMs' statements. On a `@queue` class, `@table` names the queue's
 table whole, with no `_queue`, and `@column` its message's columns; an
 `@enqueueOnChange` trigger is named after both tables
-(`trg_lineItem_enqueue_linePosted`). The fields keep their names in the
-row types, the filters and the API.
+(`trg_lineItem_enqueue_linePosted`), and a `@stateMachine`'s guard and a
+`@fenced` trigger after the table and the column
+(`trg_lineItem_status_transition_guard`, `trg_lineItem_version_fence`).
+The fields keep their names in the row types, the filters and the API.
 
 Two tables, or two columns of a table, a column the generator adds among
 them, may not take one name, and the load says which. A table the engine,
@@ -789,6 +793,715 @@ UUID, as a custom authenticator may give, is no acting user.
 of a table with `updatedBy` need an acting user too, so a nullable
 `updatedBy` is never left as it was by a write that forgot to name one.
 
+## State machines
+
+An enum column's `CHECK` says which values the column holds. It does not
+say which value may follow which. `@stateMachine`, from
+`@superschematic/schema`, declares the moves an enum field may make
+([D118](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+On a table, the database then refuses every other move, whatever writes
+the row: a repository, a job's own SQL, a script or `psql`. The generated
+types carry the same moves in Go, TypeScript, Python and Rust, so a
+service asks whether a move is listed, or whether a row is finished,
+without keeping a list of its own.
+
+Use one for a status that no writer may move out of order and that needs
+no permission: a ledger entry, a payment, a job's run. A status that
+people move, with a permission for each move and rules that hear it, is a
+Workflow field ([A state machine or a Workflow field](#a-state-machine-or-a-workflow-field)).
+
+A support desk's ticket starts open and may be reopened until it is
+closed. Its review is null until a pass reviews the answer, and a retry
+clears it for the next pass:
+
+```ts
+import { Identity, Temporal } from "superscalar";
+import { Default, Nullable, stateMachine } from "@superschematic/schema";
+import { AutoGenerate, key } from "@superschematic/db";
+
+// Where a ticket stands. A member's value is not its name: the database
+// holds the value, and a language's types name the member.
+export enum TicketState {
+  Open = "open",
+  InProgress = "in_progress",
+  Resolved = "resolved",
+  Closed = "closed"
+}
+
+// What a review of a ticket's answer found.
+export enum ReviewOutcome {
+  RETRY = "RETRY",
+  APPROVED = "APPROVED",
+  REJECTED = "REJECTED"
+}
+
+@stateMachine<Ticket>({
+  field: "state",
+  transitions: {
+    [TicketState.Resolved]: [TicketState.Open, TicketState.Closed],
+    [TicketState.Open]: [TicketState.Open, TicketState.InProgress, TicketState.Resolved, TicketState.Closed],
+    [TicketState.InProgress]: [TicketState.Resolved, TicketState.Open]
+  },
+  terminal: [TicketState.Closed]
+})
+@stateMachine<Ticket>({
+  field: "review",
+  fromNull: [ReviewOutcome.RETRY, ReviewOutcome.APPROVED, ReviewOutcome.REJECTED],
+  transitions: {
+    [ReviewOutcome.RETRY]: [null, ReviewOutcome.APPROVED, ReviewOutcome.REJECTED]
+  },
+  terminal: [ReviewOutcome.APPROVED, ReviewOutcome.REJECTED]
+})
+export abstract class Ticket {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  subject: string;
+
+  state: Default<TicketState, TicketState.Open>;
+
+  review: Nullable<ReviewOutcome>;
+
+  updatedAt: Temporal.DateTime;
+}
+```
+
+A class takes one `@stateMachine` per field:
+
+| Option | What it sets |
+| --- | --- |
+| `field` | the field the machine governs, one typed by an enum: `E`, `Nullable<E>` or `Default<E, V>` |
+| `transitions` | each state that has a move, and the states it may move to; `{}` when no state moves. A state with no entry moves nowhere. `null` in a state's list returns a `Nullable` field to null, and needs `fromNull` |
+| `terminal` | the states no update leaves; `[]` when there is none. A terminal state has no entry in `transitions` |
+| `fromNull` | on a `Nullable` field, the states a null may take. Without it an update cannot set a null field |
+
+Three rules hold in the database and in every generated helper alike:
+
+- A state is the enum member's value, `in_progress`, which is what the
+  column holds. The types of each language name the member.
+- A write that leaves the field as it was is no move, and passes whether
+  the machine lists it or not. The ticket's move from open to open says
+  nothing the rule does not.
+- An insert is not held. A row is born in the state its writer gives it,
+  so a backfill or a restore can write a row that is part of the way
+  along.
+
+TypeScript holds every state to the field's enum: a state of another
+enum, a field the class does not declare, and a machine on a text or a
+number field do not compile. The options are written out where the
+decorator stands: a spread in `transitions` is refused.
+
+### What the build checks of a machine
+
+The build refuses a graph that cannot work, and names the type, the field
+and the state:
+
+- a field the class lacks, a field no enum types, and a list or a map of
+  an enum;
+- a state that is no member of the field's enum;
+- two machines on one field, two entries for one state, and a move listed
+  twice;
+- a terminal state that has a transition, and an entry with no target;
+- `fromNull`, or `null` in a state's list, on a required field; an empty
+  `fromNull`; and `null` in a state's list on a machine with no
+  `fromNull`, after which the row could not change again;
+- a state no row can come to hold. The build walks the moves from the
+  field's `Default`, or from null by `fromNull` when the field has no
+  default, and every member must be reached. A field with neither is not
+  walked: its rows are born in any state.
+
+```
+@stateMachine on Ticket.state: "closed" is terminal and has a transition; take it out of terminal, or drop its transitions
+@stateMachine on Ticket.state: no move reaches "resolved" from state's default, "open", so no update could put a row there; list a move to it, or take the member out of TicketState
+```
+
+On a DB service the build also refuses a machine where no guard could
+hold it: on an engine type (`@behavior`), whose instances are kept in the
+engine's own tables; on a `@queue` class; and on a field a behavior owns,
+such as a `Workflow` field, whose moves are the behavior's.
+
+A JSON or YAML schema file writes the same list on the type, under
+`stateMachines`, each state as the member's value and a return to null as
+`toNull`:
+
+```yaml
+stateMachines:
+  - field: state
+    transitions:
+      - from: open
+        to: [open, in_progress, resolved, closed]
+      - from: in_progress
+        to: [resolved, open]
+      - from: resolved
+        to: [open, closed]
+    terminal: [closed]
+  - field: review
+    transitions:
+      - from: RETRY
+        to: [APPROVED, REJECTED]
+        toNull: true
+    terminal: [APPROVED, REJECTED]
+    fromNull: [RETRY, APPROVED, REJECTED]
+```
+
+A machine on an enum that a dependency owns works from a TypeScript
+schema only. A JSON or YAML schema file does not read a dependency's
+enum, so the build refuses the machine there: type the field by an enum
+of the schema's own.
+
+### What a guard refuses
+
+A table gets a guard per machine, in each dialect the service lists. On
+Postgres it is the function `<table>_<column>_transition_guard()` and the
+trigger `trg_<table>_<column>_transition_guard`, which runs before each
+update that sets the column:
+
+```sql
+CREATE OR REPLACE FUNCTION ticket_state_transition_guard() RETURNS trigger AS $$
+BEGIN
+  -- The @stateMachine of Ticket.state (D118): an update that leaves the
+  -- column's value is no move, and any other must be one the machine lists.
+  IF NEW.state IS NOT DISTINCT FROM OLD.state THEN
+    RETURN NEW;
+  END IF;
+  IF OLD.state IN ('closed') THEN
+    RAISE EXCEPTION 'ticket.state is terminal at %: it cannot move to %', OLD.state, NEW.state
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF (OLD.state = 'open' AND NEW.state IN ('open', 'in_progress', 'resolved', 'closed'))
+    OR (OLD.state = 'in_progress' AND NEW.state IN ('resolved', 'open'))
+    OR (OLD.state = 'resolved' AND NEW.state IN ('open', 'closed'))
+  THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'ticket.state cannot move from % to %', OLD.state, NEW.state
+    USING ERRCODE = 'check_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_ticket_state_transition_guard
+  BEFORE UPDATE OF state ON ticket
+  FOR EACH ROW EXECUTE FUNCTION ticket_state_transition_guard();
+```
+
+A refused update fails with `check_violation`, SQLSTATE `23514`, the code
+a broken `CHECK` fails with, and the message holds the two values:
+`ticket.state is terminal at closed: it cannot move to open`, or
+`ticket.state cannot move from in_progress to closed`.
+
+SQLite has no trigger functions. Its guard is one trigger of the same
+name whose `WHEN` is the same rule and whose body aborts the statement:
+
+```sql
+CREATE TRIGGER "trg_ticket_review_transition_guard" BEFORE UPDATE OF "review" ON "ticket" FOR EACH ROW
+WHEN NEW."review" IS NOT OLD."review" AND (
+  OLD."review" IN ('APPROVED', 'REJECTED')
+  OR NOT COALESCE(
+    (OLD."review" IS NULL AND NEW."review" IN ('RETRY', 'APPROVED', 'REJECTED'))
+    OR (OLD."review" IS 'RETRY' AND (NEW."review" IS NULL OR NEW."review" IN ('APPROVED', 'REJECTED'))), 0))
+BEGIN
+  SELECT RAISE(ABORT, 'ticket.review cannot make this move: its state machine does not list it');
+END;
+```
+
+`RAISE` takes a literal, so SQLite's message names the column and not the
+two values.
+
+A guard's names follow `@table` and `@column`
+([Table and column names](#table-and-column-names)), and a trigger name
+over Postgres's 63 bytes fails the build: give the table or the column a
+shorter name. `drop.sql` drops each guard's trigger and function.
+
+A class that is no table, such as a `@jsonField` type, a base class or a
+projection, gets no guard. It keeps its machine in the types. A base
+class's machine is its own, as its `@index` is: a table that extends the
+base declares the machine again to be guarded.
+
+On a database that already holds data, a migration plan creates a guard
+in the `contract` phase, after the previous version's servers are gone,
+and drops a changed one in `expand`
+([Triggers that refuse a write](/superschematic/reference/migrations/#triggers-that-refuse-a-write)).
+`examples/migrations` adds a machine to a table that holds rows: an
+archived project stays archived, and its check applies the plan to
+SQLite and to Postgres and tries the move back before and after
+`contract`.
+
+<Snippet example="migrations" file="v2/schemas/services/tasks-db/src/tasks.schema.ts" from="@stateMachine<Project>({" to="})" />
+
+### The helpers in the types
+
+Every language's types carry the machine, for a class of any schema kind:
+a table of a DB schema, a `@jsonField` type, a type of an API or a General
+schema. A caller asks the helper before it writes, and a reader asks
+whether a row is finished.
+
+| Language | Where | What |
+| --- | --- | --- |
+| Go | `state_machines.go` of the types module | `<Type><Field>Terminal()`, a new slice at each call, and `<Type>CanTransition<Field>(from, to)`, over pointers on a nullable field, `nil` being null |
+| TypeScript | `state-machines.ts` of the types package, exported from its index and as `./state-machines` | `<type><Field>Transitions`, `<type><Field>Terminal` and `<type>CanTransition<Field>(from, to)`, over `E \| null` on a nullable field |
+| Python | the model, in `types.py` | `<FIELD>_TRANSITIONS`, `<FIELD>_TERMINAL` and the classmethod `can_transition_<field>(current, target)`, `None` being null |
+| Rust | `src/state_machines.rs` of the types crate, exported from its root | `<TYPE>_<FIELD>_TERMINAL` and `<type>_can_transition_<field>(from, to)`, over `Option<E>` on a nullable field |
+
+Each helper answers as the guard does: an unchanged value passes, no move
+leaves a terminal state, and any other move passes only when the machine
+lists it. The ticket's:
+
+```go
+// TicketStateTerminal returns the terminal states of
+// Ticket.state, which no update leaves, as the field's state
+// machine declares them (D118). Each call returns a new slice.
+func TicketStateTerminal() []TicketState {
+	return []TicketState{
+		TicketState_Closed,
+	}
+}
+
+// TicketCanTransitionState reports whether
+// Ticket.state may move from one state to another, as the
+// field's state machine declares (D118). An unchanged value is no move
+// and is allowed, listed or not. No move leaves a terminal state, and
+// any other move is allowed only when the machine lists it.
+func TicketCanTransitionState(from, to TicketState) bool {
+	if from == to {
+		return true
+	}
+	switch from {
+	case TicketState_Open:
+		switch to {
+		case TicketState_Open, TicketState_InProgress, TicketState_Resolved, TicketState_Closed:
+			return true
+		}
+	case TicketState_InProgress:
+		switch to {
+		case TicketState_Resolved, TicketState_Open:
+			return true
+		}
+	case TicketState_Resolved:
+		switch to {
+		case TicketState_Open, TicketState_Closed:
+			return true
+		}
+	}
+	return false
+}
+```
+
+```ts
+export const ticketReviewTransitions: Readonly<Record<ReviewOutcome, readonly (ReviewOutcome | null)[]>> = {
+  [ReviewOutcome.RETRY]: [ReviewOutcome.APPROVED, ReviewOutcome.REJECTED, null],
+  [ReviewOutcome.APPROVED]: [],
+  [ReviewOutcome.REJECTED]: [],
+};
+
+export const ticketReviewTerminal: readonly ReviewOutcome[] = [ReviewOutcome.APPROVED, ReviewOutcome.REJECTED];
+
+export function ticketCanTransitionReview(from: ReviewOutcome | null, to: ReviewOutcome | null): boolean {
+  if (from === to) {
+    return true;
+  }
+  if (from === null) {
+    return to === ReviewOutcome.RETRY || to === ReviewOutcome.APPROVED || to === ReviewOutcome.REJECTED;
+  }
+  switch (from) {
+    case ReviewOutcome.RETRY:
+      return to === null || to === ReviewOutcome.APPROVED || to === ReviewOutcome.REJECTED;
+    case ReviewOutcome.APPROVED:
+    case ReviewOutcome.REJECTED:
+      return false;
+    default:
+      // Every member has a case, which tsc holds this line to. A value
+      // that is no member moves nowhere.
+      from satisfies never;
+      return false;
+  }
+}
+```
+
+```python
+class Ticket(BaseModel):
+    ...
+
+    # The state machine of state (D118): each state that has a move and
+    # the states it may move to.
+    STATE_TRANSITIONS: ClassVar[Mapping[TicketState, frozenset[TicketState]]] = MappingProxyType({
+        TicketState.Open: frozenset({TicketState.Open, TicketState.InProgress, TicketState.Resolved, TicketState.Closed}),
+        TicketState.InProgress: frozenset({TicketState.Resolved, TicketState.Open}),
+        TicketState.Resolved: frozenset({TicketState.Open, TicketState.Closed}),
+    })
+
+    # The terminal states of state, which no update leaves.
+    STATE_TERMINAL: ClassVar[frozenset[TicketState]] = frozenset({TicketState.Closed})
+
+    @classmethod
+    def can_transition_state(cls, current: TicketState, target: TicketState) -> bool:
+        """
+        Report whether state may move from current to target, as its
+        state machine declares (D118).
+
+        An unchanged value is no move and is allowed, listed or not. No move
+        leaves a terminal state, and any other move is allowed only when the
+        machine lists it.
+        """
+        if current == target:
+            return True
+        if current in cls.STATE_TERMINAL:
+            return False
+        return target in cls.STATE_TRANSITIONS.get(current, frozenset())
+```
+
+```rust
+/// The terminal states of `Ticket.review`, which no move leaves.
+pub const TICKET_REVIEW_TERMINAL: &[ReviewOutcome] = &[ReviewOutcome::Approved, ReviewOutcome::Rejected];
+
+/// Reports whether `Ticket.review` may move from one state to another,
+/// `None` being the field without a value. An unchanged value is no move,
+/// and passes.
+#[must_use]
+pub fn ticket_can_transition_review(from: Option<ReviewOutcome>, to: Option<ReviewOutcome>) -> bool {
+    if from == to {
+        return true;
+    }
+    match from {
+        None => matches!(to, Some(ReviewOutcome::Retry | ReviewOutcome::Approved | ReviewOutcome::Rejected)),
+        Some(ReviewOutcome::Retry) => matches!(to, None | Some(ReviewOutcome::Approved | ReviewOutcome::Rejected)),
+        Some(ReviewOutcome::Approved | ReviewOutcome::Rejected) => false,
+    }
+}
+```
+
+TypeScript's `Transitions` has an entry for every member, a state that
+moves nowhere an empty list, and leaves out the states a null may take:
+`CanTransition` answers for a move from null. Python's has an entry only
+for a state that has a move, null among them as `None`. Go and Rust write
+the moves as a `switch` and a `match`, which their compilers check, and
+keep no table. An enum a dependency owns is named as the type's field
+names it. A base class has its helpers in Go, TypeScript and Rust, and
+none in Python, where they are the model's. A helper whose name another
+helper, a type, an enum or a field of the model already has fails the
+build, which names both: rename one.
+
+An operation that moves a ticket asks first, and answers a 409 of its
+own:
+
+```go
+if !types.TicketCanTransitionState(ticket.State, types.TicketState_Closed) {
+	return nil, ConflictError("the ticket cannot be closed from "+string(ticket.State), nil)
+}
+```
+
+### A state machine or a Workflow field
+
+A table's [Workflow field](#a-workflow-fields-transitions) also holds a
+status and lists its moves. The two are for different rows, and a field
+takes one or the other: the build refuses a machine on a field a behavior
+owns.
+
+| | A Workflow field | A state machine |
+| --- | --- | --- |
+| Declared | the field's type, `status: Workflow<{ states, transitions }>`, from `@superschematic/db` | `@stateMachine<T>({ field, transitions, terminal })` on the class, from `@superschematic/schema` |
+| The states | text the config lists | the members of the field's enum |
+| What moves it | the behavior's `transition`, run by the behaviors' core on an operation's path | any update of the column |
+| Who may move it | a transition's `permission` and `by`, checked against the caller | anyone who may write the row: a machine lists moves, not callers |
+| What holds the rule | the core. A raw SQL write of the column is not refused, and skips the rules | the database. A trigger refuses every writer |
+| What comes with it | `<field>_entered_at`, `_version`, the operation `transition`, which an API serves with `@behaviorOperations`, and the behaviors that read the status: Timers, Reactions, StateRules, Approvals | the terminal states and the can-transition helper in each language's types |
+| Where | a table | a class of any schema kind; the guard on a table |
+
+Use a Workflow field where people move a record and rules hear it. Use a
+state machine where the database must refuse a move no writer should
+make.
+
+### What a state machine does not do
+
+- An insert is not held. A guard checks an update, not the rows the table
+  holds: adding or changing a machine reads no row already there.
+- A generated server has no answer of its own for a guard's refusal. The
+  write fails with the database's error, which an operation that does not
+  map it answers as any error it does not know, a 500 with a generic
+  message ([Errors](/superschematic/guides/api-routes/#errors)). A 409
+  that names the two states is yours to return: ask the helper before the
+  write.
+- A `@tableOperation` update does not ask the helper for you. It writes
+  the column, and a move the machine does not list is the database's
+  error.
+- Between a migration's two phases no guard holds a changed machine: the
+  old guard is dropped in `expand` and the new one created in `contract`.
+- A machine on a dependency's enum works from a TypeScript schema only.
+
+## Fences
+
+A writer that compares a counter in its `WHERE` clause, `WHERE id = $1
+AND version = $2`, knows no other write came between its read and its
+write, as long as every writer advances the counter. One writer that
+forgets breaks every such compare, and nothing reports it. `@fenced`,
+from `@superschematic/schema`, names the counter, the fence, on a table
+of a DB schema
+([D119](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+The database then refuses a write that does not advance it, whatever
+writes the row, and the generated repositories advance it themselves.
+
+[`@optimistic`](/superschematic/reference/versioned-tables/#optimistic)
+is one such counter, `_version`, which the database bumps on every
+update. It is the whole row's, and a row has one. Use `@fenced` when the
+counter is a field of your own, or when two parties write a row and
+neither should fail the other's compare: each gets a fence over its own
+columns.
+
+A parcel has one fence over the whole row. A delivery is written by two
+parties that do not wait on one another: the planner writes the address
+and the courier, and the courier's device writes the attempts and the
+proof. A depot's fence counts a rename and a delete, and nothing else.
+
+```ts
+import { Generic, Identity, Temporal } from "superscalar";
+import { Default, Nullable, fenced } from "@superschematic/schema";
+import { AutoGenerate, Relation, key, unique } from "@superschematic/db";
+
+// Who carries a delivery. It has no fence: a write of it advances nothing.
+export abstract class Courier {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+}
+
+// A parcel at the desk. Its one fence lists no covers, so every update of
+// a row advances version by one, whatever it writes.
+@fenced<Parcel>({ field: "version" })
+export abstract class Parcel {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @unique
+  trackingCode: string;
+
+  weightGrams: Generic.Int64;
+
+  note: Nullable<string>;
+
+  version: Default<Generic.Int64, 0>;
+}
+
+// A delivery two parties write. A write of one party's fields leaves the
+// other's counter as it was. No fence covers note or updatedAt: a write
+// of them alone advances neither counter. The courier's delete action is
+// RESTRICT: a fence covers no relation the database would clear itself.
+@fenced<Delivery>({ field: "planVersion", covers: ["address", "courier"] })
+@fenced<Delivery>({ field: "runVersion", covers: ["attempts", "proof"] })
+export abstract class Delivery {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  address: string;
+
+  courier: Nullable<Relation<Courier, { onDelete: "RESTRICT" }>>;
+
+  planVersion: Default<Generic.Int64, 0>;
+
+  attempts: Default<Generic.Int64, 0>;
+
+  proof: Nullable<string>;
+
+  runVersion: Default<Generic.Int64, 0>;
+
+  note: Nullable<string>;
+
+  updatedAt: Temporal.DateTime;
+}
+
+// A depot parcels wait in. A delete sets deletedAt, which the fence
+// covers, so the delete advances revision as a rename does; a write of
+// capacity alone does not.
+@fenced<Depot>({ field: "revision", covers: ["name", "deletedAt"] })
+export abstract class Depot {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+
+  capacity: Generic.Int64;
+
+  revision: Default<Generic.Int64, 0>;
+
+  deletedAt: Nullable<Temporal.DateTime>;
+}
+```
+
+| Option | What it sets |
+| --- | --- |
+| `field` | the fence: a required integer field of the class, as `Default<Generic.Int64, 0>` |
+| `covers` | the fields whose change the fence counts. Without it the fence counts every update of the row. A relation is covered as the key it stores, and its `onDelete` is not `SET NULL` |
+
+The rule, for an update of a row:
+
+- Without `covers`, the update sets the fence to the stored value plus
+  one.
+- With `covers`, an update that changes a covered field sets the fence to
+  the stored value plus one. Any other update keeps the fence or adds
+  one.
+- No update skips a value, moves the fence back or sets it null.
+- An insert is not fenced. A row starts at the value its writer, or the
+  column's default, gives it.
+
+A class has several fences only when each lists its `covers`, and no
+field is in two lists. TypeScript holds `field` to a number field that is
+never null, and `covers` to the class's fields.
+
+### What the build checks of a fence
+
+The build refuses a fence no write could follow, and names the type and
+the fence's field:
+
+- a fence field the class lacks, one that is nullable, one whose column
+  is not `SMALLINT`, `INTEGER` or `BIGINT`, and one a `@stateMachine`
+  governs;
+- two fences on one field; a class with several fences where one lists no
+  `covers`; an empty `covers`;
+- a covered field that the class lacks, that stores no column of the
+  table, that is listed twice, that is a fence's own field or another
+  fence's, or that two fences cover; and one whose column Postgres has no
+  equality for, such as a `Geo.Location`'s `POINT`, since the trigger
+  could not tell a write that changes it;
+- a class that is no table of a DB service: a `@jsonField` type, a base
+  class, a `@queue` class, an engine type, and a member of a version
+  graph, whose engines write its rows.
+
+```
+@fenced on Parcel.version: version's column is DOUBLE PRECISION, and a fence is a whole number each covered write adds one to; type it by a scalar whose column is SMALLINT, INTEGER or BIGINT, as Default<Generic.Int64, 0>
+@fenced on Delivery.runVersion: covers lists address, which the fence on Delivery.planVersion covers; one fence covers a field, so a write of it advances one counter
+```
+
+Three more refusals keep a fence away from a writer that would not
+advance it:
+
+- A table that composes a behavior takes no fence, with `covers` or
+  without: one that types a field as a behavior, as `status: Workflow<{
+  ... }>`, or implements one, as `implements Timers<Ticket, { ... }>`
+  ([Beyond plain tables](#beyond-plain-tables)). An update of its row,
+  the update half of an upsert and a soft delete go through the
+  behaviors' core, which writes the row's columns, the table's own
+  fields among them, with statements of its own, which advance no fence.
+  The trigger would refuse each of them. The build reports it once for
+  the class, and names the behavior.
+- In a service that lists `sqlite`, a fence on an `@optimistic` table
+  lists its `covers`. There the bump of `_version` is an update of its
+  own that sets `_version` alone, which a fence over the whole row would
+  refuse. List the fields the fence counts, or build the service for
+  Postgres alone.
+- A fence counts no relation the database itself rewrites. A relation
+  whose `onDelete` is `SET NULL` has the database set its column when
+  the row it names is deleted. That is an update no writer makes, so it
+  advances no fence: the trigger would refuse it, and the delete with
+  it. So the build refuses a fence that covers such a relation, and a
+  fence without `covers` on a table that has one. Give the relation
+  another `onDelete`, or leave it out of `covers`; for a fence without
+  `covers`, list `covers` without it. `CASCADE`, `RESTRICT` and `NO
+  ACTION` update no row, and a fence covers a relation with any of
+  them.
+
+```
+@fenced on Ticket: Ticket composes the Workflow behavior, so the behaviors' core writes its rows, the table's own fields among them, with statements of its own, which advance no fence; a fence on a table that composes a behavior is not built
+@fenced on Delivery.planVersion: covers lists courier, a relation to Courier whose onDelete is SET NULL, so the database sets courier's column itself when the Courier it names is deleted, an update that advances no fence, which the fence's trigger would refuse, and the delete with it; give the relation another onDelete (CASCADE, RESTRICT or NO ACTION), or leave it out of covers
+```
+
+A JSON or YAML schema file writes the same list on the type, under
+`fences`:
+
+```yaml
+fences:
+  - field: planVersion
+    covers: [address, courier]
+  - field: runVersion
+    covers: [attempts, proof]
+```
+
+### What a fence's trigger refuses
+
+A table gets a trigger per fence, in each dialect the service lists. On
+Postgres it is the function `<table>_<column>_fence()` and the trigger
+`trg_<table>_<column>_fence`, which runs before each update of a row. It
+compares the covered columns as one row, `ROW(NEW...) IS DISTINCT FROM
+ROW(OLD...)`, and raises `check_violation` under the constraint name
+`<table>_<column>_fence`, with the stored, the expected and the written
+value in the message. On SQLite it is one trigger of the same name whose
+`WHEN` is the same rule, column by column with `IS NOT`, and whose body
+is `SELECT RAISE(ABORT, ...)` with a fixed message. A trigger name over
+Postgres's 63 bytes fails the build.
+
+So a hand-written update of a delivery's address advances `plan_version`
+in the same statement, and one of its proof advances `run_version`:
+
+```sql
+UPDATE delivery SET address = $1, plan_version = plan_version + 1
+WHERE id = $2 AND plan_version = $3;
+```
+
+The statement updates no row when another planner wrote first, and the
+courier's device, which advances `run_version`, never makes it miss.
+
+A migration plan places a fence's trigger as it places a state machine's
+guard: created in `contract`, a changed one dropped in `expand`
+([Triggers that refuse a write](/superschematic/reference/migrations/#triggers-that-refuse-a-write)).
+The previous version's servers, whose repositories advance nothing, are
+never refused.
+
+### What the repositories do
+
+The generated repositories advance a fence themselves, in Go, TypeScript
+and Rust, on each dialect they run:
+
+- An update, an `UpdateMany` and the update half of an upsert add the
+  fence's bump, `plan_version = delivery.plan_version + 1`, once, when
+  the columns they set include one the fence covers, or any column when
+  the fence has no `covers`. A write of `address` and `attempts` advances
+  both of a delivery's fences, once each. A write of `note` alone
+  advances neither, though it stamps `updatedAt`.
+- A column the write sets to the value it already holds counts, so the
+  fence advances. The trigger allows that: an update that changes no
+  covered field may add one.
+- A soft delete and `Reencrypt`, whose columns are fixed, carry the bump
+  in their statement when a fence covers those columns. A depot whose
+  fence covers `name` and `deletedAt` advances it on a delete as on a
+  rename: `UPDATE depot SET deleted_at = $1, revision = depot.revision +
+  1 WHERE id = $2 AND deleted_at IS NULL`.
+- An upsert that inserts, or whose update sets no field, advances
+  nothing.
+- A [`@tableOperation`](/superschematic/guides/api-routes/#operations-the-build-serves)
+  writes through the repository, so it needs nothing of its own.
+
+A write that sets the fence field itself is written as it stands, with no
+bump added, and the trigger judges it. That is how a caller compares and
+sets through a repository: `UpdateMany` (`updateMany`) with a filter on
+the value it read, and an update that sets the next one. The count of
+rows it updated says whether the write won:
+
+```go
+read := int64(delivery.PlanVersion)
+next := delivery.PlanVersion + 1
+n, err := db.Delivery.UpdateMany(ctx,
+	&orm.DeliveryFilter{Id: &orm.UUIDFilter{Eq: delivery.Id}, PlanVersion: &orm.Int64Filter{Eq: &read}},
+	&orm.DeliveryUpdate{Address: &address, PlanVersion: &next})
+// n is 0 when another planner wrote first.
+```
+
+### What a fence does not do
+
+- An insert is not fenced.
+- The behaviors' core does not advance a fence, and it writes every
+  update of a row of a table that composes a behavior. So such a table
+  takes no fence: the build refuses one there, whatever it covers.
+- The repositories have no compare-and-set of a fence's own, as
+  `UpdateOneIfVersion` is `_version`'s. Filter on the fence field and set
+  it, as above.
+- A member of a version graph takes no fence.
+- A fence's trigger does not tell the database's own write from a
+  writer's. A relation's `SET NULL` is an update it would refuse, so the
+  build refuses a fence that counts such a relation, and the delete of
+  a row a covered relation names is the foreign key's to refuse
+  (`RESTRICT`, `NO ACTION`) or to carry to the row (`CASCADE`).
+- A generated server has no answer of its own for a fence's refusal: it
+  is the database's error, as a state machine guard's is
+  ([What a state machine does not do](#what-a-state-machine-does-not-do)).
+
 ## Transactions
 
 `Transaction` runs a function with repositories bound to one transaction,
@@ -968,6 +1681,9 @@ materialized view of each project's open tasks for a dashboard:
 
 <Snippet example="migrations" file="v2/schemas/services/tasks-db/src/tasks.schema.ts" symbol="Project" />
 
+The `@stateMachine` on the class is its status's
+([State machines](#state-machines)), and no part of the piece.
+
 - `id` names the piece: a lowercase identifier, unique in the service.
 - `up` is one or more statements, separated by semicolons. A migration
   plan runs the piece again when it changes, so each statement must run
@@ -1050,7 +1766,8 @@ Three reference pages cover what a DB schema can add on top of this guide:
 - [Versioned tables](/superschematic/reference/versioned-tables/): `@versioned`
   keeps every version of a row in a history table, with readers for a
   past version or a past time, and writes fenced on the version a caller
-  read. `@optimistic` keeps only the fence.
+  read. `@optimistic` keeps only the fence. A counter of your own, or one
+  for each party that writes a row, is `@fenced` ([Fences](#fences)).
 - [Version graphs](/superschematic/reference/version-graphs/): branch,
   commit, merge, release and rebase a tree of versioned tables as a
   whole, with engines in Go, TypeScript, Rust and Python.
@@ -1083,6 +1800,10 @@ the behaviors' core
 ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations),
 [A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker),
 [A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)).
+The core holds a Workflow field's moves on an operation's path. A status
+the database itself must hold, whatever writes the row, is an enum field
+with a `@stateMachine`
+([A state machine or a Workflow field](#a-state-machine-or-a-workflow-field)).
 A table whose writes a behavior hears (`Timers`, `Reactions`, or another
 table's `Reactions` through a to-one relation of it) gets a change queue,
 `<table>_change_queue`, and a trigger that writes a message to it for

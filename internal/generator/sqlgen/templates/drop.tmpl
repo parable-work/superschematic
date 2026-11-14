@@ -34,6 +34,22 @@ DROP TRIGGER IF EXISTS {{ quote $change.TriggerName }} ON {{ $change.QuotedTable
 DROP FUNCTION IF EXISTS {{ quote $change.FunctionName }}();
 {{- end }}
 {{- end }}
+{{- if .StateGuards }}
+
+-- Drop the triggers and functions that guard a @stateMachine's column
+{{- range $guard := .StateGuards }}
+DROP TRIGGER IF EXISTS {{ quote $guard.TriggerName }} ON {{ $guard.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $guard.FunctionName }}();
+{{- end }}
+{{- end }}
+{{- if .Fences }}
+
+-- Drop the triggers and functions that hold a @fenced counter
+{{- range $fence := .Fences }}
+DROP TRIGGER IF EXISTS {{ quote $fence.TriggerName }} ON {{ $fence.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $fence.FunctionName }}();
+{{- end }}
+{{- end }}
 
 -- Drop indexes
 {{- range $table := .Tables | reverse }}

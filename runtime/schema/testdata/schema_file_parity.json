@@ -1091,6 +1091,97 @@
       "error": "a behavior name that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0/name': got number, want string"
     },
     {
+      "name": "a type's state machines",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [\n\t\t{\"field\": \"state\", \"transitions\": [{\"from\": \"open\", \"to\": [\"resolved\", \"closed\"]}, {\"from\": \"resolved\", \"to\": [\"open\"]}], \"terminal\": [\"closed\"]},\n\t\t{\"field\": \"review\", \"fromNull\": [\"RETRY\"], \"transitions\": [{\"from\": \"RETRY\", \"toNull\": true}]}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"name\":\"Ticket\",\"role\":\"DBTable\",\"stateMachines\":[{\"field\":\"state\",\"terminal\":[\"closed\"],\"transitions\":[{\"from\":\"open\",\"to\":[\"resolved\",\"closed\"]},{\"from\":\"resolved\",\"to\":[\"open\"]}]},{\"field\":\"review\",\"fromNull\":[\"RETRY\"],\"transitions\":[{\"from\":\"RETRY\",\"toNull\":true}]}]}}}"
+    },
+    {
+      "name": "a state machine with no move and no terminal state",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"state\", \"transitions\": [], \"terminal\": [], \"fromNull\": [\"open\"]}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"name\":\"Ticket\",\"role\":\"DBTable\",\"stateMachines\":[{\"field\":\"state\",\"fromNull\":[\"open\"]}]}}}"
+    },
+    {
+      "name": "a state machine with an empty fromNull",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"review\", \"fromNull\": []}]}",
+      "accept": false,
+      "error": "a state machine with an empty fromNull: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0/fromNull': minItems: got 0, want 1"
+    },
+    {
+      "name": "a state machine without its field",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"terminal\": [\"closed\"]}]}",
+      "accept": false,
+      "error": "a state machine without its field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0': missing property 'field'"
+    },
+    {
+      "name": "a state machine's transition without its state",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"state\", \"transitions\": [{\"to\": [\"closed\"]}]}]}",
+      "accept": false,
+      "error": "a state machine's transition without its state: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0/transitions/0': missing property 'from'"
+    },
+    {
+      "name": "a state machine's transitions keyed by state",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"stateMachines\": [{\"field\": \"state\", \"transitions\": {\"open\": [\"closed\"]}}]}",
+      "accept": false,
+      "error": "a state machine's transitions keyed by state: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/stateMachines/0/transitions': got object, want array"
+    },
+    {
+      "name": "a type's fences",
+      "registry": "core",
+      "input": "{\"name\": \"Job\", \"role\": \"DBTable\", \"fences\": [\n\t\t{\"field\": \"version\", \"covers\": [\"label\", \"owner\"]},\n\t\t{\"field\": \"executionVersion\", \"covers\": [\"progress\"]}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Job\":{\"fences\":[{\"covers\":[\"label\",\"owner\"],\"field\":\"version\"},{\"covers\":[\"progress\"],\"field\":\"executionVersion\"}],\"name\":\"Job\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "a fence with no covers",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"DBTable\", \"fences\": [{\"field\": \"version\"}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Order\":{\"fences\":[{\"field\":\"version\"}],\"name\":\"Order\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "a fence with an empty covers",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"DBTable\", \"fences\": [{\"field\": \"version\", \"covers\": []}]}",
+      "accept": false,
+      "error": "a fence with an empty covers: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fences/0/covers': minItems: got 0, want 1"
+    },
+    {
+      "name": "a fence without its field",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"DBTable\", \"fences\": [{\"covers\": [\"label\"]}]}",
+      "accept": false,
+      "error": "a fence without its field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fences/0': missing property 'field'"
+    },
+    {
+      "name": "a fence's covers that is one field",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"DBTable\", \"fences\": [{\"field\": \"version\", \"covers\": \"label\"}]}",
+      "accept": false,
+      "error": "a fence's covers that is one field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fences/0/covers': got string, want array"
+    },
+    {
+      "name": "an unknown key on a fence",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"DBTable\", \"fences\": [{\"field\": \"version\", \"step\": 2}]}",
+      "accept": false,
+      "error": "an unknown key on a fence: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fences/0': additional properties 'step' not allowed"
+    },
+    {
+      "name": "a type's fences keyed by field",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"DBTable\", \"fences\": {\"version\": {\"covers\": [\"label\"]}}}",
+      "accept": false,
+      "error": "a type's fences keyed by field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fences': got object, want array"
+    },
+    {
       "name": "a display",
       "registry": "core",
       "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"transitions\": {\"todo\": {\"doing\": \"Start\"}},\n\t\t\"states\": {\"doing\": {\"tone\": \"active\", \"activeForm\": \"Doing\"}, \"todo\": {\"label\": \"To do\"}}, \"summaryFields\": [\"Workflow.status\", \"title\"], \"titleField\": \"title\", \"noun\": \"Ticket\"}}",

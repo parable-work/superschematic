@@ -28,6 +28,9 @@ pub mod engine;
 {{if .Behaviors -}}
 pub mod behaviors;
 {{end -}}
+{{if .StateMachines -}}
+pub mod state_machines;
+{{end -}}
 {{if .Queues -}}
 pub mod queues;
 {{end -}}
@@ -58,6 +61,9 @@ pub use engine::*;
 {{end -}}
 {{if .Behaviors -}}
 pub use behaviors::*;
+{{end -}}
+{{if .StateMachines -}}
+pub use state_machines::*;
 {{end -}}
 {{if .WrittenQueues -}}
 pub use queues::*;

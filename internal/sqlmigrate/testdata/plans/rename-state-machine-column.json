@@ -1,0 +1,80 @@
+{
+  "dialect": "postgres",
+  "expanded": "349f7b92b2643931931f09300aa8b674b9cfb343afb091493ed20d7a206f8290",
+  "from": "2a94cd047b37bc4e29cce4300ab774ad47e5d7ad8a54dd33d4f1ba56fa773b61",
+  "hash": "bb25098734382aa0182e0a509bc37346b688123ad8eaf2384749a0d6a3b9a581",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/stage",
+          "reason": "order.status is renamed to order.stage, following Order.status's @column: servers built from the previous version still use the old name.",
+          "subject": "table/order/column/stage"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN status TO stage"
+      ],
+      "subject": "table/order/column/stage",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME CONSTRAINT ck_order_status TO ck_order_stage"
+      ],
+      "subject": "table/order/constraint/ck_order_stage",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_status_transition_guard ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_stage_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.stage IS NOT DISTINCT FROM OLD.stage THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.stage IN ('shipped') THEN\n    RAISE EXCEPTION 'order.stage is terminal at %: it cannot move to %', OLD.stage, NEW.stage\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.stage IS NULL AND NEW.stage IN ('placed'))\n    OR (OLD.stage = 'placed' AND NEW.stage IN ('shipped'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.stage cannot move from % to %', OLD.stage, NEW.stage\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_stage_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_stage_transition_guard\n  BEFORE UPDATE OF stage ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_stage_transition_guard()"
+      ],
+      "subject": "trigger/order/trg_order_stage_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION order_status_transition_guard()"
+      ],
+      "subject": "function/order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "ffb440fad4bdf4a5ee2a25e8602e1b1de52a88affc10fe202f18885cbeb91daa",
+  "toModel": null,
+  "version": 1
+}

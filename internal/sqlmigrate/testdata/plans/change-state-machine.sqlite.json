@@ -1,0 +1,32 @@
+{
+  "dialect": "sqlite",
+  "expanded": "67e734bd1b2bb5640e05601e39362d9fc33781c05a25b6bbb0d54c04d70711f3",
+  "from": "6a68249893b6667ef63b712662c8064e0d4267a0ec7b3e67d7aaa76d96f978fb",
+  "hash": "a57ad0f61565430d5024263588b410675d3fbc3add06a8e2c666039e8b509c10",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_status_transition_guard\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_status_transition_guard\" BEFORE UPDATE OF \"status\" ON \"order\" FOR EACH ROW\nWHEN NEW.\"status\" IS NOT OLD.\"status\" AND (\n  OLD.\"status\" IN ('shipped', 'cancelled')\n  OR NOT COALESCE(\n    (OLD.\"status\" IS NULL AND NEW.\"status\" IN ('placed'))\n    OR (OLD.\"status\" IS 'placed' AND NEW.\"status\" IN ('shipped', 'cancelled')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'order.status cannot make this move: its state machine does not list it');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "8fcb048950a0d39ac9412812084d3cc056581a2c6b217f7d20c22b11a0dbf21f",
+  "toModel": null,
+  "version": 1
+}

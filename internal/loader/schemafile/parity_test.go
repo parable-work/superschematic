@@ -397,6 +397,28 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"an unknown key on a behavior entry", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "extra": 1}]}`},
 	{"a behavior entry without its name", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"config": {"aisles": 1}}]}`},
 	{"a behavior name that is not a string", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": 3}]}`},
+	// A type's state machines (D118): each a field, the moves of its
+	// states, its terminal states and, on a nullable field, its null start,
+	// which lists a state when it is written.
+	{"a type's state machines", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [
+		{"field": "state", "transitions": [{"from": "open", "to": ["resolved", "closed"]}, {"from": "resolved", "to": ["open"]}], "terminal": ["closed"]},
+		{"field": "review", "fromNull": ["RETRY"], "transitions": [{"from": "RETRY", "toNull": true}]}]}`},
+	{"a state machine with no move and no terminal state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": [], "terminal": [], "fromNull": ["open"]}]}`},
+	{"a state machine with an empty fromNull", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "review", "fromNull": []}]}`},
+	{"a state machine without its field", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"terminal": ["closed"]}]}`},
+	{"a state machine's transition without its state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": [{"to": ["closed"]}]}]}`},
+	{"a state machine's transitions keyed by state", "core", `{"name": "Ticket", "role": "DBTable", "stateMachines": [{"field": "state", "transitions": {"open": ["closed"]}}]}`},
+	// A type's fences (D119): each a field and, when it lists them, the
+	// fields it covers, which is a list of at least one.
+	{"a type's fences", "core", `{"name": "Job", "role": "DBTable", "fences": [
+		{"field": "version", "covers": ["label", "owner"]},
+		{"field": "executionVersion", "covers": ["progress"]}]}`},
+	{"a fence with no covers", "core", `{"name": "Order", "role": "DBTable", "fences": [{"field": "version"}]}`},
+	{"a fence with an empty covers", "core", `{"name": "Order", "role": "DBTable", "fences": [{"field": "version", "covers": []}]}`},
+	{"a fence without its field", "core", `{"name": "Order", "role": "DBTable", "fences": [{"covers": ["label"]}]}`},
+	{"a fence's covers that is one field", "core", `{"name": "Order", "role": "DBTable", "fences": [{"field": "version", "covers": "label"}]}`},
+	{"an unknown key on a fence", "core", `{"name": "Order", "role": "DBTable", "fences": [{"field": "version", "step": 2}]}`},
+	{"a type's fences keyed by field", "core", `{"name": "Order", "role": "DBTable", "fences": {"version": {"covers": ["label"]}}}`},
 	// A type's display (D48): the registered @display schema's shape.
 	{"a display", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"doing": "Start"}},
 		"states": {"doing": {"tone": "active", "activeForm": "Doing"}, "todo": {"label": "To do"}}, "summaryFields": ["Workflow.status", "title"], "titleField": "title", "noun": "Ticket"}}`},

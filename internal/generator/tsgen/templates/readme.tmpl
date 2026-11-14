@@ -77,6 +77,9 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - `validators/unions.ts` - `parse<Union>FromJSON` for each union: it picks the member as the Go and Rust decoders do (by the discriminator when every member gives it a value, else by the payload's keys, the members' tags and the fields each member requires) and reads it with the member's `parse<Type>FromJSON`; a type's parser reads its union fields with it. `validate<Union>` validates the member it picks by the member's rules, and a type's validator validates its union fields with it
 {{- end}}
 - `mask/` - Secret-masking helpers for types with @secret fields
+{{- if .StateMachines}}
+- `state-machines.ts` - for each field a `@stateMachine` governs (D118): `<type><Field>Transitions`, each state and the states it may move to; `<type><Field>Terminal`, the states no move leaves; and `<type>CanTransition<Field>(from, to)`, whether a move is one the machine lists, as the table's guard decides it in the database
+{{- end}}
 - `index.ts` - Main export (re-exports all; backward compatible)
 
 ## Type System

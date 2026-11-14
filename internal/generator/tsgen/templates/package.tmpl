@@ -41,6 +41,10 @@
     "./identity": {
       "types": "./identity.ts",
       "import": "./identity.ts"
+    }{{end}}{{if .StateMachines}},
+    "./state-machines": {
+      "types": "./state-machines.ts",
+      "import": "./state-machines.ts"
     }{{end}}{{if .EngineDocument}},
     "./engine": {
       "types": "./engine.ts",

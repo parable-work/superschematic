@@ -131,11 +131,13 @@ func TestReadDatabaseRoundTrip(t *testing.T) {
 	// The fixtures that hold what a read must get right: checks, defaults,
 	// expression and partial indexes and a SET NULL key (ddl), the
 	// @optimistic bump trigger, a queue's indexes and triggers, unique
-	// constraints, lists and JSON, a search_text column, and join tables.
+	// constraints, lists and JSON, a search_text column, join tables, and
+	// the triggers that refuse a write, a @stateMachine's guards (D118)
+	// and a @fenced counter's triggers (D119).
 	for _, name := range []string{
 		"shop-db", "types-db", "fixture-ddl-db", "fixture-ledger-db", "fixture-optimistic-db", "fixture-queue-db",
 		"fixture-user-model-db", "fixture-users-db", "fixture-list-defaults-db", "fixture-nested-arrays-db",
-		"fixture-tracker-db", "fixture-vault-db",
+		"fixture-tracker-db", "fixture-vault-db", "fixture-state-machine-db", "fixture-fenced-db",
 	} {
 		if !read[name] {
 			t.Errorf("%s was not read", name)

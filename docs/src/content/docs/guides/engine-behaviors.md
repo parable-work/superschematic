@@ -307,7 +307,8 @@ table's row through the row's key in a plain field. The build refuses,
 before its generators run, an engine type that reaches a table or
 another engine type through a field, a table that references an engine
 type, an engine type that declares what only a table has (`@versioned`,
-`@optimistic`, a version graph, the `User` trait, a queue) or a field the
+`@optimistic`, a version graph, the `User` trait, a queue, a
+`@stateMachine` or a `@fenced`) or a field the
 database generates (`AutoGenerate`: the engine gives each instance its
 id), and a map or a union, which the engine does not validate. Each
 message names the way out.

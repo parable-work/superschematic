@@ -158,6 +158,11 @@ type ORMTable struct {
 
 	SoftDelete   bool
 	HistoryActor bool
+	// Fences are the table's @fenced fields (D119), sqlutil's FenceModel,
+	// which the runtime's repositories advance in an update, an updateMany
+	// and an upsert's update; a soft delete and a reseal carry the bump in
+	// their statements.
+	Fences []sqlutil.FenceModel
 	// Search is the search column, qualified, of a table with search
 	// fields, or of a view's source with them; empty otherwise. On a view,
 	// SearchProbe is the condition the words' conditions sit in, the
@@ -429,6 +434,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			KeyType:      keyTypes[t.Type],
 			SoftDelete:   t.SoftDelete,
 			HistoryActor: t.HistoryActor != "",
+			Fences:       t.Fences,
 		}
 		if td := schema.Types[t.Type]; td != nil {
 			table.Doc = codegen.DocText(td.Description, td.Comment)

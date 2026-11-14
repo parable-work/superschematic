@@ -304,6 +304,12 @@ type ModuleOutput struct {
 	// depends on the HTTP runtime, whose ormOf runs them.
 	ORM *ORMInfo
 
+	// StateMachines are the schema's @stateMachine declarations (D118),
+	// which state-machines.ts writes as each one's transitions, terminal
+	// states and helper, index.ts re-exports and package.json exports as
+	// "./state-machines". Nil writes no state-machines.ts.
+	StateMachines []StateMachineInfo
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -537,6 +543,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if output.IdentityDescriptor, err = identityDescriptor(schema); err != nil {
+		return nil, err
+	}
+	if output.StateMachines, err = stateMachines(schema, imported.enumDefs); err != nil {
 		return nil, err
 	}
 	output.EngineDocument = strings.TrimSuffix(string(opts.EngineDocument), "\n")

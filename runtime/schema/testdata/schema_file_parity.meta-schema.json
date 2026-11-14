@@ -4562,6 +4562,26 @@
       },
       "type": "object"
     },
+    "Fence": {
+      "additionalProperties": false,
+      "properties": {
+        "covers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
     "FieldDef": {
       "additionalProperties": false,
       "properties": {
@@ -6537,6 +6557,63 @@
       },
       "type": "object"
     },
+    "StateMachine": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "fromNull": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "terminal": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "transitions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StateTransition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "StateTransition": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "toNull": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
     "TableOperation": {
       "additionalProperties": false,
       "properties": {
@@ -6711,6 +6788,13 @@
           },
           "type": "object"
         },
+        "fences": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Fence"
+          },
+          "type": "array"
+        },
         "fields": {
           "default": [],
           "items": {
@@ -6809,6 +6893,13 @@
         },
         "stack": {
           "$ref": "#/$defs/StackDecl"
+        },
+        "stateMachines": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StateMachine"
+          },
+          "type": "array"
         },
         "strictJSON": {
           "default": false,

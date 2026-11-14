@@ -3,18 +3,28 @@ export {
   decrypted,
   denyUnknownFields,
   docs,
+  fenced,
   icon,
   internalMetadata,
   jsonField,
   purpose,
   source,
+  stateMachine,
   strictJSON,
   temporalFormat,
   uiControl,
   uiHidden,
   virtual,
 } from "./decorators";
-export type { TemporalWireFormat, UIControl } from "./decorators";
+export type {
+  FenceFieldOf,
+  FencedConfig,
+  StateMachineConfig,
+  StateMachineConfigFor,
+  StateOf,
+  TemporalWireFormat,
+  UIControl,
+} from "./decorators";
 export type {
   Default,
   Nullable,

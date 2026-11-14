@@ -23,8 +23,11 @@
 #      model; after apply --phase expand, servers of both versions can
 #      write comments, the reminders are numbers, the project v1 wrote
 #      takes the new status column's default and its check refuses a value
-#      outside the enum (D83), and status shows the contract pending;
-#      apply --phase contract drops comment.legacy_id;
+#      outside the enum (D83), no guard holds the status's moves yet, and
+#      status shows the contract pending;
+#      apply --phase contract drops comment.legacy_id and creates the guard
+#      of the status's state machine, which then refuses the move from
+#      archived back to active (D118);
 #      the database is then at v2's model, a plan from it has no steps, a
 #      second apply does nothing, and a database with no recorded model
 #      refuses the plan;
@@ -163,6 +166,11 @@ apply_plan() {
   # v1 wrote takes the default, and a value outside the enum is refused.
   test "$("$sql" "SELECT status FROM project")" = active
   fails "$OUT/status-check.$dialect.txt" "$sql" "UPDATE project SET status = 'paused'"
+  # The status's state machine (D118) lets an active project be archived
+  # and none be reopened. Its guard refuses a write, so contract creates
+  # it: between the phases nothing holds the move back.
+  "$sql" "UPDATE project SET status = 'archived'"
+  "$sql" "UPDATE project SET status = 'active'"
   # Between the phases, a v1 server still writes legacy_id and leaves out
   # mentions, and a v2 server leaves out legacy_id.
   "$sql" "INSERT INTO comment (task_id, body, legacy_id) SELECT id, 'Written by v1', 'TRK-8' FROM task"
@@ -175,6 +183,12 @@ apply_plan() {
   grep -q '^plan in progress: none$' "$OUT/status.$dialect.txt"
   test "$("$sql" "SELECT count(*) FROM comment")" = 3
   fails "$OUT/legacy-id.$dialect.txt" "$sql" "SELECT legacy_id FROM comment"
+  # The guard is there now: archiving passes, a write that keeps the
+  # status is no move, and the move back is refused.
+  "$sql" "UPDATE project SET status = 'archived'"
+  "$sql" "UPDATE project SET status = 'archived'"
+  fails "$OUT/status-guard.$dialect.txt" "$sql" "UPDATE project SET status = 'active'"
+  test "$("$sql" "SELECT status FROM project")" = archived
 
   # The database is at v2's model: the model it recorded is the one v2
   # resolves to, and a plan from it has nothing to do.

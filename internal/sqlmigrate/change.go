@@ -124,9 +124,13 @@ var rank = map[op]int{
 // sits between ranks. A piece that runs after the tables runs after the
 // alterations and before the indexes; one that runs after every object,
 // after the comments; and a removed piece's down after the tightenings,
-// before any drop (D83).
+// before any drop (D83). A trigger expand drops is one that refuses a
+// write (D118): it goes after the renames, by the names they leave, and
+// before the functions, so its function is never replaced under it.
 func rankOf(c *change) int {
 	switch {
+	case c.op == opDropTrigger && c.phase == Expand:
+		return rank[opRenameTrigger]*10 + 5
 	case c.op == opRunRawSQL && c.raw.Position == ir.RawSQLAfterTables:
 		return rank[opAlterColumnType]*10 + 5
 	case c.op == opRunRawSQL, c.op == opUndoRawSQL:

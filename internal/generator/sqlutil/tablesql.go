@@ -86,7 +86,10 @@ type TableStatements struct {
 	// Update sets %s on the row whose key is $%d. VersionFence follows it
 	// for a write fenced on _version $%d, Live for a soft-deletable table,
 	// and Returning last. UpdateMany sets %s on the rows of the WHERE %s.
-	// UpdatedAt and UpdatedBy are the assignments an update stamps.
+	// UpdatedAt and UpdatedBy are the assignments an update stamps. On a
+	// table with a @fenced field, the assignments %s of Update, UpdateMany
+	// and Upsert end with the bump of each fence they advance (D119,
+	// TableModel.FenceBumps), which the repository that fills them adds.
 	Update       string
 	VersionFence string
 	Returning    string
@@ -108,7 +111,9 @@ type TableStatements struct {
 	// whose key is $3, or deleted_at $1 on the one whose key is $2 for a
 	// table without deletedBy; SoftDeleteIfVersion fences it on _version
 	// too. SoftDeleteMany stamps the rows of the WHERE %s, whose parameters
-	// follow those. Empty for a table without deletedAt.
+	// follow those. Each also advances a @fenced field that covers a column
+	// it stamps, or that covers the row (D119). Empty for a table without
+	// deletedAt.
 	SoftDelete          string
 	SoftDeleteIfVersion string
 	SoftDeleteMany      string
@@ -133,7 +138,8 @@ type TableStatements struct {
 	// each encrypted column, in order, from $1, on the row whose key is the
 	// parameter after them, when each still holds what Stale read, the
 	// parameters after that: a write between the two, which sealed under
-	// the current key, is left as it is.
+	// the current key, is left as it is. Reseal also advances a @fenced
+	// field that covers an encrypted column, or that covers the row (D119).
 	Stale  string
 	Reseal string
 
@@ -414,13 +420,16 @@ func tableStatements(table *TableModel, d tableDialect) TableStatements {
 		s.LiveCondition = t + "." + deletedAt + " IS NULL"
 		s.Version += s.Live
 		if table.DeletedBy {
-			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + " WHERE " + key + " = " + p(3) + " AND " + deletedAt + " IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + " WHERE " + key + " = " + p(3) + " AND _version = " + p(4) + " AND " + deletedAt + " IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + "%s"
+			// The stamps, then each fence they advance (D119).
+			stamps := deletedAt + " = " + p(1) + ", " + deletedBy + " = " + p(2) + table.fenced(deletedAt, deletedBy)
+			s.SoftDelete = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(3) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(3) + " AND _version = " + p(4) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + stamps + "%s"
 		} else {
-			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + " WHERE " + key + " = " + p(2) + " AND " + deletedAt + " IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + " WHERE " + key + " = " + p(2) + " AND _version = " + p(3) + " AND " + deletedAt + " IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = " + p(1) + "%s"
+			stamps := deletedAt + " = " + p(1) + table.fenced(deletedAt)
+			s.SoftDelete = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(2) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(2) + " AND _version = " + p(3) + " AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + stamps + "%s"
 		}
 	}
 	s.Upsert = "INSERT INTO " + t + " (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s" + bump + "%s RETURNING " + list
@@ -447,22 +456,24 @@ func tableStatements(table *TableModel, d tableDialect) TableStatements {
 
 // resealStatements are Stale and Reseal of table, whose name is t and key
 // column key, both quoted, in the dialect d; empty for a table without an
-// Encrypted<T> column.
+// Encrypted<T> column. Reseal sets every encrypted column, and with them
+// advances each fence they move (D119).
 func resealStatements(table *TableModel, t, key string, d tableDialect) (stale, reseal string) {
 	encrypted := table.EncryptedColumns()
 	if len(encrypted) == 0 {
 		return "", ""
 	}
 	selected := []string{key}
-	var older, sets, guards []string
+	var older, sets, guards, sealed []string
 	for i, c := range encrypted {
 		selected = append(selected, c.Quoted)
 		older = append(older, c.Quoted+" NOT LIKE "+d.param(1))
 		sets = append(sets, c.Quoted+" = "+d.param(i+1))
 		guards = append(guards, c.Quoted+" IS NOT DISTINCT FROM "+d.param(len(encrypted)+2+i))
+		sealed = append(sealed, c.Quoted)
 	}
 	stale = "SELECT " + strings.Join(selected, ", ") + " FROM " + t + " WHERE " + strings.Join(older, " OR ") + " ORDER BY " + key + " LIMIT " + d.param(2)
-	reseal = "UPDATE " + t + " SET " + strings.Join(sets, ", ") + " WHERE " + key + " = " + d.param(len(encrypted)+1) + " AND " + strings.Join(guards, " AND ")
+	reseal = "UPDATE " + t + " SET " + strings.Join(sets, ", ") + table.fenced(sealed...) + " WHERE " + key + " = " + d.param(len(encrypted)+1) + " AND " + strings.Join(guards, " AND ")
 	return stale, reseal
 }
 

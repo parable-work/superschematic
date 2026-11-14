@@ -175,6 +175,9 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		behaviorsPackage(t),
 		{name: "fixture-queue-db", schema: load("fixture-queue-db")},
 	}
+	// The state machines' helpers (D118), with the file that checks their
+	// types.
+	cases = append(cases, stateMachinePackages(t)...)
 	buildTSPackages(t, append(cases, loadNestedArraysEdges(t)...))
 }
 

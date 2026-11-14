@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "expanded": "064bea21570dcb7856a336852989adae06e2a8d4828302349159b444b792bb64",
+  "from": "ae5c744ddcfe8cceb624d759c560efadcc3ee006d350e2eddd692c0a67e14675",
+  "hash": "9e1e99cccf797e2d12b1dcef8c5995a70788929b5fad79813f2e1ee2d28f4b17",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Order.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('shipped') THEN\n    RAISE EXCEPTION 'order.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status IS NULL AND NEW.status IN ('placed'))\n    OR (OLD.status = 'placed' AND NEW.status IN ('shipped'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'order.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_order_status_transition_guard\n  BEFORE UPDATE OF status ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_status_transition_guard()"
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "2a94cd047b37bc4e29cce4300ab774ad47e5d7ad8a54dd33d4f1ba56fa773b61",
+  "toModel": null,
+  "version": 1
+}
