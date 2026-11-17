@@ -1,0 +1,22 @@
+{
+  "dialect": "sqlite",
+  "expanded": "a6d610c27a47f7c6cfe61f4e4c026749af8fbcb22b46a88ff89f8dfa3f2af61e",
+  "from": "a6d610c27a47f7c6cfe61f4e4c026749af8fbcb22b46a88ff89f8dfa3f2af61e",
+  "hash": "bbbbe6be7906443d7aa9ca87a07f8cc4f93009241f96bd314a8180b3449599f6",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_status_transition_guard\""
+      ],
+      "subject": "trigger/order/trg_order_status_transition_guard",
+      "transactional": true
+    }
+  ],
+  "to": "db494498d82d2b0a9be05b92ae9a59aab35f76dc2a1326d47dad99365c03caad",
+  "toModel": null,
+  "version": 1
+}

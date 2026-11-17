@@ -328,7 +328,11 @@ func TestVectorsOnPostgres(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(names(live), []string{"north-east"}) {
 		t.Fatalf("Nearest after a delete = %v, %v", names(live), err)
 	}
-	all, err := db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{K: 1, Metric: VectorL2, IncludeDeleted: true})
+	// With no filter the ivfflat index serves l2. It was built on an empty
+	// table, so its four lists lie where chance put them, and a scan of
+	// one list, the default, misses east in a run in ten or so: this one
+	// reads all four.
+	all, err := db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{K: 1, Metric: VectorL2, IncludeDeleted: true, Probes: 4})
 	if err != nil || !reflect.DeepEqual(names(all), []string{"east"}) {
 		t.Fatalf("Nearest with deleted rows = %v, %v", names(all), err)
 	}

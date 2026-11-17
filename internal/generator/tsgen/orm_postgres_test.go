@@ -47,7 +47,8 @@ type repositoryCase struct {
 // fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
 // refused and resealed; fixture-actor-db's acting user, the caller of the
 // operation being run and the system actor (D87); and fixture-vectors-db's
-// decimals, vectors and nearest (D84), on the Postgres with pgvector.
+// decimals, vectors and nearest (D84), on the Postgres with pgvector; and
+// fixture-fenced-db's @fenced fields (D119), which each write advances.
 // fixture-workflow-db's tables whose fields are behaviors (D103) have a
 // test of their own, on bun:sqlite and Postgres: TestWorkflowTablesEndToEnd;
 // and so do fixture-timers-db's, which implement Timers:
@@ -153,6 +154,14 @@ var repositoryCases = []repositoryCase{
 		"plaidItem.upsertOne by itemId inserts an item sealed under the key it generates, then updates its token; upsertMany seals each item it inserts or updates",
 		"no filter holds an encrypted field, and the DDL bounds the plaintext, not the envelope",
 		"reencrypt reseals the envelopes of an older key under the current one, and the older key can then leave the secret",
+	}},
+	{fixture: "fixture-fenced-db", files: []string{"fenced.test.ts"}, tests: []string{
+		"an update advances the fence that covers a column it sets by one, leaves the other, and advances none for uncovered columns alone",
+		"an update that sets a fence itself is written as it stands, and an updateMany that filters on the fence is a compare-and-set",
+		"updateMany and an upsert's update advance as updateOne does, and an upsert that inserts or sets no field advances nothing",
+		"a fence with no covers advances on every update",
+		"a soft delete advances the fence that covers deletedAt, and a write of capacity alone does not",
+		"the bump follows an update's assignments and its stamp, once for each fence, and a table with no fence is written as before",
 	}},
 }
 

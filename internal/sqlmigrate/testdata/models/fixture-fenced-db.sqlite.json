@@ -1,0 +1,230 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-fenced-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Courier.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Courier.name",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "courier",
+      "origin": "Courier",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "courier_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Delivery.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "address",
+          "origin": "Delivery.address",
+          "type": "TEXT"
+        },
+        {
+          "name": "courier_id",
+          "nullable": true,
+          "origin": "Delivery.courier",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "plan_version",
+          "origin": "Delivery.planVersion",
+          "type": "INTEGER"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "origin": "Delivery.attempts",
+          "type": "INTEGER"
+        },
+        {
+          "name": "proof",
+          "nullable": true,
+          "origin": "Delivery.proof",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "run_version",
+          "origin": "Delivery.runVersion",
+          "type": "INTEGER"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Delivery.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "origin": "Delivery.updatedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "courier_id"
+          ],
+          "name": "fk_delivery_courier_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "courier"
+        }
+      ],
+      "kind": "entity",
+      "name": "delivery",
+      "origin": "Delivery",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "delivery_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Depot.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Depot.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "capacity",
+          "origin": "Depot.capacity",
+          "type": "INTEGER"
+        },
+        {
+          "default": "0",
+          "name": "revision",
+          "origin": "Depot.revision",
+          "type": "INTEGER"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Depot.deletedAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "depot",
+      "origin": "Depot",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "depot_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Parcel.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "tracking_code",
+          "origin": "Parcel.trackingCode",
+          "type": "TEXT"
+        },
+        {
+          "name": "weight_grams",
+          "origin": "Parcel.weightGrams",
+          "type": "INTEGER"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Parcel.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "version",
+          "origin": "Parcel.version",
+          "type": "INTEGER"
+        }
+      ],
+      "kind": "entity",
+      "name": "parcel",
+      "origin": "Parcel",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "parcel_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "tracking_code"
+          ],
+          "name": "parcel_tracking_code_key"
+        }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER \"trg_delivery_plan_version_fence\" BEFORE UPDATE ON \"delivery\" FOR EACH ROW\nWHEN NEW.\"plan_version\" IS NOT OLD.\"plan_version\" + 1 AND (\n  NEW.\"plan_version\" IS NOT OLD.\"plan_version\"\n  OR NEW.\"address\" IS NOT OLD.\"address\"\n  OR NEW.\"courier_id\" IS NOT OLD.\"courier_id\")\nBEGIN\n  SELECT RAISE(ABORT, 'delivery.plan_version is fenced: an update that changes a column it covers must add one to it, and any other must keep it or add one');\nEND",
+      "name": "trg_delivery_plan_version_fence",
+      "origin": "Delivery",
+      "refuses": true,
+      "table": "delivery"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_delivery_run_version_fence\" BEFORE UPDATE ON \"delivery\" FOR EACH ROW\nWHEN NEW.\"run_version\" IS NOT OLD.\"run_version\" + 1 AND (\n  NEW.\"run_version\" IS NOT OLD.\"run_version\"\n  OR NEW.\"attempts\" IS NOT OLD.\"attempts\"\n  OR NEW.\"proof\" IS NOT OLD.\"proof\")\nBEGIN\n  SELECT RAISE(ABORT, 'delivery.run_version is fenced: an update that changes a column it covers must add one to it, and any other must keep it or add one');\nEND",
+      "name": "trg_delivery_run_version_fence",
+      "origin": "Delivery",
+      "refuses": true,
+      "table": "delivery"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_depot_revision_fence\" BEFORE UPDATE ON \"depot\" FOR EACH ROW\nWHEN NEW.\"revision\" IS NOT OLD.\"revision\" + 1 AND (\n  NEW.\"revision\" IS NOT OLD.\"revision\"\n  OR NEW.\"name\" IS NOT OLD.\"name\"\n  OR NEW.\"deleted_at\" IS NOT OLD.\"deleted_at\")\nBEGIN\n  SELECT RAISE(ABORT, 'depot.revision is fenced: an update that changes a column it covers must add one to it, and any other must keep it or add one');\nEND",
+      "name": "trg_depot_revision_fence",
+      "origin": "Depot",
+      "refuses": true,
+      "table": "depot"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_parcel_version_fence\" BEFORE UPDATE ON \"parcel\" FOR EACH ROW\nWHEN NEW.\"version\" IS NOT OLD.\"version\" + 1\nBEGIN\n  SELECT RAISE(ABORT, 'parcel.version is fenced: an update of the row must add one to it');\nEND",
+      "name": "trg_parcel_version_fence",
+      "origin": "Parcel",
+      "refuses": true,
+      "table": "parcel"
+    }
+  ],
+  "version": 1
+}

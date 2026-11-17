@@ -21,6 +21,7 @@
 
 use crate::choices::Choices;
 use crate::records::{GridViewRecord, PointRecord, SaveGridInputRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -56,7 +57,7 @@ pub fn shade_label(value: &str) -> &str {
 /// `GridViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn grid_view_detail(record: GridViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn grid_view_detail(cx: &Cx, record: GridViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="GridView" role="group">
             <dl>
@@ -139,6 +140,7 @@ pub async fn grid_view_detail(record: GridViewRecord, #[default] choices: Choice
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn grid_view_table(
+    cx: &Cx,
     rows: Vec<GridViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -233,7 +235,7 @@ pub async fn grid_view_table(
 /// `PointRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn point_detail(record: PointRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn point_detail(cx: &Cx, record: PointRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Point" role="group">
             <dl>
@@ -256,6 +258,7 @@ pub async fn point_detail(record: PointRecord, #[default] choices: Choices) -> t
 /// its end links nowhere.
 #[component]
 pub async fn point_table(
+    cx: &Cx,
     rows: Vec<PointRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -290,7 +293,7 @@ pub async fn point_table(
 /// `SaveGridInputRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn save_grid_input_detail(record: SaveGridInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn save_grid_input_detail(cx: &Cx, record: SaveGridInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="SaveGridInput" role="group">
             <dl>
@@ -369,6 +372,7 @@ pub async fn save_grid_input_detail(record: SaveGridInputRecord, #[default] choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn save_grid_input_table(
+    cx: &Cx,
     rows: Vec<SaveGridInputRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

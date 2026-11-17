@@ -154,3 +154,9 @@ bumps it (`<table>_bump_version`, `trg_<table>_bump_version`),
 has no history table, capture function, prune function or history
 readers, and the types declare `_version` but no `HistoryRecord`. Use it
 for a table that needs a fence on concurrent writes and no past versions.
+
+`_version` is the whole row's, and the database bumps it. A counter that
+is a field of the class, or one for each party that writes a row, each
+over its own columns, is `@fenced`
+([Fences](/superschematic/guides/database-tables/#fences)), which the
+writer advances and a trigger checks.

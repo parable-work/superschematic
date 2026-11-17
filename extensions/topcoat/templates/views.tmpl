@@ -40,6 +40,7 @@
 
 use crate::choices::Choices;
 use crate::records::{ {{- .ViewRecords -}} };
+use topcoat::context::Cx;
 {{- if and .SortedTables .Pages.Live }}
 use topcoat::runtime::{Event, Signal};
 {{- end }}
@@ -140,7 +141,7 @@ pub fn {{ .Func }}(value: &str) -> &str {
 /// `{{ .Record }}` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn {{ .Detail }}(record: {{ .Record }}, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn {{ .Detail }}(cx: &Cx, record: {{ .Record }}, #[default] choices: Choices) -> topcoat::Result<impl View> {
 {{- if not .Fields }}
     let _ = record;
 {{- end }}
@@ -176,6 +177,7 @@ pub async fn {{ .Detail }}(record: {{ .Record }}, #[default] choices: Choices) -
 {{- end }}
 #[component]
 pub async fn {{ .Table }}(
+    cx: &Cx,
     rows: Vec<{{ .Record }}>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

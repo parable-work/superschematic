@@ -1,0 +1,259 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "functions": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION delivery_plan_version_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Delivery.planVersion (D119):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.address, NEW.courier_id) IS DISTINCT FROM ROW(OLD.address, OLD.courier_id) THEN\n    IF NEW.plan_version IS DISTINCT FROM OLD.plan_version + 1 THEN\n      RAISE EXCEPTION 'delivery.plan_version must advance from % to %, not to %', OLD.plan_version, OLD.plan_version + 1, NEW.plan_version\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'delivery_plan_version_fence';\n    END IF;\n  ELSIF NEW.plan_version IS DISTINCT FROM OLD.plan_version THEN\n    IF NEW.plan_version IS DISTINCT FROM OLD.plan_version + 1 THEN\n      RAISE EXCEPTION 'delivery.plan_version must stay at % or advance to %, not move to %', OLD.plan_version, OLD.plan_version + 1, NEW.plan_version\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'delivery_plan_version_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "delivery_plan_version_fence",
+      "origin": "Delivery"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION delivery_run_version_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Delivery.runVersion (D119):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.attempts, NEW.proof) IS DISTINCT FROM ROW(OLD.attempts, OLD.proof) THEN\n    IF NEW.run_version IS DISTINCT FROM OLD.run_version + 1 THEN\n      RAISE EXCEPTION 'delivery.run_version must advance from % to %, not to %', OLD.run_version, OLD.run_version + 1, NEW.run_version\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'delivery_run_version_fence';\n    END IF;\n  ELSIF NEW.run_version IS DISTINCT FROM OLD.run_version THEN\n    IF NEW.run_version IS DISTINCT FROM OLD.run_version + 1 THEN\n      RAISE EXCEPTION 'delivery.run_version must stay at % or advance to %, not move to %', OLD.run_version, OLD.run_version + 1, NEW.run_version\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'delivery_run_version_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "delivery_run_version_fence",
+      "origin": "Delivery"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION depot_revision_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Depot.revision (D119):\n  -- an update that changes a column it covers sets it to the stored value\n  -- plus one, and any other keeps it or adds one.\n  IF ROW(NEW.\"name\", NEW.deleted_at) IS DISTINCT FROM ROW(OLD.\"name\", OLD.deleted_at) THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'depot.revision must advance from % to %, not to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'depot_revision_fence';\n    END IF;\n  ELSIF NEW.revision IS DISTINCT FROM OLD.revision THEN\n    IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN\n      RAISE EXCEPTION 'depot.revision must stay at % or advance to %, not move to %', OLD.revision, OLD.revision + 1, NEW.revision\n        USING ERRCODE = 'check_violation', CONSTRAINT = 'depot_revision_fence';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "depot_revision_fence",
+      "origin": "Depot"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION parcel_version_fence() RETURNS trigger AS $$\nBEGIN\n  -- The @fenced counter Parcel.version (D119):\n  -- every update of a row sets it to the stored value plus one.\n  IF NEW.version IS DISTINCT FROM OLD.version + 1 THEN\n    RAISE EXCEPTION 'parcel.version must advance from % to %, not to %', OLD.version, OLD.version + 1, NEW.version\n      USING ERRCODE = 'check_violation', CONSTRAINT = 'parcel_version_fence';\n  END IF;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "parcel_version_fence",
+      "origin": "Parcel"
+    }
+  ],
+  "service": "fixture-fenced-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Courier.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Courier.name",
+          "type": "TEXT"
+        }
+      ],
+      "comment": "Who carries a delivery. It has no fence: a write of it advances nothing.",
+      "kind": "entity",
+      "name": "courier",
+      "origin": "Courier",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "courier_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Delivery.id",
+          "type": "UUID"
+        },
+        {
+          "name": "address",
+          "origin": "Delivery.address",
+          "type": "TEXT"
+        },
+        {
+          "name": "courier_id",
+          "nullable": true,
+          "origin": "Delivery.courier",
+          "type": "UUID"
+        },
+        {
+          "default": "0",
+          "name": "plan_version",
+          "origin": "Delivery.planVersion",
+          "type": "BIGINT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "origin": "Delivery.attempts",
+          "type": "BIGINT"
+        },
+        {
+          "name": "proof",
+          "nullable": true,
+          "origin": "Delivery.proof",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "run_version",
+          "origin": "Delivery.runVersion",
+          "type": "BIGINT"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Delivery.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "origin": "Delivery.updatedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A delivery two parties write, neither waiting on the other. The planner\nwrites the address and the courier, a relation, covered as the key it\nstores, and advances planVersion; the courier's device writes attempts\nand proof, and advances runVersion. A write of one party's fields leaves\nthe other's counter as it was, so neither fails the other's compare.\nNo fence covers note or updatedAt: a write of them alone advances\nneither counter. The courier is nullable, set and cleared by the\nplanner's writes alone: its delete action is RESTRICT, so a courier a\ndelivery names is not deleted. A SET NULL would have the database clear\nthe column itself, an update that advances no fence, and the build\nrefuses a fence that covers such a relation.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "courier_id"
+          ],
+          "name": "fk_delivery_courier_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "courier"
+        }
+      ],
+      "kind": "entity",
+      "name": "delivery",
+      "origin": "Delivery",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "delivery_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Depot.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Depot.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "capacity",
+          "origin": "Depot.capacity",
+          "type": "BIGINT"
+        },
+        {
+          "default": "0",
+          "name": "revision",
+          "origin": "Depot.revision",
+          "type": "BIGINT"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Depot.deletedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A depot parcels wait in. A delete sets deletedAt, which the fence\ncovers, so the delete advances revision as a rename does; a write of\ncapacity alone does not.",
+      "kind": "entity",
+      "name": "depot",
+      "origin": "Depot",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "depot_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Parcel.id",
+          "type": "UUID"
+        },
+        {
+          "name": "tracking_code",
+          "origin": "Parcel.trackingCode",
+          "type": "TEXT"
+        },
+        {
+          "name": "weight_grams",
+          "origin": "Parcel.weightGrams",
+          "type": "BIGINT"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Parcel.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "version",
+          "origin": "Parcel.version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A parcel at the desk. Its one fence lists no covers, so every update of\na row advances version by one, whatever it writes: a writer that read\nversion 4 writes where version is 4, and knows no other write came\nbetween. An upsert by trackingCode updates a row the same way.",
+      "kind": "entity",
+      "name": "parcel",
+      "origin": "Parcel",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "parcel_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "tracking_code"
+          ],
+          "name": "parcel_tracking_code_key"
+        }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER trg_delivery_plan_version_fence\n  BEFORE UPDATE ON delivery\n  FOR EACH ROW EXECUTE FUNCTION delivery_plan_version_fence()",
+      "name": "trg_delivery_plan_version_fence",
+      "origin": "Delivery",
+      "refuses": true,
+      "table": "delivery"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_delivery_run_version_fence\n  BEFORE UPDATE ON delivery\n  FOR EACH ROW EXECUTE FUNCTION delivery_run_version_fence()",
+      "name": "trg_delivery_run_version_fence",
+      "origin": "Delivery",
+      "refuses": true,
+      "table": "delivery"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_depot_revision_fence\n  BEFORE UPDATE ON depot\n  FOR EACH ROW EXECUTE FUNCTION depot_revision_fence()",
+      "name": "trg_depot_revision_fence",
+      "origin": "Depot",
+      "refuses": true,
+      "table": "depot"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_parcel_version_fence\n  BEFORE UPDATE ON parcel\n  FOR EACH ROW EXECUTE FUNCTION parcel_version_fence()",
+      "name": "trg_parcel_version_fence",
+      "origin": "Parcel",
+      "refuses": true,
+      "table": "parcel"
+    }
+  ],
+  "version": 1
+}

@@ -72,7 +72,7 @@ The crate, `acme-shop-orders-topcoat`, lands in
 `schemas/dist-rust/topcoat/shop-orders`, beside the API crate it builds
 on. A service whose server is in another language skips the crate and
 says why in the build log, so the same config also builds the Go server.
-The crate pins Topcoat 0.10, which needs Rust 1.98 or newer.
+The crate pins Topcoat 0.12.1, which needs Rust 1.99 or newer.
 
 The crate's forms, records, procedures and display components, below,
 are on by default. In `outputs.topcoat`, `forms: false` leaves out both
@@ -313,7 +313,7 @@ own:
 
 <Snippet file="topcoat/src/lib.rs" symbol="cancel_order" />
 
-`path_param!(id: types::IdentityUUID, error = not_found)` declares the
+`path_param!(id: types::IdentityUUID else not_found)` declares the
 route's id, so a path that holds no id is a 404.
 
 A GET operation's form is a filter. Its `METHOD` is `"get"`, and a page
@@ -746,7 +746,10 @@ resources the caller may list, the current one marked with
 the app's stylesheet draws, since the crate ships no icon set: acme's
 `ProductView` and `OrderView` name `package` and `receipt`), and a
 breadcrumb trail from the index to the page, an
-item by its title where its type declares one. Else an item is named by
+item by its title where its type declares one. The layout carries the
+same trail, read from the page back to the index, as the page's title
+(`Edit · Apollo · Projects · Projects console`), which an app shows by
+rendering `topcoat::metadata::tags()` in its document's `<head>`. Else an item is named by
 the label of what its route's value refers to, when every operation whose
 route holds that value refers to one target by one value, so a supplier's
 products at `suppliers/{supplierId}/products` name their supplier though
@@ -760,7 +763,7 @@ the display components' `ss-` classes and no styles.
 
 The app's `.discover()` registers the pages, as it registers the
 procedures. The app tells them its site's title, its sign-in page and
-any choices of its own through `pages::Settings` in its app context. The
+any choices of its own through `pages::Settings` in its router's context. The
 acme app gives its title and sign-in page and no choices: the console
 names what an order's lines refer to through `listProducts`, so the
 new-order page offers each line's product in a picker, which finds the

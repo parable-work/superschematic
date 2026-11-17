@@ -47,7 +47,7 @@ use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImple
 use schemas_fixture_engine_api_topcoat::{engine, engine_panels, PageAuthenticator, RouterBuilderFixtureEngineApiExt, Setup};
 use serde_json::{json, Map, Value};
 use superschematic_engine::{CreateOptions, Engine, GetOptions, InstanceRecord, ToolTarget, WriteOptions};
-use topcoat::context::{Cx, app_context};
+use topcoat::context::{Cx, context};
 use topcoat::router::request::{headers, uri};
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
@@ -231,7 +231,7 @@ async fn request_panels(cx: &Cx) -> topcoat::Result<impl View> {
 // document and its record read as ada, shown to the page's caller.
 #[page("/panels/document")]
 async fn document_panel(cx: &Cx) -> topcoat::Result<impl View> {
-    let setup: &Setup = app_context(cx);
+    let setup: &Setup = context(cx);
     let engine = Arc::clone(&setup.engine);
     let id = query_value(cx, "id");
     let (describe, record) = tokio::task::spawn_blocking(move || {

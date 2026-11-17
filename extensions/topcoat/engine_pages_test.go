@@ -142,7 +142,7 @@ func engineCopy(t *testing.T, edit func(schema string) string) string {
 const panelFormPage = `
 #[page("/console/engine/Note/{engine_id}/panel-form")]
 pub async fn panel_form_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let id = path_param::<EngineId>(cx).to_owned();
+    let id = engine_id(cx).to_owned();
     let describe = described(cx, "Note").await.map_err(|_| topcoat::router::error::not_found())?.clone();
     let post = operations(cx, &describe).await.into_iter().find(|operation| operation.name == "post").expect("post");
     let values = vec![("body".to_owned(), "Filled".to_owned()), ("thread".to_owned(), "1".to_owned())];
@@ -298,7 +298,7 @@ impl NotesImplementation for Notes {
 }
 
 fn app() -> Router {
-    app_with(OriginPolicy::new())
+    app_with(OriginPolicy::default())
 }
 
 // The app with origins as its origin policy, its engine holding
@@ -311,7 +311,7 @@ fn app_with(origins: OriginPolicy) -> Router {
     let engine = engine::open(&path).expect("open the engine");
     engine.deploy(&[long_type(), invoice_type()], Some("fixture-engine-db")).expect("deploy SupplierContractAmendmentRequest and Invoice");
     let implementations = Implementations { notes: Arc::new(Notes), authenticator: Arc::new(Bearer) };
-    Router::builder().origin_policy(origins).discover().fixture_engine_api(implementations, Pages, engine).build()
+    Router::builder().with(origins).discover().fixture_engine_api(implementations, Pages, engine).build()
 }
 
 // Invoice: an amount in a literal currency (total), one in its currency

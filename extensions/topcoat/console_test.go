@@ -1,7 +1,6 @@
 package topcoat_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -756,15 +755,14 @@ func TestATrailStepMeetsItsOptionsControls(t *testing.T) {
 		t.Fatal(err)
 	}
 	pages := string(data)
-	controls := pages[strings.Index(pages, "        controls: vec![\n"):]
-	controls = controls[:strings.Index(controls, "        ],\n    })")]
-	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limiter(limits.of(&crate::api::operations::SUPPLIER_LIST_SUPPLIERS))")], "Controls::default()")
 	for _, want := range []string{
-		fmt.Sprintf(`(Method::GET, "/console/suppliers/{supplier_id}/pages", None, &[%d]),`, limiter),
-		fmt.Sprintf(`(Method::GET, "/console/suppliers", Some(%d), &[]),`, limiter),
+		"            controls: vec![\n                Controls::default().rate_limiter(limits.of(&crate::api::operations::SUPPLIER_LIST_SUPPLIERS)),\n",
+		"    pub(super) const SUPPLIER_LIST_SUPPLIERS: usize = 0;\n",
+		`#[page("/console/suppliers/{supplier_id}/pages", with(Meets { own: None, called: &[place::SUPPLIER_LIST_SUPPLIERS] }))]`,
+		`#[page("/console/suppliers", with(Meets { own: Some(place::SUPPLIER_LIST_SUPPLIERS), called: &[] }))]`,
 	} {
 		if !strings.Contains(pages, want) {
-			t.Errorf("pages.rs lacks %q:\n%s", want, controls)
+			t.Errorf("pages.rs lacks %q", want)
 		}
 	}
 }
@@ -954,10 +952,10 @@ func TestAReferenceToAnotherAPIsOptions(t *testing.T) {
 			"let page = " + hosted + "::operations::supplier_list_suppliers(cx, args).await.ok()?;",
 			"async fn fixture_console_suppliers_api_supplier_list_suppliers_search(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {",
 			"async fn supplier_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {",
-			"rate_from: Some(|cx: &Cx| try_app_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS)),",
+			"rate_from: Some(|cx: &Cx| try_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS)),",
 		},
 		"src/pages.rs": {
-			".rate_limiter_from(|cx: &Cx| try_app_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS))",
+			".rate_limiter_from(|cx: &Cx| try_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS))",
 		},
 	} {
 		for _, want := range wants {
@@ -1478,7 +1476,7 @@ fn implementations(store: &Arc<Store>) -> Implementations {
 }
 
 fn app_with(store: &Arc<Store>, settings: Settings) -> Router {
-    Router::builder().discover().app_context(settings).fixture_console_api(implementations(store), Callers).build()
+    Router::builder().discover().with(settings).fixture_console_api(implementations(store), Callers).build()
 }
 
 fn app(store: &Arc<Store>) -> Router {
@@ -2627,7 +2625,7 @@ fn app(shop: &Arc<Shop>) -> Router {
         supplier: Arc::clone(shop) as _,
         authenticator: Arc::new(NoRequests),
     };
-    Router::builder().discover().app_context(Settings::new().title("Shop console")).fixture_console_api(implementations, Clerk).build()
+    Router::builder().discover().with(Settings::new().title("Shop console")).fixture_console_api(implementations, Clerk).build()
 }
 
 async fn send(router: &Router, method: &str, uri: &str, body: &str) -> (StatusCode, String) {
@@ -2838,7 +2836,7 @@ fn shop() -> Arc<Shop> {
 fn app(shop: &Arc<Shop>) -> Router {
     Router::builder()
         .discover()
-        .app_context(Settings::new().title("Shop console"))
+        .with(Settings::new().title("Shop console"))
         .fixture_console_api(console(shop), Clerk)
         .fixture_console_suppliers_api_without_api(directory(), Clerk)
         .build()
@@ -2847,7 +2845,7 @@ fn app(shop: &Arc<Shop>) -> Router {
 // An app that hosts the console alone, though it links the suppliers'
 // crate.
 fn console_alone(shop: &Arc<Shop>) -> Router {
-    Router::builder().discover().app_context(Settings::new().title("Shop console")).fixture_console_api(console(shop), Clerk).build()
+    Router::builder().discover().with(Settings::new().title("Shop console")).fixture_console_api(console(shop), Clerk).build()
 }
 
 // The suppliers' in-process call, from the app's own page: how many

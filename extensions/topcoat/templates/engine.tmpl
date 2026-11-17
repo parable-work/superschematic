@@ -9,7 +9,7 @@
 //! has the document's hash left as it is. `{{ .ExtTrait }}::{{ .SetupMethod }}` mounts
 //! its routes ([`routes`]) at `{{ engineMount }}`, its event stream and its MCP endpoint
 //! among them,{{ if .HasAuth }} each request's caller the one the API's `Authenticator`
-//! establishes,{{ end }} and keeps it in the app context (`Setup::engine`), which a page
+//! establishes,{{ end }} and keeps it in the router's context (`Setup::engine`), which a page
 //! calls in-process. The engine is synchronous: call it off the async
 //! threads (`tokio::task::spawn_blocking`).
 

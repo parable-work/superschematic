@@ -6,7 +6,9 @@
 //! operation serves it, and a resource under an item as a section of the
 //! item's page and as pages under it. A layout puts each page in `<main>`,
 //! after a nav of the resources the caller may list and the trail from the
-//! index to the page, each item by its title.
+//! index to the page, each item by its title. It carries the page's title
+//! too, the trail read back to the index, as Topcoat metadata, which an app
+//! whose document renders `topcoat::metadata::tags()` shows.
 //!
 //! Every page calls its operation through `operations`, so the route's
 //! rules hold: the caller admitted as the route admits it, the arguments
@@ -40,7 +42,8 @@ use crate::records::{CommentRecord, DocumentRecord, MemberRecord, ProjectRecord,
 use crate::views::{comment_table, document_detail, document_table, member_table, project_detail, project_table, shelf_detail, shelf_table, task_detail, task_table};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use topcoat::context::{Cx, memoize, try_app_context};
+use topcoat::context::{Cx, memoize, try_context};
+use topcoat::metadata::Metadata;
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::request::uri;
@@ -78,8 +81,8 @@ pub const RESOURCES: &[&str] = &[
     "shelves",
 ];
 
-/// What the app tells the pages, in its app context
-/// (`.app_context(pages::Settings::new().sign_in("/sign-in"))`): the site's
+/// What the app tells the pages, in its router's context
+/// (`.with(pages::Settings::new().sign_in("/sign-in"))`): the site's
 /// title, which heads every page; its sign-in page, which a page that
 /// refuses a caller who is not signed in (401) links to, with the page to
 /// come back to as `next`; and the choices every form and display component
@@ -156,7 +159,7 @@ impl Settings {
 
     /// The settings the app put in its context, or the defaults.
     fn of(cx: &Cx) -> Self {
-        try_app_context::<Settings>(cx).cloned().unwrap_or_default()
+        try_context::<Settings>(cx).cloned().unwrap_or_default()
     }
 
     fn site_title(&self) -> String {
@@ -175,7 +178,7 @@ impl Settings {
 /// The choices the app's `Settings` give the forms and display components
 /// of one resource's pages, `resource` its path below the prefix.
 fn choices_of(cx: &Cx, resource: &str) -> Choices {
-    try_app_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
+    try_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
@@ -651,11 +654,41 @@ async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
     .filter(|title| !title.trim().is_empty())
 }
 
+/// The trail from the index to the request's page, as the layout shows it
+/// and the page's title reads it (`page_metadata`): each step's label, its
+/// link, none for a page that does not exist and for the page itself, and
+/// whether it is the page itself, an item by its title. The request keeps
+/// it (`#[memoize]`), so the two ask once.
+#[memoize]
+async fn page_trail(cx: &Cx) -> Vec<(String, Option<String>, bool)> {
+    let title = Settings::of(cx).site_title();
+    let path = uri(cx).path().to_owned();
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        if let Some((key, ids)) = &crumb.item
+            && let Some(title) = item_title(cx, key, ids).await
+        {
+            crumb.label = title;
+        }
+    }
+    crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect()
+}
+
+/// The metadata of every page under `/console`, which the layout carries in
+/// its context (`Metadata`): the page's title, the trail's steps from the
+/// page back to the index (`Ada · Customers · Shop`). An app whose document
+/// renders `topcoat::metadata::tags()` in its `<head>` gives each page its
+/// own `<title>`; one that does not is as it was.
+async fn page_metadata(cx: &Cx) -> topcoat::Result<Metadata> {
+    let steps: Vec<&str> = page_trail(cx).await.iter().rev().map(|(label, _, _)| label.as_str()).collect();
+    Ok(Metadata::new().title(steps.join(" · ")))
+}
+
 /// Every page under `/console`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the one whose
 /// path is the longest the page's begins with, the trail from the index to
 /// the page, an item by its title, then the page in `<main>`.
-#[layout("/console")]
+#[layout("/console", with(Metadata::from_fn(page_metadata)))]
 pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     let title = Settings::of(cx).site_title();
     let path = uri(cx).path().to_owned();
@@ -676,16 +709,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, link.icon, current)
         })
         .collect();
-    let mut crumbs = trail(&path, &title);
-    for crumb in &mut crumbs {
-        if let Some((key, ids)) = &crumb.item
-            && let Some(title) = item_title(cx, key, ids).await
-        {
-            crumb.label = title;
-        }
-    }
-    let crumbs: Vec<(String, Option<String>, bool)> =
-        crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
+    let crumbs = page_trail(cx).await.clone();
     Ok(view! {
         <div class="ss-pages">
             <header class="ss-header"><a href=(PREFIX)>(title)</a></header>
@@ -940,7 +964,7 @@ async fn documents_rows(cx: &Cx, items: Vec<types::Document>) -> topcoat::Result
 /// when not.
 #[page("/console/documents/{document_id}")]
 pub async fn documents_item_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let document_id = document_id(cx).to_owned();
     Ok(view! { documents_item(document_id: document_id) })
 }
 
@@ -1037,7 +1061,7 @@ async fn documents_new(cx: &Cx, form: DocumentInputForm, errors: FormErrors) -> 
 /// filled from the item, each field the item holds.
 #[page("/console/documents/{document_id}/edit")]
 pub async fn documents_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let document_id = document_id(cx).to_owned();
     let next = current(cx);
     let shown = match operations::can_document_replace_document(cx).await {
         Err(err) => Err(Refusal::from_api(&err)),
@@ -1062,7 +1086,7 @@ pub async fn documents_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// status.
 #[page(POST "/console/documents/{document_id}/edit")]
 pub async fn documents_update_page(cx: &Cx, Form(form): Form<DocumentReplaceDocumentArgsForm>) -> topcoat::Result<impl View> {
-    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let document_id = document_id(cx).to_owned();
     let next = current(cx);
     // The route's values, never the hidden inputs, which a reader can change.
     let form = DocumentReplaceDocumentArgsForm {
@@ -1108,7 +1132,7 @@ fn documents_comments_href(document_id: &str) -> Option<String> {
 /// The list of comments, when the caller may list them.
 #[page("/console/documents/{document_id}/comments")]
 pub async fn documents_comments_list_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let document_id = path_param::<DocumentId>(cx).to_owned();
+    let document_id = document_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_document_list_comments(cx).await;
     Ok(view! {
@@ -1214,7 +1238,7 @@ async fn documents_drafts_rows(cx: &Cx, items: Vec<types::Document>) -> topcoat:
 /// The list of tasks, when the caller may list them.
 #[page("/console/labels/{label_id}/tasks")]
 pub async fn labels_tasks_list_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let label_id = path_param::<LabelId>(cx).to_owned();
+    let label_id = label_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_task_list_labelled_tasks(cx).await;
     Ok(view! {
@@ -1376,7 +1400,7 @@ async fn projects_rows(cx: &Cx, items: Vec<types::Project>) -> topcoat::Result<i
 /// when not.
 #[page("/console/projects/{project_id}")]
 pub async fn projects_item_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     Ok(view! { projects_item(project_id: project_id) })
 }
 
@@ -1494,7 +1518,7 @@ async fn projects_new(cx: &Cx, form: ProjectInputForm, errors: FormErrors) -> to
 /// filled from the item, each field the item holds.
 #[page("/console/projects/{project_id}/edit")]
 pub async fn projects_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     let shown = match operations::can_project_update_project(cx).await {
         Err(err) => Err(Refusal::from_api(&err)),
@@ -1518,7 +1542,7 @@ pub async fn projects_edit_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// (303); a row button or a refusal renders the form again with its status.
 #[page(POST "/console/projects/{project_id}/edit")]
 pub async fn projects_update_page(cx: &Cx, Form(form): Form<ProjectUpdateProjectArgsForm>) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     // The route's values, never the hidden inputs, which a reader can change.
     let mut form = ProjectUpdateProjectArgsForm {
@@ -1562,7 +1586,7 @@ async fn projects_edit(cx: &Cx, form: ProjectUpdateProjectArgsForm, errors: Form
 /// The page that confirms deleting one of the projects, when the caller may.
 #[page("/console/projects/{project_id}/delete")]
 pub async fn projects_delete_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_project_delete_project(cx).await;
     let form = ProjectDeleteProjectArgsForm::new(project_id.as_str());
@@ -1578,7 +1602,7 @@ pub async fn projects_delete_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// list (303); a refusal renders the confirmation again with its status.
 #[page(POST "/console/projects/{project_id}/delete")]
 pub async fn projects_destroy_page(cx: &Cx, Form(form): Form<ProjectDeleteProjectArgsForm>) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     // The route's values, never the hidden inputs, which a reader can change.
     let form = ProjectDeleteProjectArgsForm {
@@ -1631,7 +1655,7 @@ async fn projects_delete(cx: &Cx, project_id: String, form: ProjectDeleteProject
 /// errors and its status.
 #[page(POST "/console/projects/{project_id}/archive")]
 pub async fn projects_archive_form_page(cx: &Cx, Form(form): Form<ProjectArchiveProjectArgsForm>) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let item = projects_item_href(&project_id).unwrap_or_else(|| PREFIX.to_owned());
     // The route's values, never the hidden inputs, which a reader can change.
     let form = ProjectArchiveProjectArgsForm {
@@ -1670,7 +1694,7 @@ fn projects_tasks_item_href(project_id: &str, task_id: &str) -> Option<String> {
 /// The list of tasks, filtered by the query, when the caller may list them.
 #[page("/console/projects/{project_id}/tasks")]
 pub async fn projects_tasks_list_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_task_list_tasks(cx).await;
     Ok(view! {
@@ -1774,8 +1798,8 @@ async fn projects_tasks_section(cx: &Cx, project_id: String) -> topcoat::Result<
 /// not.
 #[page("/console/projects/{project_id}/tasks/{task_id}")]
 pub async fn projects_tasks_item_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
-    let task_id = path_param::<TaskId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
+    let task_id = task_id(cx).to_owned();
     Ok(view! { projects_tasks_item(project_id: project_id, task_id: task_id) })
 }
 
@@ -1809,7 +1833,7 @@ async fn projects_tasks_item(
 /// The page that creates one of the tasks, when the caller may.
 #[page("/console/projects/{project_id}/tasks/new")]
 pub async fn projects_tasks_new_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_task_add_task(cx).await;
     let form = TaskAddTaskArgsForm::new(project_id.as_str());
@@ -1825,7 +1849,7 @@ pub async fn projects_tasks_new_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// (303); a row button or a refusal renders the form again with its status.
 #[page(POST "/console/projects/{project_id}/tasks/new")]
 pub async fn projects_tasks_create_page(cx: &Cx, Form(form): Form<TaskAddTaskArgsForm>) -> topcoat::Result<impl View> {
-    let project_id = path_param::<ProjectId>(cx).to_owned();
+    let project_id = project_id(cx).to_owned();
     let next = current(cx);
     // The route's values, never the hidden inputs, which a reader can change.
     let form = TaskAddTaskArgsForm {
@@ -1960,7 +1984,7 @@ async fn shelves_rows(cx: &Cx, items: Vec<types::Shelf>) -> topcoat::Result<impl
 /// when not.
 #[page("/console/shelves/{shelve_id}")]
 pub async fn shelves_item_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let shelve_id = path_param::<ShelveId>(cx).to_owned();
+    let shelve_id = shelve_id(cx).to_owned();
     Ok(view! { shelves_item(shelve_id: shelve_id) })
 }
 

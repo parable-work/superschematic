@@ -6,7 +6,9 @@
 //! operation serves it, and a resource under an item as a section of the
 //! item's page and as pages under it. A layout puts each page in `<main>`,
 //! after a nav of the resources the caller may list and the trail from the
-//! index to the page, each item by its title.
+//! index to the page, each item by its title. It carries the page's title
+//! too, the trail read back to the index, as Topcoat metadata, which an app
+//! whose document renders `topcoat::metadata::tags()` shows.
 //!
 //! Every page calls its operation through `operations`, so the route's
 //! rules hold: the caller admitted as the route admits it, the arguments
@@ -42,7 +44,8 @@ use crate::references;
 use crate::views::{Sorted, order_detail, order_table, product_detail, product_table, review_table, site_page_table, supplier_table};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use topcoat::context::{Cx, memoize, try_app_context};
+use topcoat::context::{Cx, memoize, try_context};
+use topcoat::metadata::Metadata;
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::request::uri;
@@ -73,8 +76,8 @@ pub const RESOURCES: &[&str] = &[
     "suppliers/{supplier_id}/products",
 ];
 
-/// What the app tells the pages, in its app context
-/// (`.app_context(pages::Settings::new().sign_in("/sign-in"))`): the site's
+/// What the app tells the pages, in its router's context
+/// (`.with(pages::Settings::new().sign_in("/sign-in"))`): the site's
 /// title, which heads every page; its sign-in page, which a page that
 /// refuses a caller who is not signed in (401) links to, with the page to
 /// come back to as `next`; and the choices every form and display component
@@ -151,7 +154,7 @@ impl Settings {
 
     /// The settings the app put in its context, or the defaults.
     fn of(cx: &Cx) -> Self {
-        try_app_context::<Settings>(cx).cloned().unwrap_or_default()
+        try_context::<Settings>(cx).cloned().unwrap_or_default()
     }
 
     fn site_title(&self) -> String {
@@ -170,7 +173,7 @@ impl Settings {
 /// The choices the app's `Settings` give the forms and display components
 /// of one resource's pages, `resource` its path below the prefix.
 fn choices_of(cx: &Cx, resource: &str) -> Choices {
-    try_app_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
+    try_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
@@ -457,7 +460,7 @@ fn size_pairs(pairs: &[(String, String)]) -> Vec<(String, String)> {
 /// Nothing when none applies: a list has no page's number, which a cursor
 /// cannot give.
 #[component]
-async fn pager(base: String, first: Option<String>, prev: Option<String>, next: Option<String>, #[default] sizes: Vec<(i64, bool)>, #[default] hidden: Vec<(String, String)>) -> topcoat::Result<impl View> {
+async fn pager(cx: &Cx, base: String, first: Option<String>, prev: Option<String>, next: Option<String>, #[default] sizes: Vec<(i64, bool)>, #[default] hidden: Vec<(String, String)>) -> topcoat::Result<impl View> {
     Ok(view! {
         if first.is_some() || prev.is_some() || next.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
@@ -841,11 +844,49 @@ async fn item_reference(cx: &Cx, key: &str, value: &str) -> Option<String> {
     }
 }
 
+/// The trail from the index to the request's page, as the layout shows it
+/// and the page's title reads it (`page_metadata`): each step's label, its
+/// link, none for a page that does not exist and for the page itself, and
+/// whether it is the page itself, an item by its title. The request keeps
+/// it (`#[memoize]`), so the two ask once.
+#[memoize]
+async fn page_trail(cx: &Cx) -> Vec<(String, Option<String>, bool)> {
+    let title = Settings::of(cx).site_title();
+    let path = uri(cx).path().to_owned();
+    // An item's step is named by its title, else by what its route's value
+    // refers to, else by its noun and id.
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        let titled = match &crumb.item {
+            Some((key, ids)) => item_title(cx, key, ids).await,
+            None => None,
+        };
+        if let Some(title) = titled {
+            crumb.label = title;
+        } else if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
+        }
+    }
+    crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect()
+}
+
+/// The metadata of every page under `/console`, which the layout carries in
+/// its context (`Metadata`): the page's title, the trail's steps from the
+/// page back to the index (`Ada · Customers · Shop`). An app whose document
+/// renders `topcoat::metadata::tags()` in its `<head>` gives each page its
+/// own `<title>`; one that does not is as it was.
+async fn page_metadata(cx: &Cx) -> topcoat::Result<Metadata> {
+    let steps: Vec<&str> = page_trail(cx).await.iter().rev().map(|(label, _, _)| label.as_str()).collect();
+    Ok(Metadata::new().title(steps.join(" · ")))
+}
+
 /// Every page under `/console`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the one whose
 /// path is the longest the page's begins with, the trail from the index to
 /// the page, an item by its title, then the page in `<main>`.
-#[layout("/console")]
+#[layout("/console", with(Metadata::from_fn(page_metadata)))]
 pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
     let title = Settings::of(cx).site_title();
     let path = uri(cx).path().to_owned();
@@ -866,24 +907,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
-    // An item's step is named by its title, else by what its route's value
-    // refers to, else by its noun and id.
-    let mut crumbs = trail(&path, &title);
-    for crumb in &mut crumbs {
-        let titled = match &crumb.item {
-            Some((key, ids)) => item_title(cx, key, ids).await,
-            None => None,
-        };
-        if let Some(title) = titled {
-            crumb.label = title;
-        } else if let Some((key, value)) = &crumb.reference
-            && let Some(label) = item_reference(cx, key, value).await
-        {
-            crumb.label = label;
-        }
-    }
-    let crumbs: Vec<(String, Option<String>, bool)> =
-        crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
+    let crumbs = page_trail(cx).await.clone();
     Ok(view! {
         <div class="ss-pages">
             <header class="ss-header"><a href=(PREFIX)>(title)</a></header>
@@ -1153,7 +1177,7 @@ async fn orders_rows(cx: &Cx, items: Vec<types::Order>, #[default] sorted: Sorte
 /// not.
 #[page("/console/orders/{order_id}")]
 pub async fn orders_item_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let order_id = path_param::<OrderId>(cx).to_owned();
+    let order_id = order_id(cx).to_owned();
     Ok(view! { orders_item(order_id: order_id) })
 }
 
@@ -1266,7 +1290,7 @@ async fn orders_new(cx: &Cx, form: OrderInputForm, errors: FormErrors) -> topcoa
 /// and its status.
 #[page(POST "/console/orders/{order_id}/add-line")]
 pub async fn orders_add_line_form_page(cx: &Cx, Form(form): Form<OrderAddLineArgsForm>) -> topcoat::Result<impl View> {
-    let order_id = path_param::<OrderId>(cx).to_owned();
+    let order_id = order_id(cx).to_owned();
     let item = orders_item_href(&order_id).unwrap_or_else(|| PREFIX.to_owned());
     // The route's values, never the hidden inputs, which a reader can change.
     let mut form = OrderAddLineArgsForm {
@@ -1597,7 +1621,7 @@ async fn products_rows(cx: &Cx, items: Vec<types::Product>, #[default] sorted: S
 /// when not.
 #[page("/console/products/{product_id}")]
 pub async fn products_item_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let product_id = path_param::<ProductId>(cx).to_owned();
+    let product_id = product_id(cx).to_owned();
     Ok(view! { products_item(product_id: product_id) })
 }
 
@@ -1642,7 +1666,7 @@ fn products_reviews_href(product_id: &str) -> Option<String> {
 /// The list of reviews, filtered by the query, when the caller may list them.
 #[page("/console/products/{product_id}/reviews")]
 pub async fn products_reviews_list_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let product_id = path_param::<ProductId>(cx).to_owned();
+    let product_id = product_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_review_list_reviews(cx).await;
     Ok(view! {
@@ -1966,7 +1990,7 @@ async fn suppliers_rows(cx: &Cx, items: Vec<types::Supplier>) -> topcoat::Result
 /// The list of products, when the caller may list them.
 #[page("/console/suppliers/{supplier_id}/products")]
 pub async fn suppliers_products_list_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let supplier_id = path_param::<SupplierId>(cx).to_owned();
+    let supplier_id = supplier_id(cx).to_owned();
     let next = current(cx);
     let admitted = operations::can_supplier_list_supplier_products(cx).await;
     Ok(view! {

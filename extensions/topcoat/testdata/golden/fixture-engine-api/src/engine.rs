@@ -8,7 +8,7 @@
 //! has the document's hash left as it is. `RouterBuilderFixtureEngineApiExt::fixture_engine_api` mounts
 //! its routes ([`routes`]) at `/engine`, its event stream and its MCP endpoint
 //! among them, each request's caller the one the API's `Authenticator`
-//! establishes, and keeps it in the app context (`Setup::engine`), which a page
+//! establishes, and keeps it in the router's context (`Setup::engine`), which a page
 //! calls in-process. The engine is synchronous: call it off the async
 //! threads (`tokio::task::spawn_blocking`).
 

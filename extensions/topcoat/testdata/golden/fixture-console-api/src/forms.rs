@@ -268,6 +268,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -912,6 +913,7 @@ impl OrderLineInputForm {
 /// number field the app names into a select.
 #[component]
 pub async fn order_input_fields(
+    cx: &Cx,
     #[default(OrderInputForm::new())] form: OrderInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1132,6 +1134,7 @@ impl<'de> Deserialize<'de> for OrderAddLineArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_add_line_args_fields(
+    cx: &Cx,
     #[default] form: OrderAddLineArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1357,6 +1360,7 @@ impl<'de> Deserialize<'de> for OrderListOrdersArgsForm {
 /// names into a select.
 #[component]
 pub async fn order_list_orders_args_fields(
+    cx: &Cx,
     #[default] form: OrderListOrdersArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1571,6 +1575,7 @@ impl<'de> Deserialize<'de> for ProductListProductsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn product_list_products_args_fields(
+    cx: &Cx,
     #[default] form: ProductListProductsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1789,6 +1794,7 @@ impl<'de> Deserialize<'de> for ReviewListReviewsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn review_list_reviews_args_fields(
+    cx: &Cx,
     #[default] form: ReviewListReviewsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1950,6 +1956,7 @@ impl<'de> Deserialize<'de> for SiteListPagesArgsForm {
 /// names into a select.
 #[component]
 pub async fn site_list_pages_args_fields(
+    cx: &Cx,
     #[default] form: SiteListPagesArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2095,6 +2102,7 @@ impl<'de> Deserialize<'de> for SupplierListSuppliersArgsForm {
 /// app names into a select.
 #[component]
 pub async fn supplier_list_suppliers_args_fields(
+    cx: &Cx,
     #[default] form: SupplierListSuppliersArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

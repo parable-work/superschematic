@@ -250,6 +250,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -1533,6 +1534,7 @@ impl<'de> Deserialize<'de> for SignupInputForm {
 /// number field the app names into a select.
 #[component]
 pub async fn booking_input_fields(
+    cx: &Cx,
     #[default(BookingInputForm::new())] form: BookingInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1842,6 +1844,7 @@ pub async fn booking_input_fields(
 /// number field the app names into a select.
 #[component]
 pub async fn note_input_fields(
+    cx: &Cx,
     #[default(NoteInputForm::new())] form: NoteInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1900,6 +1903,7 @@ pub async fn note_input_fields(
 /// number field the app names into a select.
 #[component]
 pub async fn signup_input_fields(
+    cx: &Cx,
     #[default(SignupInputForm::new())] form: SignupInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2098,6 +2102,7 @@ impl<'de> Deserialize<'de> for AccountAnnotateArgsForm {
 /// or number control the app names into a select.
 #[component]
 pub async fn account_annotate_args_fields(
+    cx: &Cx,
     #[default] form: AccountAnnotateArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2261,6 +2266,7 @@ impl<'de> Deserialize<'de> for AccountDraftNoteArgsForm {
 /// or number control the app names into a select.
 #[component]
 pub async fn account_draft_note_args_fields(
+    cx: &Cx,
     #[default] form: AccountDraftNoteArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2399,6 +2405,7 @@ impl<'de> Deserialize<'de> for AccountRotateKeyArgsForm {
 /// names into a select.
 #[component]
 pub async fn account_rotate_key_args_fields(
+    cx: &Cx,
     #[default] form: AccountRotateKeyArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

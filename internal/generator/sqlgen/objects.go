@@ -39,6 +39,11 @@ type Trigger struct {
 	// Function is the trigger function it executes, which takes no
 	// arguments.
 	Function string
+	// Refuses is set on a trigger that fails a write it does not allow, as
+	// a @stateMachine's guard (D118) and a @fenced counter's trigger (D119)
+	// do. The migration planner places such a trigger by a rule of its
+	// own, since a server of the previous version may make the write.
+	Refuses bool
 }
 
 // SQL renders the CREATE TRIGGER statement.

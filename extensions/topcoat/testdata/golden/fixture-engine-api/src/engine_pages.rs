@@ -506,7 +506,7 @@ fn own_shown(data: &Map<String, Value>, field: &str, currencies: &HashMap<String
 
 /// The values a detail lists, each in a `<div>` with its `data-field`.
 #[component]
-async fn fields_view(fields: Vec<Field>, #[default] label: Option<String>) -> topcoat::Result<impl View> {
+async fn fields_view(cx: &Cx, fields: Vec<Field>, #[default] label: Option<String>) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" role="group" aria-label=(label)>
             <dl>
@@ -523,7 +523,7 @@ async fn fields_view(fields: Vec<Field>, #[default] label: Option<String>) -> to
 }
 
 #[component]
-async fn shown_view(shown: Shown) -> topcoat::Result<impl View> {
+async fn shown_view(cx: &Cx, shown: Shown) -> topcoat::Result<impl View> {
     Ok(view! {
         match shown {
             Shown::Text(text) => (text),
@@ -558,7 +558,7 @@ async fn shown_view(shown: Shown) -> topcoat::Result<impl View> {
 /// An operation's result: an object as the list of its members, any other
 /// value on its own.
 #[component]
-async fn result_view(result: Value) -> topcoat::Result<impl View> {
+async fn result_view(cx: &Cx, result: Value) -> topcoat::Result<impl View> {
     let members: Option<Vec<Field>> =
         result.as_object().map(|object| object.iter().map(|(key, value)| (key.clone(), words(key), shown(value))).collect());
     let whole = shown(&result);
@@ -865,6 +865,7 @@ fn form_of(prefix: &str, schema: &str, id: Option<&str>, seq: Option<i64>, opera
 /// a commit, say, which the reader does not change.
 #[component]
 pub async fn operation_form(
+    cx: &Cx,
     schema: String,
     id: Option<String>,
     seq: Option<i64>,
@@ -883,7 +884,7 @@ pub async fn operation_form(
 }
 
 #[component]
-async fn form_view(form: FormShown) -> topcoat::Result<impl View> {
+async fn form_view(cx: &Cx, form: FormShown) -> topcoat::Result<impl View> {
     let FormShown { action, post, operation, label, hint, seq, controls, errors, result } = form;
     let method = if post { "post" } else { "get" };
     Ok(view! {
@@ -913,7 +914,7 @@ async fn form_view(form: FormShown) -> topcoat::Result<impl View> {
 }
 
 #[component]
-async fn control_view(control: Control) -> topcoat::Result<impl View> {
+async fn control_view(cx: &Cx, control: Control) -> topcoat::Result<impl View> {
     let Control { id, name, label, hint, kind, required, min, max, value, errors, hidden } = control;
     if hidden {
         return Ok(view! { <input type="hidden" name=(name) value=(value)> }.boxed());
@@ -1073,7 +1074,7 @@ pub async fn engine_index_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// when the caller may read them.
 #[page("/console/engine/{engine_schema}")]
 pub async fn engine_list_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let schema = path_param::<EngineSchema>(cx).to_owned();
+    let schema = engine_schema(cx).to_owned();
     Ok(view! { engine_list(schema: schema, sent: None) })
 }
 
@@ -1081,8 +1082,8 @@ pub async fn engine_list_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// the type's list with its result.
 #[page("/console/engine/{engine_schema}/operations/{engine_op}")]
 pub async fn engine_type_read_page(cx: &Cx, Form(pairs): Form<Vec<(String, String)>>) -> topcoat::Result<impl View> {
-    let schema = path_param::<EngineSchema>(cx).to_owned();
-    let operation = path_param::<EngineOp>(cx).to_owned();
+    let schema = engine_schema(cx).to_owned();
+    let operation = engine_op(cx).to_owned();
     let outcome = run(cx, &schema, None, &operation, &pairs, false).await.map(|(_, result)| result);
     let sent = Sent { operation, pairs, outcome };
     let next = type_href(&schema);
@@ -1099,8 +1100,8 @@ pub async fn engine_type_read_page(cx: &Cx, Form(pairs): Form<Vec<(String, Strin
 /// list with the form as sent.
 #[page(POST "/console/engine/{engine_schema}/operations/{engine_op}")]
 pub async fn engine_type_operation_page(cx: &Cx, Form(pairs): Form<Vec<(String, String)>>) -> topcoat::Result<impl View> {
-    let schema = path_param::<EngineSchema>(cx).to_owned();
-    let operation = path_param::<EngineOp>(cx).to_owned();
+    let schema = engine_schema(cx).to_owned();
+    let operation = engine_op(cx).to_owned();
     let next = type_href(&schema);
     let outcome = match run(cx, &schema, None, &operation, &pairs, true).await {
         Ok((true, _)) => return Err(see_other(next).into()),
@@ -1270,8 +1271,8 @@ async fn engine_list(cx: &Cx, schema: String, sent: Option<Sent>) -> topcoat::Re
 /// One instance, when the caller may read it.
 #[page("/console/engine/{engine_schema}/{engine_id}")]
 pub async fn engine_instance_page(cx: &Cx) -> topcoat::Result<impl View> {
-    let schema = path_param::<EngineSchema>(cx).to_owned();
-    let id = path_param::<EngineId>(cx).to_owned();
+    let schema = engine_schema(cx).to_owned();
+    let id = engine_id(cx).to_owned();
     Ok(view! { engine_instance(schema: schema, id: id, sent: None) })
 }
 
@@ -1279,9 +1280,9 @@ pub async fn engine_instance_page(cx: &Cx) -> topcoat::Result<impl View> {
 /// renders the instance's page with its result.
 #[page("/console/engine/{engine_schema}/{engine_id}/operations/{engine_op}")]
 pub async fn engine_instance_read_page(cx: &Cx, Form(pairs): Form<Vec<(String, String)>>) -> topcoat::Result<impl View> {
-    let schema = path_param::<EngineSchema>(cx).to_owned();
-    let id = path_param::<EngineId>(cx).to_owned();
-    let operation = path_param::<EngineOp>(cx).to_owned();
+    let schema = engine_schema(cx).to_owned();
+    let id = engine_id(cx).to_owned();
+    let operation = engine_op(cx).to_owned();
     let outcome = run(cx, &schema, Some(&id), &operation, &pairs, false).await.map(|(_, result)| result);
     let sent = Sent { operation, pairs, outcome };
     let next = instance_href(&schema, &id);
@@ -1298,9 +1299,9 @@ pub async fn engine_instance_read_page(cx: &Cx, Form(pairs): Form<Vec<(String, S
 /// renders the page with the form as sent, its errors and its status.
 #[page(POST "/console/engine/{engine_schema}/{engine_id}/operations/{engine_op}")]
 pub async fn engine_instance_operation_page(cx: &Cx, Form(pairs): Form<Vec<(String, String)>>) -> topcoat::Result<impl View> {
-    let schema = path_param::<EngineSchema>(cx).to_owned();
-    let id = path_param::<EngineId>(cx).to_owned();
-    let operation = path_param::<EngineOp>(cx).to_owned();
+    let schema = engine_schema(cx).to_owned();
+    let id = engine_id(cx).to_owned();
+    let operation = engine_op(cx).to_owned();
     let next = instance_href(&schema, &id);
     let outcome = match run(cx, &schema, Some(&id), &operation, &pairs, true).await {
         Ok((true, _)) => return Err(see_other(next).into()),
@@ -1333,7 +1334,7 @@ struct GenericPanel {
 }
 
 #[component]
-async fn generic_panel(panel: GenericPanel) -> topcoat::Result<impl View> {
+async fn generic_panel(cx: &Cx, panel: GenericPanel) -> topcoat::Result<impl View> {
     let GenericPanel { name, description, fields, forms } = panel;
     Ok(view! {
         <section class="ss-panel" data-behavior=(name.clone())>

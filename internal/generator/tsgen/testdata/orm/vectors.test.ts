@@ -87,7 +87,11 @@ describe.skipIf(dsn === '')('decimals and vectors under the repositories', () =>
     expect(titles(await orm.passage.nearest('embedding', query, { filter: { topic: { eq: 'sky' } } }))).toEqual(['up']);
     await orm.passage.deleteOne(ids.east!);
     expect(titles(await orm.passage.nearest('embedding', query, { k: 1, metric: 'l2' }))).toEqual(['north-east']);
-    expect(titles(await orm.passage.nearest('embedding', query, { k: 1, metric: 'l2', includeDeleted: true }))).toEqual(['east']);
+    // With no filter the ivfflat index serves l2. It was built on an empty
+    // table, so its four lists lie where chance put them, and a scan of
+    // one list, the default, misses east in a run in ten or so: this one
+    // reads all four.
+    expect(titles(await orm.passage.nearest('embedding', query, { k: 1, metric: 'l2', includeDeleted: true, probes: 4 }))).toEqual(['east']);
     // A row whose vector is null has no distance and is left out.
     expect(titles(await orm.passage.nearest('titleEmbedding', [0.25, -0.5, 0]))).toEqual(['up']);
     await expect(orm.passage.nearest('embedding', [1, 2])).rejects.toThrow('3 dimensions, not 2');

@@ -911,8 +911,12 @@ fn a_token_for_other_arguments_another_caller_or_none_this_endpoint_gave_runs_no
     );
     let root = endpoint.call_as(confirmed(desk(), &token), None, "root");
     assert_eq!(refused(&root), "mismatch");
-    let text = text_of(&token);
-    let forged = json!(format!("{}AA", &text[..text.len() - 2]));
+    // Another MAC: its first character changed, which changes its first six
+    // bits. Its last two characters set to "AA" would not do, since they
+    // read as ten zero bits, which one MAC in 1024 ends in.
+    let (head, mac) = text_of(&token).rsplit_once('.').expect("a token's MAC");
+    let first = if mac.starts_with('A') { 'B' } else { 'A' };
+    let forged = json!(format!("{head}.{first}{}", &mac[1..]));
     assert_eq!(
         refused(&endpoint.call(confirmed(desk(), &forged), None)),
         "invalid"

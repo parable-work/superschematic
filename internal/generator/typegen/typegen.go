@@ -334,6 +334,11 @@ type ModuleOutput struct {
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as behaviors.go. Nil when no type composes one.
 	Behaviors []behaviortypes.Type
+
+	// StateMachines are the schema's @stateMachine declarations (D118),
+	// each with the terminal states and the moves its helpers in
+	// state_machines.go answer by. Nil when no type declares one.
+	StateMachines []StateMachineInfo
 }
 
 // DescriptorFile is one descriptor document written beside the types.
@@ -557,6 +562,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 
 	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
+		return nil, err
+	}
+	if output.StateMachines, err = buildStateMachines(schema, opts.Dependencies, output); err != nil {
 		return nil, err
 	}
 

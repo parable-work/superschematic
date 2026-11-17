@@ -161,7 +161,7 @@ async fn workflow_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecor
     }
     let stays = !leaves;
     let other = (!others.is_empty()).then(|| (op_href(record, "transition"), record.seq.to_string(), others));
-    view! { cx =>
+    view! {
         <section class="ss-panel" data-behavior="Workflow">
             <h2>"Workflow"</h2>
             <p class="ss-state" data-state=(status) data-tone=(tone)>(label)</p>
@@ -294,7 +294,7 @@ async fn approvals_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceReco
         });
         gates.push(Gate { state: state.clone(), label, count, signed, signing, met });
     }
-    view! { cx =>
+    view! {
         <section class="ss-panel" data-behavior="Approvals">
             <h2>"Approvals"</h2>
             for gate in gates {
@@ -731,7 +731,7 @@ async fn branches_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecor
         })
         .collect();
     let seq = record.seq.to_string();
-    view! { cx =>
+    view! {
         <section class="ss-panel" data-behavior="Branches">
             <h2>"Branches"</h2>
             <p class="ss-release">(released)</p>
@@ -912,7 +912,7 @@ async fn branches_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecor
 
 /// A panel that shows only a message: why it shows nothing else.
 fn panel_message<'a>(cx: &'a Cx, behavior: &'static str, message: String) -> BoxView<'a> {
-    view! { cx =>
+    view! {
         <section class="ss-panel" data-behavior=(behavior)>
             <h2>(behavior)</h2>
             <p class="ss-refusal">(message)</p>

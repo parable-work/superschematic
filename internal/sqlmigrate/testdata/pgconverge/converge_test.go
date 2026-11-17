@@ -19,6 +19,13 @@
 // Each case builds two databases: one from from.sql, seed.sql and the plan's
 // steps, run as the runner runs them, and one from to.sql. Their catalogs
 // must be the same.
+//
+// TestGuards (guards_test.go) runs a service's @stateMachine guards on a
+// database its create.sql made; TestStateMachineGuardsOnPostgres runs it
+// with PGCONVERGE_GUARDS, the directory holding its cases.
+//
+// TestFences (fences_test.go) runs a service's @fenced counters the same
+// way; TestFencesOnPostgres runs it with PGCONVERGE_FENCES.
 package pgconverge
 
 import (

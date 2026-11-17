@@ -257,7 +257,12 @@ describe('a tool that asks, through the endpoint', () => {
     expect(other.structuredContent).toMatchObject({ code: 'confirmation_required', details: { refused: 'mismatch', summary: 'Rename an item (rename_item) with {"id":"i1","newName":"Chair"}' } });
     const root = await call(app, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: token }), undefined, 'root');
     expect(root.structuredContent.details.refused).toBe('mismatch');
-    const forged = await call(app, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: token.slice(0, -2) + 'AA' }));
+    // Another MAC: its first character changed, which changes its first six
+    // bits. Its last two characters set to 'AA' would not do, since they
+    // read as ten zero bits, which one MAC in 1024 ends in.
+    const mac = token.lastIndexOf('.') + 1;
+    const forgedToken = token.slice(0, mac) + (token[mac] === 'A' ? 'B' : 'A') + token.slice(mac + 1);
+    const forged = await call(app, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: forgedToken }));
     expect(forged.structuredContent.details.refused).toBe('invalid');
     const wrongType = await call(app, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: 42 }));
     expect(wrongType.structuredContent.details.refused).toBe('invalid');

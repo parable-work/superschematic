@@ -161,9 +161,9 @@ struct ProcedureControls {
     /// IP address as Topcoat reads it (`client_key`: the peer's, or the
     /// client's a trusted proxy names), the key the route reads too.
     rate_limit: Option<Arc<RateLimiter>>,
-    /// The limit in bytes, and the Topcoat layer that lets the procedure
-    /// read its arguments up to it.
-    body_limit: Option<(usize, BodyLimit)>,
+    /// The limit in bytes, which the procedure's context carries too
+    /// (`BodyLimit`), so the procedure reads its arguments up to it.
+    body_limit: Option<usize>,
     timeout: Option<Duration>,
 }
 
@@ -185,7 +185,7 @@ impl ProcedureControls {
     /// `@bodyLimit({ megabytes })`, in mebibytes as the route counts them.
     fn body_limit_megabytes(mut self, megabytes: usize) -> Self {
         let bytes = megabytes.saturating_mul(1024 * 1024);
-        self.body_limit = Some((bytes, BodyLimit::max(bytes)));
+        self.body_limit = Some(bytes);
         self
     }
 
@@ -217,18 +217,18 @@ impl Layer for ProcedureControls {
             }
             // The body is read up to the limit before the procedure decodes
             // it: one that declares more, or sends more, is refused.
-            let (body, extractor_limit) = match &self.body_limit {
-                Some((limit, extractor_limit)) => {
+            let (body, extractor_limit) = match self.body_limit {
+                Some(limit) => {
                     let too_large = || ApiError::payload_too_large("Request body exceeds the accepted size");
                     let declared = headers(cx)
                         .get(header::CONTENT_LENGTH)
                         .and_then(|value| value.to_str().ok())
                         .and_then(|value| value.parse::<u64>().ok());
-                    if declared.is_some_and(|length| length > *limit as u64) {
+                    if declared.is_some_and(|length| length > limit as u64) {
                         return self.refuse(cx, too_large());
                     }
-                    match to_bytes(body, *limit).await {
-                        Ok(bytes) => (Body::from(bytes), Some(extractor_limit)),
+                    match to_bytes(body, limit).await {
+                        Ok(bytes) => (Body::from(bytes), Some(BodyLimit::max(limit))),
                         Err(err) if err.is::<ContentTooLargeError>() => return self.refuse(cx, too_large()),
                         Err(_) => return self.refuse(cx, ApiError::bad_request("The request body could not be read")),
                     }
@@ -237,7 +237,7 @@ impl Layer for ProcedureControls {
             };
             let procedure = async move {
                 match extractor_limit {
-                    Some(layer) => layer.handle(cx, body, next).await,
+                    Some(limit) => next.run(&cx.with(limit), body).await,
                     None => next.run(cx, body).await,
                 }
             };

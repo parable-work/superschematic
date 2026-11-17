@@ -23,6 +23,10 @@ type resolvedImports struct {
 	// enumNames tracks imported enum names so default-literal classification
 	// recognises enum-typed fields whose enum lives in a dependency.
 	enumNames map[string]bool
+
+	// enumDefs are the imported enums by name, whose members a state
+	// machine on a field of one names its states by (D118).
+	enumDefs map[string]*ir.EnumDef
 }
 
 // DependencyServiceName extracts the service name from a schema import
@@ -43,7 +47,7 @@ func DependencyServiceName(pkg string) string {
 // superscalar. @source / foreign extends must not appear in schema.Imports --
 // those are compile-time only in the TypeScript loader.
 func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
-	result := &resolvedImports{enumNames: map[string]bool{}}
+	result := &resolvedImports{enumNames: map[string]bool{}, enumDefs: map[string]*ir.EnumDef{}}
 	if len(schema.Imports) == 0 {
 		return result, nil
 	}
@@ -105,6 +109,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 				enumDef := depSchema.Enums[symbol]
 				doc = codegen.DocText(enumDef.Description, enumDef.Comment)
 				result.enumNames[symbol] = true
+				result.enumDefs[symbol] = enumDef
 				isEnum = true
 			case depSchema.Unions[symbol] != nil:
 				unionDef := depSchema.Unions[symbol]

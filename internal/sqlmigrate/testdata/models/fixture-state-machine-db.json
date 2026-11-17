@@ -1,0 +1,152 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "functions": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION ticket_account_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Ticket.accountStatus (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.account_status IS NOT DISTINCT FROM OLD.account_status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.account_status IN ('closed') THEN\n    RAISE EXCEPTION 'ticket.account_status is terminal at %: it cannot move to %', OLD.account_status, NEW.account_status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.account_status = 'active' AND NEW.account_status IN ('suspended', 'closed'))\n    OR (OLD.account_status = 'suspended' AND NEW.account_status IN ('active', 'closed'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'ticket.account_status cannot move from % to %', OLD.account_status, NEW.account_status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "ticket_account_status_transition_guard",
+      "origin": "Ticket"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION ticket_escalation_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Ticket.escalation (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.escalation IS NOT DISTINCT FROM OLD.escalation THEN\n    RETURN NEW;\n  END IF;\n  IF (OLD.escalation IS NULL AND NEW.escalation IN ('raised'))\n    OR (OLD.escalation = 'raised' AND NEW.escalation IN ('acknowledged'))\n    OR (OLD.escalation = 'acknowledged' AND NEW.escalation IS NULL)\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'ticket.escalation cannot move from % to %', OLD.escalation, NEW.escalation\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "ticket_escalation_transition_guard",
+      "origin": "Ticket"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION ticket_review_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Ticket.review (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.review IS NOT DISTINCT FROM OLD.review THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.review IN ('APPROVED', 'REJECTED') THEN\n    RAISE EXCEPTION 'ticket.review is terminal at %: it cannot move to %', OLD.review, NEW.review\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.review IS NULL AND NEW.review IN ('RETRY', 'APPROVED', 'REJECTED'))\n    OR (OLD.review = 'RETRY' AND (NEW.review IS NULL OR NEW.review IN ('APPROVED', 'REJECTED')))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'ticket.review cannot move from % to %', OLD.review, NEW.review\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "ticket_review_transition_guard",
+      "origin": "Ticket"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION ticket_state_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Ticket.state (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.state IS NOT DISTINCT FROM OLD.state THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.state IN ('closed') THEN\n    RAISE EXCEPTION 'ticket.state is terminal at %: it cannot move to %', OLD.state, NEW.state\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.state = 'open' AND NEW.state IN ('open', 'in_progress', 'resolved', 'closed'))\n    OR (OLD.state = 'in_progress' AND NEW.state IN ('resolved', 'open'))\n    OR (OLD.state = 'resolved' AND NEW.state IN ('open', 'closed'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'ticket.state cannot move from % to %', OLD.state, NEW.state\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "ticket_state_transition_guard",
+      "origin": "Ticket"
+    }
+  ],
+  "service": "fixture-state-machine-db",
+  "tables": [
+    {
+      "checks": [
+        {
+          "column": "escalation",
+          "in": [
+            "raised",
+            "acknowledged"
+          ],
+          "name": "ck_ticket_escalation"
+        },
+        {
+          "column": "review",
+          "in": [
+            "RETRY",
+            "APPROVED",
+            "REJECTED"
+          ],
+          "name": "ck_ticket_review"
+        },
+        {
+          "column": "state",
+          "in": [
+            "open",
+            "in_progress",
+            "resolved",
+            "closed"
+          ],
+          "name": "ck_ticket_state"
+        }
+      ],
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Ticket.id",
+          "type": "UUID"
+        },
+        {
+          "name": "subject",
+          "origin": "Ticket.subject",
+          "type": "TEXT"
+        },
+        {
+          "default": "'open'",
+          "name": "state",
+          "origin": "Ticket.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "review",
+          "nullable": true,
+          "origin": "Ticket.review",
+          "type": "TEXT"
+        },
+        {
+          "name": "escalation",
+          "nullable": true,
+          "origin": "Ticket.escalation",
+          "type": "TEXT"
+        },
+        {
+          "default": "'active'",
+          "name": "account_status",
+          "origin": "Ticket.accountStatus",
+          "type": "TEXT"
+        },
+        {
+          "name": "sign_off",
+          "nullable": true,
+          "origin": "Ticket.signOff",
+          "type": "JSONB"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "origin": "Ticket.updatedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A support ticket. Its state starts open, may be reopened until it is\nclosed, and lists a move from open to open, which is no move. Its review\nis null until a pass reviews the answer, and a retry clears it for the\nnext pass. Its escalation is null until it is raised, and once\nacknowledged only returns to null. Its account's status is an enum of\nanother service.",
+      "kind": "entity",
+      "name": "ticket",
+      "origin": "Ticket",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ticket_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER trg_ticket_account_status_transition_guard\n  BEFORE UPDATE OF account_status ON ticket\n  FOR EACH ROW EXECUTE FUNCTION ticket_account_status_transition_guard()",
+      "name": "trg_ticket_account_status_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_ticket_escalation_transition_guard\n  BEFORE UPDATE OF escalation ON ticket\n  FOR EACH ROW EXECUTE FUNCTION ticket_escalation_transition_guard()",
+      "name": "trg_ticket_escalation_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_ticket_review_transition_guard\n  BEFORE UPDATE OF review ON ticket\n  FOR EACH ROW EXECUTE FUNCTION ticket_review_transition_guard()",
+      "name": "trg_ticket_review_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_ticket_state_transition_guard\n  BEFORE UPDATE OF state ON ticket\n  FOR EACH ROW EXECUTE FUNCTION ticket_state_transition_guard()",
+      "name": "trg_ticket_state_transition_guard",
+      "origin": "Ticket",
+      "refuses": true,
+      "table": "ticket"
+    }
+  ],
+  "version": 1
+}

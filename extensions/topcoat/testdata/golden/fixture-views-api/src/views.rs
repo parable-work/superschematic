@@ -25,6 +25,7 @@
 
 use crate::choices::Choices;
 use crate::records::{AddressRecord, CommentRecord, InvoiceLineRecord, InvoiceRecord, MoneyRecord, OrderLineRecord, OrderViewRecord};
+use topcoat::context::Cx;
 use topcoat::view::{View, ViewExt, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -234,7 +235,7 @@ pub fn order_status_label(value: &str) -> &str {
 /// `AddressRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn address_detail(record: AddressRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn address_detail(cx: &Cx, record: AddressRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.recipient.as_str()), None);
     Ok(view! {
         <div class="ss-detail" data-type="Address" role="group" aria-label=(label)>
@@ -259,6 +260,7 @@ pub async fn address_detail(record: AddressRecord, #[default] choices: Choices) 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn address_table(
+    cx: &Cx,
     rows: Vec<AddressRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -300,7 +302,7 @@ pub async fn address_table(
 /// `CommentRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn comment_detail(cx: &Cx, record: CommentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Comment" role="group">
             <dl>
@@ -325,6 +327,7 @@ pub async fn comment_detail(record: CommentRecord, #[default] choices: Choices) 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn comment_table(
+    cx: &Cx,
     rows: Vec<CommentRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -367,7 +370,7 @@ pub async fn comment_table(
 /// `InvoiceRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn invoice_detail(record: InvoiceRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn invoice_detail(cx: &Cx, record: InvoiceRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.number.as_str()), Some("Invoice"));
     let billed_in_code = record.billed_in.clone();
     Ok(view! {
@@ -451,6 +454,7 @@ pub async fn invoice_detail(record: InvoiceRecord, #[default] choices: Choices) 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn invoice_table(
+    cx: &Cx,
     rows: Vec<InvoiceRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -508,7 +512,7 @@ pub async fn invoice_table(
 /// `InvoiceLineRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn invoice_line_detail(record: InvoiceLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn invoice_line_detail(cx: &Cx, record: InvoiceLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let currency_code = record.currency.clone();
     Ok(view! {
         <div class="ss-detail" data-type="InvoiceLine" role="group">
@@ -537,6 +541,7 @@ pub async fn invoice_line_detail(record: InvoiceLineRecord, #[default] choices: 
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn invoice_line_table(
+    cx: &Cx,
     rows: Vec<InvoiceLineRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -581,7 +586,7 @@ pub async fn invoice_line_table(
 /// `MoneyRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn money_detail(record: MoneyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn money_detail(cx: &Cx, record: MoneyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="Money" role="group">
             <dl>
@@ -604,6 +609,7 @@ pub async fn money_detail(record: MoneyRecord, #[default] choices: Choices) -> t
 /// its end links nowhere.
 #[component]
 pub async fn money_table(
+    cx: &Cx,
     rows: Vec<MoneyRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -638,7 +644,7 @@ pub async fn money_table(
 /// `OrderLineRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_line_detail(record: OrderLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_line_detail(cx: &Cx, record: OrderLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     Ok(view! {
         <div class="ss-detail" data-type="OrderLine" role="group">
             <dl>
@@ -666,6 +672,7 @@ pub async fn order_line_detail(record: OrderLineRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_line_table(
+    cx: &Cx,
     rows: Vec<OrderLineRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
@@ -709,7 +716,7 @@ pub async fn order_line_table(
 /// `OrderViewRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
-pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+pub async fn order_view_detail(cx: &Cx, record: OrderViewRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
     let label = label_of(Some(record.reference.as_str()), Some("Order"));
     Ok(view! {
         <div class="ss-detail" data-type="OrderView" role="group" aria-label=(label)>
@@ -822,6 +829,7 @@ pub async fn order_view_detail(record: OrderViewRecord, #[default] choices: Choi
 /// links the type's noun in its place, with the row's id when it has one.
 #[component]
 pub async fn order_view_table(
+    cx: &Cx,
     rows: Vec<OrderViewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,

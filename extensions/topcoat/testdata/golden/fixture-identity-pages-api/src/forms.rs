@@ -240,6 +240,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -494,6 +495,7 @@ impl<'de> Deserialize<'de> for NoteListNotesArgsForm {
 /// names into a select.
 #[component]
 pub async fn note_list_notes_args_fields(
+    cx: &Cx,
     #[default] form: NoteListNotesArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

@@ -252,6 +252,7 @@ fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String
 /// is, then each choice (`choice_options`).
 #[component]
 async fn choice_select(
+    cx: &Cx,
     #[into] id: String,
     #[into] name: String,
     required: bool,
@@ -1180,6 +1181,7 @@ impl<'de> Deserialize<'de> for TaskInputForm {
 /// number field the app names into a select.
 #[component]
 pub async fn document_input_fields(
+    cx: &Cx,
     #[default(DocumentInputForm::new())] form: DocumentInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1219,6 +1221,7 @@ pub async fn document_input_fields(
 /// number field the app names into a select.
 #[component]
 pub async fn project_input_fields(
+    cx: &Cx,
     #[default(ProjectInputForm::new())] form: ProjectInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1318,6 +1321,7 @@ pub async fn project_input_fields(
 /// number field the app names into a select.
 #[component]
 pub async fn project_patch_fields(
+    cx: &Cx,
     #[default(ProjectPatchForm::new())] form: ProjectPatchForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1474,6 +1478,7 @@ pub async fn project_patch_fields(
 /// number field the app names into a select.
 #[component]
 pub async fn task_input_fields(
+    cx: &Cx,
     #[default(TaskInputForm::new())] form: TaskInputForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1582,6 +1587,7 @@ impl<'de> Deserialize<'de> for DocumentClearCommentsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn document_clear_comments_args_fields(
+    cx: &Cx,
     #[default] form: DocumentClearCommentsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1703,6 +1709,7 @@ impl<'de> Deserialize<'de> for DocumentGetDocumentArgsForm {
 /// app names into a select.
 #[component]
 pub async fn document_get_document_args_fields(
+    cx: &Cx,
     #[default] form: DocumentGetDocumentArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1812,6 +1819,7 @@ impl<'de> Deserialize<'de> for DocumentRemoveCoverArgsForm {
 /// app names into a select.
 #[component]
 pub async fn document_remove_cover_args_fields(
+    cx: &Cx,
     #[default] form: DocumentRemoveCoverArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -1926,6 +1934,7 @@ impl<'de> Deserialize<'de> for DocumentReplaceCommentsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn document_replace_comments_args_fields(
+    cx: &Cx,
     #[default] form: DocumentReplaceCommentsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2058,6 +2067,7 @@ impl<'de> Deserialize<'de> for DocumentReplaceDocumentArgsForm {
 /// text or number control the app names into a select.
 #[component]
 pub async fn document_replace_document_args_fields(
+    cx: &Cx,
     #[default] form: DocumentReplaceDocumentArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2191,6 +2201,7 @@ impl<'de> Deserialize<'de> for ProjectArchiveProjectArgsForm {
 /// app names into a select.
 #[component]
 pub async fn project_archive_project_args_fields(
+    cx: &Cx,
     #[default] form: ProjectArchiveProjectArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2301,6 +2312,7 @@ impl<'de> Deserialize<'de> for ProjectDeleteProjectArgsForm {
 /// app names into a select.
 #[component]
 pub async fn project_delete_project_args_fields(
+    cx: &Cx,
     #[default] form: ProjectDeleteProjectArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2413,6 +2425,7 @@ impl<'de> Deserialize<'de> for ProjectListProjectsArgsForm {
 /// app names into a select.
 #[component]
 pub async fn project_list_projects_args_fields(
+    cx: &Cx,
     #[default] form: ProjectListProjectsArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2544,6 +2557,7 @@ impl<'de> Deserialize<'de> for ProjectUpdateProjectArgsForm {
 /// text or number control the app names into a select.
 #[component]
 pub async fn project_update_project_args_fields(
+    cx: &Cx,
     #[default] form: ProjectUpdateProjectArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2795,6 +2809,7 @@ impl<'de> Deserialize<'de> for TaskAddTaskArgsForm {
 /// or number control the app names into a select.
 #[component]
 pub async fn task_add_task_args_fields(
+    cx: &Cx,
     #[default] form: TaskAddTaskArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,
@@ -2925,6 +2940,7 @@ impl<'de> Deserialize<'de> for TaskListTasksArgsForm {
 /// names into a select.
 #[component]
 pub async fn task_list_tasks_args_fields(
+    cx: &Cx,
     #[default] form: TaskListTasksArgsForm,
     #[default] errors: FormErrors,
     #[default] choices: Choices,

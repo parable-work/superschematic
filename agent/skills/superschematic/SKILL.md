@@ -202,6 +202,12 @@ path for when the store is unavailable.
   `backfill: true` (or `stack queue backfill`) for the rows already there; and
   `@deriver` on an API class to fill an engine type's Derived fields from
   a model.
+- **What every writer must keep is declared.** A status that moves only
+  along listed moves is an enum field with `@stateMachine` on its class,
+  and a counter that writers compare and set is `@fenced` on its table:
+  the database refuses a write that breaks either, a script's and
+  `psql`'s too, and the generated code follows them. Don't keep the list
+  of moves in a handler or write the trigger by hand (rules below).
 - **Syncs and imports upsert by a unique key, in batches.** The generated
   repositories' `upsertMany(inputs, on, fields, { onlyIfChanged: true })`
   (Go `UpsertMany`) writes a batch in one statement and reports each row
@@ -297,6 +303,58 @@ Most are load errors; knowing them saves a build round-trip:
   SQL write of one is not refused, so an operator can repair a row, but
   it skips the behavior's rules: do not write one to move a state, in a
   migration, a seed or a handler.
+- A status no writer may move out of order, and that needs no permission
+  (a ledger entry, a payment, a run), is an enum field with a
+  `@stateMachine` on its class, from `@superschematic/schema` (D118), not
+  a Workflow field: `@stateMachine<Ticket>({ field: "state", transitions:
+  { [TicketState.Open]: [TicketState.Resolved, TicketState.Closed],
+  [TicketState.Resolved]: [TicketState.Open, TicketState.Closed] },
+  terminal: [TicketState.Closed] })`. One per field; every state is a
+  member of the field's enum; `terminal` is `[]` when no state is final;
+  on a `Nullable` field `fromNull` lists the states a null may take, and
+  `null` in a state's list returns it to null. The load fails when a
+  terminal state has a transition, or when a member cannot be reached
+  from the field's `Default` (or from null by `fromNull`). On a table a
+  trigger refuses every other update of the column with
+  `check_violation`, whatever writes the row; an unchanged value is no
+  move, and an insert is not held. The types of each language carry the
+  moves: ask before a write and answer a 409 yourself, with
+  `TicketCanTransitionState(from, to)` (Go), `ticketCanTransitionState`
+  (TypeScript), `Ticket.can_transition_state` (Python) or
+  `ticket_can_transition_state` (Rust), and read `TicketStateTerminal()`
+  and its like for whether a row is finished. A `@tableOperation` update
+  does not ask for you, and a refused move reaches the caller as the
+  database's error, a 500. Not on a Workflow field, a `@queue` class or
+  an engine type; a machine on a dependency's enum works from a
+  TypeScript schema only. A migration plan creates the guard in
+  `contract`, and drops a changed one in `expand`.
+- A row writers compare and set on a counter gets `@fenced` on its table,
+  from `@superschematic/schema` (D119): `@fenced<Parcel>({ field:
+  "version" })`, the fence a required integer field, `version:
+  Default<Generic.Int64, 0>`. Every update of a row then advances it by
+  one: the generated repositories add the bump themselves, a
+  `@tableOperation` with them, and a trigger refuses a hand-written
+  update that leaves it, skips a value or moves it back (write `SET ...,
+  version = version + 1`). When two parties write one row, give each a
+  fence over its own fields, `@fenced<Delivery>({ field: "planVersion",
+  covers: ["address", "courier"] })` beside `@fenced<Delivery>({ field:
+  "runVersion", covers: ["attempts", "proof"] })`: each lists `covers`,
+  and no field is in two lists. Don't set the fence in a repository
+  update except to compare: filter on the value you read and set it to
+  that plus one with `updateMany` (`UpdateMany`), and read the count. An
+  insert is not fenced. On an `@optimistic` table of a service that
+  lists `sqlite`, a fence lists `covers`. Don't cover a relation whose
+  `onDelete` is `SET NULL`, or put a fence without `covers` on a table
+  that has one: the database sets that column itself when the row it
+  names is deleted, an update that advances no fence, so the build
+  refuses it. Give the relation `RESTRICT`, `CASCADE` or `NO ACTION`, or
+  leave it out of `covers`. Don't put `@fenced` on a table
+  that composes a behavior (a field typed as one, `status: Workflow<{
+  ... }>`, or an `implements` use): the behaviors' core writes its rows
+  with statements that advance no fence, so the build refuses it, with
+  `covers` or without; nor on a `@queue` class, an engine type or a
+  version graph's member. For one counter over the whole row that the
+  database bumps, `@optimistic` is enough.
 - To serve a table's behavior operations from an API, write a class with
   no members that names the table, imported from the API's database (its
   authDb or its one DB dependency), and guard it as a method:

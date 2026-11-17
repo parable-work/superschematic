@@ -707,6 +707,105 @@ var planCases = []planCase{
 			fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100)
 		}},
 
+	// A table's @stateMachine (D118). Its guard refuses a write, so a plan
+	// creates it in contract, drops a changed one in expand, before its
+	// function is replaced, and creates it in contract, and drops a
+	// removed one in contract.
+	{name: "add-state-machine",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped"); orderMachine(s, "shipped") }},
+	{name: "change-state-machine",
+		before: func(s *ir.Schema) {
+			addOrderStatus(s, statusRef, "placed", "shipped", "cancelled")
+			orderMachine(s, "shipped")
+		},
+		after: func(s *ir.Schema) {
+			addOrderStatus(s, statusRef, "placed", "shipped", "cancelled")
+			orderMachine(s, "shipped", "cancelled")
+		}},
+	{name: "drop-state-machine",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped"); orderMachine(s, "shipped") },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	// The enum gains a state and the machine the move to it: expand widens
+	// the check, for which SQLite rebuilds order without the guard, and
+	// contract creates the new guard.
+	{name: "widen-state-machine",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped"); orderMachine(s, "shipped") },
+		after: func(s *ir.Schema) {
+			addOrderStatus(s, statusRef, "placed", "shipped", "cancelled")
+			orderMachine(s, "shipped", "cancelled")
+		}},
+	// The enum loses a state and the machine the move to it: contract
+	// narrows the check, for which SQLite rebuilds order with the new
+	// guard.
+	{name: "narrow-state-machine",
+		before: func(s *ir.Schema) {
+			addOrderStatus(s, statusRef, "placed", "shipped", "cancelled")
+			orderMachine(s, "shipped", "cancelled")
+		},
+		after: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped"); orderMachine(s, "shipped") }},
+	// A guard is named after its column and its table, and its rule names
+	// the column, so a rename of either changes it: the plan drops the
+	// guard under its old name once the rename has run and creates the new
+	// one in contract.
+	{name: "rename-state-machine-column",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped"); orderMachine(s, "shipped") },
+		after: func(s *ir.Schema) {
+			addOrderStatus(s, statusRef, "placed", "shipped")
+			orderMachine(s, "shipped")
+			fieldNamed(s, "Order", "status").SQLName = "stage"
+		}},
+	{name: "rename-state-machine-table",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped"); orderMachine(s, "shipped") },
+		after: func(s *ir.Schema) {
+			addOrderStatus(s, statusRef, "placed", "shipped")
+			orderMachine(s, "shipped")
+			typeNamed(s, "Order").SQLName = "purchaseOrder"
+		}},
+
+	// A table's @fenced counter (D119). Its trigger refuses a write, so a
+	// plan places it as it places a guard: created in contract, a changed
+	// one dropped in expand, before its function is replaced, and created
+	// in contract, and a removed one dropped in contract. A fence with
+	// covers counts the columns of a field and of a relation, and one
+	// without counts the row.
+	{name: "add-fence",
+		before: func(s *ir.Schema) { addOrderRevision(s) },
+		after:  func(s *ir.Schema) { addOrderRevision(s); orderFence(s, "note", "customer") }},
+	{name: "change-fence-covers",
+		before: func(s *ir.Schema) { addOrderRevision(s); orderFence(s, "note") },
+		after:  func(s *ir.Schema) { addOrderRevision(s); orderFence(s, "note", "reference") }},
+	{name: "drop-fence",
+		before: func(s *ir.Schema) { addOrderRevision(s); orderFence(s) },
+		after:  func(s *ir.Schema) { addOrderRevision(s) }},
+	// A fence's rule names the columns it covers, so a rename of one
+	// changes it under the names it keeps: the plan drops the trigger once
+	// the rename has run and creates the new one in contract.
+	{name: "rename-fence-covered-column",
+		before: func(s *ir.Schema) { addOrderRevision(s); orderFence(s, "note", "customer") },
+		after: func(s *ir.Schema) {
+			addOrderRevision(s)
+			orderFence(s, "note", "customer")
+			fieldNamed(s, "Order", "note").SQLName = "remark"
+		}},
+	// A fence is named after its column and its table, so a rename of
+	// either changes it: the plan drops the trigger under its old name and
+	// creates the new one in contract.
+	{name: "rename-fence-column",
+		before: func(s *ir.Schema) { addOrderRevision(s); orderFence(s, "note", "customer") },
+		after: func(s *ir.Schema) {
+			addOrderRevision(s)
+			orderFence(s, "note", "customer")
+			fieldNamed(s, "Order", "revision").SQLName = "rev"
+		}},
+	{name: "rename-fence-table",
+		before: func(s *ir.Schema) { addOrderRevision(s); orderFence(s, "note", "customer") },
+		after: func(s *ir.Schema) {
+			addOrderRevision(s)
+			orderFence(s, "note", "customer")
+			typeNamed(s, "Order").SQLName = "purchaseOrder"
+		}},
+
 	// Projections.
 	{name: "add-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {
 		s.Types["CustomerDirectory"] = &ir.TypeDef{
@@ -865,6 +964,31 @@ func enqueueShip(s *ir.Schema, on []string, fields ...string) {
 		Queue: "OrderShipped", On: on, Fields: fields,
 		Message: map[string]string{"orderId": "id", "note": "note"},
 	}}
+}
+
+// orderMachine declares the @stateMachine of Order.status (D118), over the
+// states addOrderStatus gives OrderStatus: a null status may become placed,
+// placed moves to each state of to, and each of those is terminal.
+func orderMachine(s *ir.Schema, to ...string) {
+	typeNamed(s, "Order").StateMachines = []*ir.StateMachine{{
+		Field:       "status",
+		FromNull:    []string{"placed"},
+		Transitions: []*ir.StateTransition{{From: "placed", To: to}},
+		Terminal:    to,
+	}}
+}
+
+// addOrderRevision adds Order.revision, a required integer that starts at
+// zero: the field orderFence declares a fence on.
+func addOrderRevision(s *ir.Schema) {
+	zero := "0"
+	addField(s, "Order", &ir.FieldDef{Name: "revision", TypeRef: int64Ref, Required: true, Default: &zero})
+}
+
+// orderFence declares the @fenced counter Order.revision (D119) over the
+// fields of covers, or over every update of a row when there are none.
+func orderFence(s *ir.Schema, covers ...string) {
+	typeNamed(s, "Order").Fences = []*ir.Fence{{Field: "revision", Covers: covers}}
 }
 
 // addSupplierAndWarehouse adds two tables that reference each other: a

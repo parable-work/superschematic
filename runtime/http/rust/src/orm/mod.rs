@@ -252,6 +252,10 @@ pub struct Table {
     /// A @versioned table whose hard deletes set the history actor.
     #[serde(default)]
     pub history_actor: bool,
+    /// The table's @fenced fields, in the order declared (D119); none for
+    /// most tables.
+    #[serde(default)]
+    pub fences: Vec<Fence>,
     /// The search column, qualified, of a table with search fields (D62).
     #[serde(default)]
     pub search: Option<String>,
@@ -274,6 +278,23 @@ pub struct Table {
     /// repository's `Rules` runs.
     #[serde(default)]
     pub behaviors: Option<Behaviors>,
+}
+
+/// A fence of a table, a @fenced field (D119): a counter every write of a
+/// column it covers sets to the stored value plus one, which a trigger
+/// holds every writer to. An update, an update of many rows and an
+/// upsert's update add its bump to their assignments
+/// (`plan::fence_bumps`); a soft delete carries it in its statement.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Fence {
+    /// The fence's column, as a statement names it.
+    pub column: String,
+    /// The columns a write of which advances the fence, as a statement
+    /// names them; none for a fence that counts every update of the row.
+    #[serde(default)]
+    pub covers: Vec<String>,
+    /// The assignment that advances the fence by one.
+    pub bump: String,
 }
 
 /// What a repository reads of the behaviors a table composes (D103): the

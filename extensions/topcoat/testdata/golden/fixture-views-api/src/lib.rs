@@ -39,12 +39,12 @@ pub use schemas_fixture_views_api_api as api;
 
 use api::runtime::{ApiError, ClientIp, RateLimits};
 use api::{build_router_with, Implementations, RouterOptions};
-use topcoat::context::{Cx, try_app_context};
+use topcoat::context::{Cx, try_context};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
 
-/// What `fixture_views_api` keeps in the app context for the in-process calls.
+/// What `fixture_views_api` keeps in the router's context for the in-process calls.
 pub struct Setup {
     pub implementations: Implementations,
     /// The app's one limiter per rate-limited operation (D44, amended),
@@ -90,7 +90,7 @@ impl RouterBuilderFixtureViewsApiExt for RouterBuilder {
 /// The app's router with the crate's setup: a new registry of the
 /// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
 /// its routes given the client's address and their limiters from the
-/// registry, `Setup` in the app context.
+/// registry, `Setup` in the router's context.
 fn set_up(router: RouterBuilder, implementations: Implementations, api: bool) -> RouterBuilder {
     let rate_limits = RateLimits::new();
     let router = if api {
@@ -102,7 +102,7 @@ fn set_up(router: RouterBuilder, implementations: Implementations, api: bool) ->
     } else {
         router
     };
-    router.app_context(Setup {
+    router.with(Setup {
         implementations,
         rate_limits,
     })
@@ -114,7 +114,7 @@ fn set_up(router: RouterBuilder, implementations: Implementations, api: bool) ->
 /// set up some of them, so a call into one it did not set up is refused,
 /// not a panic.
 pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
-    try_app_context::<Setup>(cx).ok_or_else(|| {
+    try_context::<Setup>(cx).ok_or_else(|| {
         ApiError::internal("the app does not host fixture-views-api: its router builder calls neither fixture_views_api nor fixture_views_api_without_api")
     })
 }

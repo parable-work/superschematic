@@ -446,13 +446,14 @@ echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Ru
 # TestStackDevRunsTheShop runs stack dev twice, the second time into an
 # output root of its own, whose generated crates cargo compiles again, so
 # on a runner whose caches are cold the tests take more than go test's
-# default ten minutes.
+# default ten minutes: each run has twenty to come up, and the tests
+# forty-five in all.
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_ENGINE=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
     ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
     ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" ACME_SHOP_SUPERSCHEMATIC_TOPCOAT="$OUT/superschematic-topcoat" \
     SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
-    go test -count=1 -timeout 30m -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
+    go test -count=1 -timeout 45m -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
 grep -E '^(--- |ok)' "$OUT/go-test.log"
 for server in Go Rust; do
   for language in typescript python rust; do

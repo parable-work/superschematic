@@ -49,7 +49,7 @@ type procedure struct {
 // limiter the app's registry holds (D44, amended). Crate is the Topcoat
 // crate of the API dependency whose operation it is (D61, amended), empty
 // for the service's own: its limiter is in that crate's registry, which
-// its setup keeps in the app context.
+// its setup keeps in the router's context.
 type routeControls struct {
 	RateLimit int
 	BodyLimit int
@@ -66,7 +66,7 @@ func (p routeControls) key() string { return p.Crate + "::" + p.Const }
 // operation's limiter from its crate's setup, at a request (D61, amended),
 // none when the app does not set the crate up.
 func (p routeControls) LimiterFrom() string {
-	return "|cx: &Cx| try_app_context::<" + p.Crate + "::Setup>(cx)?.rate_limits.of(&" + p.Crate + "::api::operations::" + p.Const + ")"
+	return "|cx: &Cx| try_context::<" + p.Crate + "::Setup>(cx)?.rate_limits.of(&" + p.Crate + "::api::operations::" + p.Const + ")"
 }
 
 func controlsOf(e registry.RustEndpoint) routeControls {
