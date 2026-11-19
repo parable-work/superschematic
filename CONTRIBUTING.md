@@ -632,13 +632,31 @@ the GitHub environment named in the job (`npm`, `pypi`, `crates-io`). If the
 workflow is renamed or an environment name changes, every registry entry must
 be updated to match or publishing stops. The three publish jobs are gated on
 the repository variable `RELEASE_PUBLISH_ENABLED`; it is set to `true` once
-the registrations exist. crates.io only accepts a trusted publisher for a
-crate that already exists, so the first version of `superschematic-http-runtime`
-is published by hand with a personal token before the publisher is
-registered. The `@superschematic` npm scope is an npmjs.com organization
-that must exist and be owned by the publisher before the variable is set. The
-exact registrations are written at the top of each publish job in
-`release.yml`.
+the registrations exist. The exact registrations are written at the top of
+each publish job in `release.yml`.
+
+The registries differ in what must exist before a trusted publisher can be
+registered:
+
+- crates.io only accepts a trusted publisher for a crate that already exists,
+  so the first version of `superschematic-schema-runtime` and of
+  `superschematic-http-runtime` is published by hand with a personal token
+  before the publisher is registered.
+- npm is the same: a trusted publisher is a setting of a package that already
+  exists, so the first version of each of the eighteen packages is published
+  by hand too. A new npm trusted publisher entry expires unless it publishes
+  within two days, so register the eighteen entries no more than two days
+  before the first tag that publishes. The `@superschematic` npm scope is an
+  npmjs.com organization that must exist and be owned by the publisher before
+  the variable is set.
+- PyPI accepts a pending publisher for a project that does not exist yet, and
+  the first publish creates the project. A pending publisher does not hold the
+  name: if someone else registers `superschematic-schema-runtime` first, the
+  entry is void.
+
+The first version published by hand can be a placeholder at `0.0.0`, the
+version that means unreleased, with a README that points at this repository:
+it holds the name and makes the trusted publisher registrable.
 
 ### No changelog before the first release
 
