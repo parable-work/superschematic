@@ -404,6 +404,9 @@ keeps as a table of its own, and 46 checks),
 `core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
 checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
 each approval an operation's write of the row's own fields, and 35
+checks); and, of Derived and Provenance (D73 on D103's step 4), the
+hand-written `core-derived-provenance.transcript.json`, 75 steps (49
+commands, Derived's pulls and settles commands without a row, and 26
 checks); each command's
 `expect.events` compared with what `read_queued_events` reads of every
 type's event queue after it, which it then empties; each held to a floor
