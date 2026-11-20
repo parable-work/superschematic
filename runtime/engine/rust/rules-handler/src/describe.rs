@@ -1,6 +1,7 @@
 //! A type's live version as development mode runs it: its key, its own
 //! fields with what a filter and a sort take of each, the owned fields its
-//! uses add, each use with its behavior's operations, sub-tables and
+//! uses add, each use with its behavior's operations, sub-tables (a table
+//! kept for the type's table as a whole says `"scope": "schema"`) and
 //! events, its unique keys, and the document it was published from.
 
 use serde_json::{json, Value};
@@ -91,11 +92,17 @@ pub fn describe(model: &Model, version: i64, declarations: &Declarations) -> Val
                         .tables
                         .iter()
                         .map(|table| {
-                            json!({
+                            let mut entry = json!({
                                 "name": table.name,
                                 "key": table.key,
                                 "fields": table.fields.iter().map(|field| json!({"name": field.name, "type": field.type_name})).collect::<Vec<_>>(),
-                            })
+                            });
+                            // A table kept for the type's table as a whole,
+                            // as the declaration names it (D103's step 4).
+                            if table.shared {
+                                entry["scope"] = json!("schema");
+                            }
+                            entry
                         })
                         .collect()
                 })

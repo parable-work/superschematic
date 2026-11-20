@@ -5,12 +5,15 @@
 //! (`superschematic-rules-testkit`'s `Store`), pure: a row is its id, its
 //! version, its own fields as one JSON object and its owned fields as
 //! another; a sub-table row sits in its behavior's shared sub-table, keyed
-//! by type, id, use, table and key; a deadline, an event and a heard write
-//! are rows of the store's deadlines, event queue and change queue.
+//! by type, id, use, table and key; a row of a use's shared table, kept for
+//! the type's table as a whole (D103's step 4), sits in the store's shared
+//! table, keyed by type, use, table and key, with a version of its own; a
+//! deadline, an event and a heard write are rows of the store's deadlines,
+//! event queue and change queue.
 //!
 //! The bridge asks a store for a row by its id, every row of a type, a
-//! row's rows of a sub-table, every row's rows of a sub-table and a
-//! deadline's arming; it answers the core's linked, holding and table reads
+//! row's rows of a sub-table, every row's rows of a sub-table, a shared
+//! table's row by its key and a deadline's arming; it answers the core's linked, holding and table reads
 //! from every row of the type, in id order by code point, so a store learns
 //! no rule. A host runs each command in one transaction that holds the
 //! store's one writer from its start, so every lock the core asks for is
@@ -21,8 +24,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value};
 use superschematic_rules::{
     key_of, merge_patch, Action, Answer, Answers, ChangeSet, Command, Core, DeadlineChange,
-    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage, RowWrite, Step,
-    SubRowChange, TableRef, TypeSpec, WriteKind, MAX_ROUNDS,
+    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage, RowWrite,
+    SharedRowChange, Step, SubRowChange, TableRef, TypeSpec, WriteKind, MAX_ROUNDS,
 };
 use superschematic_rules_behaviors::subjects::canonical_subject;
 
@@ -52,13 +55,25 @@ pub struct Changed {
     pub rows: Vec<(String, String, Option<StoredRow>)>,
 }
 
+/// How a host holds a row's own fields to its type when a row write of
+/// the change set sets them: the type, the own fields as the row held them
+/// and the merge patch the core wrote; the fields as the write leaves them,
+/// in their stored form, or its refusal. An update's patch and an
+/// operation's write of its row's own fields (`Cx::update`, D103's step 4)
+/// both come through it.
+pub type OwnFields<'a> = dyn Fn(&str, &Map<String, Value>, &Map<String, Value>) -> Result<Map<String, Value>, Refusal>
+    + 'a;
+
 /// A command's run over the store: the core, every type's live version by
-/// name (what a call on another type's row binds), and the types whose
-/// writes a behavior hears, each of whose writes queues a change.
+/// name (what a call on another type's row binds), the types whose writes
+/// a behavior hears, each of whose writes queues a change, and how a row
+/// write's own fields are held to their type ([`OwnFields`]; `None` merges
+/// each patch as the core wrote it).
 pub struct Bridge<'a> {
     pub core: &'a Core,
     pub specs: &'a BTreeMap<String, TypeSpec>,
     pub hearing: &'a BTreeSet<String>,
+    pub own: Option<&'a OwnFields<'a>>,
 }
 
 /// A stored row as the core reads it.
@@ -370,6 +385,28 @@ impl Bridge<'_> {
                     .collect();
                 Some(Answer::Linked(page(keyed, after.as_deref(), *limit)))
             }
+            // A row of a use's shared table (D103's step 4): each write of
+            // it is held to the version read here, so the read needs no lock.
+            ReadRequest::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+            } => {
+                let read = StoreRead::SharedRow {
+                    type_name: type_name.clone(),
+                    use_id: use_id.clone(),
+                    table: table.clone(),
+                    key: key.clone(),
+                };
+                match answers.get(&read) {
+                    Some(StoreAnswer::SharedRow(row)) => Some(Answer::SharedRow(row.clone())),
+                    _ => {
+                        ask(read);
+                        None
+                    }
+                }
+            }
             other => {
                 return Err(Refusal::internal(format!(
                     "the development store answers no read of this kind: {}",
@@ -460,11 +497,15 @@ impl Bridge<'_> {
             .map(|(_, used)| used.behavior.clone())
     }
 
-    // written maps a change set onto the store's writes: each row write,
-    // each a queued change when its type's writes are heard; a deadline
-    // command's spend of its arming; the sub-table rows, the events and the
-    // deadline changes, a deleted row's sub-table rows and deadlines left
-    // out, since they go with it.
+    // written maps a change set onto the store's writes: the rows of the
+    // uses' shared tables first, so a writer that moved one moves the unit
+    // before any row write; each row write, each a queued change when its
+    // type's writes are heard, an operation's write of its row's own fields
+    // (Cx::update, D103's step 4) merged into the row as an update's patch
+    // is; a deadline command's spend of its arming; the sub-table rows, the
+    // events and the deadline changes, a deleted row's sub-table rows and
+    // deadlines left out, since they go with it. A row's delete leaves the
+    // shared tables' rows.
     fn written(
         &self,
         spec: &TypeSpec,
@@ -502,6 +543,30 @@ impl Bridge<'_> {
         }
 
         let mut writes = Vec::new();
+        for shared in &changes.shared_rows {
+            let change = match &shared.change {
+                SharedRowChange::Insert { values } => SharedRowChange::Insert {
+                    values: values
+                        .iter()
+                        .filter(|(_, value)| !value.is_null())
+                        .map(|(name, value)| (name.clone(), value.clone()))
+                        .collect(),
+                },
+                SharedRowChange::Update { .. } => shared.change.clone(),
+                other => {
+                    return Ran::Refused(Refusal::internal(format!(
+                        "the development store takes no shared-table change of this kind: {other:?}"
+                    )))
+                }
+            };
+            writes.push(StoreWrite::SharedRow {
+                type_name: shared.type_name.clone(),
+                use_id: shared.use_id.clone(),
+                table: shared.table.clone(),
+                key: shared.key.clone(),
+                change,
+            });
+        }
         let mut queued = Vec::new();
         let mut need = Vec::new();
         let mut now_rows: Vec<(String, String, Option<StoredRow>)> = Vec::new();
@@ -572,7 +637,13 @@ impl Bridge<'_> {
                         });
                         continue;
                     };
-                    let data = merge_patch(&before.data, own);
+                    let data = match self.own.filter(|_| !own.is_empty()) {
+                        Some(hold) => match hold(&type_name, &before.data, own) {
+                            Ok(data) => data,
+                            Err(refusal) => return Ran::Refused(refusal),
+                        },
+                        None => merge_patch(&before.data, own),
+                    };
                     let owned = set_owned(&before.owned, owned);
                     let after = StoredRow {
                         id: id.clone(),

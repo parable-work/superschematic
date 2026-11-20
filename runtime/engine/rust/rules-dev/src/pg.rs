@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 use postgres::types::ToSql;
 use postgres::{Client, NoTls};
 use serde_json::{Map, Value};
-use superschematic_rules::{Code, Refusal, RowChange, SubRow, SubRowChange};
+use superschematic_rules::{
+    Code, Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange,
+};
 use superschematic_rules_handler::document::storage_key;
 use superschematic_rules_handler::{
     Armed, Declarations, Draft, DueDeadline, HeldSubRow, QueuedChange, QueuedEvent, Store,
@@ -106,7 +108,11 @@ impl PgStore {
                    use_id TEXT NOT NULL, kind TEXT NOT NULL, at BIGINT NOT NULL, payload TEXT NOT NULL);
                  CREATE TABLE IF NOT EXISTS \"{s}\".dev_changes (
                    seq BIGSERIAL PRIMARY KEY, schema TEXT NOT NULL, id TEXT NOT NULL,
-                   change TEXT NOT NULL);"
+                   change TEXT NOT NULL);
+                 CREATE TABLE IF NOT EXISTS \"{s}\".dev_shared (
+                   schema TEXT NOT NULL, use_id TEXT NOT NULL, tbl TEXT NOT NULL, key TEXT NOT NULL,
+                   data TEXT NOT NULL, version BIGINT NOT NULL,
+                   PRIMARY KEY (schema, use_id, tbl, key));"
             ))
             .map_err(failed)?;
         client
@@ -120,7 +126,7 @@ impl PgStore {
         let mut sub_tables = BTreeMap::new();
         for declared in declarations
             .iter()
-            .filter(|declared| !declared.tables.is_empty())
+            .filter(|declared| declared.has_row_tables())
         {
             let table = format!("\"{s}\".\"dev_sub_{}\"", storage_key(&declared.name));
             client
@@ -152,6 +158,7 @@ impl PgStore {
             "dev_deadlines",
             "dev_events",
             "dev_changes",
+            "dev_shared",
         ]
         .iter()
         .map(|table| format!("\"{s}\".{table}"))
@@ -271,6 +278,25 @@ impl PgStore {
         }
         out.sort_by(|a, b| (&a.id, &a.row.key).cmp(&(&b.id, &b.row.key)));
         Ok(out)
+    }
+
+    /// The row of a key of a use's shared table, with its version.
+    pub fn shared_row(
+        &mut self,
+        type_name: &str,
+        use_id: &str,
+        table: &str,
+        key: &str,
+    ) -> Result<Option<SharedRow>, Refusal> {
+        let sql = format!(
+            "SELECT data, version FROM {} WHERE schema = $1 AND use_id = $2 AND tbl = $3 AND key = $4",
+            self.t("dev_shared")
+        );
+        self.client
+            .query_opt(&sql, &[&type_name, &use_id, &table, &key])
+            .map_err(failed)?
+            .map(|row| Ok(SharedRow::new(key, parse(row.get(0))?, row.get(1))))
+            .transpose()
     }
 
     /// A row's armed deadlines: each its use, name, time and payload, by
@@ -501,6 +527,52 @@ impl PgStore {
                     }
                 }
             }
+            StoreWrite::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+                change,
+            } => {
+                let shared = self.t("dev_shared");
+                match change {
+                    SharedRowChange::Insert { values } => self.one(
+                        &format!(
+                            "INSERT INTO {shared} (schema, use_id, tbl, key, data, version)
+                             VALUES ($1, $2, $3, $4, $5, 1) ON CONFLICT DO NOTHING"
+                        ),
+                        &[type_name, use_id, table, key, &text(values)?],
+                    )?,
+                    SharedRowChange::Update {
+                        expected_version,
+                        values,
+                    } => {
+                        let Some(held) = self.shared_row(type_name, use_id, table, key)? else {
+                            return Err(Stop::Moved);
+                        };
+                        let mut data = held.values;
+                        for (name, value) in values {
+                            if value.is_null() {
+                                data.shift_remove(name);
+                            } else {
+                                data.insert(name.clone(), value.clone());
+                            }
+                        }
+                        self.one(
+                            &format!(
+                                "UPDATE {shared} SET data = $1, version = version + 1
+                                 WHERE schema = $2 AND use_id = $3 AND tbl = $4 AND key = $5 AND version = $6"
+                            ),
+                            &[&text(&data)?, type_name, use_id, table, key, expected_version],
+                        )?;
+                    }
+                    other => {
+                        return Err(Stop::Refused(Refusal::internal(format!(
+                            "the development store takes no shared-table change of this kind: {other:?}"
+                        ))))
+                    }
+                }
+            }
             StoreWrite::DropUse {
                 type_name,
                 behavior,
@@ -512,6 +584,11 @@ impl PgStore {
                         &[type_name, use_id],
                     )?;
                 }
+                let sql = format!(
+                    "DELETE FROM {} WHERE schema = $1 AND use_id = $2",
+                    self.t("dev_shared")
+                );
+                self.client.execute(&sql, &[type_name, use_id])?;
             }
             StoreWrite::Arm {
                 type_name,
@@ -754,6 +831,12 @@ impl Store for PgStore {
                 use_id,
                 table,
             } => StoreAnswer::TableSubRows(self.table_sub_rows(type_name, use_id, table)?),
+            StoreRead::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+            } => StoreAnswer::SharedRow(self.shared_row(type_name, use_id, table, key)?),
             StoreRead::Armed {
                 type_name,
                 id,

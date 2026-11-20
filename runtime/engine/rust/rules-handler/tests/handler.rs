@@ -639,6 +639,145 @@ fn a_publish_that_adds_a_use_fails_rows_without_its_value_and_removing_one_drops
     assert_eq!(host.get("Ticket", &id).expect("kept")["status"], "open");
 }
 
+fn invoice(behaviors: Value) -> Value {
+    json!({"name": "Invoice", "behaviors": behaviors, "fields": [{"name": "title", "typeRef": {"name": "string"}}]})
+}
+
+fn numbered() -> Value {
+    json!([{"name": "Numbering", "field": "number", "config": {"format": "INV-{seq:3}"}}])
+}
+
+#[test]
+fn numbering_counts_in_the_layouts_shared_table_and_a_delete_leaves_a_gap() {
+    let mut host = Host::new();
+    host.publish(invoice(numbered()));
+    let described = host.ok(&Request::Describe {
+        type_name: "Invoice".into(),
+    });
+    assert_eq!(described["uses"][0]["tables"][0]["name"], "counts");
+    assert_eq!(described["uses"][0]["tables"][0]["scope"], "schema");
+    let number = |host: &mut Host, title: &str| -> (String, Value) {
+        let created = host
+            .create("Invoice", json!({"title": title}))
+            .expect("created");
+        (
+            created["id"].as_str().expect("an id").to_owned(),
+            created["number"].clone(),
+        )
+    };
+    assert_eq!(number(&mut host, "a").1, "INV-001");
+    let (second, label) = number(&mut host, "b");
+    assert_eq!(label, "INV-002");
+    // The count is the type's as a whole: one row of the shared table, its
+    // version moved by each write of it.
+    let count = host
+        .store
+        .shared_row("Invoice", "number", "counts", "*")
+        .expect("the count is held")
+        .clone();
+    assert_eq!((count.values["last"].clone(), count.version), (json!(2), 2));
+    host.ok(&Request::Delete {
+        type_name: "Invoice".into(),
+        id: second,
+        preconditions: Map::new(),
+    });
+    assert_eq!(number(&mut host, "c").1, "INV-003", "a delete leaves a gap");
+
+    // A publish that removes the use drops its counts with its state, so a
+    // use added again counts from 1.
+    host.publish(invoice(json!([])));
+    assert!(host
+        .store
+        .shared_row("Invoice", "number", "counts", "*")
+        .is_none());
+    host.publish(invoice(numbered()));
+    assert_eq!(number(&mut host, "d").1, "INV-001");
+}
+
+fn policy() -> Value {
+    json!({"name": "Policy",
+    "behaviors": [{"name": "Revisions", "config": {"review": {"permission": "policies.review"}}}],
+    "fields": [
+        {"name": "title", "typeRef": {"name": "string"}, "required": true, "validateMaxLength": 10},
+        {"name": "body", "typeRef": {"name": "string"}},
+        {"name": "code", "typeRef": {"name": "string"}, "unique": true}
+    ]})
+}
+
+fn revisions(id: &str, operation: &str, params: Value) -> Request {
+    Request::Operation {
+        type_name: "Policy".into(),
+        id: id.into(),
+        use_id: "Revisions".into(),
+        operation: operation.into(),
+        params,
+        preconditions: Map::new(),
+    }
+}
+
+#[test]
+fn an_approval_writes_the_rows_own_fields_held_to_its_type() {
+    let mut host = Host::new();
+    host.publish(policy());
+    let created = host
+        .create("Policy", json!({"title": "Travel", "body": "Any class."}))
+        .expect("created");
+    let id = created["id"].as_str().expect("an id").to_owned();
+    let reviewer = Caller::new("rita", ["policies"]);
+    host.ok(&revisions(
+        &id,
+        "propose",
+        json!({"patch": {"body": "Economy only."}}),
+    ));
+    let approved = host
+        .as_(
+            &reviewer,
+            &revisions(&id, "approve", json!({"proposal": 1})),
+        )
+        .expect("approved");
+    assert_eq!(approved["state"], "approved");
+    // The operation's write of the row's own fields is the row's, and the
+    // revision it made is kept beside the first.
+    let row = host.get("Policy", &id).expect("read");
+    assert_eq!(row["body"], "Economy only.");
+    assert_eq!(row["title"], "Travel");
+    assert_eq!(row["_version"], 3);
+    assert_eq!(
+        host.store
+            .sub_rows("Policy", &id, "Revisions", "revisions")
+            .len(),
+        2
+    );
+
+    // A patch the core takes but the type refuses (too long a title, a
+    // field it lacks, a unique code another row holds) is kept as a
+    // proposal, and its approval is refused as a table's columns and its
+    // unique index refuse the write, changing nothing.
+    host.create("Policy", json!({"title": "Leave", "code": "P2"}))
+        .expect("created");
+    for (n, (patch, code)) in [
+        (json!({"title": "A title past ten"}), Code::InvalidInstance),
+        (json!({"subtitle": "none"}), Code::InvalidInstance),
+        (json!({"code": "P2"}), Code::Conflict),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        host.ok(&revisions(&id, "propose", json!({ "patch": patch })));
+        let refused = host
+            .as_(
+                &reviewer,
+                &revisions(&id, "approve", json!({"proposal": n + 2})),
+            )
+            .unwrap_err();
+        assert_eq!(refused.code, code, "{}", refused.message);
+    }
+    let kept = host.get("Policy", &id).expect("read");
+    assert_eq!(kept["title"], "Travel");
+    assert!(kept.get("code").is_none());
+    assert_eq!(kept["_version"], row["_version"].as_i64().unwrap() + 3);
+}
+
 #[test]
 fn a_deadline_falls_due_through_the_runner() {
     let mut host = Host::new();

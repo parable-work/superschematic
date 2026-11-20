@@ -108,6 +108,38 @@ pub fn own_fields(
     (out, issues)
 }
 
+/// A merge patch of a row's own fields held to its type's version, as an
+/// update holds its write: the patch in its stored form and the fields as
+/// it leaves them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Patched {
+    pub patch: Map<String, Value>,
+    pub fields: Map<String, Value>,
+}
+
+/// A merge patch of a row's own fields held to its type's version, or the
+/// issues of the patch or of the fields it leaves: what an update request
+/// and an operation's write of its row's own fields (D103's step 4) are
+/// held to.
+pub fn patched(
+    model: &Model,
+    before: &Map<String, Value>,
+    patch: &Map<String, Value>,
+) -> Result<Patched, Vec<ValidationIssue>> {
+    let (patch, mut issues) = own_fields(model, patch, Mode::Patch);
+    let fields = superschematic_rules::merge_patch(before, &patch);
+    for issue in stored_fields(model, &fields) {
+        if !issues.iter().any(|known| known.path == issue.path) {
+            issues.push(issue);
+        }
+    }
+    if issues.is_empty() {
+        Ok(Patched { patch, fields })
+    } else {
+        Err(issues)
+    }
+}
+
 /// The issues a stored row's own fields have under a type's version, every
 /// field held as a create holds it but defaults: what a publish checks of
 /// each row it keeps.

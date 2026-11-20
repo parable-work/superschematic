@@ -96,9 +96,18 @@ the field itself (`status`), and its other fields follow the field's name
 
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
-Seats, Reconcile, Schedules and Pool. Comments, Revisions, Blueprint,
-Rollups and Dependencies are not ported yet, so `examples/engine-notes`
-and `examples/engine-jobs` still run on the engine.
+Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering and
+Revisions. A read serves no Rollups value yet. Comments and Blueprint are
+not ported yet, so `examples/engine-notes` and `examples/engine-jobs`
+still run on the engine.
+
+- Numbering's counts are the type's as a whole, not a row's. A create
+  reads its count and writes it held to the version it read, so two
+  creates never take one number. A delete leaves a gap.
+- Revisions' `approve` writes the row's own fields. The write is held to
+  the type's fields, relations and unique keys as an update is, so a
+  patch the type refuses is kept as a proposal and its approval is
+  refused with `422 invalid_instance` or `409 conflict`.
 
 ## Requests
 
@@ -137,8 +146,9 @@ engine's rule that a new version may only add does not apply.
 
 - A field the version removes goes, and so do its values. A rename is a
   removal and an addition.
-- A use the version removes goes with its owned fields, its sub-table rows
-  and its deadlines.
+- A use the version removes goes with its owned fields, its sub-table rows,
+  its shared tables' rows and its deadlines. Numbering added again counts
+  from 1.
 - A stored row the version no longer describes fails it: a value of the
   wrong type, a required field with no value, a value past a bound, a
   relation to a row that does not exist, a unique value two rows hold, or
@@ -166,7 +176,9 @@ answer lists what it discarded.
 The store creates its tables when it opens, and none after:
 `dev_schema_versions`, `dev_schema_drafts`, `dev_instances` (a schema
 column, the own fields as one JSON column and the owned fields as
-another), one `dev_sub_<behavior>` per behavior that keeps sub-tables,
+another), one `dev_sub_<behavior>` per behavior that keeps sub-tables of
+a row, `dev_shared` (the rows of the tables a use keeps for the type as a
+whole, such as Numbering's counts, each with a version of its own),
 `dev_deadlines`, `dev_events` and `dev_changes`. The crates' tests replay
 every recorded scenario of the ported behaviors over it, on SQLite, on
 Postgres and in memory.

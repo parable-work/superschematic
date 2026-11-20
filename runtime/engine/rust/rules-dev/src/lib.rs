@@ -11,7 +11,8 @@
 //! | `dev_schema_versions` | each type's published versions: the type (`schema`), the number, the schema document |
 //! | `dev_schema_drafts` | each type's version defined and not published yet |
 //! | `dev_instances` | the rows: the type (`schema`), the id, the version, the own fields as one JSON column (`data`) and the owned fields as another (`owned`) |
-//! | `dev_sub_<behavior>` | one shared sub-table per behavior that declares sub-tables (`dev_sub_timers`), keyed by type, id, use, table and key, each row's values a JSON column |
+//! | `dev_sub_<behavior>` | one shared sub-table per behavior that declares sub-tables kept per row (`dev_sub_timers`), keyed by type, id, use, table and key, each row's values a JSON column |
+//! | `dev_shared` | the rows of the uses' shared tables, kept for a type's table as a whole (D103's step 4: Numbering's `counts`), keyed by type, use, table and key, each row's values a JSON column and its version |
 //! | `dev_deadlines` | the armed deadlines: the row, the use, the name, the time armed and when due |
 //! | `dev_events` | the event queue (D104), in the order written |
 //! | `dev_changes` | the change queue (D103): each heard write, run after the commit |
@@ -32,7 +33,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 use serde_json::{Map, Value};
-use superschematic_rules::{Caller, Code, Core, Refusal, RowChange, SubRow, SubRowChange};
+use superschematic_rules::{
+    Caller, Code, Core, Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange,
+};
 use superschematic_rules_handler::document::storage_key;
 use superschematic_rules_handler::{
     run_due, serve, Armed, Context, Declarations, Draft, DueDeadline, Handler, HeldSubRow,
@@ -133,7 +136,11 @@ impl SqliteStore {
                use_id TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, payload TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS dev_changes (
                seq INTEGER PRIMARY KEY AUTOINCREMENT, schema TEXT NOT NULL, id TEXT NOT NULL,
-               change TEXT NOT NULL);",
+               change TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS dev_shared (
+               schema TEXT NOT NULL, use_id TEXT NOT NULL, tbl TEXT NOT NULL, key TEXT NOT NULL,
+               data TEXT NOT NULL, version INTEGER NOT NULL,
+               PRIMARY KEY (schema, use_id, tbl, key));",
         )?;
         conn.execute(
             "INSERT INTO dev_meta (key, value) VALUES ('layout', ?1) ON CONFLICT (key) DO NOTHING",
@@ -142,7 +149,7 @@ impl SqliteStore {
         let mut sub_tables = BTreeMap::new();
         for declared in declarations
             .iter()
-            .filter(|declared| !declared.tables.is_empty())
+            .filter(|declared| declared.has_row_tables())
         {
             let table = format!("dev_sub_{}", storage_key(&declared.name));
             conn.execute_batch(&format!(
@@ -291,6 +298,26 @@ impl SqliteStore {
         }
         out.sort_by(|a, b| (&a.id, &a.row.key).cmp(&(&b.id, &b.row.key)));
         Ok(out)
+    }
+
+    /// The row of a key of a use's shared table, with its version.
+    pub fn shared_row(
+        &self,
+        type_name: &str,
+        use_id: &str,
+        table: &str,
+        key: &str,
+    ) -> Result<Option<SharedRow>, Refusal> {
+        self.conn
+            .query_row(
+                "SELECT data, version FROM dev_shared WHERE schema = ?1 AND use_id = ?2 AND tbl = ?3 AND key = ?4",
+                params![type_name, use_id, table, key],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(failed)?
+            .map(|(data, version)| Ok(SharedRow::new(key, parse(&data)?, version)))
+            .transpose()
     }
 
     /// A row's armed deadlines: each its use, name and time, by use and
@@ -515,6 +542,45 @@ impl SqliteStore {
                     }
                 }
             }
+            StoreWrite::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+                change,
+            } => match change {
+                SharedRowChange::Insert { values } => self.one(
+                    "INSERT INTO dev_shared (schema, use_id, tbl, key, data, version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 1) ON CONFLICT DO NOTHING",
+                    params![type_name, use_id, table, key, text(values)?],
+                )?,
+                SharedRowChange::Update {
+                    expected_version,
+                    values,
+                } => {
+                    let Some(held) = self.shared_row(type_name, use_id, table, key)? else {
+                        return Err(Stop::Moved);
+                    };
+                    let mut data = held.values;
+                    for (name, value) in values {
+                        if value.is_null() {
+                            data.shift_remove(name);
+                        } else {
+                            data.insert(name.clone(), value.clone());
+                        }
+                    }
+                    self.one(
+                        "UPDATE dev_shared SET data = ?1, version = version + 1
+                         WHERE schema = ?2 AND use_id = ?3 AND tbl = ?4 AND key = ?5 AND version = ?6",
+                        params![text(&data)?, type_name, use_id, table, key, expected_version],
+                    )?;
+                }
+                other => {
+                    return Err(Stop::Refused(Refusal::internal(format!(
+                        "the development store takes no shared-table change of this kind: {other:?}"
+                    ))))
+                }
+            },
             StoreWrite::DropUse {
                 type_name,
                 behavior,
@@ -526,6 +592,10 @@ impl SqliteStore {
                         params![type_name, use_id],
                     )?;
                 }
+                self.conn.execute(
+                    "DELETE FROM dev_shared WHERE schema = ?1 AND use_id = ?2",
+                    params![type_name, use_id],
+                )?;
             }
             StoreWrite::Arm {
                 type_name,
@@ -790,6 +860,12 @@ impl Store for SqliteStore {
                 use_id,
                 table,
             } => StoreAnswer::TableSubRows(self.table_sub_rows(type_name, use_id, table)?),
+            StoreRead::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+            } => StoreAnswer::SharedRow(self.shared_row(type_name, use_id, table, key)?),
             StoreRead::Armed {
                 type_name,
                 id,

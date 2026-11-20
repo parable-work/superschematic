@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
-    merge_patch, Action, Caller, Code, Command, Core, Outcome, Refusal, RowChange, Step, TypeSpec,
+    Action, Caller, Code, Command, Core, Outcome, Refusal, RowChange, RowWrite, Step, TypeSpec,
     ValidationIssue,
 };
 
@@ -756,16 +756,11 @@ impl<'a> Handler<'a> {
         };
         let model = live.model(type_name)?;
         let row = row.ok_or_else(|| not_found(type_name, id))?;
-        let (patch, mut issues) = validate::own_fields(model, patch, Mode::Patch);
-        let merged = merge_patch(&row.data, &patch);
-        for issue in validate::stored_fields(model, &merged) {
-            if !issues.iter().any(|known| known.path == issue.path) {
-                issues.push(issue);
-            }
-        }
-        if !issues.is_empty() {
-            return Err(Refusal::invalid_instance(type_name, issues));
-        }
+        let validate::Patched {
+            patch,
+            fields: merged,
+        } = validate::patched(model, &row.data, patch)
+            .map_err(|issues| Refusal::invalid_instance(type_name, issues))?;
         let relation = Self::relation_issues(model, &patch, reads);
         let touches_unique = model
             .uniques
@@ -1184,10 +1179,20 @@ impl<'a> Handler<'a> {
         let command = Command::new(context.caller.clone(), context.now, action)
             .with_request(context.request.clone())
             .with_preconditions(preconditions.clone());
+        // A row write's own fields are held to their type as an update's
+        // are, an operation's write of them (Cx::update) among them: the
+        // columns and their checks a table would hold them to.
+        let own = |type_name: &str, before: &Map<String, Value>, patch: &Map<String, Value>| {
+            let model = live.model(type_name)?;
+            validate::patched(model, before, patch)
+                .map(|patched| patched.fields)
+                .map_err(|issues| Refusal::invalid_instance(type_name, issues))
+        };
         let bridge = Bridge {
             core: self.core,
             specs: &live.specs,
             hearing: &live.hearing,
+            own: Some(&own),
         };
         Ok(match bridge.run(&spec, &command, reads.answers) {
             Ran::Read(need) => {
@@ -1197,8 +1202,72 @@ impl<'a> Handler<'a> {
                 take(reads).wait()
             }
             Ran::Refused(refusal) => refused(refusal),
-            Ran::Changed(changed) => done(respond(&changed), changed.writes),
+            Ran::Changed(changed) => {
+                if let Some(refusal) = Self::own_writes_refusal(live, &changed, reads) {
+                    return Ok(refused(refusal));
+                }
+                if reads.waiting() {
+                    return Ok(take(reads).wait());
+                }
+                done(respond(&changed), changed.writes)
+            }
         })
+    }
+
+    /// The refusal of a change set whose row writes set own fields a
+    /// relation or a unique key refuses, as a foreign key and a unique
+    /// index refuse a table's write: an update's patch, and an operation's
+    /// write of its row's own fields (Cx::update, D103's step 4). Asks for
+    /// the rows it needs.
+    fn own_writes_refusal(
+        live: &Live,
+        changed: &bridge::Changed,
+        reads: &mut Reads<'_>,
+    ) -> Option<Refusal> {
+        for write in &changed.changes.rows {
+            let RowWrite::Update {
+                type_name,
+                key,
+                own,
+                ..
+            } = write
+            else {
+                continue;
+            };
+            let Ok(model) = live.model(type_name) else {
+                continue;
+            };
+            if own.is_empty() {
+                continue;
+            }
+            let (patch, _) = validate::own_fields(model, own, Mode::Patch);
+            let relation = Self::relation_issues(model, &patch, reads);
+            if !relation.is_empty() {
+                return Some(Refusal::invalid_instance(type_name, relation));
+            }
+            let touches_unique = model
+                .uniques
+                .iter()
+                .any(|unique| unique.iter().any(|name| patch.contains_key(name)));
+            if !touches_unique {
+                continue;
+            }
+            let Some(rows) = reads.rows(type_name) else {
+                continue;
+            };
+            let after = changed
+                .rows
+                .iter()
+                .rev()
+                .find(|(t, k, _)| t == type_name && k == key)
+                .and_then(|(_, _, row)| row.as_ref());
+            if let Some(conflict) =
+                after.and_then(|after| Self::unique_conflict(model, key, &after.data, rows))
+            {
+                return Some(conflict);
+            }
+        }
+        None
     }
 }
 

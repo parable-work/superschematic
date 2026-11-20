@@ -7,7 +7,9 @@
 //! type's versions (its schema documents), its rows (an id, a version, the
 //! row's own fields as one JSON object and its uses' owned fields as
 //! another), one shared sub-table per behavior keyed by type and id, the
-//! armed deadlines, the event queue and the change queue. Every name here
+//! rows of the uses' shared tables keyed by type, use, table and key, each
+//! with a version of its own (D103's step 4), the armed deadlines, the
+//! event queue and the change queue. Every name here
 //! is the type's, as a table's would be: a store keys its rows by the type
 //! a schema document defines.
 //!
@@ -21,7 +23,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use superschematic_rules::{Refusal, RowChange, SubRow, SubRowChange};
+use superschematic_rules::{Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange};
 
 /// What the handler asks a store to read.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,6 +71,16 @@ pub enum StoreRead {
         use_id: String,
         table: String,
     },
+    /// The row of a key of a use's shared table, kept for the type's table
+    /// as a whole rather than per row (D103's step 4), with its version
+    /// ([`StoreAnswer::SharedRow`]).
+    SharedRow {
+        #[serde(rename = "type")]
+        type_name: String,
+        use_id: String,
+        table: String,
+        key: String,
+    },
     /// A deadline armed on a row ([`StoreAnswer::Armed`]).
     Armed {
         #[serde(rename = "type")]
@@ -89,6 +101,7 @@ pub enum StoreAnswer {
     Rows(Vec<StoredRow>),
     SubRows(Vec<SubRow>),
     TableSubRows(Vec<HeldSubRow>),
+    SharedRow(Option<SharedRow>),
     Armed(Option<Armed>),
 }
 
@@ -228,8 +241,22 @@ pub enum StoreWrite {
         key: String,
         change: SubRowChange,
     },
+    /// A write of one row of a use's shared table (D103's step 4): an
+    /// insert at version 1 (moved when the key is held), or an update that
+    /// sets the values given, a null clearing one, and moves the version on
+    /// by one (moved when the row is not at the version it expects). A
+    /// handler puts these first in its unit.
+    SharedRow {
+        #[serde(rename = "type")]
+        type_name: String,
+        use_id: String,
+        table: String,
+        key: String,
+        change: SharedRowChange,
+    },
     /// Every sub-table row of one use of a type, in its behavior's shared
-    /// sub-table: what a publish that removes the use drops.
+    /// sub-table, and every row of the use's shared tables: what a publish
+    /// that removes the use drops.
     DropUse {
         #[serde(rename = "type")]
         type_name: String,

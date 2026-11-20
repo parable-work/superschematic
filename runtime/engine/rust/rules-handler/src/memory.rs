@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
-use superschematic_rules::{Code, Refusal, RowChange, SubRow, SubRowChange};
+use superschematic_rules::{
+    Code, Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange,
+};
 
 use crate::store::{
     Armed, Draft, DueDeadline, HeldSubRow, QueuedChange, QueuedEvent, Store, StoreAnswer,
@@ -20,6 +22,10 @@ type SubKey = (String, String, String, String, String, String);
 /// Where a deadline sits: its row's type and id, its use and its name.
 type DeadlineKey = (String, String, String, String);
 
+/// Where a row of a use's shared table sits: its type, its use, its table
+/// and its key.
+type SharedKey = (String, String, String, String);
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct State {
     versions: BTreeMap<String, Vec<Version>>,
@@ -27,6 +33,9 @@ struct State {
     rows: BTreeMap<String, BTreeMap<String, StoredRow>>,
     /// By behavior, type, id, use, table and key.
     sub_rows: BTreeMap<SubKey, Map<String, Value>>,
+    /// The rows of the uses' shared tables, by type, use, table and key,
+    /// each with its version, which no row's delete takes.
+    shared: BTreeMap<SharedKey, SharedRow>,
     /// By type, id, use and name: the time it was armed at, when it falls
     /// due, and its payload.
     deadlines: BTreeMap<DeadlineKey, (i64, i64, Value)>,
@@ -73,6 +82,22 @@ impl MemoryStore {
             })
             .map(|((_, _, _, _, _, key), values)| SubRow::new(key.clone(), values.clone()))
             .collect()
+    }
+
+    /// The row of a key of a use's shared table, with its version.
+    pub fn shared_row(
+        &self,
+        type_name: &str,
+        use_id: &str,
+        table: &str,
+        key: &str,
+    ) -> Option<&SharedRow> {
+        self.state.shared.get(&(
+            type_name.to_owned(),
+            use_id.to_owned(),
+            table.to_owned(),
+            key.to_owned(),
+        ))
     }
 
     /// A row's armed deadlines: each its use, name, time and payload, by use
@@ -256,6 +281,53 @@ fn apply_one(state: &mut State, write: &StoreWrite) -> Result<(), Stop> {
                 }
             }
         }
+        StoreWrite::SharedRow {
+            type_name,
+            use_id,
+            table,
+            key,
+            change,
+        } => {
+            let at = (
+                type_name.clone(),
+                use_id.clone(),
+                table.clone(),
+                key.clone(),
+            );
+            match change {
+                SharedRowChange::Insert { values } => {
+                    if state.shared.contains_key(&at) {
+                        return Err(Stop::Moved);
+                    }
+                    state
+                        .shared
+                        .insert(at, SharedRow::new(key.clone(), values.clone(), 1));
+                }
+                SharedRowChange::Update {
+                    expected_version,
+                    values,
+                } => {
+                    let row = state
+                        .shared
+                        .get_mut(&at)
+                        .filter(|row| row.version == *expected_version)
+                        .ok_or(Stop::Moved)?;
+                    for (name, value) in values {
+                        if value.is_null() {
+                            row.values.shift_remove(name);
+                        } else {
+                            row.values.insert(name.clone(), value.clone());
+                        }
+                    }
+                    row.version += 1;
+                }
+                other => {
+                    return Err(Stop::Refused(Refusal::internal(format!(
+                        "the development store takes no shared-table change of this kind: {other:?}"
+                    ))))
+                }
+            }
+        }
         StoreWrite::DropUse {
             type_name,
             behavior,
@@ -264,6 +336,9 @@ fn apply_one(state: &mut State, write: &StoreWrite) -> Result<(), Stop> {
             state
                 .sub_rows
                 .retain(|(b, t, _, u, _, _), _| !(b == behavior && t == type_name && u == use_id));
+            state
+                .shared
+                .retain(|(t, u, _, _), _| !(t == type_name && u == use_id));
         }
         StoreWrite::Arm {
             type_name,
@@ -479,6 +554,12 @@ impl Store for MemoryStore {
                 rows.sort_by(|a, b| (&a.id, &a.row.key).cmp(&(&b.id, &b.row.key)));
                 StoreAnswer::TableSubRows(rows)
             }
+            StoreRead::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+            } => StoreAnswer::SharedRow(self.shared_row(type_name, use_id, table, key).cloned()),
             StoreRead::Armed {
                 type_name,
                 id,

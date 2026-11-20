@@ -1,7 +1,8 @@
 //! Development mode's store over SQLite (D117), in memory and in a file:
 //! the same requests answer as they do over memory, a file keeps its
 //! versions and rows across opens, a unit whose fence does not hold
-//! applies nothing, and the host runs its queues after each request.
+//! applies nothing, a shared table's row is written held to its version,
+//! and the host runs its queues after each request.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -34,7 +35,9 @@ fn caller() -> Caller {
 
 /// The requests of a session that works out two types: defines,
 /// publishes, writes, a behavior's operation, lists, a relation's
-/// cascade, a refused tightening and its discard.
+/// cascade, a refused tightening and its discard; then a type whose rows
+/// Numbering counts in a shared table, and one whose changes Revisions
+/// reviews, an approval writing the row's own fields (D103's step 4).
 fn script() -> Vec<Request> {
     let project = json!({"name": "Project", "fields": [
         {"name": "id", "typeRef": {"name": "string"}, "key": true},
@@ -62,6 +65,26 @@ fn script() -> Vec<Request> {
         type_name: type_name.into(),
         data: object(data),
         params: Map::new(),
+    };
+    let invoice = json!({"name": "Invoice",
+    "behaviors": [{"name": "Numbering", "field": "number", "config": {"format": "INV-{seq:2}"}}],
+    "fields": [
+        {"name": "id", "typeRef": {"name": "string"}, "key": true},
+        {"name": "title", "typeRef": {"name": "string"}}
+    ]});
+    let policy = json!({"name": "Policy",
+    "behaviors": [{"name": "Revisions", "config": {"review": {"permission": "orders.review"}}}],
+    "fields": [
+        {"name": "id", "typeRef": {"name": "string"}, "key": true},
+        {"name": "title", "typeRef": {"name": "string"}, "required": true}
+    ]});
+    let revisions = |operation: &str, params: Value| Request::Operation {
+        type_name: "Policy".into(),
+        id: "y1".into(),
+        use_id: "Revisions".into(),
+        operation: operation.into(),
+        params,
+        preconditions: Map::new(),
     };
     let list = |filter: Value, sort: Vec<Sort>| Request::List {
         type_name: "Task".into(),
@@ -167,6 +190,33 @@ fn script() -> Vec<Request> {
             operation: "nothing".into(),
             params: Value::Null,
         },
+        Request::Define { document: invoice },
+        Request::Publish {
+            type_name: "Invoice".into(),
+            discard: false,
+        },
+        create("Invoice", json!({"id": "i1", "title": "a"})),
+        create("Invoice", json!({"id": "i2", "title": "b"})),
+        Request::Delete {
+            type_name: "Invoice".into(),
+            id: "i2".into(),
+            preconditions: Map::new(),
+        },
+        create("Invoice", json!({"id": "i3", "title": "c"})),
+        Request::Define { document: policy },
+        Request::Publish {
+            type_name: "Policy".into(),
+            discard: false,
+        },
+        create("Policy", json!({"id": "y1", "title": "Travel"})),
+        revisions("propose", json!({"patch": {"title": "Trips"}})),
+        revisions("approve", json!({"proposal": 1})),
+        revisions("propose", json!({"patch": {"title": null}})),
+        revisions("approve", json!({"proposal": 2})),
+        Request::Get {
+            type_name: "Policy".into(),
+            id: "y1".into(),
+        },
     ]
 }
 
@@ -221,14 +271,24 @@ fn the_same_requests_answer_alike_over_memory_and_over_sqlite() {
     assert_eq!(
         refused,
         [
-            (5, "conflict"),         // a second holder of a unique name
-            (9, "invalid_instance"), // a relation to p9, which does not exist
-            (13, "forbidden"),       // done needs projects.finish
-            (20, "not_found"),       // p2's delete cascaded to t2
-            (22, "conflict"),        // the tightened title fails t1
-            (25, "not_found"),       // Timers has no operation nothing
+            (5, "conflict"),          // a second holder of a unique name
+            (9, "invalid_instance"),  // a relation to p9, which does not exist
+            (13, "forbidden"),        // done needs projects.finish
+            (20, "not_found"),        // p2's delete cascaded to t2
+            (22, "conflict"),         // the tightened title fails t1
+            (25, "not_found"),        // Timers has no operation nothing
+            (38, "invalid_instance"), // the approval clears a required title
         ]
     );
+    // Numbering's count is the table's: a delete leaves a gap.
+    let numbers: Vec<&Value> = [28, 29, 31]
+        .iter()
+        .map(|n| &over_memory[*n]["ok"]["number"])
+        .collect();
+    assert_eq!(numbers, ["INV-01", "INV-02", "INV-03"]);
+    // The approval wrote the row's own fields; the refused one, nothing.
+    assert_eq!(over_memory[39]["ok"]["title"], "Trips");
+    assert_eq!(over_memory[39]["ok"]["revisionsRevision"], 2);
     let ids = |answer: &Value| -> Vec<String> {
         answer["ok"]["items"]
             .as_array()
@@ -400,6 +460,113 @@ fn a_unit_whose_fence_does_not_hold_applies_nothing() {
         "the arm went with the unit"
     );
     store.commit().expect("committed");
+}
+
+/// A shared table's row is written held to one row (D103's step 4): an
+/// insert of a key the table holds and an update at another version move
+/// the unit, which applies nothing, and a publish's drop of the use takes
+/// its rows.
+fn shared_rows_are_held_to_their_version<S: Store>(store: &mut S) {
+    let write = |change: Value| StoreWrite::SharedRow {
+        type_name: "Invoice".into(),
+        use_id: "number".into(),
+        table: "counts".into(),
+        key: "*".into(),
+        change: serde_json::from_value(change).expect("a change"),
+    };
+    let read = StoreRead::SharedRow {
+        type_name: "Invoice".into(),
+        use_id: "number".into(),
+        table: "counts".into(),
+        key: "*".into(),
+    };
+    let held = |store: &mut S| -> Value {
+        serde_json::to_value(store.read(&read).expect("read")).expect("json")["sharedRow"].clone()
+    };
+    store.begin().expect("begun");
+    assert_eq!(held(store), Value::Null);
+    let insert = Unit {
+        writes: vec![write(
+            json!({"kind": "insert", "values": {"last": 1, "counting": null}}),
+        )],
+    };
+    assert!(store.apply(&insert).expect("applied"));
+    assert_eq!(
+        held(store),
+        json!({"key": "*", "values": {"last": 1}, "version": 1})
+    );
+    assert!(!store.apply(&insert).expect("a racing first insert moves"));
+    let update = |expected: i64, last: i64| Unit {
+        writes: vec![write(
+            json!({"kind": "update", "expectedVersion": expected, "values": {"last": last}}),
+        )],
+    };
+    assert!(store.apply(&update(1, 2)).expect("applied"));
+    // A unit whose shared row moved applies none of its writes.
+    let stale = Unit {
+        writes: [
+            update(1, 9).writes,
+            vec![StoreWrite::Insert {
+                type_name: "Invoice".into(),
+                id: "i9".into(),
+                data: object(json!({"title": "late"})),
+                owned: Default::default(),
+            }],
+        ]
+        .concat(),
+    };
+    assert!(!store.apply(&stale).expect("moved, not failed"));
+    assert_eq!(
+        held(store),
+        json!({"key": "*", "values": {"last": 2}, "version": 2})
+    );
+    let row = store
+        .read(&StoreRead::Row {
+            type_name: "Invoice".into(),
+            id: "i9".into(),
+        })
+        .expect("read");
+    assert_eq!(
+        serde_json::to_value(&row).expect("json")["row"],
+        Value::Null
+    );
+    let dropped = Unit {
+        writes: vec![StoreWrite::DropUse {
+            type_name: "Invoice".into(),
+            behavior: "Numbering".into(),
+            use_id: "number".into(),
+        }],
+    };
+    assert!(store.apply(&dropped).expect("applied"));
+    assert_eq!(held(store), Value::Null);
+    store.commit().expect("committed");
+}
+
+#[test]
+fn a_shared_tables_row_is_held_to_its_version_over_memory_and_sqlite() {
+    let declarations = Declarations::ported();
+    shared_rows_are_held_to_their_version(&mut MemoryStore::new());
+    shared_rows_are_held_to_their_version(
+        &mut SqliteStore::memory(&declarations).expect("SQLite opens"),
+    );
+}
+
+/// The same over a Postgres schema. Skipped without
+/// `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
+#[cfg(feature = "postgres")]
+#[test]
+fn a_shared_tables_row_is_held_to_its_version_over_postgres() {
+    let Ok(url) = std::env::var("SUPERSCHEMATIC_RULES_TEST_DATABASE_URL") else {
+        println!("set SUPERSCHEMATIC_RULES_TEST_DATABASE_URL to run it on Postgres");
+        return;
+    };
+    let declarations = Declarations::ported();
+    let schema = format!("rules_dev_{}_shared", std::process::id());
+    let mut store = superschematic_rules_dev::PgStore::open(&url, &schema, &declarations)
+        .expect("the Postgres store opens");
+    store.clear().expect("the store empties");
+    shared_rows_are_held_to_their_version(&mut store);
+    store.drop_schema().expect("the schema drops");
 }
 
 fn ticket() -> Value {

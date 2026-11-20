@@ -13,9 +13,11 @@
 //! compared, with its version when the transcript holds one, its sub-table
 //! rows, its armed deadlines, the other rows its change set wrote, and the
 //! events it wrote, read from the event queue in the order written. A check
-//! runs on the core alone, its type's rows read from the store; a raw step
-//! writes owned fields past the bridge, moving the row's version as a
-//! table's trigger does.
+//! runs on the core alone, its type's rows read from the store, and a
+//! publish's drops the shared tables' rows of each use it no longer lists,
+//! as development mode's publish does (D103's step 4); a raw step writes
+//! owned fields past the bridge, moving the row's version as a table's
+//! trigger does.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -34,14 +36,14 @@ use superschematic_rules_testkit::{
 
 /// The transcripts and the floors `superschematic-rules-adapter`'s replay
 /// holds them to: each store replays every one.
-const TRANSCRIPTS: [(&str, usize); 21] = [
+const TRANSCRIPTS: [(&str, usize); 24] = [
     ("core-workflow", 96),
     ("core-timers", 139),
     ("core-reactions", 618),
-    ("core-reactions-changes", 60),
+    ("core-reactions-changes", 62),
     ("core-workflow-principals", 101),
     ("core-constants", 39),
-    ("core-staterules", 76),
+    ("core-staterules", 88),
     ("core-approvals", 122),
     ("core-freezes-and-sign-offs", 115),
     ("core-lease", 464),
@@ -56,6 +58,9 @@ const TRANSCRIPTS: [(&str, usize); 21] = [
     ("core-pool", 82),
     ("core-rollups", 180),
     ("core-dependencies", 266),
+    ("core-numbering", 104),
+    ("core-lease-numbering", 14),
+    ("core-revisions", 104),
 ];
 
 fn transcript(name: &str) -> Transcript {
@@ -244,7 +249,51 @@ impl<'s, S: Inspect> Scenario<'s, S> {
                 other => panic!("step {at}: a check asked for {other:?}"),
             }
         }
+        if refused.is_none() && matches!(command.action, Action::Publish { .. }) {
+            self.drop_shared_of_removed_uses(database, spec);
+        }
         self.compare(*at, call, "refused", json!(expect.refused), json!(refused));
+    }
+
+    /// Drops the rows of the shared tables of each use of a type that a
+    /// published version no longer lists, or gives another behavior, as
+    /// development mode's publish does with a removed use's writes
+    /// (D103's step 4), so a use added again counts from fresh.
+    fn drop_shared_of_removed_uses(&mut self, database: &str, spec: &TypeSpec) {
+        let mut writes = Vec::new();
+        let versions = self
+            .scenario
+            .types
+            .iter()
+            .find(|known| known.name == spec.name)
+            .map(|known| known.versions.as_slice())
+            .unwrap_or_default();
+        for entry in versions.iter().flat_map(|version| &version.uses) {
+            let kept = spec
+                .uses
+                .iter()
+                .any(|used| used.id() == entry.id() && used.behavior == entry.behavior);
+            let shares = self
+                .declarations
+                .get(&entry.behavior)
+                .is_some_and(|declared| declared.tables.iter().any(|table| table.shared));
+            let write = StoreWrite::DropUse {
+                type_name: spec.name.clone(),
+                behavior: entry.behavior.clone(),
+                use_id: entry.id().to_owned(),
+            };
+            if !kept && shares && !writes.contains(&write) {
+                writes.push(write);
+            }
+        }
+        if writes.is_empty() {
+            return;
+        }
+        let store = self.store(database);
+        store.begin().expect("begun");
+        let applied = store.apply(&Unit { writes }).expect("the drop applies");
+        store.commit().expect("committed");
+        assert!(applied, "a drop of a removed use's shared rows moved");
     }
 
     fn raw(&mut self, step: &TranscriptStep) {
@@ -292,10 +341,14 @@ impl<'s, S: Inspect> Scenario<'s, S> {
         store: &mut S,
     ) -> Result<Changed, Refusal> {
         let hearing = Default::default();
+        // The reference host's mapping, each patch merged as the core
+        // wrote it: a transcript leaves out what a store's own validation
+        // refuses.
         let bridge = Bridge {
             core,
             specs,
             hearing: &hearing,
+            own: None,
         };
         for _ in 0..8 {
             store.begin()?;
@@ -474,7 +527,8 @@ impl<'s, S: Inspect> Scenario<'s, S> {
                 continue;
             };
             let mut tables = Map::new();
-            for table in &declared.tables {
+            // A shared table is the type's as a whole, no row's.
+            for table in declared.tables.iter().filter(|table| !table.shared) {
                 let rows = match self
                     .store(database)
                     .read(&StoreRead::SubRows {

@@ -23,13 +23,16 @@ pub struct DeclaredField {
     pub description: String,
 }
 
-/// One sub-table a behavior declares: its name, its key field and its
-/// other fields.
+/// One sub-table a behavior declares: its name, its key field, its other
+/// fields, and whether it is kept for the type's table as a whole rather
+/// than per row (`"scope": "schema"`, D103's step 4: Numbering's
+/// `counts`), its rows in the layout's shared table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclaredTable {
     pub name: String,
     pub key: String,
     pub fields: Vec<DeclaredField>,
+    pub shared: bool,
 }
 
 /// One operation a behavior declares.
@@ -60,6 +63,14 @@ pub struct Declared {
     pub arms_deadlines: bool,
     pub hears_changes: bool,
     pub events: Vec<String>,
+}
+
+impl Declared {
+    /// Whether the behavior declares a sub-table kept per row, whose rows
+    /// sit in its shared sub-table.
+    pub fn has_row_tables(&self) -> bool {
+        self.tables.iter().any(|table| !table.shared)
+    }
 }
 
 /// The declarations of the behaviors a core runs, by name.
@@ -141,6 +152,7 @@ fn read(file: &Value) -> Result<Declared, String> {
                     .filter(|field| field.name != key)
                     .collect(),
                 key,
+                shared: table.get("scope").and_then(Value::as_str) == Some("schema"),
             }
         })
         .collect();
@@ -215,6 +227,11 @@ mod tests {
         assert!(pool.operations.iter().any(|operation| operation.table));
         let schedules = declarations.get("Schedules").expect("Schedules");
         assert_eq!(schedules.events, ["run"]);
+        let numbering = declarations.get("Numbering").expect("Numbering");
+        assert_eq!(numbering.tables[0].name, "counts");
+        assert!(numbering.tables[0].shared && !numbering.has_row_tables());
+        let revisions = declarations.get("Revisions").expect("Revisions");
+        assert!(revisions.has_row_tables());
         assert_eq!(
             declarations.iter().count(),
             superschematic_rules_behaviors::NAMES.len()
