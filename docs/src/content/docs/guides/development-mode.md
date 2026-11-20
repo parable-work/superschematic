@@ -98,7 +98,7 @@ the field itself (`status`), and its other fields follow the field's name
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
 Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
-Revisions and Comments. Blueprint is not ported yet, so
+Revisions, Comments, Derived and Provenance. Blueprint is not ported yet, so
 `examples/engine-jobs` still runs on the engine, and so does
 `examples/engine-notes`, whose reads hold Comments' `composing` and
 `unread`, which wait for the core.
@@ -122,6 +122,11 @@ they stand. `describe` lists them under `computed`.
   the type's shared table, and moves no version of the row. Its streamed
   replies, read state, inbox, deliveries, search and attachments wait for
   the core.
+- Derived's pulls and settles run on the type as a whole. A derived
+  field's output, the JSON Schema its value is held to, comes from the
+  type's fields: an enum's values and a primitive's type.
+- Provenance's `inReview` is an owned field of each row, which a list
+  filters on as `Provenance.inReview`.
 
 ## Requests
 

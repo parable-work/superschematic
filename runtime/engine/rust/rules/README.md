@@ -81,13 +81,25 @@ to-one relation names it (`relation`: the relation's name and its target
 type, `FieldSpec::relation(name, type, relation, target)`;
 `TypeSpec::relation(name)` finds it by the relation's name), which the core
 follows from a write of the row to the uses of the target type that listen
-to it (a change command, below).
+to it (a change command, below). A field a behavior hands a model carries
+its JSON Schema (`schema`, `FieldSpec::with_schema`): the layout gives each
+field a Derived use derives its own, the output a deriver asks for, which
+Derived hashes and holds a value to (D73).
+
+An operation's handler writes its row's own fields with `Cx::update`, a
+merge patch held to an update's validation and to every use's guard, or
+with `Cx::update_attributed`, which also says where each value came from
+(`{ confidence? }` by field, D73). The operation's after-change hooks hear
+the fields as they were before it (`Change::Operation`'s `before`) and,
+for each field it changed, the behavior whose handler wrote it last with
+the entry its update gave (`attribution`), which Provenance records.
 
 ## The host loop
 
 1. Build the command (`Command::new`, since `Command` may gain members):
-   the caller (`Caller`: subject, permissions, and `stands_in` for a service
-   standing in for an end user, which holds none), the time in epoch
+   the caller (`Caller`: subject, permissions, `stands_in` for a service
+   standing in for an end user, which holds none, and `acting_for`, the
+   subject an agent acts for, D77), the time in epoch
    milliseconds, the action, and the host's id for the request
    (`with_request`), unique per command and the same for every run of it,
    which the keys a behavior makes are derived from. A create carries the id
@@ -961,11 +973,13 @@ and 29 changes a runner ran, in 13 scenarios, the one whose fire a
 StateRules guard vetoes among them; `core-reactions` to 618
 steps, 114 checks and 504 commands, 266 of them changes, in 27 scenarios;
 `core-reactions-changes` to 62 steps, 14 checks and 48 commands, 24 of
-them changes, in 5 scenarios; `core-constants` to 39 steps, 19 checks and
-20 commands, in 4 scenarios; `core-staterules` to 88 steps, 39 checks and
+them changes, in 5 scenarios; `core-constants` to 49 steps, 23 checks and
+26 commands, in 5 scenarios, the one beside Comments and Revisions among
+them; `core-staterules` to 88 steps, 39 checks and
 49 commands, in 9 scenarios, the two of test.Recorder's write of the
-row's own fields and the two beside Revisions among them; `core-approvals` to 122 steps, 29 checks and
-93 commands, 71 of them operations and 5 changes, in 9 scenarios;
+row's own fields and the two beside Revisions among them; `core-approvals` to 146 steps, 33 checks and
+113 commands, 86 of them operations and 5 changes, in 10 scenarios, the
+one beside Comments and Revisions among them;
 `core-workflow-principals` to 101 steps,
 38 define and publish checks, fourteen of them refused, and 63 commands, five
 of them repeats answered unchanged, in 10 scenarios, the one of a state
@@ -987,13 +1001,18 @@ commands, in 18 scenarios; and, of Numbering and Revisions (D103's step
 4), `core-numbering` to 104 steps, 46 checks and 58 commands, in 8
 scenarios, each create's number taken from the use's shared table,
 `core-lease-numbering` (the work queue's `workqueue-lease-numbering.json`)
-to 14 steps, 6 checks and 8 commands, and `core-revisions` to 104 steps,
-35 checks and 69 commands, 44 of them operations, in 12 scenarios, each
-approval an operation's write of the row's own fields; and, of Comments
+to 14 steps, 6 checks and 8 commands, and `core-revisions` to 112 steps,
+37 checks and 75 commands, 49 of them operations, in 13 scenarios, each
+approval an operation's write of the row's own fields; of Comments
 (D103's step 4), `core-comments` to 238 steps, 35 checks and 203
 commands, every write beside the row, and the hand-written
 `core-comments-beside` to 25 steps, 6 checks and 19 commands, each
-command's row version held where a lease's acquire left it. Every transcript's `behaviors` lists the
+command's row version held where a lease's acquire left it; and, of
+Derived and Provenance (D73 on D103's step 4), the hand-written
+`core-derived-provenance` to 75 steps, 26 checks and 49 commands, in 7
+scenarios, each settle a command without a row that writes the rows it
+reaches through applyDerived, an update attributed to Derived
+(`Cx::update_attributed`). Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to

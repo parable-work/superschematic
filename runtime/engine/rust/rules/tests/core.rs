@@ -1344,8 +1344,11 @@ impl Behavior for Count {
 // the patch changed them; its validation refuses the title `bad`, its guard
 // vetoes an update to the title `held`, naming the precondition it was
 // handed, and its after-change hook keeps the title the operation's change
-// heard as before (`none` when it heard none). peek, read-only, and a
-// create's after-change hook try to write the fields too.
+// heard as before (`none` when it heard none), and where each field it
+// changed came from (`from`, D73). peek, read-only, and a create's
+// after-change hook try to write the fields too. score writes the title
+// with update_attributed and the confidence its parameters give, or the
+// attribution `as` gives whole.
 struct Editor;
 
 impl Behavior for Editor {
@@ -1354,7 +1357,9 @@ impl Behavior for Editor {
     fn declaration(&self) -> Declaration {
         Declaration::new("Editor")
             .field("heard")
+            .field("from")
             .operation("retitle", true)
+            .operation("score", true)
             .operation("peek", false)
             .veto("held")
             .preconditions()
@@ -1395,6 +1400,14 @@ impl Behavior for Editor {
     }
 
     fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        if name == "score" {
+            let patch = json!({ "title": params["title"] });
+            let attribution = match params.get("as") {
+                Some(given) => given.clone(),
+                None => json!({ "title": { "confidence": params["confidence"] } }),
+            };
+            return cx.update_attributed(&patch, &attribution).map(Value::Bool);
+        }
         let mut patch = Map::new();
         if let Some(title) = params.get("title") {
             patch.insert("title".into(), title.clone());
@@ -1411,11 +1424,19 @@ impl Behavior for Editor {
             Change::Create if cx.own_field("title") == Some(json!("init")) => {
                 cx.update(&json!({"title": "later"})).map(|_| ())
             }
-            Change::Operation { before, .. } => {
+            Change::Operation {
+                before,
+                attribution,
+                ..
+            } => {
                 let heard = before
                     .and_then(|fields| fields.get("title").cloned())
                     .unwrap_or_else(|| json!("none"));
-                cx.set("heard", heard)
+                cx.set("heard", heard)?;
+                match attribution {
+                    Some(attribution) => cx.set("from", Value::Object((*attribution).clone())),
+                    None => Ok(()),
+                }
             }
             _ => Ok(()),
         }
@@ -5008,6 +5029,87 @@ fn a_shared_table_is_read_by_key_and_written_held_to_its_version() {
     );
 }
 
+/// An operation's write of its row's own fields says where each changed
+/// field came from (D73): the writing behavior, with the confidence an
+/// attributed update gives, which its after-change hooks hear; a field it
+/// leaves as it was is not among them, and an attribution of another shape
+/// is a defect.
+#[test]
+fn an_operations_write_of_own_fields_is_attributed_to_its_behavior() {
+    let core = core();
+    let spec = TypeSpec::new("Page")
+        .with(UseSpec::on_type("Editor", None))
+        .with_field(FieldSpec::new("title", "string"))
+        .with_field(FieldSpec::new("body", "string"));
+    let page = || {
+        Memory::default().with(
+            "Page",
+            "p1",
+            row(json!({"title": "Old", "body": "b"}), json!({}), 4),
+        )
+    };
+    let score = |params: Value| command(alice(), invoke("p1", "Editor", "score", params));
+    let written = changed(core.drive(
+        &spec,
+        &score(json!({"title": "New", "confidence": 0.5})),
+        &mut page(),
+    ));
+    assert_eq!(
+        serde_json::to_value(&written.rows).unwrap()[0]["owned"]["Editor"]["from"],
+        json!({"title": {"behavior": "Editor", "confidence": 0.5}})
+    );
+    // A plain update names the behavior alone.
+    let retitled = changed(core.drive(
+        &spec,
+        &command(
+            alice(),
+            invoke("p1", "Editor", "retitle", json!({"title": "New"})),
+        ),
+        &mut page(),
+    ));
+    assert_eq!(
+        serde_json::to_value(&retitled.rows).unwrap()[0]["owned"]["Editor"]["from"],
+        json!({"title": {"behavior": "Editor"}})
+    );
+    // A patch that changes nothing attributes nothing.
+    let unchanged = changed(core.drive(
+        &spec,
+        &score(json!({"title": "Old", "confidence": 0.5})),
+        &mut page(),
+    ));
+    assert!(
+        serde_json::to_value(&unchanged.rows).unwrap()[0]["owned"]["Editor"]
+            .get("from")
+            .is_none()
+    );
+    for (attribution, ends) in [
+        (
+            json!({"body": {}}),
+            "update_attributed() attributes body, which its patch does not write",
+        ),
+        (
+            json!({"title": {"confidence": 2}}),
+            "update_attributed()'s confidence for title is a number from 0 to 1",
+        ),
+        (
+            json!({"title": {"source": "x"}}),
+            "update_attributed()'s attribution of title has source; it takes confidence",
+        ),
+        (
+            json!([]),
+            "update_attributed()'s attribution is an object of entries by own field",
+        ),
+    ] {
+        let defect = refused(core.drive(
+            &spec,
+            &score(json!({"title": "New", "as": attribution})),
+            &mut page(),
+        ));
+        assert_eq!(defect.code, Code::BehaviorError);
+        assert!(defect.message.ends_with(ends), "{}", defect.message);
+    }
+}
+
 #[test]
 fn an_operation_writes_its_rows_own_fields_through_an_updates_rules() {
     let core = core();
@@ -5037,7 +5139,8 @@ fn an_operation_writes_its_rows_own_fields_through_an_updates_rules() {
     assert_eq!(
         serde_json::to_value(&written.rows).unwrap(),
         json!([{"kind": "update", "type": "Page", "key": "p1", "expectedVersion": 4,
-                "own": {"title": "New", "body": null}, "owned": {"Editor": {"heard": "Old"}}}])
+                "own": {"title": "New", "body": null}, "owned": {"Editor": {"heard": "Old",
+                "from": {"title": {"behavior": "Editor"}, "body": {"behavior": "Editor"}}}}}])
     );
     // A patch that changes nothing writes no own field and asks no guard,
     // and the operation's change hears no fields before it.

@@ -796,6 +796,30 @@ Most are load errors; knowing them saves a build round-trip:
   build refuses their config members (`composeTimeoutMs`,
   `deliverPermission`, `attachments`, ...) and leaves their operations out.
   Comments cannot be removed from a table with rows.
+- When a model should fill fields of a row from its other fields (a
+  ticket's category, an article's summary), implement Derived on the
+  table rather than a worker that writes columns of its own: `implements
+  Derived<Ticket, { fields: { category: { from: ["subject", "body"];
+  instruction: "Classify the request."; model: "standard" } }; permission:
+  "tickets.derive" }>` (D73, D103). Type each derived field as the answer
+  you want, an enum for a pick: its JSON Schema is the output the model is
+  asked for, and a value it refuses counts an attempt. A deriver holding
+  the permission pulls with `derived.staleDerivations` and settles with
+  `derived.settleDerivations`, presenting each item's `sourceHash`; both
+  take no key. A caller's write of a derived field overrides it until
+  `derived.rederive`. Never derive from a `Secret<T>` field. A `@deriver`
+  runs over engine types alone so far: on a table, run the loop in a
+  worker of your own through the repository.
+- When each field must say who set it, or a model's answers must wait
+  for a person, implement Provenance beside it: `implements
+  Provenance<Ticket, { review: { sources: ["Derived"]; below: 0.8;
+  permission: "tickets.review" }; gates: { assigned: { reviewed:
+  ["category"] } } }>` (D73, D103). A write from a source below the
+  confidence is proposed until `provenance.accept` or `provenance.reject`;
+  `provenance_in_review` is a column to list the queue by; a gate holds
+  the Workflow's move into its state. For who wrote the row as a whole,
+  the audit fields (`createdBy`, `updatedBy`, D87) are enough. Neither
+  behavior can be removed from a table with rows.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

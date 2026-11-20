@@ -20,7 +20,9 @@
     "Dependencies",
     "Numbering",
     "Revisions",
-    "Comments"
+    "Comments",
+    "Derived",
+    "Provenance"
   ],
   "scenarios": [
     {

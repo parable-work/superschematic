@@ -252,7 +252,9 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // Dependencies use's tables, relations and fields to its database
 // (checkRollupsConfig, checkDependenciesConfig, D104's step 4), and a
 // Comments use's members to what the behaviors' core runs
-// (checkCommentsConfig, D103's step 4).
+// (checkCommentsConfig, D103's step 4), and a Derived or Provenance use's
+// fields, inputs, sources, states and gates to the table and its Workflow
+// (checkDerivedConfig, checkProvenanceConfig, D73 on D103's step 4).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -356,6 +358,14 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			case commentsBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkCommentsConfig(td, ref, r)
+				}
+			case derivedBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkDerivedConfig(schema, td, ref, r)
+				}
+			case provenanceBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkProvenanceConfig(schema, td, ref, r)
 				}
 			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior, poolBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {

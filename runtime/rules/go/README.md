@@ -379,13 +379,13 @@ deadlines and 29 changes, and 54 checks);
 `core-reactions.transcript.json`, 618 steps (504 commands, 266 of them
 changes, and 114 checks); `core-reactions-changes.transcript.json`, 62
 steps (48 commands, 24 of them changes, and 14 checks);
-`core-constants.transcript.json`, 39 steps (20 commands and 19 checks);
+`core-constants.transcript.json`, 49 steps (26 commands and 23 checks);
 `core-staterules.transcript.json`, 88 steps (49 commands and 39 checks);
-`core-approvals.transcript.json`, 122 steps (93 commands, 71 of them
-operations and 5 changes, and 29 checks); the work queue's, on the core
-(D104): `core-lease.transcript.json`, 464 steps (345 commands, 3 of them
-deadlines, 84 presenting Lease's token as their precondition and 8
-expireHolder's commands without a row, and 119 checks);
+`core-approvals.transcript.json`, 146 steps (113 commands, 86 of them
+operations and 5 changes, and 33 checks); the work queue's, on the core
+(D104): `core-lease.transcript.json`, 474 steps (354 commands, 3 of them
+deadlines, 86 presenting Lease's token as their precondition and 8
+expireHolder's commands without a row, and 120 checks);
 `core-presence.transcript.json`, 141 steps (89 commands, 8 of them
 deadlines, and 52 checks); `core-budget.transcript.json`, 495 steps
 (331 commands and 164 checks); `core-retries.transcript.json`, 250 steps
@@ -422,14 +422,16 @@ those of Numbering and Revisions (D103's step 4),
 `core-numbering.transcript.json`, 104 steps (58 commands, each create's
 number taken from a shared table of counts, and 46 checks),
 `core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
-checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
-each approval an operation's write of the row's own fields, and 35
-checks); and those of Comments (D103's step 4),
+checks), and `core-revisions.transcript.json`, 112 steps (75 commands,
+each approval an operation's write of the row's own fields, and 37
+checks); those of Comments (D103's step 4),
 `core-comments.transcript.json`, 238 steps (203 commands, each message,
 edit and reaction a sub-table row and each write beside the row, and 35
 checks), and `core-comments-beside.transcript.json`, 25 steps (19
 commands, each compared with its row's `expect.version`, which a write
-beside the row leaves, and 6 checks), each command held to its
+beside the row leaves, and 6 checks); and that of Derived and Provenance
+(D73 on D103's step 4), `core-derived-provenance.transcript.json`, 75
+steps (49 commands and 26 checks), each command held to its
 `expect.events` by reading every event queue of its database back after
 it and deleting what it read; each held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every

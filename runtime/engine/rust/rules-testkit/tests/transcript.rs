@@ -105,13 +105,14 @@ const REACTIONS_CHANGES_FLOOR: usize = 62;
 const WORKFLOW_PRINCIPALS_FLOOR: usize = 101;
 
 /// The steps `core-constants.transcript.json` holds, of
-/// `core-constants.json`'s 65: 19 define and publish checks and 20 creates
-/// and updates, in the four scenarios that compose Constants alone or with
-/// Workflow. The two that compose Comments and Revisions, or Variants,
-/// which the core does not run, hold none; the rest of the 26 left out are
-/// opens and reads of rows and of the types the host keeps. An adapter's
-/// replay holds its own count to this one.
-const CONSTANTS_FLOOR: usize = 39;
+/// `core-constants.json`'s 65: 23 define and publish checks and 26 creates,
+/// updates and operations, in the four scenarios that compose Constants
+/// alone or with Workflow and the one that composes Comments and Revisions,
+/// whose operation's update() Constants holds (D103's step 4). The one that
+/// composes Variants, which the core does not run, holds none; the rest of
+/// the 16 left out are opens and reads of rows and of the types the host
+/// keeps. An adapter's replay holds its own count to this one.
+const CONSTANTS_FLOOR: usize = 49;
 
 /// The steps `core-staterules.transcript.json` holds, of
 /// `core-staterules.json`'s 126: 39 define and publish checks and 49
@@ -127,19 +128,20 @@ const CONSTANTS_FLOOR: usize = 39;
 const STATERULES_FLOOR: usize = 88;
 
 /// The steps `core-approvals.transcript.json` holds, of
-/// `core-approvals.json`'s 198: 29 define and publish checks and 93
-/// commands, 88 creates, an update, a delete, transitions and the three
+/// `core-approvals.json`'s 198: 33 define and publish checks and 113
+/// commands, 108 creates, updates, a delete, transitions and the three
 /// operations, and the 5 changes the runner's sweep ran for the Reactions
-/// rule that moves a row into a gated state, in nine scenarios, each
+/// rule that moves a row into a gated state, in ten scenarios, each
 /// recorded type given the own field createdBy the engine kept beside an
-/// instance. The scenario that composes Comments and Revisions holds none,
-/// and the new-version one stops at the publish that removes a gate on a
-/// type with rows, whose sign-offs the engine consumed there and the core
-/// consumes at each row's next write; the rest of the 80 left out are
+/// instance. The scenario that composes Comments and Revisions runs since
+/// the core runs Comments (D103's step 4), and the new-version one stops
+/// at the publish that removes a gate on a type with rows, whose sign-offs
+/// the engine consumed there and the core consumes at each row's next
+/// write; the rest of the 52 left out are
 /// opens, reads of rows and of the event log, and the define the engine's
 /// requires check refused. An adapter's replay holds its own count to this
 /// one.
-const APPROVALS_FLOOR: usize = 122;
+const APPROVALS_FLOOR: usize = 146;
 
 /// The steps `core-freezes-and-sign-offs.transcript.json` holds, of the
 /// hand-written `core-freezes-and-sign-offs.json`'s 138 (D104): 40 define
@@ -151,28 +153,29 @@ const APPROVALS_FLOOR: usize = 122;
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
 /// The steps `core-lease.transcript.json` holds, of `workqueue-lease.json`'s
-/// 691 (D104, step 2): 119 define and publish checks and 345 commands,
-/// creates, updates, deletes and invokes, 84 of them presenting Lease's
+/// 691 (D104, step 2): 120 define and publish checks and 354 commands,
+/// creates, updates, deletes and invokes, 86 of them presenting Lease's
 /// token as the command's precondition, the 3 expiries the runner's runDue
 /// ran as deadlines, each under the step number of the `runner.runDue` that
 /// ran it, and expireHolder's 8 calls, each a command without a row
 /// (`tableOperation`, D104) with the rows it expired as its `others`, in
 /// the 44 scenarios the core an adapter embeds runs, the configs with
 /// sweepMs left out, the scenario that composes Dependencies among them
-/// since the core runs it (D104's step 4). Of the 13 steps expireHolder's
-/// runs brought in: in "expire says why" its call and the acquire after
-/// it; in "a lapsed holder's" its call; in "notRenewedAfter spares" its
-/// two calls and the refused expire after them; in "expireHolder expires
-/// every lease" its refused call, its call, its call that expires none, the
-/// second engine's define and publish, the create and the refused call. The
-/// three that compose test.Gate or test.Signal, which the reference host
-/// runs as fixtures, hold none (31 steps); the rest of the 227 left out are
-/// opens, reads of rows and of the event log, the runDues that ran nothing,
-/// and what the replay skips: the engines with a value store, Comments'
-/// steps (incidental), the reads of the engine's store and the options the
+/// since the core runs it (D104's step 4), and Comments' posts beside the
+/// row since the core runs Comments (D103's step 4). Of the 13 steps
+/// expireHolder's runs brought in: in "expire says why" its call and the
+/// acquire after it; in "a lapsed holder's" its call; in "notRenewedAfter
+/// spares" its two calls and the refused expire after them; in
+/// "expireHolder expires every lease" its refused call, its call, its call
+/// that expires none, the second engine's define and publish, the create
+/// and the refused call. The three that compose test.Gate or test.Signal,
+/// which the reference host runs as fixtures, hold none (31 steps); the
+/// rest of the 217 left out are opens, reads of rows and of the event log,
+/// the runDues that ran nothing, and what the replay skips: the engines
+/// with a value store, the reads of the engine's store and the options the
 /// reference host does not take. An adapter's replay holds its own count to
 /// this one.
-const LEASE_FLOOR: usize = 464;
+const LEASE_FLOOR: usize = 474;
 
 /// The steps `core-presence.transcript.json` holds, of the engine's
 /// `workqueue-presence.json`'s 226 (D104): 52 define and publish checks,
@@ -329,17 +332,17 @@ const NUMBERING_FLOOR: usize = 104;
 const LEASE_NUMBERING_FLOOR: usize = 14;
 
 /// The steps `core-revisions.transcript.json` holds, of
-/// `core-revisions.json`'s 210 (D103's step 4): 35 define and publish
-/// checks and 69 creates, updates, deletes and invokes, in its 16
+/// `core-revisions.json`'s 210 (D103's step 4): 37 define and publish
+/// checks and 75 creates, updates, deletes and invokes, in its 16
 /// scenarios: each revision a row of the use's sub-table `revisions`, each
 /// proposal one of `proposals`, and each approval an operation that writes
 /// the row's own fields through an update's rules, held by test.Hold's
-/// guard while the row is held. The 106 left out are what the replay skips
-/// (the scenarios with an access policy, the one beside Comments, the
-/// proposes the store's own-field validation refuses, a read of the event
-/// log after an update that changed nothing), opens and reads. An adapter's
-/// replay holds its own count to this one.
-const REVISIONS_FLOOR: usize = 104;
+/// guard while the row is held. The 98 left out are what the replay skips
+/// (the scenarios with an access policy, the proposes the store's own-field
+/// validation refuses, a read of the event log after an update that changed
+/// nothing), opens and reads. An adapter's replay holds its own count to
+/// this one.
+const REVISIONS_FLOOR: usize = 112;
 
 /// The steps `core-comments.transcript.json` holds, of
 /// `core-comments.json`'s 502 (D103's step 4): 35 define and publish checks
@@ -359,6 +362,20 @@ const COMMENTS_FLOOR: usize = 238;
 /// it, which a write beside the row leaves where the lease's acquire put
 /// it. The 4 left out are the opens and the reads of the host.
 const COMMENTS_BESIDE_FLOOR: usize = 25;
+
+/// The steps `core-derived-provenance.transcript.json` holds, of the
+/// hand-written `core-derived-provenance.json`'s 88 (D73 on the core,
+/// D103's step 4): 26 define and publish checks, twelve of them refused,
+/// and 49 commands: 12 creates and updates, each keeping the row's
+/// derivations and records, 22 of Derived's pulls, settles and failure
+/// lists, each a command without a row (`tableOperation`) whose settle
+/// writes the rows it reaches as its `others`, and 15 operations of a row
+/// (applyDerived, rederive, Provenance's accept and reject, and the
+/// Workflow moves its gate holds), each holding its row's version after
+/// the step, with its derivations and records as its sub-rows, in its 7
+/// scenarios; none is a repeat. The 13 left out are the opens and the
+/// reads of rows. An adapter's replay holds its own count to this one.
+const DERIVED_PROVENANCE_FLOOR: usize = 75;
 
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
@@ -441,6 +458,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-schedules", SCHEDULES_FLOOR, true),
         ("core-pool", POOL_FLOOR, true),
         ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
+        ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

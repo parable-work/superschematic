@@ -152,9 +152,15 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
             })
         })
         .collect();
+    // A field a Derived use derives carries its JSON Schema, the output a
+    // deriver asks for (D73), as the engine's describe wrote it.
+    let derived = derived_fields(&spec);
     for field in &fields {
         let mut own = FieldSpec::new(&field.name, &field.type_name);
         own.date_time = field.date_time;
+        if derived.contains(&field.name) {
+            own = own.with_schema(field_schema(document, &field.type_name, field.required));
+        }
         spec = spec.with_field(own);
     }
     for (link, target) in related {
@@ -175,6 +181,65 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
         links,
         unmapped,
     })
+}
+
+// derived_fields is the own fields a type's Derived uses derive, by name.
+fn derived_fields(spec: &TypeSpec) -> Vec<String> {
+    spec.uses
+        .iter()
+        .filter(|entry| entry.behavior == "Derived")
+        .filter_map(|entry| entry.config.as_ref()?.get("fields")?.as_object())
+        .flat_map(|fields| fields.keys().cloned())
+        .collect()
+}
+
+/// A field's JSON Schema as the engine's describe wrote it
+/// (`toolsutil.typeToJSONSchemaProperty`): a primitive's type and words, an
+/// enum's values as a string's, and any other type a string described by
+/// its name; a field that is not required admits null. Its members come in
+/// key order, as the engine hashed them (D73: Derived's output).
+pub fn field_schema(document: &Value, type_name: &str, required: bool) -> Value {
+    let (kind, description) = match type_name {
+        "string" | "String" | "ID" => ("string", "A string value".to_owned()),
+        "number" | "Float" => ("number", "A numeric value".to_owned()),
+        "boolean" | "Boolean" => ("boolean", "A boolean value (true or false)".to_owned()),
+        "Int" => ("integer", "An integer value".to_owned()),
+        _ => ("string", format!("A {type_name} value")),
+    };
+    let mut schema = Map::new();
+    schema.insert("description".into(), Value::from(description));
+    let values: Vec<Value> = document
+        .get("enums")
+        .and_then(|enums| enums.get(type_name))
+        .and_then(|definition| definition.get("values"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            value
+                .get("serializedAs")
+                .and_then(Value::as_str)
+                .filter(|serialized| !serialized.is_empty())
+                .or_else(|| value.get("name").and_then(Value::as_str))
+                .map(Value::from)
+        })
+        .collect();
+    if !values.is_empty() {
+        let mut values = values;
+        if !required {
+            values.push(Value::Null);
+        }
+        schema.insert("enum".into(), Value::Array(values));
+    }
+    schema.insert(
+        "type".into(),
+        if required {
+            Value::from(kind)
+        } else {
+            json!([kind, "null"])
+        },
+    );
+    Value::Object(schema)
 }
 
 /// The own field a link's key is held in: `<link>Id`.
@@ -751,6 +816,17 @@ pub fn engine_error(refusal: &Refusal, type_name: &str, live_version: usize) -> 
             error["message"] = Value::from(format!("{}{suffix}", refusal.message));
             if let Some(reason) = error["details"]["reason"].as_str() {
                 error["details"]["reason"] = Value::from(format!("{reason}{suffix}"));
+            }
+        }
+        // A deriver without Derived's permission (D73) is refused for the
+        // derived fields of a table, where the engine's named the schema's
+        // namespace too.
+        "EngineError" if refusal.code == Code::Forbidden => {
+            let table = format!(" the derived fields of {type_name}: ");
+            if let Some((before, after)) = refusal.message.split_once(&table) {
+                error["message"] = Value::from(format!(
+                    "{before} the derived fields of {type_name} in namespace {NAMESPACE}: {after}"
+                ));
             }
         }
         _ => {}

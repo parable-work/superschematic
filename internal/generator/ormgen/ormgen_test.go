@@ -94,6 +94,13 @@ const revisionsFixture = "fixture-revisions-db"
 // marks a shared table's, none with a repository.
 const commentsFixture = "fixture-comments-db"
 
+// derivedProvenanceFixture is the DB fixture whose Ticket implements
+// Derived and Provenance beside its status Workflow and whose Article
+// implements Derived (D73 on D103's step 4): their operations under
+// Derived() and Provenance(), the pulls and settles of the table as a
+// whole, each derivation and record a sub-table row with no repository.
+const derivedProvenanceFixture = "fixture-derived-provenance-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -112,7 +119,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -246,6 +253,11 @@ func TestWriteORMGolden(t *testing.T) {
 		// Comments(), every writing one beside the row, no repository of a
 		// sub-table or of the shared table, no upserts, and no queue.
 		{commentsFixture, []string{"repository_review.go", "repository_ticket.go", "rules.go"}},
+		// Tables of Derived and Provenance (D73 on D103's step 4): their
+		// operations under Derived() and Provenance(), Derived's of the
+		// table as a whole taking no key, no repository of a sub-table, no
+		// upserts, and no queue.
+		{derivedProvenanceFixture, []string{"repository_article.go", "repository_ticket.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

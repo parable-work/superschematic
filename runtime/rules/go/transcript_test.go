@@ -86,11 +86,11 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reactions.transcript.json", 618},
 	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 62},
 	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 101},
-	{"../../engine/testdata/rules/core-constants.transcript.json", 39},
+	{"../../engine/testdata/rules/core-constants.transcript.json", 49},
 	{"../../engine/testdata/rules/core-staterules.transcript.json", 88},
-	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
+	{"../../engine/testdata/rules/core-approvals.transcript.json", 146},
 	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
-	{"../../engine/testdata/rules/core-lease.transcript.json", 464},
+	{"../../engine/testdata/rules/core-lease.transcript.json", 474},
 	{"../../engine/testdata/rules/core-presence.transcript.json", 141},
 	{"../../engine/testdata/rules/core-budget.transcript.json", 495},
 	{"../../engine/testdata/rules/core-retries.transcript.json", 250},
@@ -104,9 +104,10 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-dependencies.transcript.json", 266},
 	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},
 	{"../../engine/testdata/rules/core-lease-numbering.transcript.json", 14},
-	{"../../engine/testdata/rules/core-revisions.transcript.json", 104},
+	{"../../engine/testdata/rules/core-revisions.transcript.json", 112},
 	{"../../engine/testdata/rules/core-comments.transcript.json", 238},
 	{"../../engine/testdata/rules/core-comments-beside.transcript.json", 25},
+	{"../../engine/testdata/rules/core-derived-provenance.transcript.json", 75},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

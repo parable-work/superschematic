@@ -112,7 +112,8 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Schedules, D104's step 3's second part, then Pool, the rest of its step
 // 3, then Rollups and Dependencies, the first of D103's step 4's waves
 // after D104's, then Numbering and Revisions, its next, then Comments, the
-// wave after. Of these, a table
+// wave after, then Derived and Provenance (D73), the wave after that. Of
+// these, a table
 // implements one that names no value field (implements Timers<T, C>, and
 // Constants, StateRules and Approvals since D104's step 2, Lease,
 // Presence, Budget and Retries since its second batch, Seats since its
@@ -121,12 +122,13 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3,
 // and number: Numbering<C> since D103's step 4, which ports the engine's
 // remaining behaviors in waves after them, and implements Rollups,
-// Dependencies, Revisions and Comments<T, C> since that step too). A test holds the
+// Dependencies, Revisions, Comments, Derived and Provenance<T, C> since
+// that step too). A test holds the
 // list to the behaviors each transcript of runtime/engine/testdata/rules
 // records.
 var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool",
 	// D103's step 4, its later waves, in the order they were ported.
-	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments",
+	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments", "Derived", "Provenance",
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a

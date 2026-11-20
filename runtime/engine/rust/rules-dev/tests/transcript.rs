@@ -36,17 +36,17 @@ use superschematic_rules_testkit::{
 
 /// The transcripts and the floors `superschematic-rules-adapter`'s replay
 /// holds them to: each store replays every one.
-const TRANSCRIPTS: [(&str, usize); 26] = [
+const TRANSCRIPTS: [(&str, usize); 27] = [
     ("core-workflow", 96),
     ("core-timers", 139),
     ("core-reactions", 618),
     ("core-reactions-changes", 62),
     ("core-workflow-principals", 101),
-    ("core-constants", 39),
+    ("core-constants", 49),
     ("core-staterules", 88),
-    ("core-approvals", 122),
+    ("core-approvals", 146),
     ("core-freezes-and-sign-offs", 115),
-    ("core-lease", 464),
+    ("core-lease", 474),
     ("core-presence", 141),
     ("core-budget", 495),
     ("core-retries", 250),
@@ -60,9 +60,10 @@ const TRANSCRIPTS: [(&str, usize); 26] = [
     ("core-dependencies", 266),
     ("core-numbering", 104),
     ("core-lease-numbering", 14),
-    ("core-revisions", 104),
+    ("core-revisions", 112),
     ("core-comments", 238),
     ("core-comments-beside", 25),
+    ("core-derived-provenance", 75),
 ];
 
 fn transcript(name: &str) -> Transcript {

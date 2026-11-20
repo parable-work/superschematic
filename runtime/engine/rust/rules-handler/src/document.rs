@@ -205,12 +205,20 @@ impl Model {
     }
 
     /// The type as the core runs it: its uses in order and its own fields,
-    /// an instant's marked, a relation's naming it.
+    /// an instant's marked, a relation's naming it, and a field a Derived
+    /// use derives carrying its JSON Schema (D73, [`derived_output`]).
     pub fn spec(&self) -> TypeSpec {
         let mut spec = TypeSpec::new(&self.name);
         for used in &self.uses {
             spec = spec.with(used.spec.clone());
         }
+        let derived: Vec<&str> = self
+            .uses
+            .iter()
+            .filter(|used| used.spec.behavior == "Derived" && used.spec.field().is_none())
+            .filter_map(|used| used.spec.config.as_ref()?.get("fields")?.as_object())
+            .flat_map(|fields| fields.keys().map(String::as_str))
+            .collect();
         for field in &self.fields {
             let mut entry = match &field.relation {
                 Some(relation) => FieldSpec::relation(
@@ -222,10 +230,56 @@ impl Model {
                 None => FieldSpec::new(&field.name, &field.type_name),
             };
             entry.date_time = field.kind == Kind::DateTime && !field.list;
+            if derived.contains(&field.name.as_str()) {
+                entry = entry.with_schema(derived_output(field));
+            }
             spec = spec.with_field(entry);
         }
         spec
     }
+}
+
+/// The JSON Schema of a field a Derived use derives (D73): the output a
+/// deriver asks for, as the engine's describe and a table's layout write
+/// it, so its hash is theirs: a primitive's type and words, an enum's
+/// values, any other type a string described by its name, and null
+/// admitted where the field is not required; its members in key order.
+pub fn derived_output(field: &Field) -> Value {
+    let (kind, description) = match field.type_name.as_str() {
+        "string" | "String" | "ID" => ("string", "A string value".to_owned()),
+        "number" | "Float" => ("number", "A numeric value".to_owned()),
+        "boolean" | "Boolean" => ("boolean", "A boolean value (true or false)".to_owned()),
+        "Int" => ("integer", "An integer value".to_owned()),
+        name => (
+            match field.kind {
+                Kind::Integer => "integer",
+                Kind::Number => "number",
+                _ => "string",
+            },
+            format!("A {name} value"),
+        ),
+    };
+    let mut schema = Map::new();
+    schema.insert("description".into(), Value::from(description));
+    if let Kind::Enum(values) = &field.kind {
+        let mut listed: Vec<Value> = values
+            .iter()
+            .map(|value| Value::from(value.as_str()))
+            .collect();
+        if !field.required {
+            listed.push(Value::Null);
+        }
+        schema.insert("enum".into(), Value::Array(listed));
+    }
+    schema.insert(
+        "type".into(),
+        if field.required {
+            Value::from(kind)
+        } else {
+            serde_json::json!([kind, "null"])
+        },
+    );
+    Value::Object(schema)
 }
 
 /// The kind of a builtin IR type or primitive; `None` for any other name.
@@ -845,6 +899,47 @@ mod tests {
         assert_eq!(spec.uses.len(), 2);
         assert!(spec.field("placedAt").is_some_and(|field| field.date_time));
         assert!(spec.relation("customer").is_some());
+    }
+
+    /// A field a Derived use derives carries its JSON Schema in the core's
+    /// spec, as the engine's describe wrote it (D73): an enum's values and
+    /// null where the field is not required; no other field carries one.
+    #[test]
+    fn a_derived_field_carries_its_json_schema() {
+        let document = json!({
+            "kind": "General",
+            "name": "Ticket",
+            "enums": {"Category": {"name": "Category", "values": [{"name": "billing"}, {"name": "bug"}]}},
+            "types": {"Ticket": {
+                "name": "Ticket",
+                "behaviors": [{"name": "Derived", "config": {"permission": "p", "fields": {
+                    "category": {"from": ["subject"], "instruction": "i", "model": "m"},
+                    "summary": {"from": ["subject"], "instruction": "i", "model": "m"}}}}],
+                "fields": [
+                    {"name": "subject", "typeRef": {"name": "string"}, "required": true},
+                    {"name": "category", "typeRef": {"name": "Category"}},
+                    {"name": "summary", "typeRef": {"name": "string"}}
+                ]
+            }}
+        });
+        let spec = read(&document, &declarations())
+            .expect("the document reads")
+            .spec();
+        assert_eq!(
+            spec.field("category")
+                .and_then(|field| field.schema.clone()),
+            Some(
+                json!({"description": "A Category value", "enum": ["billing", "bug", null], "type": ["string", "null"]})
+            )
+        );
+        assert_eq!(
+            spec.field("summary").and_then(|field| field.schema.clone()),
+            Some(json!({"description": "A string value", "type": ["string", "null"]}))
+        );
+        assert_eq!(
+            spec.field("subject").and_then(|field| field.schema.clone()),
+            None
+        );
     }
 
     #[test]

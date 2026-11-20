@@ -734,3 +734,65 @@ export interface DependenciesOn<T> {
  * the table itself.
  */
 export type Dependencies<T, C extends DependenciesOn<T>> = NonNullable<unknown>;
+
+/** One derived field of DerivedOn<T> (D73): the table's own fields it is derived from, never itself or another derived field; what the model is asked; the label of its model; and the states of the table's Workflow it is derived in. */
+export interface DerivedFieldOn<T> {
+  readonly from: readonly Extract<keyof T, string>[];
+  /** What the model is asked, given the inputs: 1 to 4000 characters. */
+  readonly instruction: string;
+  /** A label the deployment maps to a provider's model, which the core only compares. */
+  readonly model: string;
+  /** The states of the table's one Workflow in which the field is derived; every state when absent. */
+  readonly states?: readonly string[];
+}
+
+/** Derived's config on a table (D73, D103's step 4): the derived fields, by the table's own field, the permission a deriver needs and how many failed attempts a field takes. */
+export interface DerivedOn<T> {
+  readonly fields: { readonly [F in Extract<keyof T, string>]?: DerivedFieldOn<T> };
+  /** The permission a deriver needs to pull, settle and apply values. */
+  readonly permission: string;
+  /** How many failed attempts a field takes before it waits for its inputs to move: 1 to 10, 3 when absent. */
+  readonly maxAttempts?: number;
+}
+
+/**
+ * Own fields a model outside the core fills (D73, D103's step 4):
+ * `export abstract class Ticket implements Derived<Ticket, { fields: { category: { from: ["subject", "body"]; instruction: "Classify the request."; model: "standard" } }; permission: "tickets.derive" }>`.
+ * The type stays a table, and a derived field is an own field of it, typed
+ * by the table, whose JSON Schema is the output a deriver asks for. Derived
+ * keeps each derived field's hashes, override and attempts in a sub-table
+ * (ticket_derived_derivations); a deriver pulls the stale fields with
+ * derived.staleDerivations and settles its answers with
+ * derived.settleDerivations, operations of the table as a whole, which
+ * write each row's values through derived.applyDerived; a caller's write of
+ * a derived field overrides it until derived.rederive. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Derived<T, C extends DerivedOn<T>> = NonNullable<unknown>;
+
+/** Provenance's config on a table (D73, D103's step 4): the fields it records, which writes enter review, and the states of the table's Workflow a move into which requires fields out of review. */
+export interface ProvenanceOn<T> {
+  /** The table's own fields it records; every one when absent. */
+  readonly fields?: readonly Extract<keyof T, string>[];
+  /** Which writes enter review: the behaviors whose writes are proposed, the confidence at or above which one is accepted with no reviewer, and the permission a reviewer needs. */
+  readonly review?: { readonly sources: readonly string[]; readonly below?: number; readonly permission: string };
+  /** By state of the table's one Workflow, the recorded fields a move into it requires out of review, or all. */
+  readonly gates?: Readonly<Record<string, { readonly reviewed: readonly Extract<keyof T, string>[] | "all" }>>;
+}
+
+/**
+ * Who set each of a table's own fields last, and through what (D73, D103's
+ * step 4): `export abstract class Ticket implements Provenance<Ticket, { review: { sources: ["Derived"]; permission: "tickets.review" } }>`.
+ * The type stays a table. Provenance records each field's last write, its
+ * source (caller, or the behavior whose operation wrote it), who made it and
+ * for whom, when and with what confidence, in a sub-table
+ * (ticket_provenance_records); with review, a write from a source is
+ * proposed until a reviewer accepts or rejects it (provenance.accept,
+ * reject), and the owned column provenance_in_review, which a list filters
+ * on, holds whether any field is proposed. A gate holds a move of the
+ * table's Workflow into its state while a field it lists is proposed. Like
+ * Timers, it resolves to the empty object type; the first type argument is
+ * the table itself.
+ */
+export type Provenance<T, C extends ProvenanceOn<T>> = NonNullable<unknown>;

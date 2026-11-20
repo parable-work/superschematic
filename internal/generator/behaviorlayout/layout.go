@@ -435,6 +435,10 @@ type FieldSpec struct {
 	Type     string        `json:"type"`
 	DateTime bool          `json:"dateTime,omitempty"`
 	Relation *RelationSpec `json:"relation,omitempty"`
+	// Schema is the field's JSON Schema, given for a field a Derived use
+	// of the table derives: the output a deriver asks for (D73,
+	// DerivedOutput); absent for any other field.
+	Schema json.RawMessage `json:"schema,omitempty"`
 }
 
 // RelationSpec is a to-one relation an own field holds the key of, as the
@@ -681,6 +685,13 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 		return nil, fmt.Errorf("behaviorlayout: table %s has no key column", td.Name)
 	}
 	t.Spec = TypeSpec{Name: td.Name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own, relations)}
+	// A field a Derived use derives carries its JSON Schema, the output a
+	// deriver asks for, which the core hashes and holds a value to (D73).
+	for i, spec := range t.Spec.Fields {
+		if output := DerivedOutput(schema, td, spec.Name); output != nil {
+			t.Spec.Fields[i].Schema = output
+		}
+	}
 	for _, c := range t.Audit {
 		t.Spec.Fields = append(t.Spec.Fields, FieldSpec{Name: c.Field, Type: c.Type, DateTime: c.Convert == ConvertEpochMillis})
 	}
@@ -967,6 +978,86 @@ func AuditFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 		return nil
 	}
 	return auditColumns(model)
+}
+
+// DerivedOutput is the JSON Schema of the own field name of td when a
+// Derived use td implements derives it (D73): the output a deriver asks
+// for, as the engine's describe wrote a field's (toolsutil's
+// typeToJSONSchemaProperty), so a hash is the one the engine gave: a
+// primitive's type and words, an enum's values, a whole-number scalar an
+// integer and a decimal one a number, described by its name, and any other
+// type a string described by its name; a field that is not required admits
+// null. Its members are in key order, as the core hashes them. nil for a
+// field no Derived use derives.
+func DerivedOutput(schema *ir.Schema, td *ir.TypeDef, name string) json.RawMessage {
+	derived := false
+	for _, ref := range td.TableBehaviors() {
+		if ref.Name != "Derived" || ref.FieldAnchored() {
+			continue
+		}
+		var config struct {
+			Fields map[string]json.RawMessage `json:"fields"`
+		}
+		if json.Unmarshal(ref.Config, &config) == nil {
+			_, derived = config.Fields[name]
+		}
+	}
+	if !derived {
+		return nil
+	}
+	var field *ir.FieldDef
+	for _, fd := range td.Fields {
+		if fd != nil && fd.Name == name {
+			field = fd
+		}
+	}
+	if field == nil {
+		return nil
+	}
+	typeName := field.TypeRef.Name
+	kind, description := "string", fmt.Sprintf("A %s value", typeName)
+	switch typeName {
+	case "string", "String", "ID":
+		description = "A string value"
+	case "number", "Float":
+		kind, description = "number", "A numeric value"
+	case "boolean", "Boolean":
+		kind, description = "boolean", "A boolean value (true or false)"
+	case "Int":
+		kind, description = "integer", "An integer value"
+	default:
+		switch {
+		case strings.HasPrefix(typeName, "Generic.Int") || strings.HasPrefix(typeName, "Generic.UInt"):
+			kind = "integer"
+		case strings.HasPrefix(typeName, "Generic.Float") || strings.HasPrefix(typeName, "Generic.Decimal"):
+			kind = "number"
+		}
+	}
+	output := map[string]any{"description": description}
+	if enum := schema.Enums[typeName]; enum != nil && len(enum.Values) > 0 {
+		values := make([]any, 0, len(enum.Values)+1)
+		for _, value := range enum.Values {
+			if value.SerializedAs != "" {
+				values = append(values, value.SerializedAs)
+			} else {
+				values = append(values, value.Name)
+			}
+		}
+		if !field.Required {
+			values = append(values, nil)
+		}
+		output["enum"] = values
+	}
+	if field.Required {
+		output["type"] = kind
+	} else {
+		output["type"] = []string{kind, "null"}
+	}
+	text, err := json.Marshal(output)
+	if err != nil {
+		return nil
+	}
+	return text
 }
 
 // fieldSpecs are own's columns as the core's spec holds the type's own

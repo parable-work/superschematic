@@ -778,6 +778,11 @@ pub enum Change<'a> {
         /// it made wrote them ([`crate::Cx::update`]); `None` when nothing
         /// in it did.
         before: Option<&'a Map<String, Value>>,
+        /// Where each own field the operation changed came from (D73), by
+        /// field: `{ behavior, confidence? }`, the behavior whose handler
+        /// wrote it last and the confidence its update gave
+        /// ([`crate::Cx::update_attributed`]); `None` when it changed none.
+        attribution: Option<&'a Map<String, Value>>,
     },
     /// A deadline of a use that fell due.
     Deadline {

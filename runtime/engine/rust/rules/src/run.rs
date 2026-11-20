@@ -157,6 +157,12 @@ pub(crate) struct Touched {
     /// them ([`crate::Cx::update`]): what its after-change hooks hear as
     /// the fields before it.
     pub initial: Option<Map<String, Value>>,
+    /// Where each own field an operation wrote came from, by field, the
+    /// last write's: `{ behavior, confidence? }`, the behavior whose
+    /// handler wrote it and the confidence its update gave
+    /// ([`crate::Cx::update_attributed`], D73): what its after-change hooks
+    /// hear as the operation's attribution.
+    pub attribution: Map<String, Value>,
 }
 
 impl Touched {
@@ -170,6 +176,7 @@ impl Touched {
             write: Write::Read,
             set: BTreeMap::new(),
             initial: None,
+            attribution: Map::new(),
         }
     }
 
@@ -183,6 +190,7 @@ impl Touched {
             write: Write::Create,
             set: BTreeMap::new(),
             initial: None,
+            attribution: Map::new(),
         }
     }
 
@@ -196,6 +204,7 @@ impl Touched {
             write: Write::Gone,
             set: BTreeMap::new(),
             initial: None,
+            attribution: Map::new(),
         }
     }
 
@@ -211,6 +220,7 @@ impl Touched {
             write: Write::Table,
             set: BTreeMap::new(),
             initial: None,
+            attribution: Map::new(),
         }
     }
 
@@ -1092,12 +1102,15 @@ impl<'a> Run<'a> {
     /// changes nothing asks no guard and writes nothing. The row's write
     /// carries each field the patch names at its value after it, and the
     /// row keeps its fields from before the first such write for its
-    /// after-change hooks. Answers whether it changed the fields.
+    /// after-change hooks, and each field the patch names records where it
+    /// came from: the writing use's behavior, with the entry `attribution`
+    /// gives it (D73). Answers whether it changed the fields.
     pub fn update_own(
         &self,
         frame: Frame<'_>,
         index: usize,
         patch: &Map<String, Value>,
+        attribution: &Map<String, Value>,
     ) -> Hook<bool> {
         let (before, after) = self.validate_own(frame, index, patch)?;
         if after == before {
@@ -1118,9 +1131,20 @@ impl<'a> Run<'a> {
                 (field.clone(), value)
             })
             .collect();
+        let behavior = frame.uses[index].spec.behavior.as_str();
         let mut rows = self.rows.borrow_mut();
         let touched = &mut rows[frame.row];
         touched.initial.get_or_insert(before);
+        for field in patch.keys() {
+            let mut entry = Map::new();
+            entry.insert("behavior".into(), Value::from(behavior));
+            if let Some(Value::Object(given)) = attribution.get(field) {
+                entry.extend(given.clone());
+            }
+            touched
+                .attribution
+                .insert(field.clone(), Value::Object(entry));
+        }
         match &mut touched.write {
             Write::Read => touched.write = Write::Update(written),
             Write::Update(own) => own.extend(written),
@@ -1128,6 +1152,23 @@ impl<'a> Run<'a> {
         }
         touched.own = after;
         Ok(true)
+    }
+
+    /// The attribution of the own fields an operation changed on a row
+    /// (D73): each field whose value differs from the row's own fields
+    /// before the operation, with its last write's entry; `None` when the
+    /// operation changed none.
+    pub(crate) fn attribution_of(&self, row: usize) -> Option<Map<String, Value>> {
+        let rows = self.rows.borrow();
+        let touched = &rows[row];
+        let initial = touched.initial.as_ref()?;
+        let changed: Map<String, Value> = touched
+            .attribution
+            .iter()
+            .filter(|(field, _)| initial.get(*field) != touched.own.get(*field))
+            .map(|(field, entry)| (field.clone(), entry.clone()))
+            .collect();
+        (!changed.is_empty()).then_some(changed)
     }
 
     /// Holds a merge patch of a row's own fields to an update's validation
@@ -1393,6 +1434,7 @@ impl<'a> Run<'a> {
                     )?;
                     self.mark_updated(row);
                     let initial = self.rows.borrow()[row].initial.clone();
+                    let attribution = self.attribution_of(row);
                     self.after_change(
                         frame,
                         &Change::Operation {
@@ -1400,6 +1442,7 @@ impl<'a> Run<'a> {
                             operation,
                             params,
                             before: initial.as_ref(),
+                            attribution: attribution.as_ref(),
                         },
                         operation,
                     )?;
@@ -1685,6 +1728,7 @@ impl<'a> Run<'a> {
         if declared.writes && !self.unchanged.get() {
             self.mark_updated(self.top.row);
             let initial = self.rows.borrow()[self.top.row].initial.clone();
+            let attribution = self.attribution_of(self.top.row);
             self.after_change(
                 self.top,
                 &Change::Operation {
@@ -1692,6 +1736,7 @@ impl<'a> Run<'a> {
                     operation,
                     params,
                     before: initial.as_ref(),
+                    attribution: attribution.as_ref(),
                 },
                 operation,
             )?;
