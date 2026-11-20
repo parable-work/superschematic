@@ -341,6 +341,20 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 /// replay holds its own count to this one.
 const REVISIONS_FLOOR: usize = 104;
 
+/// The steps `core-derived-provenance.transcript.json` holds, of the
+/// hand-written `core-derived-provenance.json`'s 88 (D73 on the core,
+/// D103's step 4): 26 define and publish checks, twelve of them refused,
+/// and 49 commands: 12 creates and updates, each keeping the row's
+/// derivations and records, 22 of Derived's pulls, settles and failure
+/// lists, each a command without a row (`tableOperation`) whose settle
+/// writes the rows it reaches as its `others`, and 15 operations of a row
+/// (applyDerived, rederive, Provenance's accept and reject, and the
+/// Workflow moves its gate holds), each holding its row's version after
+/// the step, with its derivations and records as its sub-rows, in its 7
+/// scenarios; none is a repeat. The 13 left out are the opens and the
+/// reads of rows. An adapter's replay holds its own count to this one.
+const DERIVED_PROVENANCE_FLOOR: usize = 75;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -420,6 +434,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-reconcile", RECONCILE_FLOOR, true),
         ("core-schedules", SCHEDULES_FLOOR, true),
         ("core-pool", POOL_FLOOR, true),
+        ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

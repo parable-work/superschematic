@@ -146,6 +146,8 @@ export interface CoreFieldSpec {
   readonly dateTime?: boolean;
   /** The to-one relation whose key the field holds (D103): the relation's name and its target type; absent for a field that holds none. */
   readonly relation?: CoreRelationSpec;
+  /** The field's JSON Schema, which the layout gives for a field Derived derives: the output a deriver asks for (D73). */
+  readonly schema?: unknown;
 }
 
 /** A to-one relation an own field holds the key of: superschematic_rules::RelationSpec. */
@@ -168,6 +170,8 @@ export interface CoreCaller {
   readonly subject: string;
   readonly permissions?: readonly string[];
   readonly standsIn?: boolean;
+  /** The subject the caller acts for (D77), which Provenance records (D73). */
+  readonly actingFor?: string;
 }
 
 /** What a command does, tagged by kind. Open: execute refuses a kind it does not know as internal. */

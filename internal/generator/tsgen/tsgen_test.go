@@ -121,6 +121,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		// revisions, its sub-tables with no repository, no upserts, and
 		// the sub-tables in the layout.
 		{service: "fixture-revisions-db", behaviors: true},
+		// Tables of Derived and Provenance (D73 on D103's step 4): their
+		// operations under derived and provenance, Derived's of the table
+		// as a whole taking no key, their sub-tables with no repository,
+		// no upserts, and the sub-tables and each derived field's schema in
+		// the layout.
+		{service: "fixture-derived-provenance-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},

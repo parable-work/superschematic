@@ -32,6 +32,8 @@ export interface FieldSpec {
   readonly dateTime?: boolean;
   /** The to-one relation whose key the field holds (D103); absent for a field that holds none. */
   readonly relation?: RelationSpec;
+  /** The field's JSON Schema, which a host gives for a field a behavior hands a model: the output a deriver asks for a field Derived derives (D73). */
+  readonly schema?: unknown;
 }
 
 /** A to-one relation an own field holds the key of (superschematic_rules::RelationSpec): the relation field's name and the type it points at. */
@@ -52,6 +54,8 @@ export interface Caller {
   readonly subject: string;
   readonly permissions?: readonly string[];
   readonly standsIn?: boolean;
+  /** The subject the caller acts for (D77), which Provenance records (D73). */
+  readonly actingFor?: string;
 }
 
 /** What a command does (superschematic_rules::Action), tagged by kind. Open: a host matches it with a fallback. */

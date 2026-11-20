@@ -105,6 +105,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},
 	{"../../engine/testdata/rules/core-lease-numbering.transcript.json", 14},
 	{"../../engine/testdata/rules/core-revisions.transcript.json", 104},
+	{"../../engine/testdata/rules/core-derived-provenance.transcript.json", 75},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

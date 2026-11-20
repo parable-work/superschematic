@@ -1,0 +1,580 @@
+{
+  "types": {
+    "Article": {
+      "type": "Article",
+      "table": "article",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "body",
+          "column": "body",
+          "type": "string"
+        },
+        {
+          "field": "summary",
+          "column": "summary",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Derived",
+          "behavior": "Derived",
+          "member": "derived",
+          "fields": [],
+          "operations": [
+            {
+              "name": "staleDerivations",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "settleDerivations",
+              "writes": true,
+              "table": true
+            },
+            {
+              "name": "failedDerivations",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "applyDerived",
+              "writes": true
+            },
+            {
+              "name": "rederive",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "derivations",
+              "table": "article_derived_derivations",
+              "row": "article_id",
+              "key": {
+                "name": "field",
+                "field": "field",
+                "column": "field",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "sourceHash",
+                  "field": "sourceHash",
+                  "column": "source_hash",
+                  "type": "string"
+                },
+                {
+                  "name": "settledHash",
+                  "field": "settledHash",
+                  "column": "settled_hash",
+                  "type": "string"
+                },
+                {
+                  "name": "model",
+                  "field": "model",
+                  "column": "model",
+                  "type": "string"
+                },
+                {
+                  "name": "confidence",
+                  "field": "confidence",
+                  "column": "confidence",
+                  "type": "number"
+                },
+                {
+                  "name": "settledAt",
+                  "field": "settledAt",
+                  "column": "settled_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "settledBy",
+                  "field": "settledBy",
+                  "column": "settled_by",
+                  "type": "string"
+                },
+                {
+                  "name": "overriddenBy",
+                  "field": "overriddenBy",
+                  "column": "overridden_by",
+                  "type": "string"
+                },
+                {
+                  "name": "overriddenAt",
+                  "field": "overriddenAt",
+                  "column": "overridden_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "attempts",
+                  "field": "attempts",
+                  "column": "attempts",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "failure",
+                  "field": "failure",
+                  "column": "failure",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "forced",
+                  "field": "forced",
+                  "column": "forced",
+                  "type": "boolean"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Article",
+        "uses": [
+          {
+            "behavior": "Derived",
+            "config": {
+              "fields": {
+                "summary": {
+                  "from": [
+                    "body"
+                  ],
+                  "instruction": "Summarize it in one sentence.",
+                  "model": "simple"
+                }
+              },
+              "permission": "articles.derive"
+            },
+            "anchor": "type"
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "summary",
+            "type": "string",
+            "schema": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Ticket": {
+      "type": "Ticket",
+      "table": "ticket",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "subject",
+          "column": "subject",
+          "type": "string"
+        },
+        {
+          "field": "body",
+          "column": "body",
+          "type": "string"
+        },
+        {
+          "field": "category",
+          "column": "category",
+          "type": "Category"
+        },
+        {
+          "field": "priority",
+          "column": "priority",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Derived",
+          "behavior": "Derived",
+          "member": "derived",
+          "fields": [],
+          "operations": [
+            {
+              "name": "staleDerivations",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "settleDerivations",
+              "writes": true,
+              "table": true
+            },
+            {
+              "name": "failedDerivations",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "applyDerived",
+              "writes": true
+            },
+            {
+              "name": "rederive",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "derivations",
+              "table": "ticket_derived_derivations",
+              "row": "ticket_id",
+              "key": {
+                "name": "field",
+                "field": "field",
+                "column": "field",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "sourceHash",
+                  "field": "sourceHash",
+                  "column": "source_hash",
+                  "type": "string"
+                },
+                {
+                  "name": "settledHash",
+                  "field": "settledHash",
+                  "column": "settled_hash",
+                  "type": "string"
+                },
+                {
+                  "name": "model",
+                  "field": "model",
+                  "column": "model",
+                  "type": "string"
+                },
+                {
+                  "name": "confidence",
+                  "field": "confidence",
+                  "column": "confidence",
+                  "type": "number"
+                },
+                {
+                  "name": "settledAt",
+                  "field": "settledAt",
+                  "column": "settled_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "settledBy",
+                  "field": "settledBy",
+                  "column": "settled_by",
+                  "type": "string"
+                },
+                {
+                  "name": "overriddenBy",
+                  "field": "overriddenBy",
+                  "column": "overridden_by",
+                  "type": "string"
+                },
+                {
+                  "name": "overriddenAt",
+                  "field": "overriddenAt",
+                  "column": "overridden_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "attempts",
+                  "field": "attempts",
+                  "column": "attempts",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "failure",
+                  "field": "failure",
+                  "column": "failure",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "forced",
+                  "field": "forced",
+                  "column": "forced",
+                  "type": "boolean"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Provenance",
+          "behavior": "Provenance",
+          "member": "provenance",
+          "fields": [
+            {
+              "name": "inReview",
+              "field": "provenanceInReview",
+              "column": "provenance_in_review",
+              "type": "boolean"
+            }
+          ],
+          "operations": [
+            {
+              "name": "accept",
+              "writes": true
+            },
+            {
+              "name": "reject",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "records",
+              "table": "ticket_provenance_records",
+              "row": "ticket_id",
+              "key": {
+                "name": "field",
+                "field": "field",
+                "column": "field",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "source",
+                  "field": "source",
+                  "column": "source",
+                  "type": "string"
+                },
+                {
+                  "name": "bySubject",
+                  "field": "bySubject",
+                  "column": "by_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "writtenAt",
+                  "field": "writtenAt",
+                  "column": "written_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "confidence",
+                  "field": "confidence",
+                  "column": "confidence",
+                  "type": "number"
+                },
+                {
+                  "name": "review",
+                  "field": "review",
+                  "column": "review",
+                  "type": "string"
+                },
+                {
+                  "name": "reviewedBy",
+                  "field": "reviewedBy",
+                  "column": "reviewed_by",
+                  "type": "string"
+                },
+                {
+                  "name": "reviewedAt",
+                  "field": "reviewedAt",
+                  "column": "reviewed_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Ticket",
+        "uses": [
+          {
+            "behavior": "Derived",
+            "config": {
+              "fields": {
+                "category": {
+                  "from": [
+                    "subject",
+                    "body"
+                  ],
+                  "instruction": "Classify the request.",
+                  "model": "standard"
+                },
+                "priority": {
+                  "from": [
+                    "subject",
+                    "body"
+                  ],
+                  "instruction": "How urgent is this? low, normal or high.",
+                  "model": "standard",
+                  "states": [
+                    "new",
+                    "triage"
+                  ]
+                }
+              },
+              "maxAttempts": 2,
+              "permission": "tickets.derive"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Provenance",
+            "config": {
+              "fields": [
+                "subject",
+                "body",
+                "category",
+                "priority"
+              ],
+              "gates": {
+                "assigned": {
+                  "reviewed": [
+                    "category",
+                    "priority"
+                  ]
+                }
+              },
+              "review": {
+                "below": 0.8,
+                "permission": "tickets.review",
+                "sources": [
+                  "Derived"
+                ]
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "new",
+                "triage",
+                "assigned"
+              ],
+              "transitions": [
+                {
+                  "from": "new",
+                  "to": "triage"
+                },
+                {
+                  "from": "new",
+                  "to": "assigned"
+                },
+                {
+                  "from": "triage",
+                  "to": "assigned"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "subject",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "type": "Category",
+            "schema": {
+              "description": "A Category value",
+              "enum": [
+                "billing",
+                "bug",
+                "other",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "type": "string",
+            "schema": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

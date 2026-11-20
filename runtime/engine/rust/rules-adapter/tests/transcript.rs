@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 24] = [
+const TRANSCRIPTS: [(&str, usize); 25] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -116,6 +116,7 @@ const TRANSCRIPTS: [(&str, usize); 24] = [
     ("core-numbering", NUMBERING_FLOOR),
     ("core-lease-numbering", LEASE_NUMBERING_FLOOR),
     ("core-revisions", REVISIONS_FLOOR),
+    ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -270,6 +271,15 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 /// checks, each revision and proposal a row of a sub-table of the use, and
 /// each approval an operation's write of the row's own fields.
 const REVISIONS_FLOOR: usize = 104;
+
+/// core-derived-provenance's floor (D73 on the core, D103's step 4): 75
+/// steps of the scenarios written by hand, 49 commands, each holding its
+/// row's version, and 26 checks: Derived's derivations and Provenance's
+/// records each a row of a sub-table of the use, Derived's pulls and
+/// settles commands without a row over a read across the table, a
+/// settle's writes of the rows it reaches through applyDerived, and
+/// Provenance's inReview an owned column.
+const DERIVED_PROVENANCE_FLOOR: usize = 75;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

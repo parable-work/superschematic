@@ -255,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Rollups', 'Dependencies', 'Numbering', 'Revisions', 'Derived', 'Provenance']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -391,6 +391,23 @@ test('declarations are the registered files, each field typed and the value fiel
   // runs as a command without a row.
   expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');
   expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool']);
+  // Derived keeps each derived field's hashes, override and attempts in a
+  // sub-table keyed by the field, computes fields and stale at a read, and
+  // pulls and settles through operations of the table as a whole; and
+  // Provenance owns inReview, a column a list filters on, beside its
+  // records of each field's last write (D73).
+  const derived = byName('Derived');
+  expect(derived.tables?.map(t => [t.name, t.key])).toEqual([['derivations', 'field']]);
+  expect(derived.operations?.map(o => [o.name, o.writes === true, o.scope ?? 'instance'])).toEqual([
+    ['staleDerivations', false, 'schema'],
+    ['settleDerivations', true, 'schema'],
+    ['failedDerivations', false, 'schema'],
+    ['applyDerived', true, 'instance'],
+    ['rederive', true, 'instance'],
+  ]);
+  const provenance = byName('Provenance');
+  expect(provenance.fields?.map(f => `${f.name}: ${f.type ?? 'computed'}`)).toEqual(['fields: computed', 'inReview: boolean']);
+  expect(provenance.tables?.map(t => [t.name, t.key])).toEqual([['records', 'field']]);
 });
 
 test("an operation of the table as a whole runs on no row: it reads the table's rows, each own field equal names held to its value, and answers from them, writing nothing (D104)", () => {

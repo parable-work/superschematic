@@ -140,6 +140,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-numbering', floor: 104 },
   { file: 'core-lease-numbering', floor: 14 },
   { file: 'core-revisions', floor: 104 },
+  { file: 'core-derived-provenance', floor: 75 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
