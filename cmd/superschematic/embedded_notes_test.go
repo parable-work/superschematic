@@ -33,14 +33,19 @@ import (
 // through notes-api under /api/notes-api; reads the digest notes-digest
 // counts by calling notes-api in the process, whose service clause holds;
 // asks for the note to be pinned, which the worker the binary runs beside
-// its server does from the queue the request wrote to; reads the site's
+// its server does from the queue the request wrote to; writes a task,
+// whose table composes a Workflow, through the behaviors' core, and moves
+// it by the Workflow's transition; lists notes-api's MCP tools and calls
+// one; reads the site's
 // page, which
 // the binary carries with its digest as its ETag, the page's config, and
 // the fallback for a path that names no file; stops it with SIGTERM; and
 // starts it again on the same files, which need no plan and hold the
 // note. Then it starts it on a file the first release's plan alone made,
 // which the binary takes forward by the second. It listens on every
-// interface only when told to in those words.
+// interface only when told to in those words. Then a host with no async
+// runtime links the binary's library, answers requests through its handle
+// and drains its worker PinNotes on a thread of its own.
 func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the cargo build of examples/embedded-notes in -short mode")
@@ -76,11 +81,11 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	if filepath.Base(binary) != "notes-stack-desktop" {
 		t.Errorf("the binary is %s, want notes-stack-desktop", binary)
 	}
-	// The build is no release: it carries the plans the example's two
+	// The build is no release: it carries the plans the example's three
 	// releases recorded, as they are, and records nothing.
 	crate := filepath.Join(schemasRoot, "dist", "embedded", "notes-stack", "Desktop")
 	plans := filepath.Join(stackDir, "plans", "Desktop", "notes-db")
-	for _, plan := range []string{"0001.json", "0002.json"} {
+	for _, plan := range []string{"0001.json", "0002.json", "0003.json"} {
 		recorded, err := os.ReadFile(filepath.Join(plans, plan))
 		if err != nil {
 			t.Fatal(err)
@@ -90,10 +95,10 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 			t.Errorf("the binary does not carry the recorded plan %s as it is: %v", plan, err)
 		}
 	}
-	if recorded, _ := filepath.Glob(filepath.Join(plans, "*.json")); len(recorded) != 2 {
+	if recorded, _ := filepath.Glob(filepath.Join(plans, "*.json")); len(recorded) != 3 {
 		t.Errorf("a build that is no release recorded a plan: %v", recorded)
 	}
-	if !strings.Contains(out, "the binary carries 2 plan(s) of notes-db") {
+	if !strings.Contains(out, "the binary carries 3 plan(s) of notes-db") {
 		t.Errorf("stack build does not say what the binary carries:\n%s", out)
 	}
 
@@ -162,6 +167,69 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 		t.Errorf("a path under /api that is no API's = %d, want 404, never the site's page", status)
 	}
 
+	// A table that composes behaviors (D103): a task's create runs through
+	// the behaviors' core, which starts its Workflow open, and its move to
+	// done is the Workflow's transition at the route @behaviorOperations
+	// adds, both on the file's writing connection; a move to a state the
+	// Workflow does not list is refused, and writes nothing.
+	var task struct {
+		Data struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	status, _, body = request(t, http.MethodPost, origin+"/api/notes-api/api/tasks", `{"title":"buy bread"}`, nil)
+	if err := json.Unmarshal(body, &task); status != http.StatusOK || err != nil || task.Data.Status != "open" {
+		t.Fatalf("POST a task = %d %s (%v), want it open", status, body, err)
+	}
+	moved := origin + "/api/notes-api/api/task/" + task.Data.ID + "/status/transition"
+	if status, _, body := request(t, http.MethodPost, moved, `{"to":"done"}`, nil); status != http.StatusOK || !strings.Contains(string(body), `"to":"done"`) {
+		t.Errorf("POST the task's transition to done = %d %s", status, body)
+	}
+	if status, _, body := request(t, http.MethodPost, moved, `{"to":"archived"}`, nil); status != http.StatusBadRequest {
+		t.Errorf("POST the task's transition to a state the Workflow does not list = %d %s, want 400", status, body)
+	}
+	if status, _, body := request(t, http.MethodGet, origin+"/api/notes-api/api/tasks/"+task.Data.ID, "", nil); status != http.StatusOK || !strings.Contains(string(body), `"status":"done"`) {
+		t.Errorf("GET the task = %d %s, want it done", status, body)
+	}
+
+	// notes-api's MCP endpoint, which the binary answers under the API's
+	// path (D81): its tools are its table operations and its behavior
+	// operations, by the names their declarations give them (D111), and
+	// neither the route for services nor the operation the implementation
+	// writes, which has no @mcp. A call is a request to the tool's route:
+	// create_note writes the note the list then holds, and
+	// task_status_transition moves the task through the behaviors' core.
+	endpoint := origin + "/api/notes-api/api/mcp"
+	tools, _ := mcpRequest(t, endpoint, "tools/list", map[string]any{})["tools"].([]any)
+	handles := map[string]bool{}
+	for _, tool := range tools {
+		if tool, ok := tool.(map[string]any); ok {
+			handles[fmt.Sprint(tool["name"])] = true
+		}
+	}
+	for _, handle := range []string{"list_notes", "create_note", "create_task", "task_status_transition"} {
+		if !handles[handle] {
+			t.Errorf("the MCP endpoint lists no tool %s: %v", handle, handles)
+		}
+	}
+	for _, handle := range []string{"list_notes_for_services", "request_pin"} {
+		if handles[handle] {
+			t.Errorf("the MCP endpoint lists the tool %s: %v", handle, handles)
+		}
+	}
+	called := mcpRequest(t, endpoint, "tools/call", map[string]any{"name": "create_note", "arguments": map[string]any{"title": "bread"}})
+	if content, _ := called["structuredContent"].(map[string]any); called["isError"] == true || content["title"] != "bread" {
+		t.Errorf("tools/call create_note = %v, want the note it wrote", called)
+	}
+	if status, _, body := request(t, http.MethodGet, origin+"/api/notes-api/api/notes", "", nil); status != http.StatusOK || !strings.Contains(string(body), `"title":"bread"`) {
+		t.Errorf("GET the notes after the tool's call = %d %s, want the note it wrote", status, body)
+	}
+	reopened := mcpRequest(t, endpoint, "tools/call", map[string]any{"name": "task_status_transition", "arguments": map[string]any{"id": task.Data.ID, "to": "open"}})
+	if content, _ := reopened["structuredContent"].(map[string]any); reopened["isError"] == true || content["to"] != "open" {
+		t.Errorf("tools/call task_status_transition = %v, want the task reopened", reopened)
+	}
+
 	status, header, page := request(t, http.MethodGet, origin+"/", "", nil)
 	etag := header.Get("ETag")
 	if status != http.StatusOK || !strings.HasPrefix(header.Get("Content-Type"), "text/html") || len(etag) != 66 || !bytes.Contains(page, []byte("<html")) {
@@ -201,7 +269,7 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	// A file an earlier release wrote: the first release's plan alone,
 	// applied by the migration runner, as that release's binary applied
 	// it. The binary takes it forward by the second plan, which adds the
-	// queue, and serves it.
+	// queue, and the third, which adds the Task table, and serves it.
 	earlier := filepath.Join(t.TempDir(), "data")
 	file := filepath.Join(earlier, "databases", "notes_db.sqlite")
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
@@ -214,8 +282,8 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	}
 	third := startBinary(t, binary, earlier, port)
 	log := third.wait(t, origin)
-	if strings.Contains(log, "from an empty database") || strings.Count(log, "applying plan") != 1 {
-		t.Errorf("the binary did not take the earlier release's file forward by the second plan alone:\n%s", log)
+	if strings.Contains(log, "from an empty database") || strings.Count(log, "applying plan") != 2 {
+		t.Errorf("the binary did not take the earlier release's file forward by the second and the third plan:\n%s", log)
 	}
 	status, _, body = request(t, http.MethodPost, origin+"/api/notes-api/api/notes", `{"title":"eggs"}`, nil)
 	if err := json.Unmarshal(body, &created); status != http.StatusOK || err != nil {
@@ -224,7 +292,141 @@ func TestEmbeddedNotesIsOneBinary(t *testing.T) {
 	if status, _, body := request(t, http.MethodPost, origin+"/api/notes-api/api/notes/"+created.Data.ID+"/pin-requests", "", nil); status != http.StatusOK {
 		t.Errorf("POST a pin request on the migrated file = %d %s", status, body)
 	}
+	if status, _, body := request(t, http.MethodPost, origin+"/api/notes-api/api/tasks", `{"title":"on the migrated file"}`, nil); status != http.StatusOK {
+		t.Errorf("POST a task on the migrated file = %d %s", status, body)
+	}
 	third.stop(t)
+
+	// A host with no async runtime links the binary's library and none of
+	// its main.rs: it opens a data directory, answers requests through
+	// handle, and drains the worker PinNotes on its own thread, which pins
+	// the note a request asked for.
+	host := buildNoRuntimeHost(t, schemasRoot, crate, repoRoot)
+	output, err := exec.Command(host, filepath.Join(t.TempDir(), "data")).CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "a host with no async runtime drained 1 message, and the note is pinned") {
+		t.Errorf("the host with no async runtime: %v\n%s", err, output)
+	}
+}
+
+// mcpRequest sends one JSON-RPC request to the MCP endpoint at url and
+// returns its result, which it holds the request to have.
+func mcpRequest(t *testing.T, url, method string, params any) map[string]any {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _, reply := request(t, http.MethodPost, url, string(payload), map[string]string{"Accept": "application/json, text/event-stream"})
+	text := strings.TrimSpace(strings.TrimPrefix(string(reply), "event: message\ndata: "))
+	var message struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(text), &message); status != http.StatusOK || err != nil || message.Result == nil {
+		t.Fatalf("MCP %s = %d %s (%v)", method, status, reply, err)
+	}
+	return message.Result
+}
+
+// noRuntimeHost is the main.rs of a host that links the binary's library
+// with no async runtime under it (D116): it polls each future with the
+// runtime's block_on, which needs no reactor, and drains the worker
+// PinNotes on its own thread after a commit of its own process wakes it.
+const noRuntimeHost = `//! A host of the embedded-notes binary's library with no async runtime.
+
+use std::time::{Duration, SystemTime};
+
+use axum::body::Bytes;
+use axum::http::{Request, StatusCode};
+use notes_notes_stack_desktop_embedded::{Embedded, Options};
+use serde_json::Value;
+use superschematic_http_runtime::block_on;
+
+fn call(embedded: &Embedded, method: &str, path: &str, body: &str) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Bytes::from(body.to_owned()))
+        .expect("a request");
+    let response = block_on(embedded.handle(request));
+    let status = response.status();
+    (status, serde_json::from_slice(response.body()).unwrap_or(Value::Null))
+}
+
+fn main() {
+    let data = std::env::args().nth(1).expect("the data directory");
+    let embedded = block_on(Embedded::open(Options { data_dir: data.into() })).expect("open the binary");
+    let (status, note) = call(&embedded, "POST", "/api/notes-api/api/notes", r#"{"title":"tea"}"#);
+    assert_eq!(status, StatusCode::OK, "{note}");
+    let id = note["data"]["id"].as_str().expect("the note's id").to_owned();
+
+    let worker = embedded
+        .workers()
+        .iter()
+        .find(|worker| worker.name() == "notes-api-pin-notes")
+        .expect("the worker PinNotes");
+    let mut connection = worker.connect().expect("the worker's connection");
+    let seen = worker.wake().seen();
+    let (status, body) = call(&embedded, "POST", &format!("/api/notes-api/api/notes/{id}/pin-requests"), "");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(worker.wake().wait(seen, Duration::from_secs(5)), "the request's commit wakes the worker");
+    let drained = worker.drain(&mut connection, SystemTime::now(), 16).expect("a drain");
+    assert_eq!(drained.ran, 1, "{drained:?}");
+    let (status, note) = call(&embedded, "GET", &format!("/api/notes-api/api/notes/{id}"), "");
+    assert_eq!((status, note["data"]["pinned"].as_bool()), (StatusCode::OK, Some(true)), "{note}");
+    embedded.close();
+    println!("a host with no async runtime drained {} message, and the note is pinned", drained.ran);
+}
+`
+
+// noRuntimeHostManifest is the host's Cargo.toml, given the binary's crate
+// and the HTTP runtime's directories: the runtime with the features the
+// binary takes, so the two build it once.
+const noRuntimeHostManifest = `[package]
+name = "notes-no-runtime-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+axum = "0.8.9"
+serde_json = "1.0.149"
+notes-notes-stack-desktop-embedded = { path = %q }
+superschematic-http-runtime = { path = %q, features = ["http-client", "logging", "otel", "sqlite"] }
+
+# Its own workspace, so the output root's does not claim it.
+[workspace]
+`
+
+// buildNoRuntimeHost writes and builds the host of noRuntimeHost over the
+// binary's crate at crate, with the output root's lockfile and its target
+// directory, so it builds on what the binary built, and returns its path.
+func buildNoRuntimeHost(t *testing.T, schemasRoot, crate, repoRoot string) string {
+	t.Helper()
+	dir := t.TempDir()
+	lock, err := os.ReadFile(filepath.Join(schemasRoot, "dist", "Cargo.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"Cargo.toml":  fmt.Sprintf(noRuntimeHostManifest, filepath.ToSlash(crate), filepath.ToSlash(filepath.Join(repoRoot, "runtime", "http", "rust"))),
+		"Cargo.lock":  string(lock),
+		"src/main.rs": noRuntimeHost,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(schemasRoot, "dist", "target")
+	build := exec.Command("cargo", "build", "--release", "--quiet", "--target-dir", target)
+	build.Dir = dir
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build the host with no async runtime: %v\n%s", err, output)
+	}
+	return filepath.Join(target, "release", "notes-no-runtime-host")
 }
 
 // buildMigrateRunner builds superschematic-migrate, which holds the SQLite

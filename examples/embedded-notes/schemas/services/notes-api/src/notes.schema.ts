@@ -3,6 +3,7 @@ import { Nullable, Validate } from "@superschematic/schema";
 import {
   HttpMethod,
   SortBy,
+  behaviorOperations,
   paginated,
   publicRoute,
   requireService,
@@ -11,7 +12,7 @@ import {
   tableOperation,
   worker
 } from "@superschematic/api";
-import { Note, PinRequested } from "@notes/notes-db";
+import { Note, PinRequested, Task } from "@notes/notes-db";
 
 // A note as the API shows it.
 @source(Note)
@@ -41,6 +42,10 @@ export abstract class UpdateNoteInput {
 
 // The notes. The binary listens on the machine it is installed on, and
 // whoever reaches it there is its one user, so every operation is open.
+// Each table operation, and each of a task's behavior operations, is an
+// MCP tool too, by the name its declaration gives it (list_notes,
+// task_status_transition), which the binary serves at notes-api's
+// endpoint, /api/notes-api/api/mcp (D81, D111, D116).
 export class Notes {
   // The notes, newest first, a page at a time.
   @rest(HttpMethod.GET, "notes")
@@ -83,6 +88,49 @@ export class Notes {
     throw new Error("schema declaration only");
   }
 }
+
+// A task as the API shows it: its title, and where its status Workflow
+// stands.
+@source(Task)
+export abstract class TaskView {
+  id: Identity.UUID;
+  title: string;
+  status: string;
+}
+
+// What a caller sets to write a task, which starts open.
+@source(Task)
+export abstract class CreateTaskInput {
+  title: Validate<string, { minLength: 1; maxLength: 200 }>;
+}
+
+// The tasks, served from notes-db's Task table, which composes a
+// Workflow: a create runs through the behaviors' core, in the request's
+// transaction (D103, D116).
+export class Tasks {
+  // One task.
+  @rest(HttpMethod.GET, "tasks/{id}")
+  @publicRoute
+  @tableOperation()
+  getTask(id: Identity.UUID): TaskView {
+    throw new Error("schema declaration only");
+  }
+
+  // A new task, open.
+  @rest(HttpMethod.POST, "tasks")
+  @publicRoute
+  @tableOperation()
+  createTask(input: CreateTaskInput): TaskView {
+    throw new Error("schema declaration only");
+  }
+}
+
+// A task's status operations: the transitions its Workflow lists, each at
+// POST tasks/{id}/status/transition and run through the behaviors' core on
+// the file's writing connection (D103, D116).
+@behaviorOperations(Task)
+@publicRoute
+export abstract class TaskActions {}
 
 // What another API of the binary reads. Only a calling service is
 // admitted (D37): no browser reaches it, and notes-digest, which the

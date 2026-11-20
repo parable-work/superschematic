@@ -2516,6 +2516,8 @@ is the site's, on one origin.
 | a job, a bucket, a memory store, an app, an engine | refused, each with its reason |
 | an API over the user model | its users, their sessions and their API keys are kept in the identity store on the database's file, and its session cookie goes without `Secure`, since the binary serves plain HTTP on the machine it is installed on |
 | a `@worker` or a `@behaviorWorker` of one of its APIs | it runs inside the binary, claiming its queue on the database's file; a write the binary commits wakes it |
+| a table that composes behaviors | its writes, its `@tableOperation`s' among them, go through the behaviors' core on the database's file, and its `@behaviorOperations` are routes of its API |
+| an API with `outputs.api.mcp` | its MCP endpoint is under the API's path, `/api/<service>/api/mcp` |
 | two APIs, one calling the other | the call is the SDK's, answered in the process, and a service clause holds |
 
 `stack deploy`, `plan` and `destroy` refuse the environment and name
@@ -2537,7 +2539,12 @@ of its `main.rs`: `Embedded::open`, `handle` and `close`, and for each of
 `workers()` either `run`, the loop on tokio, or `drain`, which a host
 with no async runtime calls on a thread of its own with a connection from
 `connect`, the time and a limit, sleeping until the time it answers or
-until `wake` says the process wrote to the file.
+until `wake` says the process wrote to the file. A drain's claims go by
+the time it is given, and while a `@worker`'s method runs past half its
+queue's lease, the drain extends its claim. The runtime's `block_on`
+polls `open` and `handle` on the calling thread: an API whose databases
+are all SQLite files, and that calls no other server, awaits nothing
+that needs a reactor.
 
 ## Generated CI
 
