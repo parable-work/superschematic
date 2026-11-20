@@ -552,8 +552,6 @@ class User(BaseModel):
 
             if len(str(self.email)) > 255:
                 errors.add_field_error("email", "maxLength", "must be at most 255 characters")
-            if re.search(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", str(self.email), re.ASCII) is None:
-                errors.add_field_error("email", "pattern", "invalid format")
 
         # Validate displayName
         if self.display_name is None:

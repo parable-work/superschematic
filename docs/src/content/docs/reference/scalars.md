@@ -50,7 +50,7 @@ no member for them.
 
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
-| `Contact.Email` | An email address | `CITEXT` | string / string / str / String | at most 255 characters; pattern `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`; its own validator; case-insensitive; normalizes | `test@example.com` |
+| `Contact.Email` | An email address | `CITEXT` | string / string / str / String | at most 255 characters; its own validator; case-insensitive; normalizes | `test@example.com` |
 | `Contact.PhoneNumber` | Phone number in E.164 format | `VARCHAR(16)` | string / string / str / String | at most 16 characters; pattern `^\+[1-9]\d{1,14}$`; its own validator; normalizes | `+14155552671` |
 
 ## Crypto
@@ -148,19 +148,19 @@ no member for them.
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
 | `Temporal.CronExpression` | Standard 5-field cron expression for scheduling | `VARCHAR(100)` | string / string / str / String | at most 100 characters; pattern `^[0-9*,\-\/]+\s+[0-9*,\-\/]+\s+[0-9*,\-\/?]+\s+[0-9*,\-\/A-Za-z]+\s+[0-9*,\-\/A-Za-z]+$` | `0 9 * * MON-FRI` |
-| `Temporal.Date` | Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped). | `DATE` | string / string / str / String | at most 40 characters | `2025-01-01` |
+| `Temporal.Date` | Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped). | `DATE` | string / string / str / String | at most 40 characters; its own validator | `2025-01-01` |
 | `Temporal.DateTime` | ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count. | `TIMESTAMPTZ` | time.Time / JSDate / datetime.datetime / chrono::DateTime<chrono::Utc> |  | `2025-01-01T12:00:00Z` |
 | `Temporal.Days` | Signed integer count of days: an amount of elapsed time, never a point in time or a calendar date. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `7` |
 | `Temporal.Duration` | Duration for timeouts and intervals | `INTERVAL` | time.Duration / string / str / String | at most 32 characters; pattern `^(\d+(\.\d+)?(ns\|us\|µs\|ms\|s\|m\|h))+$`; its own validator; normalizes | `30s` |
 | `Temporal.Hours` | Signed integer count of hours: an amount of elapsed time, never a point in time. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `2` |
 | `Temporal.Milliseconds` | Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `1000` |
 | `Temporal.Minutes` | Signed integer count of minutes: an amount of elapsed time, never a point in time. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `5` |
-| `Temporal.Month` | Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive). | `VARCHAR(2)` | string / string / str / String | at most 9 characters | `02` |
+| `Temporal.Month` | Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive). | `VARCHAR(2)` | string / string / str / String | at most 9 characters; its own validator | `02` |
 | `Temporal.Quarter` | Calendar quarter (Q1-Q4) | `VARCHAR(2)` | string / string / str / String | length 2 to 2; pattern `^[Qq][1-4]$`; case-insensitive | `Q1` |
-| `Temporal.QuarterYear` | Quarter and year, normalized to 'YYYY-Q#'. Accepts '2025-Q1', 'Q1/2025', 'Q1-2025', 'Q1-25' (2-digit years interpreted as 20XX). | `VARCHAR(7)` | string / string / str / String | at most 8 characters | `2025-Q1` |
-| `Temporal.RecurrenceRule` | RFC 5545 recurrence rule, without DTSTART | `VARCHAR(512)` | string / string / str / String | length 6 to 512 | `FREQ=WEEKLY;BYMINUTE=0;BYHOUR=9;BYDAY=MO,WE,FR` |
+| `Temporal.QuarterYear` | Quarter and year, normalized to 'YYYY-Q#'. Accepts '2025-Q1', 'Q1/2025', 'Q1-2025', 'Q1-25' (2-digit years interpreted as 20XX). | `VARCHAR(7)` | string / string / str / String | at most 8 characters; its own validator | `2025-Q1` |
+| `Temporal.RecurrenceRule` | RFC 5545 recurrence rule, without DTSTART | `VARCHAR(512)` | string / string / str / String | length 6 to 512; its own validator | `FREQ=WEEKLY;BYMINUTE=0;BYHOUR=9;BYDAY=MO,WE,FR` |
 | `Temporal.Seconds` | Signed integer count of seconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `60` |
-| `Temporal.Time` | Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional. | `TIME` | string / string / str / String | pattern `^(?:(?:[01][0-9]\|2[0-3]):[0-5][0-9](?::[0-5][0-9])?\|(?:0?[1-9]\|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$` | `12:25` |
+| `Temporal.Time` | Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional. | `TIME` | string / string / str / String | pattern `^(?:(?:[01][0-9]\|2[0-3]):[0-5][0-9](?::[0-5][0-9])?\|(?:0?[1-9]\|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$` | `12:25:00` |
 | `Temporal.TimeZone` | IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it. | `VARCHAR(100)` | string / string / str / String | at most 100 characters; pattern `^(?:UTC\|GMT\|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$` | `America/New_York` |
 | `Temporal.Year` | Calendar year as a 4-digit string (e.g., 2025) | `VARCHAR(4)` | string / string / str / String | length 4 to 4; pattern `^[1-9]\d{3}$` | `2025` |
 
@@ -168,7 +168,7 @@ no member for them.
 
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
-| `Text.Markdown` | Markdown text | `TEXT` | string / string / str / String | at least 1 characters; pattern `^[\s\S]*$` | `## Hello, World!` |
+| `Text.Markdown` | Markdown text | `TEXT` | string / string / str / String | pattern `^[\s\S]*$` | `## Hello, World!` |
 | `Text.Sql` | SQL text | `TEXT` | string / string / str / String | at least 1 characters; pattern `^[\s\S]*$` | `SELECT 1` |
 
 ## Version

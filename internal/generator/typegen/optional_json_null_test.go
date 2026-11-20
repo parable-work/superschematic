@@ -124,7 +124,8 @@ func TestAnOptionalGenericJSONKeepsNullApartFromAbsent(t *testing.T) {
 	for _, tc := range []struct{ payload, want string }{
 		{` + "`" + `{"body": 1}` + "`" + `, "absent"},
 		{` + "`" + `{"body": 1, "extra": null}` + "`" + `, "null"},
-		{` + "`" + `{"body": 1, "extra": {"a": null}}` + "`" + `, ` + "`" + `{"a": null}` + "`" + `},
+		// superscalar's GenericJSON keeps a decoded value compact.
+		{` + "`" + `{"body": 1, "extra": {"a": null}}` + "`" + `, ` + "`" + `{"a":null}` + "`" + `},
 		{` + "`" + `{"body": {"extra": null}, "tags": [], "x": null}` + "`" + `, "absent"},
 		{` + "`" + `{"body": 1, "EXTRA": null}` + "`" + `, "null"},
 		{` + "`" + `{"body": 1, "extra": null, "extra": 2}` + "`" + `, "2"},

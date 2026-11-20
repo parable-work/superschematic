@@ -21,8 +21,6 @@ pub mod scalars {
     #[allow(unused_imports)]
     use super::{rt, ValidationError, Value};
 
-    static CONTACT_EMAIL_PATTERN: rt::Pattern = rt::Pattern::new("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-
     static CRYPTO_SHA256_PATTERN: rt::Pattern = rt::Pattern::new("^[0-9a-f]{64}$");
 
     static IDENTITY_UUID_PATTERN: rt::Pattern = rt::Pattern::new("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$");
@@ -40,9 +38,6 @@ pub mod scalars {
         let length = rt::code_points(text);
         if length > 255 {
             errors.push(ValidationError::new("maxLength", "must be at most 255 characters"));
-        }
-        if !CONTACT_EMAIL_PATTERN.is_match(text) {
-            errors.push(ValidationError::new("pattern", "invalid format"));
         }
         // The scalar core checks the rules above again, so it runs only when
         // they pass: one failing value, one error.

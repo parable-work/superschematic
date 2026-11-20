@@ -114,7 +114,7 @@ func ParseTemporalDuration(s string) (TemporalDuration, error) {
 	return TemporalDuration(parsed), nil
 }
 
-// Temporal.Time - Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+// Temporal.Time - Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.
 type TemporalTime = scalars.TemporalTime
 
 // TemporalTimePattern is the validation pattern for Temporal.Time.

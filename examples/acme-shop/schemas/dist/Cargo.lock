@@ -2868,11 +2868,13 @@ name = "superscalar"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "email_address",
  "once_cell",
  "phonenumber",
  "regex",
  "serde",
  "serde_json",
+ "unicode-normalization",
  "uuid",
 ]
 

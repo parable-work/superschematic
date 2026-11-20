@@ -405,7 +405,7 @@ for (const driver of drivers) {
           })
         ),
         [
-          ['contact', 'pattern'],
+          ['contact', 'parse'],
           ['grid[0]', 'type'],
           ['other', 'unknown'],
           ['serves', 'type'],

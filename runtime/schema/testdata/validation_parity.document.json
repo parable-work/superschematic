@@ -43,7 +43,6 @@
     "Contact_Email": {
       "description": "An email address",
       "maxLength": 255,
-      "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
       "type": "string",
       "x-caseInsensitive": true,
       "x-hasCustomNormalize": true,
@@ -997,6 +996,7 @@
       "maxLength": 40,
       "type": "string",
       "x-example": "2025-01-01",
+      "x-hasCustomValidate": true,
       "x-scalar": "Temporal_Date",
       "x-typeMapping": {
         "go": "TemporalDate",
@@ -1097,6 +1097,7 @@
       "maxLength": 9,
       "type": "string",
       "x-example": "02",
+      "x-hasCustomValidate": true,
       "x-scalar": "Temporal_Month",
       "x-typeMapping": {
         "go": "TemporalMonth",
@@ -1124,6 +1125,7 @@
       "maxLength": 8,
       "type": "string",
       "x-example": "2025-Q1",
+      "x-hasCustomValidate": true,
       "x-scalar": "Temporal_QuarterYear",
       "x-typeMapping": {
         "go": "TemporalQuarterYear",
@@ -1137,6 +1139,7 @@
       "minLength": 6,
       "type": "string",
       "x-example": "FREQ=WEEKLY;BYMINUTE=0;BYHOUR=9;BYDAY=MO,WE,FR",
+      "x-hasCustomValidate": true,
       "x-scalar": "Temporal_RecurrenceRule",
       "x-typeMapping": {
         "go": "TemporalRecurrenceRule",
@@ -1159,10 +1162,10 @@
       }
     },
     "Temporal_Time": {
-      "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+      "description": "Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
       "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
       "type": "string",
-      "x-example": "12:25",
+      "x-example": "12:25:00",
       "x-scalar": "Temporal_Time",
       "x-typeMapping": {
         "go": "TemporalTime",
@@ -1199,7 +1202,6 @@
     },
     "Text_Markdown": {
       "description": "Markdown text",
-      "minLength": 1,
       "pattern": "^[\\s\\S]*$",
       "type": "string",
       "x-example": "## Hello, World!",

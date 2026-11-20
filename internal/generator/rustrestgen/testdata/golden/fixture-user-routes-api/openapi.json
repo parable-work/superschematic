@@ -122,7 +122,6 @@
             "description": "The user's login, as their User row holds it.",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": "string"
           },
           "name": {
@@ -279,7 +278,6 @@
             "description": "The user's login, as their User row holds it.",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": "string"
           },
           "name": {
@@ -317,7 +315,6 @@
             "description": "The user's login, as their User row holds it.",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": "string"
           },
           "password": {
@@ -379,7 +376,6 @@
             "description": "The user's login, as their User row holds it.",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": "string"
           },
           "name": {
@@ -516,7 +512,6 @@
             "description": "The user's login, as their User row holds it.",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": "string"
           },
           "name": {

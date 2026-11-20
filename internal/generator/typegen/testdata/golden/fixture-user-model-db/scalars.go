@@ -13,9 +13,6 @@ import scalars "github.com/parable-work/superscalar/go"
 // Contact.Email - An email address
 type ContactEmail = scalars.ContactEmail
 
-// ContactEmailPattern is the validation pattern for Contact.Email.
-var ContactEmailPattern = scalars.ContactEmailPattern
-
 // ParseContactEmail parses a string and returns a Contact.Email scalar.
 func ParseContactEmail(s string) (ContactEmail, error) {
 	parsed, err := scalars.ParseContactEmail(s)

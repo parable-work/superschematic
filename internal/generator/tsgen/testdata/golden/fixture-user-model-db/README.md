@@ -81,7 +81,6 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **Contact.Email** - An email address
   - TypeScript type: `string`
-  - Pattern: `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
   - Max length: 255
 
 
