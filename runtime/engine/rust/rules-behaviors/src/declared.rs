@@ -80,8 +80,13 @@ pub(crate) fn declaration(text: &str) -> Declaration {
             // An operation writes only when it says so, as the engine reads
             // the file.
             let writes = operation.get("writes") == Some(&Value::Bool(true));
+            // A writing operation of a row that says beside writes only its
+            // use's own tables (D77's primitive 1, Comments').
+            let beside = operation.get("beside") == Some(&Value::Bool(true));
             declaration = if scope == Some("schema") {
                 declaration.table_operation(name, writes)
+            } else if writes && beside {
+                declaration.beside_operation(name)
             } else {
                 declaration.operation(name, writes)
             };
@@ -240,6 +245,19 @@ mod tests {
                 && fenced.find_table_operation("purge").is_none()
         );
         assert!(!declaration(r#"{"name": "Tally", "preconditionSchema": null}"#).preconditions);
+        // A writing operation beside its row says so; beside on one that
+        // writes nothing declares a plain read.
+        let beside = declaration(
+            r#"{"name": "Tally",
+                "operations": [{"name": "note", "writes": true, "beside": true}, {"name": "look", "beside": true}]}"#,
+        );
+        assert_eq!(
+            beside,
+            Declaration::new("Tally")
+                .beside_operation("note")
+                .operation("look", false)
+        );
+        assert!(beside.find_operation("note").is_some_and(|op| op.beside));
     }
 
     #[test]

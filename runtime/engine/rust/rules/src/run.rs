@@ -17,6 +17,13 @@
 //! and the command's own operation's change set holds no write, as an
 //! operation that says it writes nothing.
 //!
+//! A writing operation beside its row ([`crate::OperationDecl::beside`],
+//! D77's primitive 1) asks its own use's guard alone, writes no row and
+//! runs no after-change hook: its change set holds its use's sub-table and
+//! shared-table rows, and a write of anything else (an own or owned field,
+//! another row, an event, a deadline) is a defect. It takes no precondition
+//! but its own use's.
+//!
 //! An update, a delete and an operation may carry the caller's
 //! preconditions, each use's entry by its id (D16, D104): the run holds
 //! them to the type's uses and their behaviors' checks before it reads the
@@ -1376,8 +1383,9 @@ impl<'a> Run<'a> {
                 };
                 let invoked = self.invoke(frame, index, declared, params, calling, writable)?;
                 // A call its use settled wrote nothing: the row is not
-                // written and its after-change hooks do not run.
-                if declared.writes && !invoked.settled {
+                // written and its after-change hooks do not run. Nor is
+                // one beside the row, which writes its use's tables alone.
+                if declared.writes && !declared.beside && !invoked.settled {
                     self.unchanged_write(
                         from,
                         from_index,
@@ -1666,6 +1674,12 @@ impl<'a> Run<'a> {
         self.load(key)?;
         let (index, declared) = self.find_operation(self.top, use_id, operation)?;
         let invoked = self.invoke(self.top, index, declared, params, Calling::default(), true)?;
+        // One beside the row writes its use's tables alone: no row, and no
+        // after-change hook (D77's primitive 1).
+        if declared.beside {
+            self.beside_writes(self.top, index, &declared.name)?;
+            return Ok(self.changes(invoked.result));
+        }
         // An operation that said it writes nothing, or that its use settled,
         // writes no row and runs no after-change hook.
         if declared.writes && !self.unchanged.get() {
@@ -1683,6 +1697,66 @@ impl<'a> Run<'a> {
             )?;
         }
         Ok(self.changes(invoked.result))
+    }
+
+    // beside_writes holds an operation beside its row to what it may write:
+    // sub-table rows of its row and shared-table rows, never a row's own or
+    // owned fields, another row, an event or a deadline, each a defect.
+    fn beside_writes(&self, frame: Frame<'_>, index: usize, operation: &str) -> Hook<()> {
+        let own = frame.row_ref();
+        let found = {
+            let rows = self.rows.borrow();
+            let pending = self.pending.borrow();
+            rows.iter()
+                .find_map(|row| {
+                    if let Some(field) = row.set.values().flat_map(|fields| fields.keys()).next() {
+                        return Some(format!("set({field})"));
+                    }
+                    (!matches!(row.write, Write::Read | Write::Table)).then(|| {
+                        format!(
+                            "a write of {} {}",
+                            row.type_name,
+                            row.key.as_deref().unwrap_or_default()
+                        )
+                    })
+                })
+                .or_else(|| {
+                    pending
+                        .sub_rows
+                        .iter()
+                        .find(|write| write.row != own)
+                        .map(|write| {
+                            format!(
+                                "a write of sub-table {} of {} {}",
+                                write.table,
+                                write.row.type_name,
+                                write.row.key.as_deref().unwrap_or_default()
+                            )
+                        })
+                })
+                .or_else(|| {
+                    pending
+                        .events
+                        .first()
+                        .map(|event| format!("emit({})", event.kind))
+                })
+                .or_else(|| {
+                    pending.deadlines.first().map(|change| match change {
+                        DeadlineChange::Arm { name, .. } => format!("arm({name})"),
+                        DeadlineChange::Clear { name, .. } => format!("clear({name})"),
+                    })
+                })
+        };
+        match found {
+            Some(what) => Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "operation {operation} writes beside its row, its use's own tables alone, and made {what}"
+                ),
+            )),
+            None => Ok(()),
+        }
     }
 
     // table_operation runs an operation of the table as a whole on the
@@ -2176,6 +2250,19 @@ impl<'a> Run<'a> {
             .filter(|bound| bound.registered.declaration.preconditions)
             .map(|bound| bound.spec.id().to_owned())
             .collect();
+        // An operation beside its row asks its own use's guard alone, so it
+        // takes no other use's precondition (D77's primitive 1).
+        let beside = match &self.command.action {
+            Action::Operation {
+                use_id, operation, ..
+            } => frame.spec.use_of(use_id).and_then(|(index, _)| {
+                self.declaration(frame, index)
+                    .find_operation(operation)
+                    .filter(|declared| declared.beside)
+                    .map(|declared| (index, declared.name.clone()))
+            }),
+            _ => None,
+        };
         let mut issues = Vec::new();
         for (id, entry) in preconditions {
             let Some((index, _)) = frame.spec.use_of(id) else {
@@ -2190,6 +2277,16 @@ impl<'a> Run<'a> {
                 continue;
             };
             let bound = &frame.uses[index];
+            if let Some((own, operation)) = beside.as_ref().filter(|(own, _)| *own != index) {
+                issues.push(SchemaIssue::new(
+                    pointer(id),
+                    format!(
+                        "operation {operation} of behavior {} is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior {}",
+                        frame.uses[*own].spec.behavior, bound.spec.behavior
+                    ),
+                ));
+                continue;
+            }
             if !bound.registered.declaration.preconditions {
                 issues.push(SchemaIssue::new(
                     pointer(id),
@@ -2288,6 +2385,34 @@ impl<'a> Run<'a> {
         Ok(())
     }
 
+    // own_guard asks one use's guard alone, about an operation of its own
+    // beside its row, handing it its entry of the command's preconditions
+    // for the caller's own request, as guards does.
+    fn own_guard(&self, frame: Frame<'_>, index: usize, request: &GuardRequest<'_>) -> Hook<()> {
+        let presents = matches!(
+            request,
+            GuardRequest::Operation { caller: None, .. }
+                | GuardRequest::Operation {
+                    as_caller: true,
+                    ..
+                }
+        );
+        let bound = &frame.uses[index];
+        let action = request.action();
+        let scope = Scope {
+            precondition: if presents {
+                self.command.preconditions.get(bound.spec.id())
+            } else {
+                None
+            },
+            ..self.scope(frame, index, action, false)
+        };
+        match bound.registered.behavior.guard(scope, request)? {
+            Some(veto) => Err(self.veto_refusal(frame, index, action, veto)),
+            None => Ok(()),
+        }
+    }
+
     fn after_change(&self, frame: Frame<'_>, change: &Change<'_>, action: &str) -> Hook<()> {
         for (index, bound) in frame.uses.iter().enumerate() {
             bound
@@ -2376,7 +2501,13 @@ impl<'a> Run<'a> {
                         as_caller,
                     }
                 };
-                self.guards(frame, &request)?;
+                // One beside the row asks its own use's guard alone: it
+                // changes nothing another use's guard protects.
+                if declared.beside {
+                    self.own_guard(frame, index, &request)?;
+                } else {
+                    self.guards(frame, &request)?;
+                }
                 // The handler of a caller's operation, not a call's, is the
                 // command's own, whose unchanged() the core honors.
                 let scope = Scope {
