@@ -132,7 +132,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 			}
 		}
 	}
-	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema"}; !maps.Equal(scopes, want) {
+	if want := map[string]string{"Lease.expireHolder": "schema", "Pool.pick": "schema", "Derived.staleDerivations": "schema", "Derived.settleDerivations": "schema", "Derived.failedDerivations": "schema"}; !maps.Equal(scopes, want) {
 		t.Fatalf("the operations of a table as a whole = %v, want %v", scopes, want)
 	}
 	if got := byName["Budget"].Contracts; len(got) != 1 || got[0].Name != "Capacity" || got[0].Role != "implements" {
