@@ -284,31 +284,29 @@ pub fn targets(conds: &[Cond], out: &mut Vec<String>) {
 /// A value as a field of a kind compares: an instant by its time, a UUID
 /// by its value, anything else as it is.
 #[derive(Clone, Debug, PartialEq)]
-enum Comparable {
+enum Operand {
     Instant(i64),
     Uuid(u128),
     Plain(Value),
 }
 
-fn comparable(kind: &Kind, value: &Value) -> Comparable {
+fn operand(kind: &Kind, value: &Value) -> Operand {
     match kind {
-        Kind::DateTime => {
-            instant_of(value).map_or(Comparable::Plain(value.clone()), Comparable::Instant)
-        }
+        Kind::DateTime => instant_of(value).map_or(Operand::Plain(value.clone()), Operand::Instant),
         Kind::Uuid => value
             .as_str()
             .and_then(uuid_of)
-            .map_or(Comparable::Plain(value.clone()), Comparable::Uuid),
-        _ => Comparable::Plain(value.clone()),
+            .map_or(Operand::Plain(value.clone()), Operand::Uuid),
+        _ => Operand::Plain(value.clone()),
     }
 }
 
 fn compare(kind: &Kind, held: &Value, value: &Value) -> Option<Ordering> {
-    match (comparable(kind, held), comparable(kind, value)) {
-        (Comparable::Instant(a), Comparable::Instant(b)) => Some(a.cmp(&b)),
-        (Comparable::Uuid(a), Comparable::Uuid(b)) => Some(a.cmp(&b)),
-        (Comparable::Plain(a), Comparable::Plain(b)) => {
-            let comparable = matches!(
+    match (operand(kind, held), operand(kind, value)) {
+        (Operand::Instant(a), Operand::Instant(b)) => Some(a.cmp(&b)),
+        (Operand::Uuid(a), Operand::Uuid(b)) => Some(a.cmp(&b)),
+        (Operand::Plain(a), Operand::Plain(b)) => {
+            let orderable = matches!(
                 (&a, &b),
                 (Value::Number(_), Value::Number(_))
                     | (Value::String(_), Value::String(_))
@@ -316,7 +314,7 @@ fn compare(kind: &Kind, held: &Value, value: &Value) -> Option<Ordering> {
             );
             if same(&a, &b) {
                 Some(Ordering::Equal)
-            } else if comparable {
+            } else if orderable {
                 Some(order(&a, &b))
             } else {
                 None
