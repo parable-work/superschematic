@@ -370,11 +370,11 @@ version = "0.1.0"
 source = { editable = "../../../third_party/superscalar/bindings/python" }
 
 [package.metadata]
-requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = "==9.1.1" }]
+requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = "==9.2.0" }]
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = "==9.1.1" }]
+dev = [{ name = "pytest", specifier = "==9.2.0" }]
 
 [[package]]
 name = "superschematic-schema-runtime"

@@ -658,7 +658,7 @@ fn validate_holds_a_value_to_a_type_as_a_nested_value() {
                 })
             )),
             pairs(&[
-                ("contact", "pattern"),
+                ("contact", "parse"),
                 ("grid[0]", "type"),
                 ("other", "unknown"),
                 ("serves", "type"),

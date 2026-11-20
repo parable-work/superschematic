@@ -46,7 +46,8 @@ pub fn descriptor(edit: impl FnOnce(&mut Value)) -> String {
 }
 
 /// The scalars the fixture's tables use, with superscalar's rules:
-/// `Contact.Email` trims, lowercases and checks its pattern;
+/// `Contact.Email` trims, lowercases and checks a simple pattern, a
+/// stand-in for superscalar's email grammar;
 /// `Identity.Name` is 2 to 80 characters; `Identity.UUID` is base62 or
 /// hyphenated, written base62. Any other scalar is unknown.
 pub struct Catalog;
@@ -75,8 +76,10 @@ impl Scalars for Catalog {
     }
 }
 
-/// superscalar's `Contact.Email`: trimmed and lowercased, then
-/// `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`.
+/// A stand-in for superscalar's `Contact.Email`, enough for the fixture:
+/// trimmed and lowercased, then
+/// `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`. superscalar itself
+/// checks the address with the `email_address` crate and declares no pattern.
 fn email(input: &str) -> Result<String, String> {
     let normalized = input.trim().to_lowercase();
     if normalized.is_empty() {

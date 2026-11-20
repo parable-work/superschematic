@@ -1232,7 +1232,6 @@
             "description": "An email address",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": [
               "string",
               "null"
@@ -1669,7 +1668,7 @@
             "x-superschematic-scalar": "Temporal.Seconds"
           },
           "catalogTemporalTime": {
-            "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+            "description": "Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
             "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
             "type": [
               "string",
@@ -1700,7 +1699,6 @@
           },
           "catalogTextMarkdown": {
             "description": "Markdown text",
-            "minLength": 1,
             "pattern": "^[\\s\\S]*$",
             "type": [
               "string",
@@ -2116,7 +2114,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:f7eb52202256c7d0a982903707bd4dc45078826c004b59d5785c522a34c8708c"
+      "inputSchemaDigest": "sha256:02356c5e2b7c4f7f2c0fdff50440717b13acd5e957b2c2bd5d8ac486172eadde"
     },
     {
       "name": "a distribution's keys",
@@ -2439,7 +2437,6 @@
             "description": "An email address",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": [
               "string",
               "null"
@@ -2876,7 +2873,7 @@
             "x-acme-scalar": "Temporal.Seconds"
           },
           "catalogTemporalTime": {
-            "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+            "description": "Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
             "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
             "type": [
               "string",
@@ -2907,7 +2904,6 @@
           },
           "catalogTextMarkdown": {
             "description": "Markdown text",
-            "minLength": 1,
             "pattern": "^[\\s\\S]*$",
             "type": [
               "string",
@@ -3325,7 +3321,7 @@
         "x-acme-arguments": 1,
         "x-acme-source": "a \u003cb\u003e \u0026 c"
       },
-      "inputSchemaDigest": "sha256:7c162e2625a55c36460e5f21c15a2281be6228ec50bc8c43623d6559df1b08f9"
+      "inputSchemaDigest": "sha256:566cefc0e8249839f9ea4d4ec9bb7b9ab236199c0a6b31dfc0b3e663c1752dd7"
     },
     {
       "name": "no keys",
@@ -3630,7 +3626,6 @@
             "description": "An email address",
             "format": "email",
             "maxLength": 255,
-            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
             "type": [
               "string",
               "null"
@@ -4022,7 +4017,7 @@
             ]
           },
           "catalogTemporalTime": {
-            "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+            "description": "Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
             "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
             "type": [
               "string",
@@ -4050,7 +4045,6 @@
           },
           "catalogTextMarkdown": {
             "description": "Markdown text",
-            "minLength": 1,
             "pattern": "^[\\s\\S]*$",
             "type": [
               "string",
@@ -4447,7 +4441,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:95170dd8eed0afa61dc1b0b828219f5752457624f4a5d4ca4bdc885623ff0f5d"
+      "inputSchemaDigest": "sha256:036152c515ac0a26c720b4cfd5beb5efefa199a454d54140305cee7f82760efd"
     }
   ],
   "defaults": {

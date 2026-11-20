@@ -164,12 +164,12 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:0fddb64e199626cba1c03297716f9ad37b4d4bd15585e214fbedaa973c9f2405",
+      "inputSchemaDigest": "sha256:03a9bbcf56877a7659368d2e6fe2c41c36a38b4cd958695b2726618cc26a763b",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "login": {"description":"An email address","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string","x-superschematic-scalar":"Contact.Email"},
+          "login": {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
           "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
           "session": {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]}
         },
@@ -303,12 +303,12 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:0e4dbd541200dcd6c5e308ce1cb229a43b7798747ba6e54fe137a4b7dd3bbf76",
+      "inputSchemaDigest": "sha256:58d29a839e7a4125ec46e1ed00558f7548298b07c9b87f93d8cc495a89cb4213",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "login": {"description":"An email address","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string","x-superschematic-scalar":"Contact.Email"},
+          "login": {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
           "name": {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
           "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
           "session": {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]}
@@ -516,12 +516,12 @@
       "requiredPermissions": ["identity.users.write"],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:5e31acd1328f88f0f1f8eebe0f18d830fc5313aa100a1db989c11843269082e5",
+      "inputSchemaDigest": "sha256:a5b424663f1beb52c7c0c42b6de7edecd7d0943d80f75a9821a60ca66250f9e8",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "login": {"description":"An email address","format":"email","maxLength":255,"pattern":"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$","type":"string","x-superschematic-scalar":"Contact.Email"},
+          "login": {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
           "name": {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
           "password": {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"}
         },

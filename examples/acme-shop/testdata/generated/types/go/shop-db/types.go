@@ -358,9 +358,6 @@ func validateContactEmailValue(value ContactEmail, required bool) (bool, []Valid
 	if utf8.RuneCountInString(string(value)) > 255 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 255 characters"})
 	}
-	if matched, err := regexp.MatchString("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", string(value)); err != nil || !matched {
-		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
-	}
 	if len(ruleErrs) > 0 {
 		return false, ruleErrs
 	}

@@ -12,7 +12,7 @@ import (
 // superscalar's VALID_SCALARS), each carrying only the generic IR
 // constraints superschematic would emit. The point of these tests is that the generic
 // constraints alone DO NOT catch the deep semantic checks (Embedding.Vector /
-// Generic.StringMap serde, Asset.FilePath / Text.Markdown min_length 1) -- those
+// Generic.StringMap serde, Asset.FilePath min_length 1) -- those
 // live in the Rust core and must be reached by delegation, not by the IR.
 func par12Schema() *ir.Schema {
 	s := ir.NewSchema("par12", ir.SchemaKindGeneral)
@@ -33,7 +33,8 @@ func par12Schema() *ir.Schema {
 		Name:      "Asset.FilePath",
 		Primitive: "String",
 	}
-	// Text.Markdown: core enforces min_length 1.
+	// Text.Markdown: the core declares no min_length. An empty required value
+	// fails "required" before the core is reached.
 	s.Scalars["Text.Markdown"] = &ir.ScalarDef{
 		Name:      "Text.Markdown",
 		Primitive: "String",
