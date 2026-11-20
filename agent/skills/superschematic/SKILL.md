@@ -146,7 +146,11 @@ path for when the store is unavailable.
    SDKs.
 7. **Changing a table that holds data?** `superschematic migrate plan
    schemas/services/<db> --from-ref origin/main` plans expand and contract
-   steps with their hazards. Show the hazards to the user.
+   steps with their hazards. Show the hazards to the user. With no
+   checkout, as in a runtime environment, `migrate plan --documents
+   <db's .schema.json files> --from <model>` plans from the documents
+   `format --to=json` writes and the model `superschematic-migrate status
+   --model` prints.
 
 ## Choices that matter
 

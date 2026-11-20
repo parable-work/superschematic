@@ -534,7 +534,8 @@ file states them there, as it states `imports`.
 ## `migrate plan <service-dir>`
 
 Plan the migration of a DB service's database from a previous version of
-its schema to the one in `<service-dir>`, with no database at hand. The
+its schema to the one in `<service-dir>`, or in the service's schema
+documents (`--documents`, `--request`), with no database at hand. The
 plan is ordered steps in two phases, `expand` before the new servers roll
 out and `contract` after, each with its SQL and its hazards.
 `superschematic-migrate` applies it.
@@ -597,6 +598,58 @@ database, go to stderr. With `--fail-on`, the command prints the plan,
 then lists on stderr each hazard of a listed class that no `--allow` names,
 with the `--allow` that lets it pass, and exits 1.
 
+`--documents` takes the new version as one DB service's schema documents,
+the JSON files `format --to=json` writes, in place of the service
+directory (D117). Give every schema document of the service. `-` reads
+more from stdin, one JSON value after another, as `format --to=json
+--stdout` prints them file after file. Each document names the service
+and its kind, and every one names the same DB service. No schemas root
+stands beside them, so the previous version is the model the database
+recorded (`--from <model.json>`) or an empty database, and no reader reads
+the database's tables. `--from-ref`, `--from-database`, `--drop`,
+`--reader` and `--database-url` are refused. A document carries no
+config: the dialect is `--dialect`'s, and the model takes the `sql`
+options of a config that sets none. A document that imports another
+service's types is refused. The naming is `--naming`'s, else the
+`superschematic.toml` found walking up from the first document file, else
+the defaults. A Postgres plan of documents that declare queries (`@query`)
+is refused, since it would not prepare them: plan the service directory.
+Documents plan as their service directory plans: the same model, and from
+the same model the same plan.
+
+`--request <file>` answers a plan request, for a library that runs the
+binary, such as a runtime environment's handler at a publish (D117). It
+takes no other flag but `--naming`. The request is one JSON object, in
+the file or on stdin with `-`:
+
+| Member | Required | Meaning |
+| --- | --- | --- |
+| `version` | yes | `1` |
+| `dialect` | yes | `postgres` or `sqlite` |
+| `documents` | yes | every schema document of one DB service, each as `format --to=json` writes it |
+| `from` | yes | the model the database recorded, as `superschematic-migrate status --model` prints it, or `null` for an empty database |
+| `renames` | no | renames, as `--rename` takes them |
+| `failOn` | no | hazard classes, or `all`, as `--fail-on` takes them |
+| `allow` | no | hazard ids, as `--allow` takes them |
+
+`from` is required, so a request that leaves out the model by mistake is
+refused and not planned from an empty database. A member the request does
+not have is refused too.
+
+The command prints one line of JSON. When it plans, it exits 0:
+
+```json
+{"version":1,"plan":{"dialect":"sqlite","from":"...","steps":[...],"to":"..."},"hazards":[{"id":"destructive:table/comment/column/legacy_id","class":"destructive","subject":"table/comment/column/legacy_id","reason":"..."}],"refused":["destructive:table/comment/column/legacy_id"]}
+```
+
+`plan` is the plan's canonical JSON, as `--out` writes it and
+`superschematic-migrate apply` reads it. `hazards` lists every hazard of
+the plan in step order. `refused` lists the ids of the hazards of a
+`failOn` class that `allow` does not name: the caller refuses the publish
+while it is not empty. A request it cannot plan, such as one whose
+documents are malformed or whose model is another service's, prints
+`{"version":1,"error":"..."}`, writes the error to stderr and exits 1.
+
 ```
 superschematic migrate plan ./schemas/services/shop-db
 superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --format markdown --fail-on destructive,compat
@@ -605,6 +658,9 @@ superschematic migrate plan ./schemas/services/shop-db --from applied-model.json
 superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
 superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --out plan.json
 superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --print-model > legacy-model.json
+superschematic migrate plan --documents shop.schema.json --dialect sqlite --from applied-model.json --out plan.json
+superschematic format --to=json --stdout ./src/shop.schema.ts | superschematic migrate plan --documents - --from applied-model.json
+superschematic migrate plan --request - < request.json > response.json
 ```
 
 | Flag | Default | Meaning |
@@ -622,7 +678,9 @@ superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-d
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
 | `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags. With `--from-database` it prints the file's model, and takes the `--rename` and `--drop` the plan from the file is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
-| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+| `--documents` | false | take the new version as the arguments: one DB service's schema documents, as `format --to=json` writes them, or `-` for stdin |
+| `--request` | none | answer the plan request in this file, or on stdin with `-`, with one line of JSON on stdout |
+| `--naming` | `<service-dir>/../../superschematic.toml`; with `--documents`, the one found walking up from the first document | naming config file |
 
 ## `queries verify <service-dir>`
 
