@@ -417,6 +417,12 @@ func indexDef(args []any) (ir.IndexDef, error) {
 						return ir.IndexDef{}, ArgErrorf(1, "@index unique must be a boolean literal")
 					}
 					idx.Unique = b
+				case "nullsNotDistinct":
+					b, ok := value.(bool)
+					if !ok {
+						return ir.IndexDef{}, ArgErrorf(1, "@index nullsNotDistinct must be a boolean literal")
+					}
+					idx.NullsNotDistinct = b
 				case "name":
 					s, ok := value.(string)
 					if !ok {
@@ -474,6 +480,9 @@ func indexDef(args []any) (ir.IndexDef, error) {
 		default:
 			return ir.IndexDef{}, ArgErrorf(1, "@index second argument must be a boolean unique flag or an options object")
 		}
+	}
+	if idx.NullsNotDistinct && !idx.Unique {
+		return ir.IndexDef{}, ArgErrorf(1, "@index nullsNotDistinct requires unique: true")
 	}
 	return idx, nil
 }

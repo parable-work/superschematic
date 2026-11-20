@@ -74,6 +74,10 @@ type Index struct {
 	Type    string // BTREE, GIST, GIN, BRIN, HNSW, IVFFLAT
 	Unique  bool
 
+	// NullsNotDistinct writes NULLS NOT DISTINCT: nulls collide in the
+	// unique index (@index's nullsNotDistinct, D125).
+	NullsNotDistinct bool
+
 	// Where is an optional partial-index predicate (without the WHERE
 	// keyword): @index's where, and "deleted_at IS NULL" for unique indexes
 	// on soft-deletable tables.
@@ -847,14 +851,15 @@ func convertTypeToTable(
 		}
 		pending = append(pending, pendingIndex{
 			index: Index{
-				Columns:       indexColumns,
-				Type:          method,
-				Unique:        idx.Unique,
-				Where:         indexPredicate(idx, typeDef, table.Columns, indexColumns),
-				Opclass:       idx.Ops,
-				Expression:    idx.Expression,
-				InTransaction: idx.Concurrently != nil && !*idx.Concurrently,
-				With:          sqlutil.IndexWith(idx),
+				Columns:          indexColumns,
+				Type:             method,
+				Unique:           idx.Unique,
+				NullsNotDistinct: idx.NullsNotDistinct,
+				Where:            indexPredicate(idx, typeDef, table.Columns, indexColumns),
+				Opclass:          idx.Ops,
+				Expression:       idx.Expression,
+				InTransaction:    idx.Concurrently != nil && !*idx.Concurrently,
+				With:             sqlutil.IndexWith(idx),
 			},
 			keys: indexKeys,
 			name: idx.Name,

@@ -285,7 +285,7 @@ func entityTable(t *sqlgen.Table, ns *pgNamespace) (*Table, error) {
 			return nil, err
 		}
 		table.Indexes = append(table.Indexes, &Index{
-			Name: idx.Name, Columns: columns, Method: idx.Type, Opclass: idx.Opclass, Unique: idx.Unique, Where: idx.Where,
+			Name: idx.Name, Columns: columns, Method: idx.Type, Opclass: idx.Opclass, Unique: idx.Unique, NullsNotDistinct: idx.NullsNotDistinct, Where: idx.Where,
 			Expression: idx.Expression, InTransaction: idx.InTransaction, With: idx.With,
 		})
 	}

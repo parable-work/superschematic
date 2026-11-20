@@ -27,6 +27,9 @@ func checkIndexOptions(schema *ir.Schema, r *Result) {
 				continue
 			}
 			label := indexLabel(idx)
+			if idx.NullsNotDistinct && !idx.Unique {
+				r.errorf(td.Owner, "%s: %s nullsNotDistinct requires unique: true", td.Name, label)
+			}
 			if idx.Method != "" && !slices.Contains(ir.IndexMethods, idx.Method) {
 				r.errorf(td.Owner, "%s: %s method %q is not one of %s", td.Name, label, idx.Method, strings.Join(ir.IndexMethods, ", "))
 			}

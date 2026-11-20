@@ -763,6 +763,11 @@ type IndexDef struct {
 	// Unique controls whether the index is unique.
 	Unique bool `json:"unique,omitempty" yaml:"unique,omitempty"`
 
+	// NullsNotDistinct makes nulls collide in a unique index: two rows whose
+	// keys are both null conflict, as Postgres's NULLS NOT DISTINCT does. It
+	// needs Unique, and the sqlite dialect refuses it (D125).
+	NullsNotDistinct bool `json:"nullsNotDistinct,omitempty" yaml:"nullsNotDistinct,omitempty"`
+
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 

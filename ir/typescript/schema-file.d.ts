@@ -386,6 +386,7 @@ export interface IndexDef {
   m?: number;
   method?: string;
   name?: string;
+  nullsNotDistinct?: boolean;
   ops?: string;
   unique?: boolean;
   where?: string;

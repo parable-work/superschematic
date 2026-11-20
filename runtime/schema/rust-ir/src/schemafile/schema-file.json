@@ -5044,6 +5044,10 @@
           "default": "",
           "type": "string"
         },
+        "nullsNotDistinct": {
+          "default": false,
+          "type": "boolean"
+        },
         "ops": {
           "default": "",
           "type": "string"

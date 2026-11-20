@@ -236,6 +236,8 @@ type Index struct {
 	// ("gin_trgm_ops"); empty means the default.
 	Opclass string `json:"opclass,omitempty"`
 	Unique  bool   `json:"unique,omitempty"`
+	// NullsNotDistinct makes nulls collide in a unique index (D125).
+	NullsNotDistinct bool `json:"nullsNotDistinct,omitempty"`
 	// Where is a partial index's predicate, without WHERE.
 	Where string `json:"where,omitempty"`
 	// Expression is the raw expression the index covers instead of its

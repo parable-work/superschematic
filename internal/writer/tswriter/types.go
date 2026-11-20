@@ -205,6 +205,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		if idx.Unique {
 			options = append(options, "unique: true")
 		}
+		if idx.NullsNotDistinct {
+			options = append(options, "nullsNotDistinct: true")
+		}
 		for _, opt := range []struct{ key, value string }{
 			{"name", idx.Name}, {"method", idx.Method}, {"ops", idx.Ops}, {"where", idx.Where}, {"expression", idx.Expression},
 		} {

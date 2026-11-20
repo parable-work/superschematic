@@ -215,6 +215,12 @@ export type IndexMethod = "btree" | "gin" | "gist" | "brin" | "hnsw" | "ivfflat"
 
 export interface IndexOptions {
   readonly unique?: boolean;
+  /**
+   * Nulls collide in this unique index: two rows whose keys are both null
+   * conflict (Postgres's `NULLS NOT DISTINCT`). Needs `unique: true`. The
+   * sqlite dialect refuses it.
+   */
+  readonly nullsNotDistinct?: boolean;
   /** A purpose name: the index is `idx_<table>_<name>`, or `uq_` when unique. */
   readonly name?: string;
   /**
