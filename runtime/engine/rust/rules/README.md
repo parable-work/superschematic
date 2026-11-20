@@ -708,7 +708,12 @@ in a JSON column and each behavior's rows in a shared sub-table keyed by
 schema and id ("A runtime project"). The core and the adapter are the same
 for both; only the layout differs. D117 names that fixed layout
 development mode's, and gives runtime mode the build-time layout, read
-from the model the database recorded; neither is built.
+from the model the database recorded. Development mode is built:
+`../rules-handler` (`superschematic-rules-handler`) is its pure request
+handler, whose bridge runs a command over the fixed layout as the
+reference host does, and `../rules-dev` (`superschematic-rules-dev`) its
+store over SQLite, a file or a database in memory; both replay every
+transcript below over that layout. Runtime mode is not built.
 
 ## The adapter
 

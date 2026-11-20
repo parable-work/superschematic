@@ -243,6 +243,15 @@ path for when the store is unavailable.
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors
   with `@behavior("Workflow", {...})` (`superschematic catalog behaviors`).
+- **Working out a schema against sample rows?** Development mode (D117,
+  the Rust crates `superschematic-rules-handler` and
+  `superschematic-rules-dev`) keeps a type's rows as JSON in fixed tables
+  of a SQLite file or a database in memory, and a publish takes effect at
+  once. It has no compatibility rule: a publish may rename, retype, remove
+  and tighten, and is refused with each stored row it no longer describes
+  unless it says `discard`. It gives a table's answers (unique fields,
+  relations, the ORMs' filters and sorts) but not a table's speed, so it
+  is not where an application's data goes.
 - **A `@tableOperation` documents itself.** Without `@docs` it takes its
   title from the method's name, its description from the method's
   comment and its capability from the set and the method; without `@mcp`
