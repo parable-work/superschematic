@@ -255,7 +255,15 @@ path for when the store is unavailable.
   may rename, retype, remove and tighten, and is refused with each stored
   row it no longer describes unless it says `discard`. It gives a table's
   answers (unique fields, relations, the ORMs' filters and sorts) but not
-  a table's speed, so it is not where an application's data goes.
+  a table's speed, so it is not where an application's data goes. Run it
+  as a server with `cargo run -p superschematic-rules-dev --features
+  server --bin superschematic-dev -- --db dev.db` in
+  `runtime/engine/rust`: the engine's paths under
+  `/namespaces/default`, an event stream at `/events` and MCP at `/mcp`,
+  whose tools include `define_schema` and `publish_schema`. A request's
+  caller is the `X-Superschematic-Subject` header, or `--as`, and
+  `--policy` takes the engine's access policy (`"permission"` or
+  `{"rules": [...]}`).
 - **A `@tableOperation` documents itself.** Without `@docs` it takes its
   title from the method's name, its description from the method's
   comment and its capability from the set and the method; without `@mcp`

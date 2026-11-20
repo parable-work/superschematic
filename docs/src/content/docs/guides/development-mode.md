@@ -35,10 +35,11 @@ them by path from a checkout.
 - `superschematic-rules-dev` is its store over SQLite: a file, or a
   database in memory that goes with its process. With its `postgres`
   feature it keeps the same tables in a schema of a Postgres database
-  (`Dev::postgres(url, schema)`).
+  (`Dev::postgres(url, schema)`). With its `server` feature it serves the
+  handler's routes over HTTP, and its `superschematic-dev` binary is a
+  server you run.
 
-The library in each language, the prebuilt image, the event stream, MCP
-and the access policy are later steps.
+The library in each language and the prebuilt image are later steps.
 
 ```rust
 use serde_json::json;
@@ -97,9 +98,16 @@ the field itself (`status`), and its other fields follow the field's name
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
 Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering and
-Revisions. A read serves no Rollups value yet. Comments and Blueprint are
-not ported yet, so `examples/engine-notes` and `examples/engine-jobs`
-still run on the engine.
+Revisions. Comments and Blueprint are not ported yet, so
+`examples/engine-notes` and `examples/engine-jobs` still run on the
+engine.
+
+A get and a list also show the fields a behavior computes at a read,
+which no row holds. They are named as the use's other fields are:
+Rollups' `rollupsValues`, Dependencies' `dependenciesBlocked`, Revisions'
+`revisionsPendingProposals`, Timers' `timersDeadlines`. Rollups and
+Dependencies read other rows to compute theirs, and the read sees them as
+they stand. `describe` lists them under `computed`.
 
 - Numbering's counts are the type's as a whole, not a row's. A create
   reads its count and writes it held to the version it read, so two
@@ -118,12 +126,162 @@ still run on the engine.
 | `describe` | The live version: the key, each field with the filters and sorts it takes, the owned fields, each use with its operations, sub-tables and events. |
 | `get`, `create`, `update`, `delete` | A row. An update is a merge patch. |
 | `list` | A page of rows a filter keeps, in a sort's order. |
-| `operation` | A behavior's operation of a row. |
+| `operation` | A behavior's operation of a row. With no use named, the one use that declares the operation. |
 | `tableOperation` | A behavior's operation of the table as a whole, such as Pool's `pick`. |
+| `types` | The live types the caller may read, each with its version. |
+| `tools` | The MCP tools the caller may call. See below. |
 
 The host's runner hands the handler the deadlines that fall due and the
 writes a behavior hears, each as a request of its own. `Dev` runs them
 after each request, or when you call `run_due` with `Drain::WhenAsked`.
+
+## Running it as a server
+
+`superschematic-dev` serves development mode over HTTP. Build it from a
+checkout, in `runtime/engine/rust`:
+
+```bash
+cargo run -p superschematic-rules-dev --features server --bin superschematic-dev -- --db dev.db
+```
+
+| Flag | What it does |
+|------|--------------|
+| `--db FILE` | The SQLite file. With `--memory`, or with neither, a database in memory. |
+| `--listen ADDR` | Where it listens. `127.0.0.1:4500` unless given. |
+| `--policy JSON` | The access policy, or `@FILE` for one in a file. `"allowAll"` unless given. |
+| `--as SUBJECT` | The caller of a request that names none. `developer` unless given; `--as ""` names none. |
+| `--permissions P1,P2` | The `--as` caller's permissions. |
+| `--postgres URL --schema NAME` | A schema of a Postgres database, with the `postgres` feature. |
+
+A request's caller is the subject the `X-Superschematic-Subject` header
+names, with the permissions `X-Superschematic-Permissions` lists, or the
+`--as` caller. With neither, the request is `401 unauthorized`. Anyone who
+reaches the server is whoever they say, so keep it on your own machine.
+
+The server runs the queues after each request and the deadlines each
+second. A Rust host of its own mounts the same routes with
+`superschematic_rules_dev::server::router`, and authenticates as it
+likes.
+
+## Routes
+
+The routes are the engine's, under one namespace, `default`. A path that
+names another namespace is `404`.
+
+| Method | Path | What it does |
+|--------|------|--------------|
+| `GET` | `/namespaces/default/schemas` | The live types the caller may read. |
+| `POST` | `/namespaces/default/schemas` | Defines a type from a schema document. |
+| `GET` | `/namespaces/default/schemas/{type}` | The live version's document. |
+| `GET` | `/namespaces/default/schemas/{type}/describe` | The live version as development mode runs it. |
+| `POST` | `/namespaces/default/schemas/{type}/publish` | Publishes the draft. `?discard=true` deletes the rows it fails. |
+| `GET` | `/namespaces/default/schemas/{type}/instances` | A page of rows. |
+| `POST` | `/namespaces/default/schemas/{type}/instances` | A create: `{ "id"?, "data", "behaviors"? }`, `behaviors` being each use's create parameters. |
+| `GET` | `/namespaces/default/schemas/{type}/instances/{id}` | A row. |
+| `PATCH` | `/namespaces/default/schemas/{type}/instances/{id}` | An update, as `application/merge-patch+json`. |
+| `DELETE` | `/namespaces/default/schemas/{type}/instances/{id}` | A delete. |
+| `POST` | `/namespaces/default/schemas/{type}/instances/{id}/operations/{operation}` | A behavior's operation of a row. |
+| `POST` | `/namespaces/default/schemas/{type}/operations/{operation}` | A behavior's operation of the table. |
+| `GET` | `/namespaces/default/events` | The event queue. |
+| `POST` | `/namespaces/default/mcp` | The MCP endpoint. |
+
+A success is the envelope `{ "data", "meta": { "requestId" } }`. A row
+carries its version as its `ETag`, and a create answers `201` with the
+row's `Location`. A refusal is an RFC 9457 problem with the refusal's
+`code` and its `details`. An operation is named by its name, which the
+type's one use that declares it answers. Where two uses declare it, name
+it `<use>.<operation>`. An update, a delete and an operation take the
+`Preconditions` header, a JSON object of each use's entry by its id.
+
+A list takes its filters in the query string, as the generated servers
+read them:
+
+- `filter[title]=Desk` is equality, and `filter[estimate][gte]=4` names
+  an operation: `eq`, `ne`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte`,
+  `contains` and `isNull`. A value is read as its field's type. `in` and
+  `notIn` take a list separated by commas.
+- `where` takes the filter grammar below as JSON, a relation's filter
+  and `anyOf` among it.
+- `sort=-estimate,title` sorts, `-` descending. `limit` and `cursor` page.
+
+The router has no transport under it
+(`superschematic_rules_handler::http`): `route` reads a method, a path, a
+query, headers and a body as a request, and `respond` writes the answer.
+`Dev::http` runs both in one call.
+
+## The access policy
+
+The handler asks an access policy before each request a caller makes. It
+is the engine's policy, in the same JSON, so a policy written for the
+engine works here:
+
+- `"allowAll"` allows everything. It is the default.
+- `"permission"` allows an action on a type to a caller holding
+  `<type>.<action>`, such as `Order.write`.
+- `{ "rules": [...] }` is a list of rules. The first rule that matches a
+  question decides it, and a question no rule matches is refused.
+
+```json
+{"rules": [
+  {"subject": "mallory", "allow": false},
+  {"action": ["define", "publish"], "require": "schemas.{action}"},
+  {"action": "write", "operation": "transition", "require": "{schema}.move"},
+  {"require": "{schema}.{action}"}
+]}
+```
+
+A rule matches on `action`, `operation`, `schema`, `namespace` and
+`subject`, and decides with `allow` or `require`. In `require`,
+`{schema}`, `{action}`, `{namespace}` and `{operation}` stand for the
+question's.
+
+- `define` and `publish` ask about the type they name. A define asks once
+  its document reads.
+- `describe`, a get, a list and a read of the event queue ask `read`.
+- A create, an update and a delete ask `write`.
+- A behavior's operation asks `write` or `read`, as its declaration says,
+  and names itself as `operation`.
+
+The policy is asked before anything is read, so a type that does not
+exist is refused to a caller who may not read it. A refusal is
+`403 forbidden`, in the engine's words: `bob may not write Order in
+namespace default`. The behaviors' own permissions still apply after the
+policy allows a request. Their reads of other types are not asked of the
+policy, as a compiled server's are not.
+
+With `Dev`, pass it with `with_policy`. With the server, pass `--policy`.
+
+## The event stream
+
+The events behaviors emit, such as Schedules' `run`, are kept in order.
+`GET /namespaces/default/events` reads them as a page,
+`{ "events", "next", "more" }`. It takes `after` (a cursor, or `head`),
+`schema`, `instanceId`, `behavior`, `kind` and `limit`. A read of every
+type keeps only the types the caller may read.
+
+With `Accept: text/event-stream` it is a stream of server-sent events.
+Each event is one message: `id:` is its cursor and `data:` the event. Once
+the stream has caught up it sends a `ready` event, then each event as it
+is written, and a heartbeat comment while nothing comes. A client that
+reconnects sends `Last-Event-ID` and resumes after it.
+
+## MCP
+
+`POST /namespaces/default/mcp` is an MCP endpoint over the streamable HTTP
+transport, stateless, as the generated servers serve theirs. Its tools are
+made from the live types, as the engine makes its own:
+
+- `<type>_create`, `<type>_get`, `<type>_list`, `<type>_update` and
+  `<type>_delete`, such as `order_create`;
+- one tool per operation a type's uses declare, such as
+  `task_transition`;
+- `list_schemas`, `describe_schema`, `define_schema` and
+  `publish_schema`, so an agent can work a schema out with you.
+
+The engine has no tool that publishes. Development mode has one, since
+publishing is what it is for. A tool the access policy refuses the caller
+is not listed. A call that is refused answers a tool error whose
+structured content is the problem.
 
 ## A table's answers
 
