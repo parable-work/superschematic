@@ -168,8 +168,8 @@ takes own fields only.
 
 **D77** (L 10239). Vectors over messages; Search's every-schema search on
 namespace operations; `readable()` asked per operation; a notifier and an
-agent dispatcher as stack workers; a conversation UI. D103's step 4 ports
-Comments and may plan these on tables.
+agent dispatcher as stack workers; a conversation UI. Comments runs on
+the core now (D103's status lists what its port left).
 
 **D78** (L 10885). Go and TypeScript apps; the Topcoat asset bundle in the
 app image (so a deployed live list is a GET form); an app on Cloudflare; a
@@ -628,11 +628,15 @@ table) and Revisions (proposals reviewed into a write of the row's own
 fields), with two more primitives of the core: a use's shared table
 (`"scope": "schema"`, `ReadRequest::SharedRow`, `ChangeSet.shared_rows`,
 each write fenced on its version) and an operation's write of its row's
-own fields (`Cx::update`, held to an update's validation and guards).
-Development mode runs all eighteen. Left: the rest of step 4 (Comments,
-Derived, Provenance, Holds, Stock, Calendar and Payments, each held to the
-test, and the folded Links, Search, Queue and Branches removed), and steps
-5 to 7, whose step 6 D117 renames development mode. What the built steps left follows. The
+own fields (`Cx::update`, held to an update's validation and guards);
+and of Comments, its messages, edits and reactions sub-tables of the row
+and its conversation's marks a shared table, with the core's operation
+beside its row (`"beside": true`), which asks only its own use's guard
+and writes no row, so a post leaves the row's version as it was.
+Development mode runs all nineteen. Left: the rest of step 4 (Derived,
+Provenance, Holds, Stock, Calendar and Payments, each held to the test,
+and the folded Links, Search, Queue and Branches removed), and steps 5 to
+7, whose step 6 D117 renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
 Four of step 4's ports met the test as follows, and each waits on a choice:
@@ -682,6 +686,19 @@ serves no Rollups `values` either; Retries' `resultField` and Budget's
 Reactions rule on `Revisions.pendingProposals`, which the build refuses;
 and an update command that changes nothing, which still writes and moves
 the version, as the engine's did not.
+
+What Comments left: streamed replies (`begin`, `appendDraft`, `finish`,
+`interrupt`, `composing`), which need signals; read state, the inbox and
+deliveries (`markRead`, `follow`, `unread`, `readUpTo`), which need
+namespace operations; `searchMessages`, attachment blocks and
+`moveAnchor`, which need no new primitive; `via` and `for` on a message,
+which need the calling service and the subject acted for on the core's
+caller; events for a beside write, which no change queue hears; reads of
+a conversation by page, where every operation reads its sub-tables
+whole; a beside write that races its row's delete, which fails on the
+foreign key as a database error rather than `not_found`; and the
+declaration's descriptions, which still describe the engine's features.
+`examples/engine-notes` waits for streamed replies and read state.
 
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are
@@ -1043,9 +1060,9 @@ context is written out.
 - `Queue` folds into `@queue`: its claim a declared read and Lease's
   `acquire`. The recordings that compose Presence or Budget beside Queue
   wait for it, as does `checkReserve`'s `hears` (L 14883, 15070, 17235).
-- Comments on the core: an operation scoped to a namespace runs no
-  command, and `@behaviorOperations` warns and leaves it out (L 17127,
-  17262).
+- An operation scoped to a namespace runs no command on the core, and
+  `@behaviorOperations` warns and leaves it out: Comments' read state,
+  inbox and deliveries wait for it (L 17127, 17262).
 - Step 5's question: whether Constants' constancy and `oneWay`, and
   StateRules' required and frozen fields, become declarative rules.
   Constants still requires at least one field (L 15306, 17044, 17103).
@@ -1217,8 +1234,8 @@ its policy. Left:
 - The library in TypeScript, Go and Python over the handler (WebAssembly
   with a JSON ABI, or the C ABI), and the prebuilt image (D103's step 6).
 - `examples/engine-notes` and `examples/engine-jobs` on development mode:
-  engine-notes waits for Comments on the core, and engine-jobs for the
-  choice on Blueprint (D103's status).
+  engine-notes waits for Comments' streamed replies and read state, and
+  engine-jobs for the choice on Blueprint (D103's status).
 - The policy asked of a behavior's reads of other types (Dependencies'
   blockers, Revisions' evidence, Rollups' links), as the engine asked
   them; the runner's requests made by a system principal the policy sees.
