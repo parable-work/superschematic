@@ -15,7 +15,9 @@
     "Seats",
     "Reconcile",
     "Schedules",
-    "Pool"
+    "Pool",
+    "Rollups",
+    "Dependencies"
   ],
   "scenarios": [
     {

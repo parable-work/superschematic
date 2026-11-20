@@ -15,18 +15,18 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path, Report};
 
-/// The steps of `workqueue-lease.json` the replayer maps and compares: 637
-/// of its 691, in 47 of its 48 scenarios, expireHolder's calls among them,
-/// each run as a command without a row on Lease's use (D104). The 54 it
-/// skips: the 26 steps of the scenario that composes Dependencies, which
-/// the core does not run; the 12 steps of the engines opened with a value
+/// The steps of `workqueue-lease.json` the replayer maps and compares: 663
+/// of its 691, in every one of its 48 scenarios, expireHolder's calls among
+/// them, each run as a command without a row on Lease's use (D104), and the
+/// scenario that composes Dependencies since the core runs it (D104's step
+/// 4). The 28 it skips: the 12 steps of the engines opened with a value
 /// store, which a table has no counterpart of; the 10 steps that call
 /// Comments' operations or whose refusal names it (incidental); and the 6
 /// reads of the engine's store (storage.get, runner.status) and list and
 /// update options the reference host does not take (limit, expectedSeq).
 /// The `open` steps that run count but compare nothing, and each
 /// `runner.runDue` counts as checked once the deadlines it ran answered.
-const FLOOR: usize = 637;
+const FLOOR: usize = 663;
 
 /// The steps of `workqueue-lease-timers.json` the replayer maps and
 /// compares: all 24, a Timers fire the holder's lease holds and one it

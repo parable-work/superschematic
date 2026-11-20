@@ -76,6 +76,7 @@ pub(crate) trait Erased: Send + Sync {
     fn after_change(&self, scope: Scope<'_>, change: &Change<'_>) -> Hook<()>;
     fn listens(&self, config: &(dyn Any + Send + Sync)) -> Option<Vec<Listen>>;
     fn heard(&self, scope: Scope<'_>, heard: &Heard<'_>) -> Hook<()>;
+    fn read_view(&self, scope: Scope<'_>) -> Hook<Map<String, Value>>;
     fn read_fields(
         &self,
         config: &(dyn Any + Send + Sync),
@@ -243,6 +244,10 @@ impl<B: Behavior> Erased for Typed<B> {
 
     fn heard(&self, scope: Scope<'_>, heard: &Heard<'_>) -> Hook<()> {
         self.0.heard(&self.cx(scope)?, heard)
+    }
+
+    fn read_view(&self, scope: Scope<'_>) -> Hook<Map<String, Value>> {
+        self.0.read_view(&self.view(scope)?)
     }
 
     fn read_fields(

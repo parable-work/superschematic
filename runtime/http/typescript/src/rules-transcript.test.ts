@@ -117,14 +117,14 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] = [
   { file: 'core-workflow', floor: 96 },
   { file: 'core-timers', floor: 139 },
-  { file: 'core-reactions', floor: 586 },
+  { file: 'core-reactions', floor: 618 },
   { file: 'core-reactions-changes', floor: 60 },
   { file: 'core-workflow-principals', floor: 101 },
   { file: 'core-constants', floor: 39 },
   { file: 'core-staterules', floor: 76 },
   { file: 'core-approvals', floor: 122 },
   { file: 'core-freezes-and-sign-offs', floor: 115 },
-  { file: 'core-lease', floor: 449 },
+  { file: 'core-lease', floor: 464 },
   { file: 'core-presence', floor: 141 },
   { file: 'core-budget', floor: 495 },
   { file: 'core-retries', floor: 250 },
@@ -134,6 +134,8 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
   { file: 'core-pool', floor: 82 },
+  { file: 'core-rollups', floor: 180 },
+  { file: 'core-dependencies', floor: 266 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

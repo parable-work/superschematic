@@ -76,7 +76,7 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   (`hearsChanges`), and the entry a caller presents it as a precondition
   (`preconditionSchema`), in the order Workflow, Reactions, Constants,
   StateRules, Approvals, Timers, Lease, Presence, Budget, Retries, Seats,
-  Reconcile, Schedules, Pool. An operation the core runs on the table as
+  Reconcile, Schedules, Pool, Rollups, Dependencies. An operation the core runs on the table as
   a whole says `scope: 'schema'` (Pool's `pick`, Lease's `expireHolder`),
   and the contracts a behavior implements or asks are its
   `contracts` (`DeclaredContract`: each its name and role, D104: Budget

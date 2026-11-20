@@ -1,0 +1,39 @@
+{
+  "name": "fixture-steps-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-steps-db",
+      "types": [
+        "Batch",
+        "Step"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-steps-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "BatchActions",
+      "comment": "A batch's Workflow, for any signed-in caller: a move to done waits for\nevery step to be done (D104's step 4).",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Batch"
+      },
+      "auth": true
+    },
+    {
+      "name": "StepActions",
+      "comment": "A step's Workflow and its blockers, for any signed-in caller: addBlocker,\nremoveBlocker and listBlockers; listDependents is the engine's alone, and\nthe set leaves it out (D104's step 4).",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Step"
+      },
+      "auth": true
+    }
+  ]
+}

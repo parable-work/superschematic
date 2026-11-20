@@ -67,19 +67,19 @@ const WORKFLOW_FLOOR: usize = 96;
 const TIMERS_FLOOR: usize = 139;
 
 /// The steps `core-reactions.transcript.json` holds, of
-/// `core-reactions.json`'s 601: 110 define and publish checks and 476
-/// commands, 224 creates, updates, invokes and a delete, the engine's link
-/// and unlink among them as updates of a relation's column, and the 252
-/// changes
-/// the runner's sweeps ran, each a write of a row of a type Reactions hears
-/// or listens to, each under the step number of the `runner.runDue` that ran
-/// it, with the rows a rule moved as its `others`. The rest of the 215 left
-/// out are opens, reads of rows and of the event log, the sweeps that ran
-/// nothing, and what the replay skips: a scenario that composes
-/// Dependencies, the defines that name Links, the runner's status, and the
-/// steps after a sweep whose recording failed. An adapter's replay holds its
-/// own count to this one.
-const REACTIONS_FLOOR: usize = 586;
+/// `core-reactions.json`'s 601: 114 define and publish checks and 504
+/// commands, 238 creates, updates, invokes and a delete, the engine's link
+/// and unlink among them as updates of a relation's column, and the 266
+/// changes the runner's sweeps ran, each a write of a row of a type
+/// Reactions hears or listens to, each under the step number of the
+/// `runner.runDue` that ran it, with the rows a rule moved as its `others`,
+/// the scenario that composes Dependencies among them since the core runs
+/// it (D104's step 4). The rest of the 194 left out are opens, reads of rows
+/// and of the event log, the sweeps that ran nothing, and what the replay
+/// skips: the defines that name Links, the runner's status, and the steps
+/// after a sweep whose recording failed. An adapter's replay holds its own
+/// count to this one.
+const REACTIONS_FLOOR: usize = 618;
 
 /// The steps `core-reactions-changes.transcript.json` holds, of
 /// `core-reactions-changes.json`'s 151: 12 define and publish checks and 48
@@ -148,27 +148,28 @@ const APPROVALS_FLOOR: usize = 122;
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
 /// The steps `core-lease.transcript.json` holds, of `workqueue-lease.json`'s
-/// 691 (D104, step 2): 115 define and publish checks and 334 commands,
+/// 691 (D104, step 2): 119 define and publish checks and 345 commands,
 /// creates, updates, deletes and invokes, 84 of them presenting Lease's
 /// token as the command's precondition, the 3 expiries the runner's runDue
 /// ran as deadlines, each under the step number of the `runner.runDue` that
 /// ran it, and expireHolder's 8 calls, each a command without a row
 /// (`tableOperation`, D104) with the rows it expired as its `others`, in
-/// the 43 scenarios the core an adapter embeds runs, the configs with
-/// sweepMs left out. Of the 13 steps expireHolder's runs brought in: in
-/// "expire says why" its call and the acquire after it; in "a lapsed
-/// holder's" its call; in "notRenewedAfter spares" its two calls and the
-/// refused expire after them; in "expireHolder expires every lease" its
-/// refused call, its call, its call that expires none, the second engine's
-/// define and publish, the create and the refused call. The three that
-/// compose test.Gate or test.Signal, which the reference host runs as
-/// fixtures, hold none (31 steps); the rest of the 242 left out are opens,
-/// reads of rows and of the event log, the runDues that ran nothing, and
-/// what the replay skips: the scenario that composes Dependencies, the
-/// engines with a value store, Comments' steps (incidental), the reads of
-/// the engine's store and the options the reference host does not take. An
-/// adapter's replay holds its own count to this one.
-const LEASE_FLOOR: usize = 449;
+/// the 44 scenarios the core an adapter embeds runs, the configs with
+/// sweepMs left out, the scenario that composes Dependencies among them
+/// since the core runs it (D104's step 4). Of the 13 steps expireHolder's
+/// runs brought in: in "expire says why" its call and the acquire after
+/// it; in "a lapsed holder's" its call; in "notRenewedAfter spares" its
+/// two calls and the refused expire after them; in "expireHolder expires
+/// every lease" its refused call, its call, its call that expires none, the
+/// second engine's define and publish, the create and the refused call. The
+/// three that compose test.Gate or test.Signal, which the reference host
+/// runs as fixtures, hold none (31 steps); the rest of the 227 left out are
+/// opens, reads of rows and of the event log, the runDues that ran nothing,
+/// and what the replay skips: the engines with a value store, Comments'
+/// steps (incidental), the reads of the engine's store and the options the
+/// reference host does not take. An adapter's replay holds its own count to
+/// this one.
+const LEASE_FLOOR: usize = 464;
 
 /// The steps `core-presence.transcript.json` holds, of the engine's
 /// `workqueue-presence.json`'s 226 (D104): 52 define and publish checks,
@@ -282,6 +283,30 @@ const SCHEDULES_FLOOR: usize = 161;
 /// adapter's replay holds its own count to this one.
 const POOL_FLOOR: usize = 82;
 
+/// The steps `core-rollups.transcript.json` holds, of `core-rollups.json`'s
+/// 286 (D104's step 4): 72 define and publish checks and 108 creates,
+/// updates (the engine's link and unlink as updates of a relation's
+/// column), transitions, 21 of them refused, among them the gate's
+/// not_held, and a delete, in the 12 scenarios the core an adapter embeds
+/// runs. The rest of the 106 left out are opens, reads of rows, which an
+/// adapter's replay does not compute values for, and what the replay skips:
+/// the scenario whose access policy is the test's own, the two that stop at
+/// a latest rollup, and the defines that read another schema. An adapter's
+/// replay holds its own count to this one.
+const ROLLUPS_FLOOR: usize = 180;
+
+/// The steps `core-dependencies.transcript.json` holds, of
+/// `core-dependencies.json`'s 395 (D104's step 4): 107 define and publish
+/// checks and 159 commands, 85 creates (a create's blockers among them), 70
+/// operations (addBlocker, removeBlocker, listBlockers and transitions the
+/// gate holds), 35 of the commands and checks refused, and 4 deletes, in
+/// the 14 scenarios the core an adapter embeds runs. The rest of the 129
+/// left out are opens, reads of rows and of the event log, and what the
+/// replay skips: the scenarios whose access policy is the test's own, the
+/// one of test behaviors, listDependents, and the requires check. An
+/// adapter's replay holds its own count to this one.
+const DEPENDENCIES_FLOOR: usize = 266;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -301,6 +326,8 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ("core-presence", "workqueue-presence", PRESENCE_FLOOR),
         ("core-budget", "workqueue-budget", BUDGET_FLOOR),
         ("core-retries", "workqueue-retries", RETRIES_FLOOR),
+        ("core-rollups", "core-rollups", ROLLUPS_FLOOR),
+        ("core-dependencies", "core-dependencies", DEPENDENCIES_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {

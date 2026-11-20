@@ -201,6 +201,18 @@ with a fallback arm.
     "before": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "todo", "enteredAt": 1000000}}},
     "after":  {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000}}}}}
   ```
+- `Read { key }` (D104's step 4): a read of a row, which runs each use's
+  `read_view` on the row as the host has it, in list order, through the
+  reads it asks for, and runs no guard and writes nothing. Its result is
+  the fields each use computes through reads of other rows, by use id, a
+  use that computes none left out: Rollups' `values` over the rows that
+  point at the row, Dependencies' `blocked` over its blockers. A key no row
+  holds is `not_found`, and it takes no preconditions. The replayer
+  compares a record with it; no adapter serves it yet.
+
+  ```json
+  {"kind": "read", "key": "p1"}
+  ```
 
 A `Command` carries `preconditions` beside its action (D16, D104): the
 caller's assertions of the row, each use's entry by its use id (an
@@ -549,6 +561,12 @@ and the hooks it needs, each with a default:
   `deadlines`). None by default. `Core::read_fields(spec, use_id, row,
   tables)` computes them; the replayer compares them, and no adapter serves
   them yet (D103's Left for later).
+- `read_view(view)`: the fields a read of the row shows for the use that it
+  computes through reads of other rows (D104's step 4), which a `Read`
+  runs: Rollups' `values`, read through a linked read of the rows that
+  point at the row, and Dependencies' `blocked`, read through its blockers'
+  rows and their types' specs. It reads through a view, as a guard does,
+  and writes nothing. None by default.
 - `read_fields_at(config, row, tables, now)`: `read_fields` at the time the
   read is made at, for a field that turns on the clock (Lease's `active`,
   D104); the default is `read_fields`'. `Core::read_fields_at(spec, use_id,
@@ -929,8 +947,8 @@ writes (`UPDATE_TRANSCRIPTS=1` rewrites them), and holds each to a floor:
 one raw write, in the 14 scenarios a core with no test fixtures runs;
 `core-timers` to 139 steps, 54 checks and 85 commands, 12 of them deadlines
 and 29 changes a runner ran, in 13 scenarios, the one whose fire a
-StateRules guard vetoes among them; `core-reactions` to 586
-steps, 110 checks and 476 commands, 252 of them changes, in 26 scenarios;
+StateRules guard vetoes among them; `core-reactions` to 618
+steps, 114 checks and 504 commands, 266 of them changes, in 27 scenarios;
 `core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
 them changes, in 4 scenarios; `core-constants` to 39 steps, 19 checks and
 20 commands, in 4 scenarios; `core-staterules` to 76 steps, 33 checks and
@@ -950,7 +968,10 @@ Reconcile are anchored on fields, and `core-schedules` to 161 steps, 29
 checks, 13 of them refused defines, 131 commands, 10 of them repeats and
 late reports answered unchanged, 19 deadlines and 10 changes a runner
 ran, and one raw write, in 8 scenarios, each fire with the events it
-wrote (`expect.events`). Every transcript's `behaviors` lists the
+wrote (`expect.events`); and, of Rollups and Dependencies (D104's step
+4), `core-rollups` to 180 steps, 72 checks and 108 commands, in 13
+scenarios, and `core-dependencies` to 266 steps, 107 checks and 159
+commands, in 18 scenarios. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to
@@ -1130,7 +1151,7 @@ cargo build -p superschematic-rules-wasm --target wasm32-unknown-unknown
 ```
 
 with `RUSTUP_TOOLCHAIN` set to the toolchain `tools.env` pins.
-`tests/core.rs` (53 cases) runs the core through its public API with toy behaviors: the
+`tests/core.rs` (67 cases) runs the core through its public API with toy behaviors: the
 read exchange, vetoes, a call between two behaviors, two uses of one
 behavior on two fields and the own writes their fields refuse, a field
 anchor on a behavior with no value field, a config change that reads
@@ -1157,7 +1178,8 @@ so and presented the command's preconditions, from a handler and from a
 deadline's (D104, step 3); and an emit of a kind the declaration lists
 landing in the change set with its row, use and payload, and one of a
 kind it does not list, by a behavior that declares events and by one that
-declares none, a defect (D104, step 3's second part).
+declares none, a defect (D104, step 3's second part); and a read, each
+use's fields through its reads and nothing written (D104's step 4).
 `rules-behaviors`' `tests/workflow.rs` (36), `tests/timers.rs` (18),
 `tests/reactions.rs` (19), `tests/constants.rs` (11), `tests/staterules.rs`
 (11), `tests/approvals.rs` (14), `tests/lease.rs` (16) and

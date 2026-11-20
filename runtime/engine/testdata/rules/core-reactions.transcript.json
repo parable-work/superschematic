@@ -15,7 +15,9 @@
     "Seats",
     "Reconcile",
     "Schedules",
-    "Pool"
+    "Pool",
+    "Rollups",
+    "Dependencies"
   ],
   "scenarios": [
     {
@@ -5261,148 +5263,1942 @@
     {
       "name": "Reactions (node) > a project with no tasks left, or whose guards refuse, stays as it is",
       "clock": "wall",
-      "types": [],
-      "steps": [],
+      "types": [
+        {
+          "name": "Project",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Project",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "planned",
+                      "active",
+                      "done",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "planned",
+                        "to": "active"
+                      },
+                      {
+                        "from": "active",
+                        "to": "done"
+                      },
+                      {
+                        "from": "planned",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "active",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Dependencies",
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "allTerminal": {
+                            "schema": "Task",
+                            "link": "project"
+                          }
+                        },
+                        "then": {
+                          "transition": "done"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Task",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "projectId",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Task",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "todo",
+                      "doing",
+                      "done",
+                      "dropped"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "todo",
+                        "to": "doing"
+                      },
+                      {
+                        "from": "doing",
+                        "to": "done"
+                      },
+                      {
+                        "from": "todo",
+                        "to": "dropped"
+                      },
+                      {
+                        "from": "doing",
+                        "to": "dropped"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "enters": "doing"
+                        },
+                        "then": {
+                          "link": "project",
+                          "transition": "active"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "projectId",
+                  "type": "string",
+                  "relation": {
+                    "name": "project",
+                    "type": "Project"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Project",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "planned",
+                    "active",
+                    "done",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "planned",
+                      "to": "active"
+                    },
+                    {
+                      "from": "active",
+                      "to": "done"
+                    },
+                    {
+                      "from": "planned",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "active",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Dependencies",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "allTerminal": {
+                          "schema": "Task",
+                          "link": "project"
+                        }
+                      },
+                      "then": {
+                        "transition": "done"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Project",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "planned",
+                    "active",
+                    "done",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "planned",
+                      "to": "active"
+                    },
+                    {
+                      "from": "active",
+                      "to": "done"
+                    },
+                    {
+                      "from": "planned",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "active",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Dependencies",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "allTerminal": {
+                          "schema": "Task",
+                          "link": "project"
+                        }
+                      },
+                      "then": {
+                        "transition": "done"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Task",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "todo",
+                    "doing",
+                    "done",
+                    "dropped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "doing"
+                    },
+                    {
+                      "from": "doing",
+                      "to": "done"
+                    },
+                    {
+                      "from": "todo",
+                      "to": "dropped"
+                    },
+                    {
+                      "from": "doing",
+                      "to": "dropped"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "enters": "doing"
+                      },
+                      "then": {
+                        "link": "project",
+                        "transition": "active"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "projectId",
+                "type": "string",
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Task",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "todo",
+                    "doing",
+                    "done",
+                    "dropped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "todo",
+                      "to": "doing"
+                    },
+                    {
+                      "from": "doing",
+                      "to": "done"
+                    },
+                    {
+                      "from": "todo",
+                      "to": "dropped"
+                    },
+                    {
+                      "from": "doing",
+                      "to": "dropped"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "enters": "doing"
+                      },
+                      "then": {
+                        "link": "project",
+                        "transition": "active"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "projectId",
+                "type": "string",
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Launch"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Launch"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600005
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "create",
+              "id": "t1",
+              "own": {
+                "title": "t1"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "t1",
+            "row": {
+              "own": {
+                "title": "t1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "update",
+              "key": "t1",
+              "patch": {
+                "projectId": "p1"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "create",
+              "id": "t2",
+              "own": {
+                "title": "t2"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "t2",
+            "row": {
+              "own": {
+                "title": "t2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "update",
+              "key": "t2",
+              "patch": {
+                "projectId": "p1"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "operation",
+              "key": "t1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "doing"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "from": "todo",
+              "to": "doing"
+            },
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600013,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "insert",
+                "at": 1767225600005,
+                "after": {
+                  "own": {
+                    "title": "Launch"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "planned",
+                      "enteredAt": 1767225600005
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Launch"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600005
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600014,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "insert",
+                "at": 1767225600006,
+                "after": {
+                  "own": {
+                    "title": "t1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600015,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600007,
+                "before": {
+                  "own": {
+                    "title": "t1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600016,
+            "action": {
+              "kind": "change",
+              "key": "t2",
+              "change": {
+                "write": "insert",
+                "at": 1767225600008,
+                "after": {
+                  "own": {
+                    "title": "t2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600017,
+            "action": {
+              "kind": "change",
+              "key": "t2",
+              "change": {
+                "write": "update",
+                "at": 1767225600009,
+                "before": {
+                  "own": {
+                    "title": "t2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t2",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600018,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600010,
+                "before": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "doing",
+                      "enteredAt": 1767225600010
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            },
+            "others": [
+              {
+                "type": "Project",
+                "key": "p1",
+                "row": {
+                  "own": {
+                    "title": "Launch"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "active",
+                      "enteredAt": 1767225600018
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600019,
+            "action": {
+              "kind": "change",
+              "key": "p1",
+              "change": {
+                "write": "update",
+                "at": 1767225600018,
+                "before": {
+                  "own": {
+                    "title": "Launch"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "planned",
+                      "enteredAt": 1767225600005
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Launch"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "active",
+                      "enteredAt": 1767225600018
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Launch"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "active",
+                  "enteredAt": 1767225600018
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600020,
+            "action": {
+              "kind": "update",
+              "key": "t1",
+              "patch": {
+                "projectId": null
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600021,
+            "action": {
+              "kind": "update",
+              "key": "t2",
+              "patch": {
+                "projectId": null
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600023,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600020,
+                "before": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "doing",
+                      "enteredAt": 1767225600010
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "doing",
+                      "enteredAt": 1767225600010
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-16"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600024,
+            "action": {
+              "kind": "change",
+              "key": "t2",
+              "change": {
+                "write": "update",
+                "at": 1767225600021,
+                "before": {
+                  "own": {
+                    "title": "t2",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "todo",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-17"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "todo",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600026,
+            "action": {
+              "kind": "create",
+              "id": "p2",
+              "own": {
+                "title": "Docs"
+              },
+              "params": {}
+            },
+            "request": "request-18"
+          },
+          "expect": {
+            "key": "p2",
+            "row": {
+              "own": {
+                "title": "Docs"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600026
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600027,
+            "action": {
+              "kind": "create",
+              "id": "p3",
+              "own": {
+                "title": "Site"
+              },
+              "params": {}
+            },
+            "request": "request-19"
+          },
+          "expect": {
+            "key": "p3",
+            "row": {
+              "own": {
+                "title": "Site"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600027
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 20,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600028,
+            "action": {
+              "kind": "operation",
+              "key": "p2",
+              "useId": "Dependencies",
+              "operation": "addBlocker",
+              "params": {
+                "id": "p3"
+              }
+            },
+            "request": "request-20"
+          },
+          "expect": {
+            "result": {
+              "schema": "Project",
+              "id": "p3",
+              "status": "planned",
+              "open": true
+            },
+            "row": {
+              "own": {
+                "title": "Docs"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600026
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Project",
+                      "blockerKey": "p3",
+                      "addedBy": "alice",
+                      "addedAt": 1767225600028
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 21,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600029,
+            "action": {
+              "kind": "update",
+              "key": "t1",
+              "patch": {
+                "projectId": "p2"
+              }
+            },
+            "request": "request-21"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "doing",
+                  "enteredAt": 1767225600010
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 22,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600030,
+            "action": {
+              "kind": "operation",
+              "key": "p2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "active"
+              }
+            },
+            "request": "request-22"
+          },
+          "expect": {
+            "result": {
+              "from": "planned",
+              "to": "active"
+            },
+            "row": {
+              "own": {
+                "title": "Docs"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "active",
+                  "enteredAt": 1767225600030
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Project",
+                      "blockerKey": "p3",
+                      "addedBy": "alice",
+                      "addedAt": 1767225600028
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 24,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600032,
+            "action": {
+              "kind": "operation",
+              "key": "t1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-23"
+          },
+          "expect": {
+            "result": {
+              "from": "doing",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1767225600032
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600035,
+            "action": {
+              "kind": "change",
+              "key": "p2",
+              "change": {
+                "write": "insert",
+                "at": 1767225600026,
+                "after": {
+                  "own": {
+                    "title": "Docs"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "planned",
+                      "enteredAt": 1767225600026
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-24"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Docs"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "active",
+                  "enteredAt": 1767225600030
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Project",
+                      "blockerKey": "p3",
+                      "addedBy": "alice",
+                      "addedAt": 1767225600028
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600036,
+            "action": {
+              "kind": "change",
+              "key": "p3",
+              "change": {
+                "write": "insert",
+                "at": 1767225600027,
+                "after": {
+                  "own": {
+                    "title": "Site"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "planned",
+                      "enteredAt": 1767225600027
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-25"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Site"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600027
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600037,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600029,
+                "before": {
+                  "own": {
+                    "title": "t1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "doing",
+                      "enteredAt": 1767225600010
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "doing",
+                      "enteredAt": 1767225600010
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-26"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1767225600032
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600038,
+            "action": {
+              "kind": "change",
+              "key": "p2",
+              "change": {
+                "write": "update",
+                "at": 1767225600030,
+                "before": {
+                  "own": {
+                    "title": "Docs"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "planned",
+                      "enteredAt": 1767225600026
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "Docs"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "active",
+                      "enteredAt": 1767225600030
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-27"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Docs"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "active",
+                  "enteredAt": 1767225600030
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Project",
+                      "blockerKey": "p3",
+                      "addedBy": "alice",
+                      "addedAt": 1767225600028
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 26,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Task",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600039,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600032,
+                "before": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "doing",
+                      "enteredAt": 1767225600010
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "done",
+                      "enteredAt": 1767225600032
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-28"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1767225600032
+                }
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 4,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 5,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 6,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 7,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 8,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 9,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 10,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 11,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 12,
           "call": "events.read",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 13,
-          "call": "runner.runDue",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 14,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 15,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 16,
-          "call": "runner.runDue",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)"
         },
         {
           "step": 17,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 18,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 19,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 20,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 21,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 22,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 23,
           "call": "events.read",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 24,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of the engine's event log, which a table has no counterpart of: its writes are heard through its change queue (D103), and the event stream comes later"
         },
         {
           "step": 25,
           "call": "events.read",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 26,
-          "call": "runner.runDue",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)"
         },
         {
           "step": 27,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 28,
           "call": "runner.status",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "runner.status is outside the reference host's surface; it changes nothing"
         }
       ]
     },

@@ -572,3 +572,75 @@ export interface PoolOn<T> {
  * type argument is the table itself.
  */
 export type Pool<T, C extends PoolOn<T>> = NonNullable<unknown>;
+
+/**
+ * Where a rollup reads from on a table (D104's step 4): the table whose
+ * rows point at the row (schema) and its to-one relation to this table
+ * (link), the rows a HasMany of the table lists.
+ */
+export interface RollupSourceOn {
+  /** The table whose rows point at this one; it composes a behavior, Workflow among them. */
+  readonly schema: string;
+  /** Its to-one relation to this table. */
+  readonly link: string;
+}
+
+/**
+ * One rollup of RollupsOn<T> (D104's step 4). count, all and any take no
+ * field; countBy takes a string, enum or boolean field of the linking
+ * table, or "Workflow.status", its Workflow's status; sum, min and max a
+ * number field. all and any may gate states of the table's one Workflow
+ * and count only terminal states with the outcomes they list. latest
+ * waits for a later step on a table.
+ */
+export type RollupOn =
+  | (RollupSourceOn & { readonly function: "count" })
+  | (RollupSourceOn & { readonly function: "countBy" | "sum" | "min" | "max"; readonly field: string })
+  | (RollupSourceOn & {
+      readonly function: "all" | "any";
+      /** The states of the table's Workflow that a transition into waits for the rollup to hold. */
+      readonly gatedStates?: readonly string[];
+      /** The outcomes a linked row's terminal state must have to count; every outcome when absent. */
+      readonly outcomes?: readonly WorkflowOutcome[];
+    });
+
+/** Rollups' config on a table (D104's step 4): the rollups, by name. */
+export interface RollupsOn<T> {
+  /** The rollups, by name: camelCase, at most 64 characters. */
+  readonly rollups: Readonly<Record<string, RollupOn>>;
+}
+
+/**
+ * Values derived from the rows that point at a table's row (D104's step
+ * 4): `export abstract class Project implements Rollups<Project, { rollups:
+ * { done: { schema: "Task"; link: "project"; function: "all"; gatedStates:
+ * ["done"] } } }>`. The type stays a table. Rollups keeps no column: a
+ * read of the row computes its values through the core, and an all or any
+ * rollup that gates a state holds a transition into it until the rollup
+ * holds. Like Timers, it resolves to the empty object type; the first type
+ * argument is the table itself.
+ */
+export type Rollups<T, C extends RollupsOn<T>> = NonNullable<unknown>;
+
+/** Dependencies' config on a table (D104's step 4): the tables whose rows may block it, the gated states and the outcomes that finish a blocker. */
+export interface DependenciesOn<T> {
+  /** The tables whose rows may block this table's, each composing one Workflow; the table itself when absent. */
+  readonly schemas?: readonly string[];
+  /** The states of the table's Workflow that a transition into waits for every blocker to finish; every terminal state when absent. */
+  readonly gatedStates?: readonly string[];
+  /** The outcomes of a blocker's terminal state that finish it; success when absent. */
+  readonly satisfiedBy?: readonly WorkflowOutcome[];
+}
+
+/**
+ * Blockers between a table's rows (D104's step 4): `export abstract class
+ * Task implements Dependencies<Task, { gatedStates: ["done"] }>`. The type
+ * stays a table. Dependencies keeps a row's blockers in a sub-table
+ * (task_dependencies_blockers), and holds a transition of the table's one
+ * Workflow into a gated state while a blocker is not finished; its
+ * operations (dependencies.addBlocker, removeBlocker, listBlockers) change
+ * and read them, and a create takes blockers in its parameters. Like
+ * Timers, it resolves to the empty object type; the first type argument is
+ * the table itself.
+ */
+export type Dependencies<T, C extends DependenciesOn<T>> = NonNullable<unknown>;

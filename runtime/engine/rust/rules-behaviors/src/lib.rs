@@ -57,6 +57,13 @@
 //! read through [`capacity`], the first contract between behaviors, which a
 //! declaration names and the core resolves by declarations. Lease's
 //! `expireHolder` runs as a command without a row too.
+//! [`Rollups`] and [`Dependencies`], the first of step 4's waves of D103
+//! after D104's: values derived from the rows that point at a row through a
+//! relation, the rows a `HasMany` lists, whose `all` or `any` may gate a
+//! transition; and blockers between rows that hold up a table's Workflow,
+//! kept in a sub-table of the dependent's. Both compute at a read through
+//! reads of other rows ([`superschematic_rules::Action::Read`]): Rollups'
+//! values and Dependencies' blocked.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -87,6 +94,7 @@ pub mod calendar;
 pub mod capacity;
 pub mod constants;
 mod declared;
+pub mod dependencies;
 mod flow;
 pub mod lease;
 mod moves;
@@ -97,6 +105,7 @@ pub mod presence;
 pub mod reactions;
 pub mod reconcile;
 pub mod retries;
+pub mod rollups;
 pub mod schedules;
 mod schema;
 pub mod seats;
@@ -112,6 +121,7 @@ pub use constants::{
     Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
     ONE_WAY_NUMBERS,
 };
+pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
 pub use pool::{Pool, PoolConfig};
@@ -124,6 +134,7 @@ pub use reconcile::{Reconcile, ReconcileConfig};
 pub use retries::{
     Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
+pub use rollups::{RollupFunction, RollupSpec, Rollups, RollupsConfig, MAX_ROLLUP_READ};
 pub use schedules::{Schedules, SchedulesConfig, SchedulesKind, SchedulesRetry};
 pub use seats::{SeatRef, Seats, SeatsConfig, SeatsOnFull, SeatsSeat};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
@@ -141,7 +152,7 @@ use superschematic_rules::Core;
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104).
-pub const NAMES: [&str; 14] = [
+pub const NAMES: [&str; 16] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -156,6 +167,8 @@ pub const NAMES: [&str; 14] = [
     reconcile::NAME,
     schedules::NAME,
     pool::NAME,
+    rollups::NAME,
+    dependencies::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -163,7 +176,7 @@ pub const NAMES: [&str; 14] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 14] = [
+pub const DECLARATIONS: [&str; 16] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -178,6 +191,8 @@ pub const DECLARATIONS: [&str; 14] = [
     reconcile::DECLARATION,
     schedules::DECLARATION,
     pool::DECLARATION,
+    rollups::DECLARATION,
+    dependencies::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -204,6 +219,8 @@ pub fn core() -> Core {
         .with(Reconcile)
         .with(Schedules)
         .with(Pool)
+        .with(Rollups)
+        .with(Dependencies)
 }
 
 #[cfg(test)]

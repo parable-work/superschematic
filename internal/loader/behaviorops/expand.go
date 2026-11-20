@@ -291,7 +291,7 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 		}
 		slices.Sort(permissions)
 		for _, op := range declaration.Operations {
-			if !Serves(op) || !narrowed.Offers(op.Name) {
+			if !Serves(op) || !narrowed.Offers(op.Name) || registry.TableLeavesOut(ref.Name, op.Name) != "" {
 				// The build warns of the first (verify.CheckBehaviorOperations).
 				continue
 			}

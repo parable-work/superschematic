@@ -1325,6 +1325,37 @@ impl MemoryHost {
         }
     }
 
+    /// The fields each use of a type's live version computes through reads
+    /// on one of its rows (D104's step 4, [`Action::Read`]: Rollups'
+    /// values, Dependencies' blocked), by use id, read as the store has it
+    /// and applying nothing; none for a type or a row the store lacks.
+    pub fn read_view(
+        &self,
+        type_name: &str,
+        key: &str,
+        now: i64,
+    ) -> Result<Map<String, Value>, Refusal> {
+        let Some(spec) = self.store.live(type_name) else {
+            return Ok(Map::new());
+        };
+        if self.store.row(type_name, key).is_none() {
+            return Ok(Map::new());
+        }
+        let command = Command::new(
+            Caller::default(),
+            now,
+            Action::Read {
+                key: key.to_owned(),
+            },
+        );
+        match self.settle(spec, &command)?.0 {
+            Outcome::Refused(refusal) => Err(refusal),
+            Outcome::Changed(changes) => {
+                Ok(changes.result.as_object().cloned().unwrap_or_default())
+            }
+        }
+    }
+
     // ---- commands ----
 
     /// Runs a command on a type's live version and applies its change set.

@@ -191,6 +191,86 @@ const LIMIT_FIELD_SET_LIMIT: &str = "setLimit of a meter with limitField writes 
 /// schema's state.
 const OTHER_SCHEMA_DEFINE: &str = "a define check that reads another schema, which the core's define check cannot make: the build holds a table's releaseLeases to its database (D104)";
 
+/// Why an events.read that holds the removeBlocker the engine ran on a
+/// blocker's delete is not compared.
+const BLOCKER_DELETE: &str = "a read of the engine's event log that holds the removeBlocker its Dependencies ran on each dependent when a blocker was deleted: a table's core hears no delete of another table's row through a sub-table, and a blocker that is gone neither blocks nor is listed (D104's step 4)";
+
+// removed_on_a_delete reports whether a recorded page of events holds more
+// of Dependencies' removeBlocker than the host's log does: the ones the
+// engine ran when a blocker was deleted.
+fn removed_on_a_delete(page: &Value, store: &Store) -> bool {
+    let removals = |events: &mut dyn Iterator<Item = (&str, &str)>| {
+        events
+            .filter(|(behavior, operation)| {
+                *behavior == "Dependencies" && *operation == "removeBlocker"
+            })
+            .count()
+    };
+    let recorded = removals(
+        &mut page
+            .get("events")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|event| {
+                Some((
+                    event["change"].get("behavior")?.as_str()?,
+                    event["change"].get("operation")?.as_str()?,
+                ))
+            }),
+    );
+    if recorded == 0 {
+        return false;
+    }
+    let logged = store
+        .log()
+        .iter()
+        .filter(|logged| {
+            matches!(&logged.command.action, Action::Operation { operation, .. } if operation == "removeBlocker")
+        })
+        .count();
+    recorded > logged
+}
+
+/// The operations of a behavior the engine serves and a table's core does
+/// not declare, each with why a step that calls one is not compared.
+pub const ENGINE_ONLY_OPERATIONS: [(&str, &str, &str); 1] = [(
+    "Dependencies",
+    "listDependents",
+    "listDependents of Dependencies, the engine's alone: the rows a row blocks are a query over every table's blockers, which a type's core cannot enumerate, so a table leaves it out (D104's step 4)",
+)];
+
+/// Why a define or a publish the engine refused for a rule that reads
+/// another schema is not compared.
+const ANOTHER_TABLE_DEFINE: &str = "the engine's check of a config against another schema's live version, which a type's define check on the core cannot make, since it sees its own spec alone: the build holds a table's config to the tables it names (D103, D104's step 4)";
+
+/// The words of the engine's refusals of a Rollups config for what another
+/// schema lacks (`check_linked`): that schema's live version, its Links and
+/// the link that points here, and the field each function reads.
+const ANOTHER_TABLE_WORDS: [&str; 8] = [
+    "has no live version; publish it first",
+    "does not compose Links, so none of its instances points at",
+    " has no link ",
+    " points at ",
+    " has no field ",
+    " takes a string, enum or boolean field, and ",
+    " takes a number or integer field, and ",
+    "reads the terminal states of ",
+];
+
+// reads_another_table reports whether the engine refused a Rollups config
+// for what another schema lacks.
+fn reads_another_table(error: &Value) -> bool {
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    message.contains("behavior Rollups config: rollup ")
+        && ANOTHER_TABLE_WORDS
+            .iter()
+            .any(|words| message.contains(words))
+}
+
 /// How the engine's refusal of a member that is a table's behavior's alone
 /// ends its name of the table form (`status: Workflow<{ ... }> on a DB
 /// table, D104`), whichever behavior's it is.
@@ -1369,6 +1449,9 @@ impl<'r> Run<'r> {
             if message.contains(TABLE_FORM) {
                 return Done::Skipped(TABLE_MEMBER_REFUSAL.to_owned());
             }
+            if reads_another_table(error) {
+                return Done::Skipped(ANOTHER_TABLE_DEFINE.to_owned());
+            }
             if self.recording
                 && (message.contains("releaseLeases: schema ")
                     || message.contains("does not compose Lease, so it holds no lease to expire"))
@@ -1438,6 +1521,11 @@ impl<'r> Run<'r> {
         };
         if let Some(reason) = rewrites_rows(self.engines[cx.at].host.store(), type_name) {
             return Done::Halted(reason.to_owned());
+        }
+        if let Expected::Error(error) = cx.expected {
+            if reads_another_table(error) {
+                return Done::Skipped(ANOTHER_TABLE_DEFINE.to_owned());
+            }
         }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
@@ -1912,6 +2000,19 @@ impl<'r> Run<'r> {
         {
             return Done::Halted(LIMIT_FIELD_SET_LIMIT.to_owned());
         }
+        let composes = |behavior: &str| {
+            self.engines[cx.at]
+                .host
+                .store()
+                .live(type_name)
+                .is_some_and(|spec| spec.uses.iter().any(|entry| entry.behavior == behavior))
+        };
+        if let Some((_, _, reason)) = ENGINE_ONLY_OPERATIONS
+            .iter()
+            .find(|(behavior, name, _)| *name == operation && composes(behavior))
+        {
+            return Done::Skipped((*reason).to_owned());
+        }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
         // The engine's invoke names an operation, not its use: the use is
@@ -2156,12 +2257,18 @@ impl<'r> Run<'r> {
             .filter_map(|(key, _)| {
                 spec.zip(store.row(type_name, key)).map(|(spec, row)| {
                     without_creator(
-                        shape::record(
-                            host.core(),
-                            spec,
+                        with_views(
+                            host,
+                            shape::record(
+                                host.core(),
+                                spec,
+                                key,
+                                row,
+                                &store.sub_tables(type_name, key),
+                                cx.now,
+                            ),
+                            type_name,
                             key,
-                            row,
-                            &store.sub_tables(type_name, key),
                             cx.now,
                         ),
                         &self.engines[cx.at].creators,
@@ -2221,6 +2328,9 @@ impl<'r> Run<'r> {
                 });
             if unmapped {
                 return Done::Skipped(EVENTS_UNMAPPED.to_owned());
+            }
+            if removed_on_a_delete(page, self.engines[cx.at].host.store()) {
+                return Done::Skipped(BLOCKER_DELETE.to_owned());
             }
         }
         let schema = options.get("schema").and_then(Value::as_str);
@@ -2766,12 +2876,18 @@ fn record_of(
     let store = host.store();
     match (store.live(type_name), store.row(type_name, key)) {
         (Some(spec), Some(row)) => without_creator(
-            shape::record(
-                host.core(),
-                spec,
+            with_views(
+                host,
+                shape::record(
+                    host.core(),
+                    spec,
+                    key,
+                    row,
+                    &store.sub_tables(type_name, key),
+                    now,
+                ),
+                type_name,
                 key,
-                row,
-                &store.sub_tables(type_name, key),
                 now,
             ),
             creators,
@@ -2779,6 +2895,32 @@ fn record_of(
         ),
         _ => Value::Null,
     }
+}
+
+// with_views is a record with the fields each use computes through reads of
+// other rows (Rollups' values, Dependencies' blocked, D104's step 4): what a
+// read of the row runs, the core's Action::Read, merged into each use's
+// behaviors. A read the core refuses adds nothing, and the comparison with
+// the recording names what is missing.
+fn with_views(host: &MemoryHost, mut record: Value, type_name: &str, key: &str, now: i64) -> Value {
+    let Ok(views) = host.read_view(type_name, key, now) else {
+        return record;
+    };
+    let Some(behaviors) = record.get_mut("behaviors").and_then(Value::as_object_mut) else {
+        return record;
+    };
+    for (use_id, fields) in views {
+        let Value::Object(fields) = fields else {
+            continue;
+        };
+        let entry = behaviors
+            .entry(use_id)
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Some(entry) = entry.as_object_mut() {
+            entry.extend(fields);
+        }
+    }
+    record
 }
 
 // added_uses is the uses a type's draft adds to its live version, by id,

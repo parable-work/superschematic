@@ -11,20 +11,20 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-reactions.json` the replayer maps and compares: 443
-/// of its 601. The 158 it skips: 107 reads of the engine's event log that
-/// hold a Links operation or a move a rule made, which a table writes as an
-/// update of the relation's column and of the row's owned fields, and one
-/// read past a cursor, which the reference host does not take; the 28 steps
-/// of the scenario that composes Dependencies, which the core does not run;
-/// six refused defines of a type that lists Links, whose paths and words
-/// name the engine's Links where a table has relations; one define the
-/// engine's requires check refused; the runner's status three times; and
-/// the twelve steps after a runDue whose recording failed, from which the
-/// engine's subscription heard nothing. Each runDue counts as checked once
-/// the changes and deadlines it ran answered, the engine's counters being
-/// its store's.
-const REACTIONS_FLOOR: usize = 443;
+/// The steps of `core-reactions.json` the replayer maps and compares: 468
+/// of its 601, the scenario that composes Dependencies among them since the
+/// core runs it (D104's step 4). The 133 it skips: 109 reads of the
+/// engine's event log that hold a Links operation or a move a rule made,
+/// which a table writes as an update of the relation's column and of the
+/// row's owned fields, and one read past a cursor, which the reference host
+/// does not take; six refused defines of a type that lists Links, whose
+/// paths and words name the engine's Links where a table has relations; one
+/// define the engine's requires check refused; the runner's status four
+/// times; and the twelve steps after a runDue whose recording failed, from
+/// which the engine's subscription heard nothing. Each runDue counts as
+/// checked once the changes and deadlines it ran answered, the engine's
+/// counters being its store's.
+const REACTIONS_FLOOR: usize = 468;
 
 /// The steps of `core-reactions-changes.json` the replayer maps and
 /// compares: 65 of its 151. The 86 it skips: 32 of the scenarios that
