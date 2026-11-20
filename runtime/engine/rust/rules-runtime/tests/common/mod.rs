@@ -193,6 +193,12 @@ pub fn tickets() -> Value {
                 key(),
                 {"name": "title", "typeRef": {"name": "string"}, "required": true},
                 {"name": "visitAt", "typeRef": {"name": "Temporal.DateTime"}}
+            ]},
+        "Invoice": {"name": "Invoice", "role": "DBTable",
+            "behaviors": [{"name": "Numbering", "field": "number", "config": {"format": "INV-{seq:2}"}}],
+            "fields": [
+                key(),
+                {"name": "title", "typeRef": {"name": "string"}}
             ]}
     }})
 }
@@ -597,6 +603,14 @@ pub fn behavior_tables(open: Open<'_>, binaries: &Binaries) -> (String, String) 
     runtime
         .publish(&Publish::of(vec![tickets()]))
         .expect("the tickets publish");
+    // Numbering's count is a row of the table's shared table, held to its
+    // version.
+    let numbers: Vec<Value> = ["Rent", "Power"]
+        .iter()
+        .map(|title| create(&mut runtime, "Invoice", json!({"title": title}))["number"].clone())
+        .collect();
+    assert_eq!(numbers, [json!("INV-01"), json!("INV-02")]);
+
     let ticket = create(&mut runtime, "Ticket", json!({"title": "Printer"}));
     assert_eq!(ticket["status"], "open");
     let id = ticket["id"].as_str().expect("a key").to_owned();
