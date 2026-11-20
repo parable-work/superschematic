@@ -63,6 +63,10 @@ pub struct Declared {
     pub arms_deadlines: bool,
     pub hears_changes: bool,
     pub events: Vec<String>,
+    /// The fields the file gives no type: the ones the behavior computes
+    /// at a read (Timers' `deadlines`, Rollups' `values`), which no row
+    /// holds and a get and a list show.
+    pub computed: Vec<String>,
 }
 
 impl Declared {
@@ -194,6 +198,12 @@ fn read(file: &Value) -> Result<Declared, String> {
                     .map(str::to_owned)
             })
             .collect(),
+        computed: list(file, "fields")
+            .iter()
+            .filter(|field| field.get("type").is_none())
+            .filter_map(|field| field.get("name").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect(),
         name,
     })
 }
@@ -218,6 +228,7 @@ mod tests {
         );
         let timers = declarations.get("Timers").expect("Timers");
         assert!(timers.fields.is_empty(), "deadlines is computed");
+        assert_eq!(timers.computed, ["deadlines"]);
         assert!(timers.arms_deadlines && timers.hears_changes);
         assert_eq!(timers.tables[0].name, "deadlines");
         assert_eq!(timers.tables[0].key, "name");

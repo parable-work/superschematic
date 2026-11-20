@@ -54,19 +54,25 @@
 //! assert_eq!(row["status"], "draft");
 //! ```
 
+pub mod access;
 mod bridge;
 pub mod declarations;
 mod describe;
 pub mod document;
+pub mod events;
 pub mod filter;
 mod handler;
+pub mod http;
 mod memory;
 mod publish;
 mod serve;
 pub mod store;
+pub mod tools;
 mod validate;
 pub mod values;
+mod view;
 
+pub use access::Policy;
 pub use bridge::{core_row, hearing, image, set_owned, Bridge, Changed, Ran};
 pub use declarations::Declarations;
 pub use describe::describe;

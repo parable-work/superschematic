@@ -1,8 +1,9 @@
 //! A type's live version as development mode runs it: its key, its own
 //! fields with what a filter and a sort take of each, the owned fields its
-//! uses add, each use with its behavior's operations, sub-tables (a table
-//! kept for the type's table as a whole says `"scope": "schema"`) and
-//! events, its unique keys, and the document it was published from.
+//! uses add, the fields a read computes, each use with its behavior's
+//! operations, sub-tables (a table kept for the type's table as a whole
+//! says `"scope": "schema"`) and events, its unique keys, and the document
+//! it was published from.
 
 use serde_json::{json, Value};
 
@@ -62,6 +63,26 @@ pub fn describe(model: &Model, version: i64, declarations: &Declarations) -> Val
                 "filter": ops(&owned.kind(), false),
                 "sorts": owned.kind().sorts(),
             })
+        })
+        .collect();
+    // The fields a read computes (Rollups' values, Timers' deadlines),
+    // which no row holds and no filter or sort takes.
+    let computed: Vec<Value> = model
+        .uses
+        .iter()
+        .flat_map(|used| {
+            declarations
+                .get(&used.spec.behavior)
+                .map(|declared| declared.computed.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .map(move |name| {
+                    json!({
+                        "name": crate::document::owned_field_name(used.spec.field(), &used.spec.behavior, name, false),
+                        "use": used.id(),
+                        "field": name,
+                    })
+                })
         })
         .collect();
     let uses: Vec<Value> = model
@@ -135,6 +156,7 @@ pub fn describe(model: &Model, version: i64, declarations: &Declarations) -> Val
         },
         "fields": fields,
         "owned": owned,
+        "computed": computed,
         "uses": uses,
         "uniques": model.uniques,
         "document": model.document,
