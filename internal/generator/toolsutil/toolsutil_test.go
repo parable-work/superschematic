@@ -393,6 +393,7 @@ func TestValidateReplayContract(t *testing.T) {
 		"Input": {
 			{Name: "requestId", Type: "Identity.UUID", Required: true},
 			{Name: "revision", Type: "number", Required: true},
+			{Name: "etag", Type: "string", Required: true},
 			{Name: "order", Type: "OrderRef", Required: true},
 			{Name: "note", Type: "string"},
 			{Name: "tags", Type: "string", Required: true, IsArray: true},
@@ -421,6 +422,7 @@ func TestValidateReplayContract(t *testing.T) {
 		{name: "idempotent", mode: "idempotent", keys: []string{"/requestId"}},
 		{name: "nested revision", mode: "compare_and_swap", revisions: []string{"/order/revision"}},
 		{name: "top revision and key", mode: "compare_and_swap", keys: []string{"/order/id"}, revisions: []string{"/revision"}},
+		{name: "plain text revision", mode: "compare_and_swap", revisions: []string{"/etag"}},
 		{name: "pointers without mode", keys: []string{"/requestId"}, want: "replay pointers require a replay mode"},
 		{name: "read only with pointer", mode: "read_only", keys: []string{"/requestId"}, want: "read_only operations cannot declare replay pointers"},
 		{name: "unknown argument", mode: "idempotent", keys: []string{"/missing"}, want: `idempotency pointer "/missing": does not resolve at segment "missing"`},
@@ -428,7 +430,8 @@ func TestValidateReplayContract(t *testing.T) {
 		{name: "through a scalar", mode: "idempotent", keys: []string{"/requestId/x"}, want: `segment "requestId" is not a concrete object`},
 		{name: "key not a string", mode: "idempotent", keys: []string{"/revision"}, want: `resolves to a number argument, want a string`},
 		{name: "key is an array", mode: "idempotent", keys: []string{"/tags"}, want: `resolves to a array argument, want a string`},
-		{name: "revision not a number", mode: "compare_and_swap", revisions: []string{"/requestId"}, want: `expected revision pointer "/requestId" resolves to a string argument, want a number`},
+		{name: "revision is a string scalar", mode: "compare_and_swap", revisions: []string{"/requestId"}, want: `expected revision pointer "/requestId" resolves to a Identity.UUID argument, want a number or plain text`},
+		{name: "revision is a list", mode: "compare_and_swap", revisions: []string{"/tags"}, want: `expected revision pointer "/tags" resolves to a array argument, want a number or plain text`},
 		{name: "bad escape", mode: "idempotent", keys: []string{"/a~2"}, want: "invalid RFC 6901 escape"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
