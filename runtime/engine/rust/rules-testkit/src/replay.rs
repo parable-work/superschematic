@@ -191,6 +191,55 @@ const LIMIT_FIELD_SET_LIMIT: &str = "setLimit of a meter with limitField writes 
 /// schema's state.
 const OTHER_SCHEMA_DEFINE: &str = "a define check that reads another schema, which the core's define check cannot make: the build holds a table's releaseLeases to its database (D104)";
 
+/// Why an events.read that holds the removeBlocker the engine ran on a
+/// blocker's delete is not compared.
+const BLOCKER_DELETE: &str = "a read of the engine's event log that holds the removeBlocker its Dependencies ran on each dependent when a blocker was deleted: a table's core hears no delete of another table's row through a sub-table, and a blocker that is gone neither blocks nor is listed (D104's step 4)";
+
+// removed_on_a_delete reports whether a recorded page of events holds more
+// of Dependencies' removeBlocker than the host's log does: the ones the
+// engine ran when a blocker was deleted.
+fn removed_on_a_delete(page: &Value, store: &Store) -> bool {
+    let removals = |events: &mut dyn Iterator<Item = (&str, &str)>| {
+        events
+            .filter(|(behavior, operation)| {
+                *behavior == "Dependencies" && *operation == "removeBlocker"
+            })
+            .count()
+    };
+    let recorded = removals(
+        &mut page
+            .get("events")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|event| {
+                Some((
+                    event["change"].get("behavior")?.as_str()?,
+                    event["change"].get("operation")?.as_str()?,
+                ))
+            }),
+    );
+    if recorded == 0 {
+        return false;
+    }
+    let logged = store
+        .log()
+        .iter()
+        .filter(|logged| {
+            matches!(&logged.command.action, Action::Operation { operation, .. } if operation == "removeBlocker")
+        })
+        .count();
+    recorded > logged
+}
+
+/// The operations of a behavior the engine serves and a table's core does
+/// not declare, each with why a step that calls one is not compared.
+pub const ENGINE_ONLY_OPERATIONS: [(&str, &str, &str); 1] = [(
+    "Dependencies",
+    "listDependents",
+    "listDependents of Dependencies, the engine's alone: the rows a row blocks are a query over every table's blockers, which a type's core cannot enumerate, so a table leaves it out (D104's step 4)",
+)];
+
 /// Why a define or a publish the engine refused for a rule that reads
 /// another schema is not compared.
 const ANOTHER_TABLE_DEFINE: &str = "the engine's check of a config against another schema's live version, which a type's define check on the core cannot make, since it sees its own spec alone: the build holds a table's config to the tables it names (D103, D104's step 4)";
@@ -1951,6 +2000,19 @@ impl<'r> Run<'r> {
         {
             return Done::Halted(LIMIT_FIELD_SET_LIMIT.to_owned());
         }
+        let composes = |behavior: &str| {
+            self.engines[cx.at]
+                .host
+                .store()
+                .live(type_name)
+                .is_some_and(|spec| spec.uses.iter().any(|entry| entry.behavior == behavior))
+        };
+        if let Some((_, _, reason)) = ENGINE_ONLY_OPERATIONS
+            .iter()
+            .find(|(behavior, name, _)| *name == operation && composes(behavior))
+        {
+            return Done::Skipped((*reason).to_owned());
+        }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
         // The engine's invoke names an operation, not its use: the use is
@@ -2266,6 +2328,9 @@ impl<'r> Run<'r> {
                 });
             if unmapped {
                 return Done::Skipped(EVENTS_UNMAPPED.to_owned());
+            }
+            if removed_on_a_delete(page, self.engines[cx.at].host.store()) {
+                return Done::Skipped(BLOCKER_DELETE.to_owned());
             }
         }
         let schema = options.get("schema").and_then(Value::as_str);

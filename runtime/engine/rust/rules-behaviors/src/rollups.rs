@@ -997,6 +997,7 @@ fn unknown_keys(at: &str, members: &Map<String, Value>, known: &[&str], issues: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_number_is_written_as_javascript_writes_it() {
@@ -1006,6 +1007,16 @@ mod tests {
         assert_eq!(number_json(-0.0).to_string(), "0");
         assert_eq!(number_json(f64::NAN), Value::Null);
         assert_eq!(number_json(0.1 + 0.2).to_string(), "0.30000000000000004");
+    }
+
+    #[test]
+    fn an_untyped_duplicate_is_named_as_ajv_names_it() {
+        assert_eq!(untyped_duplicate(&[json!("a"), json!("a")]), Some((0, 1)));
+        assert_eq!(
+            untyped_duplicate(&[json!("a"), json!("b"), json!("a"), json!("b")]),
+            Some((1, 3))
+        );
+        assert_eq!(untyped_duplicate(&[json!("a"), json!("b")]), None);
     }
 
     #[test]

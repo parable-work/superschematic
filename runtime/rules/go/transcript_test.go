@@ -83,14 +83,14 @@ type transcriptFile struct {
 var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-workflow.transcript.json", 96},
 	{"../../engine/testdata/rules/core-timers.transcript.json", 139},
-	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
+	{"../../engine/testdata/rules/core-reactions.transcript.json", 618},
 	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
 	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 101},
 	{"../../engine/testdata/rules/core-constants.transcript.json", 39},
 	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
 	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
 	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
-	{"../../engine/testdata/rules/core-lease.transcript.json", 449},
+	{"../../engine/testdata/rules/core-lease.transcript.json", 464},
 	{"../../engine/testdata/rules/core-presence.transcript.json", 141},
 	{"../../engine/testdata/rules/core-budget.transcript.json", 495},
 	{"../../engine/testdata/rules/core-retries.transcript.json", 250},
@@ -101,6 +101,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
 	{"../../engine/testdata/rules/core-rollups.transcript.json", 180},
+	{"../../engine/testdata/rules/core-dependencies.transcript.json", 266},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

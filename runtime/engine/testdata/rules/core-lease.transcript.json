@@ -16,7 +16,8 @@
     "Reconcile",
     "Schedules",
     "Pool",
-    "Rollups"
+    "Rollups",
+    "Dependencies"
   ],
   "scenarios": [
     {
@@ -10473,139 +10474,1260 @@
     },
     {
       "name": "Lease: expiry (node) > a move a guard vetoes leaves the status, and the lease expires all the same; any other refusal fails the expiry",
-      "clock": "wall",
-      "types": [],
-      "steps": [],
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Job",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "priority",
+              "type": "object"
+            },
+            {
+              "name": "timeLimitMs",
+              "type": "object"
+            },
+            {
+              "name": "topic",
+              "type": "string"
+            },
+            {
+              "name": "urgent",
+              "type": "boolean"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "queued",
+                      "running",
+                      "done",
+                      "failed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "queued",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "queued"
+                      },
+                      {
+                        "from": "running",
+                        "to": "done"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "queued",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Lease",
+                  "config": {
+                    "onExpiry": {
+                      "transition": "queued",
+                      "from": [
+                        "running"
+                      ]
+                    },
+                    "maxExpiries": 1,
+                    "escalate": {
+                      "transition": "failed",
+                      "from": [
+                        "running"
+                      ]
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Dependencies",
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "timeLimitMs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "topic",
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "type": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "queued",
+                      "running",
+                      "done",
+                      "failed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "queued",
+                        "to": "running"
+                      },
+                      {
+                        "from": "running",
+                        "to": "queued",
+                        "permission": "jobs.requeue"
+                      },
+                      {
+                        "from": "running",
+                        "to": "done"
+                      },
+                      {
+                        "from": "running",
+                        "to": "failed"
+                      },
+                      {
+                        "from": "queued",
+                        "to": "failed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Lease",
+                  "config": {
+                    "onExpiry": {
+                      "transition": "queued",
+                      "from": [
+                        "running"
+                      ]
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "timeLimitMs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "topic",
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "type": "boolean"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "config": {
+                  "onExpiry": {
+                    "transition": "queued",
+                    "from": [
+                      "running"
+                    ]
+                  },
+                  "maxExpiries": 1,
+                  "escalate": {
+                    "transition": "failed",
+                    "from": [
+                      "running"
+                    ]
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Dependencies",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "config": {
+                  "onExpiry": {
+                    "transition": "queued",
+                    "from": [
+                      "running"
+                    ]
+                  },
+                  "maxExpiries": 1,
+                  "escalate": {
+                    "transition": "failed",
+                    "from": [
+                      "running"
+                    ]
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Dependencies",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "j1",
+              "own": {
+                "title": "Build"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "j1",
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "j0",
+              "own": {
+                "title": "First"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "j0",
+            "row": {
+              "own": {
+                "title": "First"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Dependencies",
+              "operation": "addBlocker",
+              "params": {
+                "id": "j0"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "schema": "Job",
+              "id": "j0",
+              "status": "queued",
+              "open": true
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Job",
+                      "blockerKey": "j0",
+                      "addedBy": "alice",
+                      "addedAt": 1000000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "token": 1,
+              "expiresAt": 1060000,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Job",
+                      "blockerKey": "j0",
+                      "addedBy": "alice",
+                      "addedAt": 1000000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "running"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "queued",
+              "to": "running"
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Job",
+                      "blockerKey": "j0",
+                      "addedBy": "alice",
+                      "addedAt": 1000000
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "expire",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "expired": true,
+              "reason": "ttl"
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 2,
+                  "expiries": 1,
+                  "ended": {
+                    "reason": "ttl",
+                    "at": 1060000
+                  }
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "subRows": {
+              "Dependencies": {
+                "blockers": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "blockerType": "Job",
+                      "blockerKey": "j0",
+                      "addedBy": "alice",
+                      "addedAt": 1000000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 14,
+          "call": "schemas.define",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued",
+                      "permission": "jobs.requeue"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "config": {
+                  "onExpiry": {
+                    "transition": "queued",
+                    "from": [
+                      "running"
+                    ]
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 15,
+          "call": "schemas.publish",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "queued",
+                      "to": "running"
+                    },
+                    {
+                      "from": "running",
+                      "to": "queued",
+                      "permission": "jobs.requeue"
+                    },
+                    {
+                      "from": "running",
+                      "to": "done"
+                    },
+                    {
+                      "from": "running",
+                      "to": "failed"
+                    },
+                    {
+                      "from": "queued",
+                      "to": "failed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Lease",
+                "config": {
+                  "onExpiry": {
+                    "transition": "queued",
+                    "from": [
+                      "running"
+                    ]
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.create",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "j1",
+              "own": {
+                "title": "Build"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "j1",
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "token": 1,
+              "expiresAt": 1060000,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "running"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "queued",
+              "to": "running"
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "otto",
+              "permissions": []
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "expire",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "otto may not move Job j1 from running to queued: the transition needs permission jobs.requeue"
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1000000,
+                  "renewedAt": 1000000,
+                  "expiresAt": 1060000
+                },
+                "Workflow": {
+                  "status": "running",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1060000,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "instances.invoke",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "sweeper",
+              "permissions": [
+                "jobs.requeue"
+              ]
+            },
+            "now": 1060000,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "expire",
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "expired": true,
+              "reason": "ttl"
+            },
+            "row": {
+              "own": {
+                "title": "Build"
+              },
+              "owned": {
+                "Lease": {
+                  "token": 2,
+                  "expiries": 1,
+                  "ended": {
+                    "reason": "ttl",
+                    "at": 1060000
+                  }
+                },
+                "Workflow": {
+                  "status": "queued",
+                  "enteredAt": 1060000
+                }
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 5,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 6,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 7,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 8,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 9,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 10,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 11,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 12,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 13,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 14,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 15,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 16,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 17,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 18,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 19,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 20,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 21,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 22,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
-        },
-        {
-          "step": 23,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 24,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 25,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 26,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Dependencies"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         }
       ]
     },

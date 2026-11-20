@@ -2,8 +2,8 @@
 //! `superschematic-rules-testkit` writes from `core-workflow.json`,
 //! `core-timers.json`, `core-reactions.json`,
 //! `core-reactions-changes.json`, `core-constants.json`,
-//! `core-staterules.json`, `core-approvals.json` and `core-rollups.json`
-//! (D104's step 4), and from the scenarios
+//! `core-staterules.json`, `core-approvals.json`, `core-rollups.json` and
+//! `core-dependencies.json` (D104's step 4), and from the scenarios
 //! written by hand in their format where the engine recorded none,
 //! `core-workflow-principals.json` (D104: a transition's `by`,
 //! `overridePermission`, `repeat` and `from`; D113: `finished`) and
@@ -90,7 +90,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 20] = [
+const TRANSCRIPTS: [(&str, usize); 21] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -111,6 +111,7 @@ const TRANSCRIPTS: [(&str, usize); 20] = [
     ("core-schedules", SCHEDULES_FLOOR),
     ("core-pool", POOL_FLOOR),
     ("core-rollups", ROLLUPS_FLOOR),
+    ("core-dependencies", DEPENDENCIES_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -119,9 +120,10 @@ const TRANSCRIPTS: [(&str, usize); 20] = [
 /// since StateRules runs on the core (D104).
 const TIMERS_FLOOR: usize = 139;
 
-/// core-reactions' floor, as the core's milestone states it: 586 steps,
-/// 476 commands (252 of them changes the runner ran) and 110 checks.
-const REACTIONS_FLOOR: usize = 586;
+/// core-reactions' floor, as the core's milestone states it: 618 steps,
+/// 504 commands (266 of them changes the runner ran) and 114 checks, the
+/// scenario that composes Dependencies among them (D104's step 4).
+const REACTIONS_FLOOR: usize = 618;
 
 /// core-reactions-changes' floor, as the core's milestone states it: 60
 /// steps, 48 commands (24 of them changes) and 12 checks.
@@ -155,15 +157,16 @@ const APPROVALS_FLOOR: usize = 122;
 /// date-times, and 40 checks.
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
 
-/// core-lease's floor, as the core's milestone states it: 449 steps, 334
-/// commands (235 operations of a row, 84 of the commands presenting Lease's
+/// core-lease's floor, as the core's milestone states it: 464 steps, 345
+/// commands (243 operations of a row, 84 of the commands presenting Lease's
 /// token as its precondition, 3 deadlines the runner ran: a lease's expiry,
 /// and 8 calls of expireHolder, each a command without a row, 2 of them
-/// refused, D104) and 115 checks (D104); its directives held as sub-table
-/// rows and its expiry as an armed deadline. What the recording composed
-/// beside Lease that the core does not run (Comments, Queue, the runner's
-/// sweep cadence) the transcript leaves out with its reasons.
-const LEASE_FLOOR: usize = 449;
+/// refused, D104) and 119 checks (D104), the scenario that composes
+/// Dependencies among them (D104's step 4); its directives held as
+/// sub-table rows and its expiry as an armed deadline. What the recording
+/// composed beside Lease that the core does not run (Comments, Queue, the
+/// runner's sweep cadence) the transcript leaves out with its reasons.
+const LEASE_FLOOR: usize = 464;
 
 /// core-presence's floor, as the core's milestone states it: 141 steps, 89
 /// commands (8 of them deadlines the runner ran: a miss, 3 of which wrote
@@ -240,6 +243,12 @@ const POOL_FLOOR: usize = 82;
 /// and 72 checks (D104's step 4); the gate reads the rows that point at the
 /// row through a linked read of the layout's relation column.
 const ROLLUPS_FLOOR: usize = 180;
+
+/// core-dependencies' floor, as the core's milestone states it: 266 steps,
+/// 159 commands (85 creates, a create's blockers among them, 70 operations
+/// and 4 deletes) and 107 checks (D104's step 4); the edges held as
+/// sub-table rows, read across tables for the gate and the cycle check.
+const DEPENDENCIES_FLOOR: usize = 266;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

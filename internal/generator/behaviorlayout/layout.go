@@ -689,8 +689,12 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 		}
 		// Its operations of a row and of the table as a whole, in
 		// declaration order (D104); one of a namespace (Comments') the core
-		// runs no command for.
+		// runs no command for, and one a table leaves out
+		// (registry.TableLeavesOut: Dependencies' listDependents), neither.
 		for _, op := range behavior.Operations {
+			if registry.TableLeavesOut(ref.Name, op.Name) != "" {
+				continue
+			}
 			switch op.Scope {
 			case "", registry.OperationScopeInstance:
 				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes})

@@ -22,8 +22,8 @@ use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 /// engine ran without the work queue's package and refused a define of
 /// Lease for its implementation, which the core runs (D104), where it skips
 /// that define. The 7 other scenarios compose behaviors the core does not
-/// run yet (Branches, Comments, Dependencies, Numbering, Revisions,
-/// Rollups, Search, Variants), and are skipped whole.
+/// run yet (Branches, Comments, Numbering, Revisions, Search, Variants),
+/// beside Dependencies and Rollups in two of them, and are skipped whole.
 /// The `open` steps that run count but compare nothing, and each
 /// `runner.runDue` counts as checked once the changes and deadlines it ran
 /// answered.
