@@ -691,3 +691,53 @@ fn the_config_may_change_and_derived_stays_on_a_table_with_rows() {
         removed.message
     );
 }
+
+/// A settle on a row another principal leases: Lease lets the settle's
+/// call of applyDerived through, a request of Derived's own code, and
+/// holds the update of the own fields it makes, so the value is skipped as
+/// Lease's veto and counts an attempt, and a failure, which writes no own
+/// field, counts one too.
+#[test]
+fn a_leased_row_vetoes_a_settled_value_and_counts_its_attempt() {
+    let mut host = opened(ticket(vec![
+        UseSpec::on_type("Lease", json!({})),
+        UseSpec::on_type(USE, config()),
+    ]));
+    let wren = Caller::new("wren", Vec::<String>::new());
+    changed(host.invoke("Ticket", &wren, T0 + 1, "t1", "Lease", "acquire", json!({})));
+    let pulled = stale(&mut host, json!({}));
+    let settled = settle(
+        &mut host,
+        json!([
+            {"id": "t1", "field": "category", "sourceHash": hash_of(&pulled, "category"), "value": "bug"},
+            {"id": "t1", "field": "summary", "sourceHash": hash_of(&pulled, "summary"), "failure": {"message": "too slow"}}
+        ]),
+    );
+    assert_eq!(
+        (settled["settled"].clone(), settled["failed"].clone()),
+        (json!(0), json!(1))
+    );
+    assert_eq!(
+        (
+            settled["skipped"][0]["field"].clone(),
+            settled["skipped"][0]["reason"].clone(),
+            settled["skipped"][0]["behavior"].clone(),
+            settled["skipped"][0]["code"].clone()
+        ),
+        (
+            json!("category"),
+            json!("vetoed"),
+            json!("Lease"),
+            json!("held_by_another")
+        )
+    );
+    assert!(host.row("Ticket", "t1").own.get("category").is_none());
+    let again = stale(&mut host, json!({}));
+    let attempts: Vec<Value> = again["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| item["attempt"].clone())
+        .collect();
+    assert_eq!(attempts, [json!(2), json!(2)]);
+}

@@ -940,6 +940,24 @@ fn settle_derivations(cx: &Cx<'_, DerivedConfig>, params: &Value) -> Hook<Value>
                 waiting.get_or_insert(stop);
             }
             Err(_) if waiting.is_some() => {}
+            // Another use refused the count, as a guard that holds every
+            // writing operation of another behavior does (Lease's): the
+            // fields keep their attempts and are skipped, as a refused
+            // value's are.
+            Err(Stop::Refuse(refusal)) => {
+                let Some((reason, extra, _)) = settle_refusal(&refusal) else {
+                    return Err(Stop::Refuse(refusal));
+                };
+                for name in fields.keys() {
+                    let mut out = Map::new();
+                    out.insert("id".into(), Value::from(id));
+                    out.insert("field".into(), Value::from(name.as_str()));
+                    out.insert("reason".into(), Value::from(reason.as_str()));
+                    out.extend(extra.clone());
+                    skipped.push(Value::Object(out));
+                    failed -= 1;
+                }
+            }
             Err(stop) => return Err(stop),
         }
     }
