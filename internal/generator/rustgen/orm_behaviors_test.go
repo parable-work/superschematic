@@ -67,6 +67,25 @@ func TestRepositoriesUpsertABehaviorTableThroughTheCore(t *testing.T) {
 	runBehaviorRepositories(t, "fixture-approvals-db", "note_rules", noteRulesTest)
 }
 
+//go:embed testdata/orm/pool_rules.rs
+var poolRulesTest string
+
+// TestRepositoriesTypeEachBehaviorOperation runs fixture-pool-db's
+// Account, which implements Pool and Budget, through the typed methods
+// src/orm.rs writes per behavior operation (D103, D116), on both dialects:
+// the repositories open a struct of each use's operations
+// (account_pool(), account_budget()), Pool's pick runs on the table as a
+// whole, a command without a row (D104), with its parameters and its
+// result typed, and Budget's reserve on a row, refused past its limit.
+// TestRepositoriesWriteABehaviorTableThroughTheCore runs a Workflow's
+// typed transition.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database the Postgres half is skipped, and the test says so.
+func TestRepositoriesTypeEachBehaviorOperation(t *testing.T) {
+	runBehaviorRepositories(t, "fixture-pool-db", "pool_rules", poolRulesTest)
+}
+
 // runBehaviorRepositories generates fixture's Rust types with both
 // dialects' repositories and the core bound, holds the types crate to
 // cargo clippy, and runs source, the test crate's tests/<name>.rs, over the

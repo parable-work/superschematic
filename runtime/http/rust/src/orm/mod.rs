@@ -1119,6 +1119,33 @@ pub struct CoreOperation<'a> {
     pub caller: Caller,
 }
 
+/// An operation of one of a table's behaviors on the table as a whole
+/// (D104), a command without a row, through the core: a Pool's `pick`. It
+/// takes no preconditions, which are a row's.
+#[derive(Clone, Debug)]
+pub struct CoreTableOperation<'a> {
+    /// The table.
+    pub table: &'a Table,
+    /// The member the use's operations sit under.
+    pub member: &'a str,
+    /// The operation, as the behavior declares it.
+    pub operation: &'a str,
+    /// The operation's parameters, in their wire form.
+    pub params: Value,
+    /// Who the command runs as.
+    pub caller: Caller,
+}
+
+/// The refusal of an operation of a table as a whole by a dialect's
+/// `Rules` that run none: a binding written before they could (D104).
+#[allow(dead_code)]
+pub(crate) fn no_table_operations(operation: &CoreTableOperation<'_>) -> Error {
+    Error::Definition(format!(
+        "{}.{}.{} is an operation of the table as a whole (D104), and the repositories' rules run none: regenerate the types crate, whose rules run them",
+        operation.table.name, operation.member, operation.operation
+    ))
+}
+
 /// A value a statement binds, and what its column holds: what a
 /// repository hands its dialect's client, and the core its own columns.
 #[derive(Clone, Debug, PartialEq)]

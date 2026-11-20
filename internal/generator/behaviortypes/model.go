@@ -258,6 +258,12 @@ func (t Type) names() []string {
 type typeBuilder struct {
 	t       *Type
 	aliases map[string]Alias
+	// operations types an operation's parameters and result (Operations):
+	// an alias that is no enum of strings is the struct of its object, or
+	// its schema's shape, and one no alias declares (<Base>Patch) any JSON,
+	// as the Go ORM types them. building holds the aliases being typed.
+	operations bool
+	building   map[string]bool
 }
 
 func buildType(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) (Type, error) {
@@ -355,6 +361,14 @@ func (b *typeBuilder) shape(schema any, name, where string) (Shape, error) {
 	}
 	if ref, ok := s[RefKey].(string); ok {
 		nullable, _ := s["nullable"].(bool)
+		if b.operations {
+			if shape, done, err := b.operationAlias(ref); done || err != nil {
+				if shape.Kind != KindJSON {
+					shape.Nullable = shape.Nullable || nullable
+				}
+				return shape, err
+			}
+		}
 		if err := b.enum(ref); err != nil {
 			return Shape{}, err
 		}
@@ -458,6 +472,44 @@ func (b *typeBuilder) object(s map[string]any, properties map[string]any, name, 
 		})
 	}
 	return b.fill(index, members)
+}
+
+// operationAlias types a reference to the alias name in an operation's
+// schema: done is false for an enum of strings, which enum adds; a name no
+// alias declares is any JSON; an object of named members is the struct
+// named for the alias, added once; and any other alias is its schema's
+// shape.
+func (b *typeBuilder) operationAlias(name string) (shape Shape, done bool, err error) {
+	alias, ok := b.aliases[name]
+	if !ok {
+		return Shape{Kind: KindJSON}, true, nil
+	}
+	node, _ := alias.Schema.(map[string]any)
+	if values, ok := node["enum"].([]any); ok {
+		if _, strs := stringValues(values); strs {
+			return Shape{}, false, nil
+		}
+	}
+	if slices.ContainsFunc(b.t.Structs, func(s Struct) bool { return s.Name == name }) || b.building[name] {
+		return Shape{Kind: KindStruct, Ref: name}, true, nil
+	}
+	if b.building == nil {
+		b.building = map[string]bool{}
+	}
+	b.building[name] = true
+	defer delete(b.building, name)
+	shape, err = b.shape(WithoutDescription(alias.Schema), name, name)
+	if err != nil {
+		return Shape{}, true, err
+	}
+	if shape.Kind == KindStruct && shape.Ref == name && alias.Doc != "" {
+		for i := range b.t.Structs {
+			if b.t.Structs[i].Name == name {
+				b.t.Structs[i].Doc = name + " is " + lowerFirst(alias.Doc)
+			}
+		}
+	}
+	return shape, true, nil
 }
 
 // enum adds the enum an alias names, once, refusing a reference to a name

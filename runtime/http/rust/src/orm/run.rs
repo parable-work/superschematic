@@ -13,8 +13,9 @@ use serde_json::Value;
 
 use super::plan::{DeletePlan, Plan, Statement};
 use super::{
-    CoreCreate, CoreDelete, CoreOperation, CoreUpdate, Dialect, Error, FindOptions, Found,
-    PageOptions, RowPage, Table, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
+    FindOptions, Found, PageOptions, RowPage, Table, UpsertOptions, UpsertStatus, Upserted, Values,
+    WriteOptions,
 };
 
 /// The alias a Postgres upsert returns whether it inserted a row as,
@@ -64,6 +65,13 @@ pub(crate) trait Client {
     fn core_operation(
         &self,
         operation: CoreOperation<'_>,
+    ) -> impl Future<Output = Result<Value, Error>>;
+
+    /// Runs an operation of one of the table's behaviors on the table as a
+    /// whole through the core (D104), and answers its result.
+    fn core_table_operation(
+        &self,
+        operation: CoreTableOperation<'_>,
     ) -> impl Future<Output = Result<Value, Error>>;
 }
 
@@ -319,6 +327,18 @@ impl<C: Client> Runner<'_, C> {
             .core_operation(command)
             .await
             .map_err(|err| self.core_miss(err, key))
+    }
+
+    /// Runs `operation` of the behavior under `member` on the table as a
+    /// whole, through the core (D104), and answers its result.
+    pub(crate) async fn table_operation(
+        &self,
+        member: &str,
+        operation: &str,
+        params: &Value,
+    ) -> Result<Value, Error> {
+        let command = self.plan.core_table_operation(member, operation, params)?;
+        self.client.core_table_operation(command).await
     }
 
     /// Clears the history actor a versioned table's hard delete set, so a

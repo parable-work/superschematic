@@ -39,8 +39,9 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{finish, Client, Runner};
 use super::{
     row, values, wire, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
-    CoreOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found, Marks,
-    PageOptions, RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
+    CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys,
+    FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted,
+    Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -68,6 +69,17 @@ pub trait Rules: Send + Sync {
         connection: &Connection,
         operation: CoreOperation<'_>,
     ) -> Result<Value, Error>;
+    /// Runs an operation of one of the table's behaviors on the table as a
+    /// whole (D104), and answers its result. Rules written before they
+    /// could run one refuse it.
+    fn table_operation(
+        &self,
+        connection: &Connection,
+        operation: CoreTableOperation<'_>,
+    ) -> Result<Value, Error> {
+        let _ = connection;
+        Err(super::no_table_operations(&operation))
+    }
 }
 
 /// The repositories of a database on a SQLite connection, acting as a
@@ -467,6 +479,26 @@ where
         serde_json::from_value(result)
             .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
     }
+
+    /// Runs `operation` of the behavior under `member` on the table as a
+    /// whole, through the behaviors' core (D104), with `params`, and
+    /// answers its result as `R`.
+    pub fn table_operation<P, R>(
+        &self,
+        member: &str,
+        operation: &str,
+        params: &P,
+    ) -> Result<R, Error>
+    where
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let result = self
+            .repository
+            .table_operation(member, operation, &wire(params)?)?;
+        serde_json::from_value(result)
+            .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
+    }
 }
 
 /// The repository of one table on a SQLite connection.
@@ -606,6 +638,19 @@ impl Repository<'_> {
                 .operation(member, operation, key, params, options),
         )
     }
+
+    /// Runs `operation` of the behavior under `member` on the table as a
+    /// whole, a command without a row, through the behaviors' core (D104):
+    /// a Pool's `pick`, say. It answers the operation's result; the core's
+    /// refusal is [`Error::Refused`].
+    pub fn table_operation(
+        &self,
+        member: &str,
+        operation: &str,
+        params: &Value,
+    ) -> Result<Value, Error> {
+        finish(self.runner().table_operation(member, operation, params))
+    }
 }
 
 /// A SQLite connection as a repository's runner drives it: each statement
@@ -725,6 +770,14 @@ impl Client for SqliteClient<'_> {
     async fn core_operation(&self, operation: CoreOperation<'_>) -> Result<Value, Error> {
         self.rules(&operation.table.name)?
             .operation(self.connection, operation)
+    }
+
+    async fn core_table_operation(
+        &self,
+        operation: CoreTableOperation<'_>,
+    ) -> Result<Value, Error> {
+        self.rules(&operation.table.name)?
+            .table_operation(self.connection, operation)
     }
 }
 

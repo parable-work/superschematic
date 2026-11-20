@@ -9,9 +9,9 @@ use std::fmt::Display;
 use serde_json::Value;
 
 use super::{
-    invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreUpdate, Definition, Dialect,
-    Error, Fence, FieldCell, FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey,
-    Values, WriteOptions,
+    invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate,
+    Definition, Dialect, Error, Fence, FieldCell, FindOptions, Marks, OrderBy, PageOptions,
+    Session, Table, UniqueKey, Values, WriteOptions,
 };
 use crate::search::{like_pattern, terms};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
@@ -1752,6 +1752,36 @@ impl<'a> Plan<'a> {
             },
             columns,
             preconditions: options.preconditions.as_ref(),
+            caller: self.session.caller(),
+        })
+    }
+
+    /// An operation of one of the table's behaviors on the table as a
+    /// whole (D104), through the core: its parameters, and who it runs as.
+    pub(crate) fn core_table_operation<'p>(
+        &self,
+        member: &'p str,
+        operation: &'p str,
+        params: &Value,
+    ) -> Result<CoreTableOperation<'p>, Error>
+    where
+        'a: 'p,
+    {
+        let table = self.table;
+        if table.behaviors.is_none() {
+            return Err(invalid(format!(
+                "{} composes no behaviors (D103), so it has no operation {member}.{operation}",
+                table.name
+            )));
+        }
+        Ok(CoreTableOperation {
+            table,
+            member,
+            operation,
+            params: match params {
+                Value::Null => Value::Object(Values::new()),
+                params => params.clone(),
+            },
             caller: self.session.caller(),
         })
     }

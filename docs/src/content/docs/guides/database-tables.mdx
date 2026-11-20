@@ -3029,8 +3029,14 @@ const picked = await orm.withBehaviorCaller({ subject: agent, permissions: [] })
 
 In Go it is `db.GetAccountRepository().Pool().Pick(ctx,
 orm.AccountPoolPickParams{...})`, which answers a
-`*orm.AccountPoolPickResult`. It takes no preconditions, which are a
-row's; one that writes no row applies nothing, and one that only reads,
+`*orm.AccountPoolPickResult`. In Rust it is
+`orm.account_pool()?.pick(&AccountPoolPickParams { .. })`, which answers
+an `AccountPoolPickResult`, and an operation on a row takes the key and
+the write's options first: `orm.order_status()?.transition(&key,
+&OrderStatusTransitionParams { to: OrderStatusState::Paid, from: None },
+&WriteOptions::default())`. An operation of the table as a whole takes
+no preconditions, which are a row's; one that writes no row applies
+nothing, and one that only reads,
 as `pick`, writes nothing in your transaction. An operation a behavior
 declares on a namespace as a whole (Comments') is left out:
 `@behaviorOperations` warns of it.

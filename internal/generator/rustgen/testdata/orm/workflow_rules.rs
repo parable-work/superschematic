@@ -57,12 +57,12 @@ macro_rules! cases {
         assert!(created["statusEnteredAt"].is_string(), "{created}");
         assert_eq!(created["_version"], 1);
         assert_eq!(created["placedAt"], "2026-10-14T12:00:00.125Z");
-        let parcel = $run!(shipments.create_one(&ShipmentCreate {
+        let parcel_row = $run!(shipments.create_one(&ShipmentCreate {
             id: None,
             reference: "S-1".to_owned(),
         }))
         .expect("create the shipment");
-        let parcel = members(&parcel);
+        let parcel = members(&parcel_row);
         assert_eq!(parcel["status"], "pending");
         assert_eq!(parcel["paymentStatus"], "unpaid");
         assert!(parcel["statusEnteredAt"].is_string(), "{parcel}");
@@ -291,6 +291,41 @@ macro_rules! cases {
                 }
                 other => panic!("a move to {to} answered {other:?}"),
             }
+        }
+        // The same operations, typed: a method of the repositories per use,
+        // and one per operation, whose parameters and result are the
+        // behavior's, narrowed by the use's config. A move from a state the
+        // row is not in is the core's veto stale.
+        let payments = $orm.shipment_payment_status().unwrap();
+        let settled = $run!(payments.transition(
+            &parcel_row.id,
+            &ShipmentPaymentStatusTransitionParams {
+                from: Some(ShipmentPaymentStatusState::Unpaid),
+                to: ShipmentPaymentStatusState::Paid,
+            },
+            &options,
+        ))
+        .expect("settle the shipment");
+        assert_eq!(settled.from, ShipmentPaymentStatusState::Unpaid);
+        assert_eq!(settled.to, ShipmentPaymentStatusState::Paid);
+        assert_eq!(
+            members(&$run!(shipments.get_one(&parcel_row.id)).unwrap())["paymentStatus"],
+            "paid"
+        );
+        let stale = $run!(payments.transition(
+            &parcel_row.id,
+            &ShipmentPaymentStatusTransitionParams {
+                from: Some(ShipmentPaymentStatusState::Unpaid),
+                to: ShipmentPaymentStatusState::Refunded,
+            },
+            &options,
+        ));
+        match stale {
+            Err(Error::Refused(refusal)) => {
+                assert_eq!(refusal.code, "vetoed", "{refusal:?}");
+                assert_eq!(refusal.details["vetoCode"], "stale", "{refusal:?}");
+            }
+            other => panic!("a stale move answered {other:?}"),
         }
         for (member, operation) in [("status", "archive"), ("title", "transition")] {
             let unknown = $run!(orders.untyped().operation(
