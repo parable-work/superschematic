@@ -201,6 +201,18 @@ with a fallback arm.
     "before": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "todo", "enteredAt": 1000000}}},
     "after":  {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000}}}}}
   ```
+- `Read { key }` (D104's step 4): a read of a row, which runs each use's
+  `read_view` on the row as the host has it, in list order, through the
+  reads it asks for, and runs no guard and writes nothing. Its result is
+  the fields each use computes through reads of other rows, by use id, a
+  use that computes none left out: Rollups' `values` over the rows that
+  point at the row, Dependencies' `blocked` over its blockers. A key no row
+  holds is `not_found`, and it takes no preconditions. The replayer
+  compares a record with it; no adapter serves it yet.
+
+  ```json
+  {"kind": "read", "key": "p1"}
+  ```
 
 A `Command` carries `preconditions` beside its action (D16, D104): the
 caller's assertions of the row, each use's entry by its use id (an
@@ -549,6 +561,12 @@ and the hooks it needs, each with a default:
   `deadlines`). None by default. `Core::read_fields(spec, use_id, row,
   tables)` computes them; the replayer compares them, and no adapter serves
   them yet (D103's Left for later).
+- `read_view(view)`: the fields a read of the row shows for the use that it
+  computes through reads of other rows (D104's step 4), which a `Read`
+  runs: Rollups' `values`, read through a linked read of the rows that
+  point at the row, and Dependencies' `blocked`, read through its blockers'
+  rows and their types' specs. It reads through a view, as a guard does,
+  and writes nothing. None by default.
 - `read_fields_at(config, row, tables, now)`: `read_fields` at the time the
   read is made at, for a field that turns on the clock (Lease's `active`,
   D104); the default is `read_fields`'. `Core::read_fields_at(spec, use_id,
@@ -1124,7 +1142,7 @@ cargo build -p superschematic-rules-wasm --target wasm32-unknown-unknown
 ```
 
 with `RUSTUP_TOOLCHAIN` set to the toolchain `tools.env` pins.
-`tests/core.rs` (53 cases) runs the core through its public API with toy behaviors: the
+`tests/core.rs` (67 cases) runs the core through its public API with toy behaviors: the
 read exchange, vetoes, a call between two behaviors, two uses of one
 behavior on two fields and the own writes their fields refuse, a field
 anchor on a behavior with no value field, a config change that reads
@@ -1151,7 +1169,8 @@ so and presented the command's preconditions, from a handler and from a
 deadline's (D104, step 3); and an emit of a kind the declaration lists
 landing in the change set with its row, use and payload, and one of a
 kind it does not list, by a behavior that declares events and by one that
-declares none, a defect (D104, step 3's second part).
+declares none, a defect (D104, step 3's second part); and a read, each
+use's fields through its reads and nothing written (D104's step 4).
 `rules-behaviors`' `tests/workflow.rs` (36), `tests/timers.rs` (18),
 `tests/reactions.rs` (19), `tests/constants.rs` (11), `tests/staterules.rs`
 (11), `tests/approvals.rs` (14), `tests/lease.rs` (16) and

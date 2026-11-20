@@ -1309,7 +1309,26 @@ impl<'a> Run<'a> {
                 ..
             } => self.deadline(key, use_id, name, payload),
             Action::Change { key, change } => self.change(key, change),
+            Action::Read { key } => self.read_view(key),
         }
+    }
+
+    // read_view runs a read of a row (D104's step 4): each use's fields it
+    // computes through reads, by use id, a use with none left out, as the
+    // change set's result. It runs no guard and writes nothing.
+    fn read_view(&self, key: &str) -> Hook<ChangeSet> {
+        self.load(key)?;
+        let mut fields = Map::new();
+        for (index, bound) in self.top.uses.iter().enumerate() {
+            let read = bound
+                .registered
+                .behavior
+                .read_view(self.scope(self.top, index, "read", false))?;
+            if !read.is_empty() {
+                fields.insert(bound.spec.id().to_owned(), Value::Object(read));
+            }
+        }
+        Ok(self.changes(Value::Object(fields)))
     }
 
     // create_on runs a create on a frame whose row the run just added: the

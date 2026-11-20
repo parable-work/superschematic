@@ -1017,6 +1017,17 @@ pub trait Behavior: Send + Sync + 'static {
         Map::new()
     }
 
+    /// The fields a read of the row shows for the use that it computes
+    /// through reads of other rows (D104's step 4): Rollups' values over the
+    /// rows that point at the row, Dependencies' blocked over its blockers'
+    /// statuses. A read ([`crate::Action::Read`]) asks it of every use, in
+    /// list order, on the row as the host has it; it reads through the view,
+    /// as a guard does, and writes nothing. None by default.
+    fn read_view(&self, view: &View<'_, Self::Config>) -> Hook<Map<String, Value>> {
+        let _ = view;
+        Ok(Map::new())
+    }
+
     /// The fields a read shows for the use at a time, beyond its owned
     /// columns: [`Behavior::read_fields`] with the time the read is made
     /// at, for a field that turns on the clock (Lease's `active`, D104).

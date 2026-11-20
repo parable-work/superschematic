@@ -4568,3 +4568,78 @@ fn a_table_operation_creates_a_row_as_a_caller_creates_one() {
     let kinds: Vec<&str> = changes.events.iter().map(|e| e.kind.as_str()).collect();
     assert_eq!(kinds, ["create"]);
 }
+
+// ---- a read of the fields a use computes through reads ----
+
+// Tallier: counts the Items whose orderId holds the row's key at a read
+// (D104's step 4).
+struct Tallier;
+
+fn items_of(view: &View<'_, ()>) -> Hook<usize> {
+    let key = view.key().unwrap_or_default().to_owned();
+    let mut after: Option<String> = None;
+    let mut count = 0;
+    loop {
+        let page = view.read_linked("Item", "orderId", &key, after.as_deref())?;
+        count += page.rows.len();
+        if !page.more {
+            return Ok(count);
+        }
+        after = page.rows.last().map(|row| row.key.clone());
+    }
+}
+
+impl Behavior for Tallier {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Tallier").computed("items")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn read_view(&self, view: &View<'_, ()>) -> Hook<Map<String, Value>> {
+        let mut fields = Map::new();
+        fields.insert("items".into(), json!(items_of(view)?));
+        Ok(fields)
+    }
+}
+
+/// A read runs each use's read_view on the row through the reads it asks,
+/// by use id, a use that computes nothing left out, and writes nothing; a
+/// key no row holds is not found, and a read takes no preconditions.
+#[test]
+fn a_read_computes_each_uses_fields_through_its_reads_and_writes_nothing() {
+    let core = core().with(Tallier);
+    let spec = TypeSpec::new("Order")
+        .with(UseSpec::on_type("Counter", json!({"max": 10})))
+        .with(UseSpec::on_type("Tallier", None));
+    let item = |order: &str| row(json!({"orderId": order}), json!({}), 1);
+    let mut memory = Memory::default()
+        .with("Order", "o1", order_at(1, 3))
+        .with("Item", "i1", item("o1"))
+        .with("Item", "i2", item("o1"))
+        .with("Item", "i3", item("o2"));
+    let read = command(alice(), Action::Read { key: "o1".into() });
+    let changes = changed(core.drive(&spec, &read, &mut memory));
+    assert_eq!(changes.result, json!({"Tallier": {"items": 2}}));
+    assert!(changes.rows.is_empty() && changes.sub_rows.is_empty());
+    assert!(changes.events.is_empty() && changes.deadlines.is_empty());
+    assert_eq!(
+        memory.log,
+        ["row Order o1", "linked Item orderId o1 after -"]
+    );
+
+    let missing = command(alice(), Action::Read { key: "o9".into() });
+    assert_eq!(
+        refused(core.drive(&spec, &missing, &mut memory)).code,
+        Code::NotFound
+    );
+    let fenced = read.with_preconditions(object(json!({"Counter": {}})));
+    assert_eq!(
+        refused(core.drive(&spec, &fenced, &mut memory)).code,
+        Code::InvalidArgument
+    );
+}

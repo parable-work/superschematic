@@ -1,7 +1,8 @@
 //! What the core is asked to run (D103): a create, an update, a delete, an
 //! operation of one use on a row, an operation of one use on the table as a
 //! whole (D104), a deadline that fell due, a write of a row the outbox hands
-//! it, or the define and publish checks of a type's configs. Every command carries its caller,
+//! it, a read of the fields its uses compute through reads, or the define
+//! and publish checks of a type's configs. Every command carries its caller,
 //! the time it runs at, in epoch milliseconds, since the core reads no
 //! clock, and the host's id for the request, which the keys a behavior
 //! makes are derived from, since the core makes no id; a create carries
@@ -199,6 +200,15 @@ pub enum Action {
         key: String,
         change: RowChange,
     },
+    /// A read of a row (D103, D104's step 4): the fields each use computes
+    /// through the reads it asks for, beyond its owned columns and its
+    /// sub-tables ([`crate::Behavior::read_view`]: Rollups' values over the
+    /// rows that point at the row, Dependencies' blocked over its blockers),
+    /// by use id, as the change set's result. It runs no guard and writes
+    /// nothing; a host reads the row's own and owned fields itself.
+    Read {
+        key: String,
+    },
 }
 
 fn empty_object() -> Value {
@@ -221,12 +231,13 @@ impl Action {
             }
             Action::Deadline { name, .. } => name,
             Action::Change { .. } => "change",
+            Action::Read { .. } => "read",
         }
     }
 
     /// The action's kind, as its JSON tag writes it: `define`, `publish`,
     /// `create`, `update`, `delete`, `operation`, `tableOperation`,
-    /// `deadline` or `change`.
+    /// `deadline`, `change` or `read`.
     pub fn kind(&self) -> &'static str {
         match self {
             Action::Define => "define",
@@ -238,6 +249,7 @@ impl Action {
             Action::TableOperation { .. } => "tableOperation",
             Action::Deadline { .. } => "deadline",
             Action::Change { .. } => "change",
+            Action::Read { .. } => "read",
         }
     }
 
@@ -252,7 +264,8 @@ impl Action {
             | Action::Delete { key }
             | Action::Operation { key, .. }
             | Action::Deadline { key, .. }
-            | Action::Change { key, .. } => Some(key),
+            | Action::Change { key, .. }
+            | Action::Read { key } => Some(key),
         }
     }
 }
@@ -320,6 +333,18 @@ mod tests {
             serde_json::to_value(Action::Publish { from: None }).unwrap(),
             json!({"kind": "publish", "from": null})
         );
+    }
+
+    /// A read names its row and writes as its kind (D104's step 4).
+    #[test]
+    fn a_read_reads_from_json_and_names_its_row() {
+        let written = json!({"kind": "read", "key": "p1"});
+        let action: Action = serde_json::from_value(written.clone()).unwrap();
+        assert_eq!(action, Action::Read { key: "p1".into() });
+        assert_eq!(action.key(), Some("p1"));
+        assert_eq!(action.kind(), "read");
+        assert_eq!(action.name(), "read");
+        assert_eq!(serde_json::to_value(&action).unwrap(), written);
     }
 
     /// An operation of the table as a whole names no row (D104).
