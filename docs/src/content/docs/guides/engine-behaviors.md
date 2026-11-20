@@ -36,7 +36,7 @@ server does.
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
-| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; blocks beside a message's body (refs, action cards, code anchored at a revision, which `moveAnchor` moves, and attachments the deployment stores); a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, the pinned messages (`listPinned`), who a message was written for when its author acted for someone, and across the namespace an inbox, a search of the messages' bodies and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments) |
+| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; blocks beside a message's body (refs, action cards, code anchored at a revision, which `moveAnchor` moves, and attachments the deployment stores); a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, the pinned messages (`listPinned`), who a message was written for when its author acted for someone, and across the namespace an inbox, a search of the messages' bodies and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments); on a table, [A row's conversation](/superschematic/guides/database-tables/#a-rows-conversation) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
@@ -760,6 +760,15 @@ appends no event, may declare `"asks": "read"` beside `"beside": true`
 and `"log": false`: the policy is asked `read` for it, so a caller who
 may only read the instance may call it, and an archived namespace lets
 it run. Comments' `markRead` and `follow` do.
+
+On a table, `implements Comments<T, C>` runs on the behaviors' core
+(D103): its posts, edits, deletes, purges, reactions, pins, resolves and
+reads, every writing one beside the row, which moves no version of it
+and asks no other behavior's guard. Its namespace operations wait for
+namespace operations on the core, and so do `markRead` and `follow`;
+a streamed reply waits for signals, and attachments and `moveAnchor`
+for the core too
+([A row's conversation](/superschematic/guides/database-tables/#a-rows-conversation)).
 
 ## Refusals and preconditions
 

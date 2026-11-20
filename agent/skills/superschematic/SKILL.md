@@ -759,6 +759,23 @@ Most are load errors; knowing them saves a build round-trip:
   holds it to the behaviors' rules alone. Revisions cannot be removed from
   a table with rows. For history alone on Postgres, `@versioned` is the
   lighter choice.
+- When a row needs a discussion (a ticket's, a change under review's, an
+  incident's), implement Comments on the table rather than a `HasMany` of
+  notes: `implements Comments<Ticket, { moderatePermission:
+  "tickets.moderate"; editWindowMs: 900000 }>` (D77, D103). It keeps the
+  messages, edits and reactions in sub-tables of the row, with threads one
+  level deep, quotes, mentions, ref, action and code blocks, pins and
+  resolved threads (`comments.post`, `edit`, `deleteMessage`, `purge`,
+  `react`, `pin`, `resolve`, `listMessages`, ...). Every write is beside the
+  row: it moves no version or ETag of the row and no other behavior's
+  guard is asked, so a Lease does not stop a reply; do not present a Lease
+  token to a post, which is refused. Pass `clientId` on a post a client
+  may retry. On a table, streamed replies (`begin`, `appendDraft`,
+  `finish`), read state (`markRead`, `follow`, `unread`), the inbox,
+  deliveries, search, attachments and `moveAnchor` are not there yet: the
+  build refuses their config members (`composeTimeoutMs`,
+  `deliverPermission`, `attachments`, ...) and leaves their operations out.
+  Comments cannot be removed from a table with rows.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the
