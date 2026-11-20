@@ -107,6 +107,9 @@ func CheckProjectionStamps(serviceDir string, schema *ir.Schema, cfg *schemaconf
 	if err != nil || output == nil {
 		return nil
 	}
+	if err := sqlgen.ReplayPreviousViews(output.Projections, ownMigrationsDir(serviceDir, outputs)); err != nil {
+		return err
+	}
 	_, _, err = checkProjectionStamps(serviceDir, ownMigrationsDir(serviceDir, outputs), output.Projections, nil)
 	return err
 }

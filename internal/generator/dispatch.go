@@ -452,6 +452,11 @@ func (r run) generateSQL() error {
 	// stamp whose files would change fails the build before it writes.
 	var stamps *ProjectionsLock
 	var stampsChanged bool
+	// A re-stamped view's down migration replays its earlier migration
+	// from the service's own migrations directory (D128).
+	if err := sqlgen.ReplayPreviousViews(output.Projections, ownMigrationsDir(r.Options.ServicePath, r.Outputs)); err != nil {
+		return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
+	}
 	if r.Options.ServicePath != "" {
 		stamps, stampsChanged, err = checkProjectionStamps(r.Options.ServicePath, ownMigrationsDir(r.Options.ServicePath, r.Outputs), output.Projections, r.Options.RewriteMigrations)
 		if err != nil {

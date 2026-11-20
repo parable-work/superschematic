@@ -39,7 +39,19 @@ type ProjectionView struct {
 
 	// Migration is the version stamp; the file names derive from it, so a
 	// changed projection is always a new migration.
-	Migration string
+	Migration    string
+	UpFileName   string
+	DownFileName string
+
+	// PreviousMigration and PreviousUp are the view's last earlier
+	// migration and its up statements, read from the service's own
+	// migrations directory when the declaration takes a new stamp
+	// (ReplayPreviousViews). The down migration replays them, so a
+	// rollback past this stamp leaves the view the earlier stamp made
+	// rather than none. Both are empty for a view's first migration
+	// (D128).
+	PreviousMigration string
+	PreviousUp        string
 
 	// Replica is false when the declaration says replica: false: a reader
 	// must scan the view on its database's primary (D121).
@@ -49,9 +61,6 @@ type ProjectionView struct {
 	// outputs.sql.sourceSchema for this view (D126). Empty uses the
 	// service's.
 	SourceSchema string
-
-	UpFileName   string
-	DownFileName string
 
 	// ViewOwner is the Postgres role the migration creates the view as
 	// (SET ROLE around the DDL); empty creates it as the migration runner.
