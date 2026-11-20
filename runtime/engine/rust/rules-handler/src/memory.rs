@@ -75,13 +75,16 @@ impl MemoryStore {
             .collect()
     }
 
-    /// A row's armed deadlines: each its use, name and time.
-    pub fn armed(&self, type_name: &str, id: &str) -> Vec<(String, String, i64)> {
+    /// A row's armed deadlines: each its use, name, time and payload, by use
+    /// and name.
+    pub fn armed(&self, type_name: &str, id: &str) -> Vec<(String, String, i64, Value)> {
         self.state
             .deadlines
             .iter()
             .filter(|((t, i, _, _), _)| t == type_name && i == id)
-            .map(|((_, _, use_id, name), (at, _, _))| (use_id.clone(), name.clone(), *at))
+            .map(|((_, _, use_id, name), (at, _, payload))| {
+                (use_id.clone(), name.clone(), *at, payload.clone())
+            })
             .collect()
     }
 
@@ -391,6 +394,16 @@ impl Store for MemoryStore {
                 id: id.clone(),
                 change: change.clone(),
             })
+            .collect())
+    }
+
+    fn events(&mut self, after: i64) -> Result<Vec<QueuedEvent>, Refusal> {
+        Ok(self
+            .state
+            .events
+            .iter()
+            .filter(|event| event.seq > after)
+            .cloned()
             .collect())
     }
 

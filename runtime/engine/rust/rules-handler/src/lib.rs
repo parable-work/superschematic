@@ -65,7 +65,7 @@ pub mod store;
 mod validate;
 pub mod values;
 
-pub use bridge::{core_row, hearing, image, Bridge, Changed, Ran};
+pub use bridge::{core_row, hearing, image, set_owned, Bridge, Changed, Ran};
 pub use declarations::Declarations;
 pub use describe::describe;
 pub use handler::{

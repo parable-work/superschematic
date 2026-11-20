@@ -412,6 +412,9 @@ pub trait Store {
     fn due(&mut self, now: i64) -> Result<Vec<DueDeadline>, Refusal>;
     /// The change queue's messages, first in first out.
     fn queued(&mut self) -> Result<Vec<QueuedChange>, Refusal>;
+    /// The event queue's messages after a number, in the order written:
+    /// what an event stream reads.
+    fn events(&mut self, after: i64) -> Result<Vec<QueuedEvent>, Refusal>;
     /// Begins the request's transaction.
     fn begin(&mut self) -> Result<(), Refusal>;
     /// Commits it.

@@ -15,7 +15,7 @@ resolver = "2"
 # sit beside the engine until it goes. Development mode (D117) is the pure
 # request handler over the development layout (rules-handler) and its store
 # over SQLite, a file or a database in memory (rules-dev).
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-handler", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
 version = "0.0.0"

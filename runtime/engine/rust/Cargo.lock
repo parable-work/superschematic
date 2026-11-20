@@ -1912,6 +1912,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-rules-dev"
+version = "0.0.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+ "superschematic-rules-handler",
+ "superschematic-rules-testkit",
+ "uuid",
+]
+
+[[package]]
 name = "superschematic-rules-handler"
 version = "0.0.0"
 dependencies = [
