@@ -222,7 +222,7 @@ rules beyond the literal ones.
 - A blind index for equality lookups.
 - Encrypted fields in the engine, in version graphs and in the identity
   tables.
-- Encryption in Python, which has no ORM; Rust's `reencrypt`.
+- Encryption in Python, which has no ORM.
 - A schema-wide naming strategy; `@table` and `@column` on engine and
   version-graph tables and on `Session`, `UserCredential` and
   `UserRoleGrant`, which are refused.
@@ -1072,8 +1072,13 @@ composes behaviors written through the core; rustrestgen's
 `@tableOperation` handlers; `Api::handle` and `block_on`; the MCP endpoint
 in Rust; behavior workers on SQLite and `drain`; the Rust runner, recorded
 plans and `migrate plan --from-database`; and the `embedded` target, with
-`examples/embedded-notes` as one binary. What is left follows, and the
-design of the one step not built, the `server` feature.
+`examples/embedded-notes` as one binary that serves a Workflow table and
+its MCP endpoint. Since then: a behavior table's `upsert_one`,
+`update_many` and `hard_delete_one` through the core, typed methods per
+behavior operation, `reencrypt`, a JSON column's comparisons on SQLite,
+and workers on SQLite that claim by the time a drain is given and extend
+a long handler's claim. What is left follows, and the design of the one
+step not built, the `server` feature.
 
 ### A request in, a response out
 
@@ -1086,31 +1091,23 @@ design of the one step not built, the `server` feature.
 
 ### What is left
 
-Not built. Of steps 1 and 2: an upsert, an `update_many` and a
-`hard_delete_one` of a table that composes behaviors, each refused by
-name; typed methods per behavior operation; a repository's `reencrypt`; a
-`@tableOperation` over a projection, which stays a method with a warning,
-the Rust repositories having no projections; a calling service standing in
-at a table route, whose behavior command runs as no one; and a JSON
-column's `eq` on SQLite, which compares text. Of step 3: the `server`
-feature, and the build's list of the operations that stream a file, which
-`handle` routes as the router does. Of step 4: the confirmation key of a
-Rust app; a shared confirmation store from the generated entrypoint, which
-a project passes as `RouterOptions.mcp.confirmation_store`; and a tool of
-a manual operation where the manual routes are not mounted, which answers
-501. Of step 5: a claim reads the database's clock, so the time a drain is
-given is the time its commands run at and its next due time is measured
-from, not the time its claims go by; a drain extends no claim, and a
-handler still running when a stopping worker's grace is over is left to
-its claim's expiry; and an event handed to a `Workers` method on a SQLite
-file is compiled and not run by a test. For a Rust API on a SQLite file
-an engine, and a deriver, an engine's runner and an app stay refused by
-name, and an identity store's write that waits out the busy timeout for
-the file's writer is the store's database error, not a 503. Of step 7:
-the runtime's in-process memory store, every memory store being refused;
-in the example, a table that composes behaviors and an MCP endpoint; a
-test of a worker's `drain` driven by a host with no runtime, and of a
-cookie's sign-in from the site's page and an API key through the binary; a command that writes the target's
+Not built. Of steps 1 and 2: a `@tableOperation` over a projection, which
+stays a method with a warning, the Rust repositories having no
+projections; a calling service standing in at a table route, whose
+behavior command runs as no one; and an upsert of a table whose behaviors
+keep sub-tables or arm deadlines, refused as in Go and TypeScript. Of step
+3: the `server` feature, and the build's list of the operations that
+stream a file, which `handle` routes as the router does. Of step 4: the
+confirmation key of a Rust app; a shared confirmation store from the
+generated entrypoint, which a project passes as
+`RouterOptions.mcp.confirmation_store`; and a tool of a manual operation
+where the manual routes are not mounted, which answers 501. Of step 5:
+for a Rust API on a SQLite file an engine, a deriver, an engine's runner
+and an app stay refused by name, and an identity store's write that waits
+out the busy timeout for the file's writer is the store's database error,
+not a 503. Of step 7: the runtime's in-process memory store, every memory
+store being refused; a test of a cookie's sign-in from the site's page and
+of an API key through the binary; a command that writes the target's
 authoring types; a route's own limits under `main.rs`, which reads every
 body up to 2 MiB; and the manual-route operations, which the build names.
 
