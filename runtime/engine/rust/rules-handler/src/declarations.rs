@@ -215,6 +215,9 @@ mod tests {
         assert!(pool.operations.iter().any(|operation| operation.table));
         let schedules = declarations.get("Schedules").expect("Schedules");
         assert_eq!(schedules.events, ["run"]);
-        assert_eq!(declarations.iter().count(), 14);
+        assert_eq!(
+            declarations.iter().count(),
+            superschematic_rules_behaviors::NAMES.len()
+        );
     }
 }
