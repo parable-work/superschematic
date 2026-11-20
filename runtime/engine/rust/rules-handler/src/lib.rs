@@ -4,7 +4,9 @@
 //! development mode its rows live in fixed tables: the types' versions,
 //! the rows with their own fields as one JSON column and their owned
 //! fields as another, one shared sub-table per behavior keyed by type and
-//! id, and the deadlines, events and changes the behaviors' queues hold.
+//! id, the rows of the tables a use keeps for its type as a whole (D103's
+//! step 4: Numbering's counts), each with a version of its own, and the
+//! deadlines, events and changes the behaviors' queues hold.
 //! Publishing writes rows and never a table, so it needs no migration and
 //! no DDL, and it has no compatibility rule: a version may rename, retype,
 //! remove and tighten, and the stored rows it no longer describes are
