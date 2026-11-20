@@ -14,7 +14,9 @@ resolver = "2"
 # hand-written Rust server over tokio-postgres or rusqlite (rules-adapter)
 # sit beside the engine until it goes. Development mode (D117) is the pure
 # request handler over the development layout (rules-handler) and its store
-# over SQLite, a file or a database in memory (rules-dev).
+# over SQLite, a file or a database in memory (rules-dev); runtime mode is
+# the same handler over each type's own table, a publish a migration
+# (rules-runtime).
 members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-runtime", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
