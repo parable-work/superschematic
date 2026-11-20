@@ -127,6 +127,12 @@ pub struct FieldSpec {
     /// a field that holds no key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relation: Option<RelationSpec>,
+    /// The field's JSON Schema, which a host gives for a field a behavior
+    /// hands a model (D73: the output a deriver asks for a field Derived
+    /// derives) and the core holds a value of it to; `None` where the host
+    /// gives none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Value>,
 }
 
 /// A to-one relation an own field holds the key of, as the core's spec
@@ -153,7 +159,14 @@ impl FieldSpec {
             type_name: type_name.into(),
             date_time: false,
             relation: None,
+            schema: None,
         }
+    }
+
+    /// The field with its JSON Schema (D73).
+    pub fn with_schema(mut self, schema: Value) -> Self {
+        self.schema = Some(schema);
+        self
     }
 
     /// A field that holds the key of a to-one relation's target: its name

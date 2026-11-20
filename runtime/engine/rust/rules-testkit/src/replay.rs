@@ -183,6 +183,10 @@ const BUDGET_COMMENTS_INCIDENTAL: &str = "Comments, which the core does not run 
 /// made of another row is not compared.
 const EVENTS_OF_CALLS: &str = "a read of the engine's event log that holds a write one row's operation or deadline made of another row through that row's operation, which the engine logged as the operation's own event and a table's change set logs under the command that wrote it (D103)";
 
+/// Why an events.read that holds a write an operation of the table as a
+/// whole made of a row is not compared.
+const EVENTS_OF_TABLE_CALLS: &str = "a read of the engine's event log that holds a write an operation of the schema made of an instance through the instance's operation (Derived's settleDerivations through applyDerived, D73), which the engine logged as that operation's own event and a table's change set logs under the operation of the table as a whole that wrote it (D104)";
+
 /// Why a scenario stops at a setLimit of a meter whose limit an own field
 /// holds.
 const LIMIT_FIELD_SET_LIMIT: &str = "setLimit of a meter with limitField writes the field through the engine's update(), and the core writes no own field from an operation (D103): on a table the limit is the field's, set by an update (D104)";
@@ -1330,7 +1334,18 @@ impl<'r> Run<'r> {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
-        Ok(Caller::new(subject, permissions))
+        let caller = Caller::new(subject, permissions);
+        // A principal acting for a subject (D77), which Provenance records.
+        Ok(
+            match principal
+                .get("actingFor")
+                .and_then(|acting| acting.get("subject"))
+                .and_then(Value::as_str)
+            {
+                Some(acting) => caller.acting_for(acting),
+                None => caller,
+            },
+        )
     }
 
     // now is the time a step's command runs at: a fixed clock's reading,
@@ -2444,6 +2459,14 @@ impl<'r> Run<'r> {
         });
         if called {
             return Done::Skipped(EVENTS_OF_CALLS.to_owned());
+        }
+        let table_called = store.log().iter().any(|logged| {
+            schema.is_none_or(|schema| logged.type_name == schema)
+                && instance.is_none_or(|key| logged.key == key)
+                && matches!(logged.command.action, Action::TableOperation { .. })
+        });
+        if table_called {
+            return Done::Skipped(EVENTS_OF_TABLE_CALLS.to_owned());
         }
         let unchanged = store.log().iter().any(|logged| {
             schema.is_none_or(|schema| logged.type_name == schema)

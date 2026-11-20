@@ -45,6 +45,27 @@
     { "name": "fields", "description": "The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent." },
     { "name": "stale", "description": "The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order.", "volatile": true }
   ],
+  "tables": [
+    {
+      "name": "derivations",
+      "description": "On a table, one row per derived field of the row, keyed by the field's name: the hash its value is derived under, the hash of its last settled value with its model, confidence, settler and time, the override a write gave it, its failed attempts and last failure, and whether rederive forced it. Every write of the row keeps them in line; a delete of the row deletes them.",
+      "key": "field",
+      "fields": [
+        { "name": "field", "description": "The derived field's name.", "type": "string" },
+        { "name": "sourceHash", "description": "The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one.", "type": "string" },
+        { "name": "settledHash", "description": "The source hash of the last value settled; absent before the first.", "type": "string" },
+        { "name": "model", "description": "The model label the last value was settled under.", "type": "string" },
+        { "name": "confidence", "description": "The confidence the last value was settled with, from 0 to 1.", "type": "number" },
+        { "name": "settledAt", "description": "When the last value was settled, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "settledBy", "description": "The subject of the deriver that settled it.", "type": "string" },
+        { "name": "overriddenBy", "description": "Who wrote the field over Derived: a caller's subject, another behavior's name, or existing for a value the row held before; absent until one does and after rederive.", "type": "string" },
+        { "name": "overriddenAt", "description": "When the override was written, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "attempts", "description": "The failed attempts since the source hash last moved or a value settled.", "type": "Generic.Int64" },
+        { "name": "failure", "description": "The last failure a deriver settled: { class?, message }.", "type": "Generic.JSON" },
+        { "name": "forced", "description": "Whether rederive asked for the field again while its hash had not moved.", "type": "boolean" }
+      ]
+    }
+  ],
   "operations": [
     {
       "name": "staleDerivations",

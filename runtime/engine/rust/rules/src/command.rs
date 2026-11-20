@@ -32,6 +32,11 @@ pub struct Caller {
     /// service's own.
     #[serde(default, skip_serializing_if = "is_false")]
     pub stands_in: bool,
+    /// The subject the caller acts for (D77): an agent's principal acting
+    /// for a person, which Provenance records beside who wrote a field
+    /// (D73). `None` for a caller that acts for no one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting_for: Option<String>,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -48,6 +53,7 @@ impl Caller {
             subject: subject.into(),
             permissions: permissions.into_iter().map(Into::into).collect(),
             stands_in: false,
+            acting_for: None,
         }
     }
 
@@ -58,7 +64,14 @@ impl Caller {
             subject: subject.into(),
             permissions: Vec::new(),
             stands_in: true,
+            acting_for: None,
         }
+    }
+
+    /// The caller acting for a subject (D77).
+    pub fn acting_for(mut self, subject: impl Into<String>) -> Self {
+        self.acting_for = Some(subject.into());
+        self
     }
 }
 

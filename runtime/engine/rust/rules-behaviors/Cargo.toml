@@ -18,10 +18,16 @@ publish.workspace = true
 # does (D70). A rule change ships with a release. Unlicense OR MIT, as
 # jiff-tzdb is.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
+# Derived's source hash (D73): the SHA-256 of the model label, the
+# instruction, the output schema and the inputs as JSON.stringify writes
+# them, its numbers as JavaScript writes a double, so a hash matches the
+# engine's. Both are pure Rust and build for wasm32.
+ryu-js = "1.0.3"
 serde = { version = "1.0.228", features = ["derive"] }
 # The engine's JSON features (D58): a number keeps its text, an object its
 # members' order.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+sha2 = "0.10.9"
 superschematic-rules = { path = "../rules" }
 
 [lints]
