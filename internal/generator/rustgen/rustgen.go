@@ -489,6 +489,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if err := checkBehaviorNames(output.Behaviors); err != nil {
 		return nil, err
 	}
+	if err := checkOperationNames(output); err != nil {
+		return nil, err
+	}
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.HasOptionalJSONFields = hasOptionalJSONFields(output.Types)

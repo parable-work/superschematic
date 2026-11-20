@@ -303,6 +303,53 @@ func SQLiteClauses() Clauses {
 	return c
 }
 
+// JSONClauses are the conditions of a Generic.JSON column's filter
+// (FilterJSON), which compare JSON values as JSONB compares them (D79):
+// Eq and Ne of the column %s and its parameter $%d, In and NoneOf of the
+// column %s and the list %s of its parameters, each a Value, $%d as the
+// condition compares it.
+type JSONClauses struct {
+	Eq, Ne, In, NoneOf, Value string
+}
+
+// AllJSONClauses are the clauses by name, for the generators that carry
+// them.
+func (c JSONClauses) AllJSONClauses() []NamedStatement {
+	return []NamedStatement{{"eq", c.Eq}, {"ne", c.Ne}, {"in", c.In}, {"noneOf", c.NoneOf}, {"value", c.Value}}
+}
+
+// PostgresJSONClauses are Postgres's: a JSONB column compares its values
+// itself, so they are the Clauses of any other column.
+func PostgresJSONClauses() JSONClauses {
+	c := PostgresClauses()
+	return JSONClauses{Eq: c.Eq, Ne: c.Ne, In: c.In, NoneOf: c.NoneOf, Value: c.Placeholder}
+}
+
+// sqliteJSONValue is the text by which SQLite compares a JSON value, %s
+// (D116): every node json_tree reads of it, each its path, its type, a
+// number's an integer's or a real's alike, and its atom, a real that holds
+// an integer as that integer, in path order, each as a JSON array. Two
+// documents whose objects list their members in another order, or that
+// write a number another way, are one text, as JSONB holds them one value;
+// SQL NULL is NULL.
+const sqliteJSONValue = `(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s))`
+
+// SQLiteJSONClauses are SQLite's (D116), which holds a JSON value as its
+// text: each compares the column's value and each parameter's by
+// sqliteJSONValue, so a filter keeps the rows Postgres's keeps. Ne is IS
+// NOT, which keeps a NULL column as IS DISTINCT FROM does.
+func SQLiteJSONClauses() JSONClauses {
+	of := func(x string) string { return strings.Replace(sqliteJSONValue, "%s", x, 1) }
+	column, param := of("%s"), of("?%d")
+	return JSONClauses{
+		Eq:     column + " = " + param,
+		Ne:     column + " IS NOT " + param,
+		In:     column + " IN (%s)",
+		NoneOf: "(" + column + " IN (%s)) IS NOT TRUE",
+		Value:  param,
+	}
+}
+
 // DefaultLimit is the rows FindMany and FindPage read unless told.
 const DefaultLimit = 100
 

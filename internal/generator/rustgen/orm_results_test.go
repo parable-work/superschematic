@@ -29,8 +29,11 @@ var ledgerResultsTest string
 // ORM and the TypeScript repositories statement for statement, so a call
 // that answers alike here answers on SQLite as theirs answer.
 //
-// A JSON column's eq is left out of the script: SQLite compares its text,
-// where Postgres compares the value (D116's status).
+// A JSON column's filter is in the script: its eq, ne, in and notIn compare
+// JSON values on SQLite, by the text json_tree reads of each
+// (sqlutil.SQLiteJSONClauses), as Postgres's JSONB compares them, so an
+// object whose members come in another order and a number written another
+// way are the value the row holds on both.
 //
 // It needs cargo and the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, which it skips without, and
@@ -52,6 +55,36 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 		t.Fatalf("the comparison did not run:\n%s", out)
 	}
 	t.Logf("%s", alike)
+}
+
+//go:embed testdata/orm/vault_reencrypt.rs
+var vaultReencryptTest string
+
+// TestRepositoriesReencryptOnSQLiteAndPostgres runs the Rust repositories'
+// reencrypt of fixture-vault-db's PlaidItem on a SQLite file and on
+// Postgres (D85, D116), with the statements sqlutil writes for the Go ORM's
+// Reencrypt and the TypeScript repositories' reencrypt: after a rotation
+// it reseals every envelope the old key sealed, two rows at a time, a
+// deleted row among them, and answers how many; a second finds none; each
+// row then opens under the new key alone; and repositories with no keys
+// are refused.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database the Postgres half is skipped, and the test says so.
+func TestRepositoriesReencryptOnSQLiteAndPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the repositories' reencrypt in -short mode")
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not found, skipping the repositories' reencrypt")
+	}
+	out := runRepositoriesOnBoth(t, cargo, "fixture-vault-db", "vault_reencrypt", vaultReencryptTest)
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
+		t.Log("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL is unset: the Postgres half did not run")
+	} else if !regexp.MustCompile(`the repositories ran on Postgres`).Match(out) {
+		t.Errorf("the Postgres half did not run:\n%s", out)
+	}
 }
 
 // runRepositoriesOnBoth writes fixture's types crate with both dialects'

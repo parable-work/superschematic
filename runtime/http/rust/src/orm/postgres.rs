@@ -30,8 +30,9 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
     row, values, wire, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate, CoreDelete,
-    CoreOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys, FindOptions, Found,
-    PageOptions, RowPage, Session, Table, UpsertOptions, Upserted, Values, WriteOptions,
+    CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error, FieldKeys,
+    FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted, Values,
+    WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -67,6 +68,18 @@ pub trait Rules<C>: Send + Sync {
         client: &'a C,
         operation: CoreOperation<'a>,
     ) -> CoreFuture<'a, Value>;
+    /// Runs an operation of one of the table's behaviors on the table as a
+    /// whole (D104), and answers its result. Rules written before they
+    /// could run one refuse it.
+    fn table_operation<'a>(
+        &'a self,
+        client: &'a C,
+        operation: CoreTableOperation<'a>,
+    ) -> CoreFuture<'a, Value> {
+        let _ = client;
+        let refused = super::no_table_operations(&operation);
+        Box::pin(async move { Err(refused) })
+    }
 }
 
 /// A client a behavior's command may run on (D103): either client the
@@ -458,7 +471,10 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     }
 
     /// Sets the members `update` sets on the live rows `filter` finds, and
-    /// answers how many.
+    /// answers how many. On a table that composes behaviors it reads the
+    /// rows and runs the core's update of each, in the key's order, so each
+    /// behavior's guards hold every row (D103); a refusal of any is the
+    /// call's, and the caller's transaction rolls back the rows before it.
     pub async fn update_many(
         &self,
         filter: Option<&Values>,
@@ -470,7 +486,10 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// Inserts `input`, or, when a row already holds its value of the
     /// unique key `on`, applies `update` to that row instead (D79, D89).
     /// On a soft-deletable table a deleted row that holds the key is left
-    /// as it is, and the upsert is [`Error::NotFound`].
+    /// as it is, and the upsert is [`Error::NotFound`]. On a table that
+    /// composes behaviors it reads whether a row holds the key, then runs
+    /// the core's create of `input` or the core's update of that row
+    /// (D103), and an update that sets no field writes nothing (D105).
     pub async fn upsert_one(
         &self,
         input: &Values,
@@ -488,7 +507,9 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     }
 
     /// Removes the row whose key is `key`, deleted or not, whatever the
-    /// table; [`Error::NotFound`] when there is none.
+    /// table; [`Error::NotFound`] when there is none. On a table that
+    /// composes behaviors a live row is removed by the core's delete, with
+    /// its sub-table rows and its queues' messages (D103).
     pub async fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         self.runner().hard_delete_one(key).await
     }
@@ -511,6 +532,32 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         self.runner()
             .operation(member, operation, key, params, options)
             .await
+    }
+
+    /// Runs `operation` of the behavior under `member` on the table as a
+    /// whole, a command without a row, through the behaviors' core (D104),
+    /// in the caller's transaction: a Pool's `pick`, say. It answers the
+    /// operation's result; the core's refusal is [`Error::Refused`].
+    pub async fn table_operation(
+        &self,
+        member: &str,
+        operation: &str,
+        params: &Value,
+    ) -> Result<Value, Error> {
+        self.runner()
+            .table_operation(member, operation, params)
+            .await
+    }
+
+    /// Reseals under the current field key every envelope of the table's
+    /// `Encrypted<T>` columns another key of the keyring sealed, `batch`
+    /// rows at a time (the definition's default limit unless set), deleted
+    /// rows among them, and answers how many rows it resealed (D85). Run it
+    /// after a rotation puts a new key first, before the old one leaves the
+    /// secret. A row a write changes between the read and the reseal keeps
+    /// the write's envelope.
+    pub async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        self.runner().reencrypt(batch).await
     }
 }
 
@@ -692,6 +739,34 @@ where
         serde_json::from_value(result)
             .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
     }
+
+    /// Runs `operation` of the behavior under `member` on the table as a
+    /// whole, through the behaviors' core (D104), with `params`, and
+    /// answers its result as `R`.
+    pub async fn table_operation<P, R>(
+        &self,
+        member: &str,
+        operation: &str,
+        params: &P,
+    ) -> Result<R, Error>
+    where
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let result = self
+            .repository
+            .table_operation(member, operation, &wire(params)?)
+            .await?;
+        serde_json::from_value(result)
+            .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
+    }
+
+    /// Reseals under the current field key every envelope another key
+    /// sealed, `batch` rows at a time, deleted rows among them, and answers
+    /// how many rows it resealed (D85).
+    pub async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        self.repository.reencrypt(batch).await
+    }
 }
 
 /// A Postgres client as a repository's runner drives it.
@@ -781,6 +856,26 @@ impl<C: GenericClient + Sync> Client for PostgresClient<'_, C> {
         Ok(out)
     }
 
+    async fn cells(
+        &self,
+        table: &Table,
+        statement: &Statement,
+        columns: &[&Column],
+    ) -> Result<Vec<Vec<Value>>, Error> {
+        let rows = self.bound(table, statement).await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let mut cells = Vec::with_capacity(columns.len());
+            for (i, column) in columns.iter().enumerate() {
+                cells.push(cell(row, i, column).map_err(|err| {
+                    Error::Definition(format!("{}.{}: {err}", table.name, column.name))
+                })?);
+            }
+            out.push(cells);
+        }
+        Ok(out)
+    }
+
     async fn execute(&self, table: &Table, statement: &Statement) -> Result<u64, Error> {
         let context = || format!("{}: {}", table.name, statement.sql);
         let prepared = self
@@ -837,6 +932,15 @@ impl<C: GenericClient + Sync> Client for PostgresClient<'_, C> {
     async fn core_operation(&self, operation: CoreOperation<'_>) -> Result<Value, Error> {
         self.rules(&operation.table.name)?
             .operation(self.client, operation)
+            .await
+    }
+
+    async fn core_table_operation(
+        &self,
+        operation: CoreTableOperation<'_>,
+    ) -> Result<Value, Error> {
+        self.rules(&operation.table.name)?
+            .table_operation(self.client, operation)
             .await
     }
 }

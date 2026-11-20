@@ -86,6 +86,11 @@ type QueueDescriptor struct {
 	// SQLiteStatements are its statements on SQLite, for a database whose
 	// DB service lists the sqlite dialect, as queues.ts carries them.
 	SQLiteStatements *QueueStatements `json:"sqliteStatements,omitempty"`
+
+	// SQLiteAtStatements are its statements on SQLite at a time each
+	// takes (sqlutil.SQLiteQueueStatementsAt), which a Rust worker's drain
+	// runs at the time its host gave it (D116), and no other client reads.
+	SQLiteAtStatements *QueueStatements `json:"sqliteAtStatements,omitempty"`
 }
 
 // QueueField is a field of a queue's message and its column.
@@ -231,6 +236,8 @@ func RustQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 		} else if q.SQLiteUnsupported == "" {
 			statements := queueStatements(sqlutil.SQLiteQueueStatements(spec))
 			q.Descriptor.SQLiteStatements = &statements
+			at := queueStatements(sqlutil.SQLiteQueueStatementsAt(spec))
+			q.Descriptor.SQLiteAtStatements = &at
 		}
 		if q.Unsupported == "" {
 			text, err := q.Descriptor.JSON()

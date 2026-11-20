@@ -57,12 +57,12 @@ macro_rules! cases {
         assert!(created["statusEnteredAt"].is_string(), "{created}");
         assert_eq!(created["_version"], 1);
         assert_eq!(created["placedAt"], "2026-10-14T12:00:00.125Z");
-        let parcel = $run!(shipments.create_one(&ShipmentCreate {
+        let parcel_row = $run!(shipments.create_one(&ShipmentCreate {
             id: None,
             reference: "S-1".to_owned(),
         }))
         .expect("create the shipment");
-        let parcel = members(&parcel);
+        let parcel = members(&parcel_row);
         assert_eq!(parcel["status"], "pending");
         assert_eq!(parcel["paymentStatus"], "unpaid");
         assert!(parcel["statusEnteredAt"].is_string(), "{parcel}");
@@ -133,16 +133,129 @@ macro_rules! cases {
             "a create of an owned field answered {started:?}"
         );
 
-        // A write of many rows at once, and an upsert, are refused by
-        // name: a behavior table's rows are written a row at a time.
+        // An update of many rows runs the core's update of each live row
+        // the filter finds: its version moves, and what the behaviors own
+        // stays as it was. One that sets an owned field is the core's
+        // refusal, and writes nothing.
+        let lamp_key = json!("11111111-1111-4111-8111-111111111111");
+        let lamps = OrderFilter {
+            title: Some(Text::eq("Lamp".to_owned())),
+            ..Default::default()
+        };
         let many = $run!(orders.update_many(
-            None,
+            Some(&lamps),
             &OrderUpdate {
-                title: Some("All".to_owned()),
+                title: Some("Desk lamp".to_owned()),
                 placed_at: None,
             },
+        ))
+        .expect("update the lamps");
+        assert_eq!(many, 1);
+        let lamp = $run!(orders.untyped().get_one(&lamp_key)).unwrap();
+        assert_eq!(lamp["title"], "Desk lamp");
+        assert_eq!(lamp["status"], "draft");
+        assert_eq!(lamp["_version"], 2);
+        let owned_many = $run!(orders
+            .untyped()
+            .update_many(None, &values(json!({"status": "paid"}))));
+        assert!(
+            matches!(&owned_many, Err(Error::Refused(refusal)) if refusal.code == "invalid_instance"),
+            "an update of many of an owned field answered {owned_many:?}"
+        );
+        assert_eq!(
+            $run!(orders.untyped().get_one(&lamp_key)).unwrap()["_version"],
+            2
+        );
+
+        // An upsert reads whether a row holds its key. None holds S-2, so
+        // it is the core's create, each Workflow in its initial state. S-1
+        // is held: an update that sets no field writes nothing of it
+        // (D105), nor does one only if changed whose fields it holds, and
+        // one that sets a field is the core's update. One whose update
+        // names an owned field is refused before anything is written.
+        let by_reference = ["reference"];
+        let s2 = $run!(shipments.upsert_one(
+            &ShipmentCreate {
+                id: None,
+                reference: "S-2".to_owned(),
+            },
+            &by_reference,
+            &ShipmentUpdate::default(),
+            UpsertOptions::default(),
+        ))
+        .expect("upsert S-2");
+        assert_eq!(s2.status, UpsertStatus::Inserted);
+        let inserted = members(&s2.row);
+        assert_eq!(inserted["status"], "pending");
+        assert_eq!(inserted["paymentStatus"], "unpaid");
+        assert_eq!(inserted["_version"], 1);
+        let s1 = ShipmentCreate {
+            id: None,
+            reference: "S-1".to_owned(),
+        };
+        let kept = $run!(shipments.upsert_one(
+            &s1,
+            &by_reference,
+            &ShipmentUpdate::default(),
+            UpsertOptions::default(),
+        ))
+        .expect("upsert S-1 setting nothing");
+        assert_eq!(kept.status, UpsertStatus::Unchanged);
+        assert_eq!(members(&kept.row), parcel);
+        let same = $run!(shipments.upsert_one(
+            &s1,
+            &by_reference,
+            &ShipmentUpdate {
+                reference: Some("S-1".to_owned()),
+            },
+            UpsertOptions {
+                only_if_changed: true,
+            },
+        ))
+        .expect("upsert S-1 only if changed");
+        assert_eq!(same.status, UpsertStatus::Unchanged);
+        assert_eq!(members(&same.row)["_version"], 1);
+        let moved = $run!(shipments.upsert_one(
+            &s1,
+            &by_reference,
+            &ShipmentUpdate {
+                reference: Some("S-1b".to_owned()),
+            },
+            UpsertOptions::default(),
+        ))
+        .expect("upsert S-1 to S-1b");
+        assert_eq!(moved.status, UpsertStatus::Updated);
+        let moved = members(&moved.row);
+        assert_eq!(moved["id"], parcel["id"]);
+        assert_eq!(moved["reference"], "S-1b");
+        assert_eq!(moved["status"], "pending");
+        assert_eq!(moved["_version"], 2);
+        let owned_upsert = $run!(shipments.untyped().upsert_one(
+            &values(json!({"reference": "S-9"})),
+            &by_reference,
+            &values(json!({"status": "packed"})),
+            UpsertOptions::default(),
         ));
-        assert!(matches!(many, Err(Error::Invalid(_))), "{many:?}");
+        assert!(matches!(owned_upsert, Err(Error::Invalid(_))), "{owned_upsert:?}");
+        let s9 = ShipmentFilter {
+            reference: Some(Text::eq("S-9".to_owned())),
+            ..Default::default()
+        };
+        assert!($run!(shipments.find_one(Some(&s9), &FindOptions::default()))
+            .unwrap()
+            .is_none());
+
+        // A hard delete of a row the core sees is the core's delete; a key
+        // no row holds is not found.
+        $run!(shipments.hard_delete_one(&s2.row.id)).expect("hard delete S-2");
+        assert!(matches!(
+            $run!(shipments.get_one(&s2.row.id)),
+            Err(Error::NotFound(_))
+        ));
+        assert!(matches!(
+            $run!(shipments.hard_delete_one(&s2.row.id)),
+            Err(Error::NotFound(_))
+        ));
 
         // A behavior's operation runs through the core too, under the
         // member its use sits at: a Workflow's transition moves its field
@@ -178,6 +291,41 @@ macro_rules! cases {
                 }
                 other => panic!("a move to {to} answered {other:?}"),
             }
+        }
+        // The same operations, typed: a method of the repositories per use,
+        // and one per operation, whose parameters and result are the
+        // behavior's, narrowed by the use's config. A move from a state the
+        // row is not in is the core's veto stale.
+        let payments = $orm.shipment_payment_status().unwrap();
+        let settled = $run!(payments.transition(
+            &parcel_row.id,
+            &ShipmentPaymentStatusTransitionParams {
+                from: Some(ShipmentPaymentStatusState::Unpaid),
+                to: ShipmentPaymentStatusState::Paid,
+            },
+            &options,
+        ))
+        .expect("settle the shipment");
+        assert_eq!(settled.from, ShipmentPaymentStatusState::Unpaid);
+        assert_eq!(settled.to, ShipmentPaymentStatusState::Paid);
+        assert_eq!(
+            members(&$run!(shipments.get_one(&parcel_row.id)).unwrap())["paymentStatus"],
+            "paid"
+        );
+        let stale = $run!(payments.transition(
+            &parcel_row.id,
+            &ShipmentPaymentStatusTransitionParams {
+                from: Some(ShipmentPaymentStatusState::Unpaid),
+                to: ShipmentPaymentStatusState::Refunded,
+            },
+            &options,
+        ));
+        match stale {
+            Err(Error::Refused(refusal)) => {
+                assert_eq!(refusal.code, "vetoed", "{refusal:?}");
+                assert_eq!(refusal.details["vetoCode"], "stale", "{refusal:?}");
+            }
+            other => panic!("a stale move answered {other:?}"),
         }
         for (member, operation) in [("status", "archive"), ("title", "transition")] {
             let unknown = $run!(orders.untyped().operation(
@@ -284,7 +432,7 @@ async fn on_postgres(pool: &deadpool_postgres::Pool) -> Result<(), Box<dyn std::
     let orm = postgres::Repositories::new(&client)?;
     let orders = orm.order()?;
     let lamp: IdentityUUID = "11111111-1111-4111-8111-111111111111".parse()?;
-    assert_eq!(members(&orders.get_one(&lamp).await?)["title"], "Lamp");
+    assert_eq!(members(&orders.get_one(&lamp).await?)["title"], "Desk lamp");
     let outside = orders
         .create_one(&OrderCreate {
             id: None,

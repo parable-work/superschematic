@@ -305,9 +305,12 @@ TypeScript runtimes' (D51):
   limit)` claims and runs what is due of its queues, in the order they
   were added, a message at a time, up to the limit, and answers `Drained
   { ran, next }`: how many it ran and when the next falls due. It needs no
-  tokio runtime, reads no clock and extends no claim; a claim reads the
-  database's clock, and `now` is the time a handler's commands run at and
-  the prune's cadence goes by. A failed claim, a busy file among them, is
+  tokio runtime and reads no clock: its claims, completions, failures and
+  prunes go by `now` and the time the drain has run since, through the
+  descriptor's `sqliteAtStatements`, and `now` is the time a handler's
+  commands run at and the prune's cadence goes by. While a `queue`
+  handler runs, a thread of the drain's own extends its message's claim
+  every half of the lease. A failed claim, a busy file among them, is
   the drain's error; a handler's failure is its message's. `Wake` is what
   a sleeping host waits on (`wait(seen, timeout)`, or `woken(seen)` in a
   future): `orm::sqlite::Database::wake()` is notified after each write

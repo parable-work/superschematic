@@ -26,6 +26,7 @@ func customTemplateFuncs() template.FuncMap {
 		"rustBehaviorAttr":    rustBehaviorAttr,
 		"rustBehaviorField":   rustBehaviorField,
 		"rustBehaviorType":    rustBehaviorType,
+		"rustOperationType":   rustOperationType,
 
 		"rulesAdapterCrate":   func() string { return RulesAdapterCrate },
 		"rulesBehaviorsCrate": func() string { return RulesBehaviorsCrate },

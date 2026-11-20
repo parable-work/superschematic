@@ -65,14 +65,27 @@ func rustBehaviorAttr(member behaviortypes.Member) string {
 // rustBehaviorType is a behavior member's Rust type: an Option for a value
 // a read may leave out or hold null for.
 func rustBehaviorType(shape behaviortypes.Shape, required bool) string {
-	if !required || shape.Nullable {
-		return "Option<" + rustBehaviorValueType(shape) + ">"
-	}
-	return rustBehaviorValueType(shape)
+	return rustShapeType(shape, required, "serde_json::Value")
 }
 
-// rustBehaviorValueType is the Rust type of one value of a shape.
-func rustBehaviorValueType(shape behaviortypes.Shape) string {
+// rustOperationType is the Rust type of a member of a behavior operation's
+// parameters or result, as src/orm.rs writes it: a JSON value is the HTTP
+// runtime's, which orm.rs names without a serde_json of its own.
+func rustOperationType(shape behaviortypes.Shape, required bool) string {
+	return rustShapeType(shape, required, "orm::Value")
+}
+
+// rustShapeType is the Rust type of a shape, json the type of any JSON
+// value: an Option for a value a read may leave out or hold null for.
+func rustShapeType(shape behaviortypes.Shape, required bool, json string) string {
+	if !required || shape.Nullable {
+		return "Option<" + rustShapeValueType(shape, json) + ">"
+	}
+	return rustShapeValueType(shape, json)
+}
+
+// rustShapeValueType is the Rust type of one value of a shape.
+func rustShapeValueType(shape behaviortypes.Shape, json string) string {
 	switch shape.Kind {
 	case behaviortypes.KindString:
 		return "String"
@@ -83,11 +96,11 @@ func rustBehaviorValueType(shape behaviortypes.Shape) string {
 	case behaviortypes.KindBoolean:
 		return "bool"
 	case behaviortypes.KindArray:
-		return "Vec<" + rustBehaviorType(*shape.Elem, !shape.Elem.Nullable) + ">"
+		return "Vec<" + rustShapeType(*shape.Elem, !shape.Elem.Nullable, json) + ">"
 	case behaviortypes.KindMap:
-		return "std::collections::HashMap<String, " + rustBehaviorType(*shape.Elem, !shape.Elem.Nullable) + ">"
+		return "std::collections::HashMap<String, " + rustShapeType(*shape.Elem, !shape.Elem.Nullable, json) + ">"
 	case behaviortypes.KindStruct, behaviortypes.KindEnum:
 		return shape.Ref
 	}
-	return "serde_json::Value"
+	return json
 }
