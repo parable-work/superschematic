@@ -527,6 +527,30 @@ export interface NumberingConfig {
  */
 export type Numbering<C extends NumberingConfig> = string | null;
 
+/** Revisions' config on a table (D16, D103's step 4): with review, a caller proposes a change of the own fields and a caller who holds the permission approves or rejects it. */
+export interface RevisionsOn {
+  /** Turns on the review step: propose, approve, reject and listProposals. */
+  readonly review?: { readonly permission: string };
+}
+
+/**
+ * The history of a table's rows' own fields, with an optional review step
+ * (D16, D103's step 4):
+ * `export abstract class Policy implements Revisions<Policy, { review: { permission: "policies.review" } }>`.
+ * The type stays a table. A create keeps revision 1 of the row's own
+ * fields, and every change of them the next, in a sub-table of the use
+ * (policy_revisions_revisions), and the owned column revisions_revision
+ * holds the latest number. With review, propose keeps a merge patch of the
+ * own fields as a pending proposal (policy_revisions_proposals), and
+ * approve applies it through every rule an update meets and records the
+ * revision it makes; reject settles it. Its operations (revisions.
+ * listRevisions, getRevision, propose, approve, reject, listProposals)
+ * read and change them. A delete of the row deletes both. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Revisions<T, C extends RevisionsOn> = NonNullable<unknown>;
+
 /** A kind of schedule (D104): after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names. */
 export type ScheduleKind = "after" | "every" | "cron";
 

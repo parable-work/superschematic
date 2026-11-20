@@ -82,6 +82,8 @@ export type {
   RetriesOn,
   RetryBackoffOn,
   RetryClassOn,
+  Revisions,
+  RevisionsOn,
   ScheduleKind,
   Schedules,
   SchedulesOn,

@@ -25,7 +25,7 @@
   "fields": [
     {
       "name": "revision",
-      "description": "The number of the instance's latest revision; absent before its first.",
+      "description": "The number of the instance's latest revision.",
       "type": "Generic.Int64"
     },
     {

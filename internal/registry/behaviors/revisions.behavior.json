@@ -17,7 +17,7 @@
     }
   },
   "fields": [
-    { "name": "revision", "description": "The number of the instance's latest revision; absent before its first.", "type": "Generic.Int64" },
+    { "name": "revision", "description": "The number of the instance's latest revision.", "type": "Generic.Int64" },
     { "name": "pendingProposals", "description": "With review in the config, how many of the instance's proposals are pending; absent without review." }
   ],
   "tables": [
