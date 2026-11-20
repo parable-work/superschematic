@@ -329,6 +329,14 @@ impl FieldKeys for FieldKeyring {
     fn open(&self, cell: FieldCell<'_>, envelope: &str) -> Result<String, String> {
         FieldKeyring::open(self, cell, envelope).map_err(|err| err.to_string())
     }
+
+    fn current_prefix(&self) -> Option<String> {
+        Some(FieldKeyring::current_prefix(self))
+    }
+
+    fn is_current(&self, envelope: &str) -> bool {
+        FieldKeyring::is_current(self, envelope)
+    }
 }
 
 #[cfg(test)]

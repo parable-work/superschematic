@@ -280,6 +280,25 @@ var ormStatements = []string{
 	"softDelete", "softDeleteIfVersion", "delete", "deleteIfVersion", "version",
 }
 
+// ormEncryptedStatements are the statements of a table with an
+// Encrypted<T> column the Rust runtime runs too (D85): its reencrypt's read
+// of the rows another key sealed and their reseal, which a table without
+// one has none of, and its definition leaves out.
+var ormEncryptedStatements = []string{"stale", "reseal"}
+
+// tableStatements are a table's statements the Rust runtime runs, by the
+// names its orm::Statements declares: ormStatements, then each of
+// ormEncryptedStatements the table has.
+func tableStatements(all []sqlutil.NamedStatement) orderedStrings {
+	out := named(all, ormStatements)
+	for _, st := range named(all, ormEncryptedStatements) {
+		if st.SQL != "" {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
 // ormClauses are the clauses the Rust runtime writes, by the names its
 // orm::Clauses declares.
 var ormClauses = []string{
@@ -465,7 +484,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			postgres.HistoryActorCTE = sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting)
 			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
 		}
-		onPostgres.Statements = named(sqlutil.TableStatementsOf(t).AllStatements(), ormStatements)
+		onPostgres.Statements = tableStatements(sqlutil.TableStatementsOf(t).AllStatements())
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}
@@ -477,7 +496,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				onSQLite.Statements = orderedStrings{}
 				info.SQLiteRefused = append(info.SQLiteRefused, ORMRefusal{Type: t.Type, Reason: reason})
 			} else {
-				onSQLite.Statements = named(sqlutil.SQLiteTableStatementsOf(t).AllStatements(), ormStatements)
+				onSQLite.Statements = tableStatements(sqlutil.SQLiteTableStatementsOf(t).AllStatements())
 				for _, k := range t.UniqueKeys {
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}

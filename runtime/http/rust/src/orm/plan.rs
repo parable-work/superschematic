@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::{
     invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate,
-    Definition, Dialect, Error, Fence, FieldCell, FindOptions, Marks, OrderBy, PageOptions,
-    Session, Table, UniqueKey, Values, WriteOptions,
+    Definition, Dialect, Error, Fence, FieldCell, FieldKeys, FindOptions, Marks, OrderBy,
+    PageOptions, Session, Table, UniqueKey, Values, WriteOptions,
 };
 use crate::search::{like_pattern, terms};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
@@ -801,6 +801,119 @@ impl<'a> Plan<'a> {
             row.insert(column.name.clone(), Value::String(plaintext));
         }
         Ok(row)
+    }
+
+    /// The keys a reencrypt seals with, refusing a table with no
+    /// `Encrypted<T>` field, repositories opened with no keys, and keys that
+    /// name no current key.
+    fn reencrypt_keys(&self) -> Result<&'a dyn FieldKeys, Error> {
+        let table = self.table;
+        let s = &table.statements;
+        let Some(first) = table.encrypted().next() else {
+            return Err(invalid(format!(
+                "{} has no Encrypted<T> field to reencrypt",
+                table.name
+            )));
+        };
+        if s.stale.is_empty() || s.reseal.is_empty() {
+            return Err(Error::Definition(format!(
+                "{} has no statements to reencrypt with: regenerate the types crate",
+                table.name
+            )));
+        }
+        self.session.keys.ok_or_else(|| {
+            Error::Encryption(format!(
+                "{}.{} is an Encrypted<T> field, and the repositories were opened with no field keys",
+                table.name, first.field
+            ))
+        })
+    }
+
+    /// The read of up to `batch` rows, deleted ones too, in key order, a
+    /// column of which another key than the current one sealed (D85), and
+    /// the columns it reads: the key, then each encrypted column.
+    pub(crate) fn stale(&self, batch: Option<u32>) -> Result<(Statement, Vec<&'a Column>), Error> {
+        let keys = self.reencrypt_keys()?;
+        let prefix = keys.current_prefix().ok_or_else(|| {
+            Error::Encryption(format!(
+                "{}: the field keys name no current key, so a reencrypt cannot tell another key's envelope",
+                self.table.name
+            ))
+        })?;
+        let batch = batch
+            .filter(|batch| *batch > 0)
+            .unwrap_or(self.definition.default_limit);
+        let columns = std::iter::once(self.table.key_column())
+            .chain(self.table.encrypted())
+            .collect();
+        let statement = Statement {
+            sql: self.table.statements.stale.clone(),
+            args: vec![
+                Bound {
+                    value: Value::String(prefix),
+                    marks: Marks::TEXT,
+                },
+                Bound {
+                    value: Value::from(batch),
+                    marks: Marks::TEXT,
+                },
+            ],
+        };
+        Ok((statement, columns))
+    }
+
+    /// The reseal of a row the stale read returned, its key and then the
+    /// envelope each encrypted column held: each envelope another key
+    /// sealed is opened and sealed again under the current key, for the
+    /// row, and the statement sets them on the row when each column still
+    /// holds what was read, so a write between the two keeps its own.
+    pub(crate) fn reseal(&self, cells: &[Value]) -> Result<Statement, Error> {
+        let keys = self.reencrypt_keys()?;
+        let table = self.table;
+        let key = cells.first().cloned().unwrap_or(Value::Null);
+        let row = self.cell_key(&key).ok_or_else(|| {
+            Error::Definition(format!(
+                "a row of {} holds no {}, which its envelopes are bound to",
+                table.name, table.key
+            ))
+        })?;
+        let mut sealed = Vec::new();
+        let mut held = Vec::new();
+        for (i, column) in table.encrypted().enumerate() {
+            let envelope = cells.get(i + 1).cloned().unwrap_or(Value::Null);
+            let next = match &envelope {
+                Value::String(text) if !keys.is_current(text) => {
+                    let cell = FieldCell {
+                        table: &table.name,
+                        field: &column.field,
+                        row: &row,
+                    };
+                    let plaintext = keys.open(cell, text).map_err(|err| {
+                        Error::Encryption(format!("{}.{}: {err}", table.name, column.field))
+                    })?;
+                    let resealed = keys.seal(cell, &plaintext).map_err(|err| {
+                        Error::Encryption(format!("{}.{}: {err}", table.name, column.field))
+                    })?;
+                    Value::String(resealed)
+                }
+                other => other.clone(),
+            };
+            sealed.push(Bound {
+                value: next,
+                marks: Marks::of(column),
+            });
+            held.push(Bound {
+                value: envelope,
+                marks: Marks::of(column),
+            });
+        }
+        let mut args = sealed;
+        args.push(self.key(&key)?);
+        args.extend(held);
+        Ok(Statement {
+            sql: table.statements.reseal.clone(),
+            args,
+        })
     }
 
     /// Whether a create writes the column, and what: the member when set,

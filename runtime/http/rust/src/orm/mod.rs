@@ -233,6 +233,10 @@ pub struct Statements {
     pub delete: String,
     pub delete_if_version: String,
     pub version: String,
+    /// A table with an Encrypted<T> column's: the read of the rows another
+    /// key sealed, and their reseal under the current one (D85).
+    pub stale: String,
+    pub reseal: String,
 }
 
 /// A table, as a types crate's `orm` module describes it.
@@ -952,6 +956,17 @@ pub trait FieldKeys: Send + Sync {
     /// The plaintext of `envelope`, which a key of the ring sealed for
     /// `cell`.
     fn open(&self, cell: FieldCell<'_>, envelope: &str) -> Result<String, String>;
+    /// The start of every envelope the current key seals, as a LIKE
+    /// pattern, by which a reencrypt reads the rows another key sealed;
+    /// none for keys that cannot say, which reseal nothing.
+    fn current_prefix(&self) -> Option<String> {
+        None
+    }
+    /// Whether `envelope` was sealed under the current key.
+    fn is_current(&self, envelope: &str) -> bool {
+        let _ = envelope;
+        false
+    }
 }
 
 /// Who a behavior's command runs as (D103): the subject and the

@@ -548,6 +548,17 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
             .table_operation(member, operation, params)
             .await
     }
+
+    /// Reseals under the current field key every envelope of the table's
+    /// `Encrypted<T>` columns another key of the keyring sealed, `batch`
+    /// rows at a time (the definition's default limit unless set), deleted
+    /// rows among them, and answers how many rows it resealed (D85). Run it
+    /// after a rotation puts a new key first, before the old one leaves the
+    /// secret. A row a write changes between the read and the reseal keeps
+    /// the write's envelope.
+    pub async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        self.runner().reencrypt(batch).await
+    }
 }
 
 /// The Rust types a typed repository reads and writes, which it holds
@@ -749,6 +760,13 @@ where
         serde_json::from_value(result)
             .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
     }
+
+    /// Reseals under the current field key every envelope another key
+    /// sealed, `batch` rows at a time, deleted rows among them, and answers
+    /// how many rows it resealed (D85).
+    pub async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        self.repository.reencrypt(batch).await
+    }
 }
 
 /// A Postgres client as a repository's runner drives it.
@@ -834,6 +852,26 @@ impl<C: GenericClient + Sync> Client for PostgresClient<'_, C> {
                 );
             }
             out.push((members, extras));
+        }
+        Ok(out)
+    }
+
+    async fn cells(
+        &self,
+        table: &Table,
+        statement: &Statement,
+        columns: &[&Column],
+    ) -> Result<Vec<Vec<Value>>, Error> {
+        let rows = self.bound(table, statement).await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let mut cells = Vec::with_capacity(columns.len());
+            for (i, column) in columns.iter().enumerate() {
+                cells.push(cell(row, i, column).map_err(|err| {
+                    Error::Definition(format!("{}.{}: {err}", table.name, column.name))
+                })?);
+            }
+            out.push(cells);
         }
         Ok(out)
     }

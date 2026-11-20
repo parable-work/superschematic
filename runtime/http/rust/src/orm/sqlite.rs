@@ -499,6 +499,13 @@ where
         serde_json::from_value(result)
             .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
     }
+
+    /// Reseals under the current field key every envelope another key
+    /// sealed, `batch` rows at a time, deleted rows among them, and answers
+    /// how many rows it resealed (D85).
+    pub fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        self.repository.reencrypt(batch)
+    }
 }
 
 /// The repository of one table on a SQLite connection.
@@ -651,6 +658,17 @@ impl Repository<'_> {
     ) -> Result<Value, Error> {
         finish(self.runner().table_operation(member, operation, params))
     }
+
+    /// Reseals under the current field key every envelope of the table's
+    /// `Encrypted<T>` columns another key of the keyring sealed, `batch`
+    /// rows at a time (the definition's default limit unless set), deleted
+    /// rows among them, and answers how many rows it resealed (D85). Run it
+    /// after a rotation puts a new key first, before the old one leaves the
+    /// secret. A row a write changes between the read and the reseal keeps
+    /// the write's envelope.
+    pub fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        finish(self.runner().reencrypt(batch))
+    }
 }
 
 /// A SQLite connection as a repository's runner drives it: each statement
@@ -717,6 +735,40 @@ impl Client for SqliteClient<'_> {
                 extras.push(member(cell, &Column::default()).map_err(Error::Definition)?);
             }
             out.push((members, extras));
+        }
+        Ok(out)
+    }
+
+    async fn cells(
+        &self,
+        table: &Table,
+        statement: &Statement,
+        columns: &[&Column],
+    ) -> Result<Vec<Vec<Value>>, Error> {
+        let context = || format!("{}: {}", table.name, statement.sql);
+        let mut prepared = self
+            .connection
+            .prepare_cached(&statement.sql)
+            .map_err(|err| failure(&context(), &err))?;
+        let args = Self::params(table, statement)?;
+        let mut rows = prepared
+            .query(params_from_iter(args))
+            .map_err(|err| failure(&context(), &err))?;
+        let mut out = Vec::new();
+        loop {
+            let row = match rows.next() {
+                Ok(Some(row)) => row,
+                Ok(None) => break,
+                Err(err) => return Err(failure(&context(), &err)),
+            };
+            let mut cells = Vec::with_capacity(columns.len());
+            for (i, column) in columns.iter().enumerate() {
+                let cell = row.get_ref(i).map_err(|err| failure(&context(), &err))?;
+                cells.push(member(cell, column).map_err(|err| {
+                    Error::Definition(format!("{}.{}: {err}", table.name, column.name))
+                })?);
+            }
+            out.push(cells);
         }
         Ok(out)
     }

@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use super::plan::{DeletePlan, Plan, Statement};
 use super::{
-    CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
+    Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
     FindOptions, Found, PageOptions, RowPage, Table, UpsertOptions, UpsertStatus, Upserted, Values,
     WriteOptions,
 };
@@ -34,6 +34,15 @@ pub(crate) trait Client {
         statement: &Statement,
         extra: usize,
     ) -> impl Future<Output = Result<Vec<(Values, Vec<Value>)>, Error>>;
+
+    /// Runs a statement that returns some columns of `table`'s rows, each
+    /// read as `columns` names it, in order, and answers each row's.
+    fn cells(
+        &self,
+        table: &Table,
+        statement: &Statement,
+        columns: &[&Column],
+    ) -> impl Future<Output = Result<Vec<Vec<Value>>, Error>>;
 
     /// Runs a statement that changes rows, and answers how many.
     fn execute(
@@ -327,6 +336,25 @@ impl<C: Client> Runner<'_, C> {
             .core_operation(command)
             .await
             .map_err(|err| self.core_miss(err, key))
+    }
+
+    /// Reseals under the current field key every envelope another key
+    /// sealed, `batch` rows at a time, deleted rows among them, and answers
+    /// how many rows it resealed (D85): a read of the rows another key
+    /// sealed, then a reseal of each, until the read finds none.
+    pub(crate) async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
+        let (stale, columns) = self.plan.stale(batch)?;
+        let mut resealed = 0;
+        loop {
+            self.plan.session.traced(&stale.sql);
+            let rows = self.client.cells(self.table, &stale, &columns).await?;
+            if rows.is_empty() {
+                return Ok(resealed);
+            }
+            for cells in rows {
+                resealed += self.execute(&self.plan.reseal(&cells)?).await?;
+            }
+        }
     }
 
     /// Runs `operation` of the behavior under `member` on the table as a
