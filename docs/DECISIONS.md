@@ -1034,9 +1034,9 @@ context is written out.
 - Lease's `directOn` waits for Revisions and Branches on the core and is
   refused on a table; `workqueue-lease-direct-on.json` is skipped
   (L 15632, 17131, 17256).
-- Retries' `resultField` waits for Revisions and is refused at define;
-  `recordAttempt` still offers `result`, which a table's types should
-  narrow out (L 15725, 17137).
+- Retries' `resultField` is refused at define; Revisions on the core and
+  `Cx::update` now allow it. `recordAttempt` still offers `result`, which
+  a table's types should narrow out (L 15725, 17137).
 - An own-field write from an operation: the engine's `update()` runs
   through validation and the guards of Constants and StateRules
   (L 17048).
@@ -1216,9 +1216,9 @@ Every rules transcript replays over the layout. Left:
 - Routes over HTTP. Requests are a typed JSON enum.
 - The library in TypeScript, Go and Python over the handler (WebAssembly
   or the C ABI), and the prebuilt image (D103's step 6).
-- `examples/engine-notes` and `examples/engine-jobs` on development mode,
-  which wait for Comments, Revisions, Blueprint, Rollups and Dependencies
-  on the core.
+- `examples/engine-notes` and `examples/engine-jobs` on development mode:
+  engine-notes waits for Comments on the core, and engine-jobs for the
+  choice on Blueprint (D103's status).
 - A scalar's own rules beyond its kind (superscalar's normalization, a
   pattern); `searchText`, `referencedBy`, vectors, a relation that holds a
   list, and namespaces; D50's user, role and session shapes and the
