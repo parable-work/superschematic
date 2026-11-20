@@ -36,6 +36,8 @@ interface Tables {
   invoke(key: string, operation: string, params: Record<string, unknown>, asReviewer?: boolean): Promise<any>;
   /** The policy's own fields as the store holds them. */
   own(key: string): Promise<{ title: unknown; body: unknown; updatedAt: number }>;
+  /** Sets the updatedAt of the policy of a title to the start of 2000 past the repository, where the store keeps the stamp. */
+  age(title: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -65,6 +67,7 @@ async function sqliteTables(): Promise<Tables> {
       const row = await readRow(host, 'Policy', key);
       return { title: row?.own.title, body: row?.own.body ?? null, updatedAt: Number.NaN };
     },
+    async age() {},
     async close() {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -89,6 +92,9 @@ async function postgresTables(): Promise<Tables> {
     async own(key) {
       const row = (await orm.policy.findOne({ id: { eq: key } } as never)) as any;
       return { title: row?.title, body: row?.body ?? null, updatedAt: new Date(row?.updatedAt).getTime() };
+    },
+    async age(title) {
+      await db.pool.query(`UPDATE policy SET updated_at = '2000-01-01T00:00:00Z' WHERE title = $1`, [title]);
     },
     close: () => db.drop(),
   };
@@ -124,16 +130,17 @@ for (const dialect of dialects) {
 
     test(`an approval writes the proposal's patch to the row beside its audit stamp and records the revision it made, on ${dialect.name}`, async () => {
       const key = await t.policy('Travel');
-      const before = await t.own(key);
+      await t.age('Travel');
       const proposal = await t.invoke(key, 'propose', { patch: { body: 'Economy only.' }, note: 'Costs.' });
       expect([proposal.id, proposal.state, proposal.base]).toEqual([1, 'pending', 1]);
       expect((await t.own(key)).body).toBeNull();
-      await new Promise(resolve => setTimeout(resolve, 5));
       const approved = await t.invoke(key, 'approve', { proposal: 1 }, true);
       expect([approved.state, approved.reviewedBy, approved.revision]).toEqual(['approved', 'rae', 2]);
       const after = await t.own(key);
       expect([after.title, after.body]).toEqual(['Travel', 'Economy only.']);
-      if (dialect.name === 'Postgres') expect(after.updatedAt).toBeGreaterThan(before.updatedAt);
+      // The repository stamps updatedAt on the approval's write, beside the
+      // patch's own fields.
+      if (dialect.name === 'Postgres') expect(after.updatedAt).toBeGreaterThan(Date.parse('2001-01-01T00:00:00Z'));
       const revision = await t.invoke(key, 'getRevision', { revision: 2 });
       expect([revision.data.body, revision.proposal, revision.createdBy]).toEqual(['Economy only.', 1, 'rae']);
     });

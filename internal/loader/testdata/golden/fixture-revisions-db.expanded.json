@@ -97,7 +97,7 @@
         },
         {
           "name": "revisionsRevision",
-          "description": "The number of the instance's latest revision; absent before its first.",
+          "description": "The number of the instance's latest revision.",
           "typeRef": {
             "name": "Generic.Int64"
           },
@@ -357,7 +357,7 @@
         },
         {
           "name": "revisionsRevision",
-          "description": "The number of the instance's latest revision; absent before its first.",
+          "description": "The number of the instance's latest revision.",
           "typeRef": {
             "name": "Generic.Int64"
           },
