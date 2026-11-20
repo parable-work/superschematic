@@ -1246,6 +1246,33 @@ its policy. Left:
 | The handler and the adapter are D103's: the pure request handler, with the access policy as data, and the adapter answering the core's reads and applying its change sets. The adapter reads the build-time layout from the recorded model where a compiled server reads it from generated code. | Generated repositories, which need the build this mode has none of |
 | A runtime type has every schema feature whose effect is DDL a plan carries and reads the handler makes from the layout: relations, unique fields, indexes, constraints, search fields, vectors, and the views of reports and projections. What needs code a build or a person writes stays compiled's: an operation with a body, a queue's handler, a job. | D103's list for runtime types, which was drawn for the JSON layout |
 
+Built, on a SQLite file and a local Postgres:
+`runtime/engine/rust/rules-runtime` serves the handler over each type's
+own table, laid out by `behaviorlayout.RuntimeOf`, which the plan request
+returns with `layout: true` and the database records beside its model in
+`superschematic_runtime`. A publish plans from the recorded model through
+`migrate plan --request`, refuses a plan from another model and a hazard
+nobody allowed, and applies expand and contract through the Rust runner on
+SQLite and `superschematic-migrate apply --plan -` on Postgres; every
+server reads the new layout once the model's hash moves, and answers
+`busy` while a plan is in progress. The plan is a route and a tool
+(`docs/src/content/docs/guides/runtime-mode.md`). A publish's tables equal
+a build's. Left:
+
+- A platform whose runner is a job: the plan delivered to the job (through
+  the state bucket, as D46's job document is), a wait that polls the
+  recorded model rather than holding a lock across machines, the record
+  written in the transaction of the plan's last step (an `apply --record`),
+  and the job's grants extended to the new tables.
+- The handler's list filters, sorts, unique checks and relation checks in
+  SQL. Runtime mode reads every row of a type.
+- Soft deletes (the layout's `live`), the `createdBy` stamp, and the access
+  policy, event stream, MCP and HTTP routes development mode serves.
+- The server roles' grants on Postgres: locally one role owns everything.
+- CI: the scenarios need `bin/superschematic` and `bin/superschematic-migrate`,
+  and pass with a message without them, which the engine-rust job builds
+  neither of.
+
 ### Moving between modes
 
 | Decision | Alternatives not taken |
@@ -1290,15 +1317,17 @@ and an embedded environment is compiled.
 2. The planner from documents: `migrate plan` over schema documents and a
    recorded model, and the plan as a route and a tool. Built:
    `migrate plan --documents` and `--request` (`internal/migrateplan`,
-   `docs/src/content/docs/reference/migrations.mdx`). Left: the plan as a
-   route and a tool of the handler; a Postgres plan of documents with
+   `docs/src/content/docs/reference/migrations.mdx`), and the plan as a
+   route and a tool of runtime mode. Left: a Postgres plan of documents with
    `@query` declarations, which is refused; documents that import another
    service's types, which are refused; what a config carries beyond the
    dialect (`viewOwner`, `sourceSchema`, platform defaults, sidecar files);
    and readers, so a plan from documents has no `api-breaking` hazard.
 3. Runtime mode on a SQLite file and a local Postgres: the adapter's
    layout read from a recorded model, the handler over it, and a publish
-   through the runner. Then a platform whose runner is a job.
+   through the runner. Then a platform whose runner is a job. Built on
+   SQLite and a local Postgres; what is left is under "Runtime mode"
+   above.
 4. The moves: development to runtime with rows, runtime to compiled by
    the recorded model, and D103's step 7.
 
