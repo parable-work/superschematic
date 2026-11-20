@@ -1359,6 +1359,7 @@ fn database_of(step: &TranscriptStep) -> &str {
 
 /// Replays every transcript on db, each in a namespace of tables of its
 /// own.
+#[cfg(feature = "sqlite")]
 async fn replay(mut db: Db, dialect: &str) {
     for (index, (name, floor)) in TRANSCRIPTS.into_iter().enumerate() {
         replay_one(&mut db, dialect, &format!("t{index}"), name, floor).await;
@@ -1427,9 +1428,14 @@ async fn transcript_replays_on_postgres() {
     ) else {
         return;
     };
-    common::pg::on_schema(url, |schema| async move {
-        let client = schema.client().await;
-        replay(Db::Postgres(client), "Postgres").await;
-    })
-    .await;
+    // Each transcript in a schema of its own: every transcript's tables in
+    // one schema are more objects than its DROP SCHEMA may lock in one
+    // transaction under Postgres's default max_locks_per_transaction.
+    for (index, (name, floor)) in TRANSCRIPTS.into_iter().enumerate() {
+        common::pg::on_schema(url.clone(), move |schema| async move {
+            let mut db = Db::Postgres(schema.client().await);
+            replay_one(&mut db, "Postgres", &format!("t{index}"), name, floor).await;
+        })
+        .await;
+    }
 }
