@@ -128,7 +128,11 @@ pub(crate) fn publish(
             .iter()
             .filter_map(|(use_id, fields)| {
                 let names = owned_names.get(use_id.as_str())?;
-                kept_uses.get(use_id.as_str())?;
+                // A use the version gives another behavior keeps none of
+                // the old behavior's state.
+                if removed_uses.iter().any(|(removed, _)| removed == use_id) {
+                    return None;
+                }
                 let fields: Map<String, Value> = fields
                     .iter()
                     .filter(|(name, _)| names.contains(name.as_str()))
