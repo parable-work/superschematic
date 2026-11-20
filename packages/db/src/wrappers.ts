@@ -551,6 +551,46 @@ export interface RevisionsOn {
  */
 export type Revisions<T, C extends RevisionsOn> = NonNullable<unknown>;
 
+/** A kind of block a table's Comments takes on a message (D77, D103's step 4): ref, another row; action, a card for what the poster did; code, a place in code at a revision. An attachment block waits for attachments on the core. */
+export type CommentsBlockKind = "ref" | "action" | "code";
+
+/** Comments' config on a table (D77, D103's step 4): the longest body, how long an author may edit, the block kinds a message may hold, and the permissions that moderate, pin and resolve. Every member is optional. Streamed replies, read state and deliveries, attachments and code anchors wait for the core, so their members are not a table's. */
+export interface CommentsOn {
+  /** The longest body a post or an edit gives, in code points: 1 to 40000, 40000 when absent. */
+  readonly maxBodyLength?: number;
+  /** How long after a message's postedAt its author may edit it, in milliseconds, at least 1000; no limit when absent. A caller holding moderatePermission is not held to it. */
+  readonly editWindowMs?: number;
+  /** The block kinds a post or an edit may give, each once; every kind when absent, none when empty. */
+  readonly blocks?: readonly CommentsBlockKind[];
+  /** The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges. */
+  readonly moderatePermission?: string;
+  /** The permission a caller needs to pin and unpin. Absent, any caller the route lets call them may. */
+  readonly pinPermission?: string;
+  /** The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does. */
+  readonly resolvePermission?: string;
+}
+
+/**
+ * A conversation on each of a table's rows (D77, D103's step 4):
+ * `export abstract class Ticket implements Comments<Ticket, { moderatePermission: "tickets.moderate" }>`.
+ * The type stays a table. Its messages, each top-level or a reply in the
+ * thread of a top-level one, are rows of a sub-table of the use
+ * (ticket_comments_messages), what each edit replaced another
+ * (ticket_comments_edits), and the reactions a third
+ * (ticket_comments_reactions); each conversation's high-water marks are a
+ * row of a table of the use's own, kept for the table as a whole
+ * (ticket_comments_conversations), which a delete of the row leaves, so a
+ * row re-created with the key never reuses a message id. Every write is
+ * beside the row: it moves no version of the row and asks no other
+ * behavior's guard, so a lease another principal holds stops no reply. Its
+ * operations (comments.post, edit, deleteMessage, purge, react, unreact,
+ * pin, unpin, resolve, reopen, listMessages, getMessage, listEdits,
+ * listReactions, listPinned) change and read them. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Comments<T, C extends CommentsOn> = NonNullable<unknown>;
+
 /** A kind of schedule (D104): after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names. */
 export type ScheduleKind = "after" | "every" | "cron";
 

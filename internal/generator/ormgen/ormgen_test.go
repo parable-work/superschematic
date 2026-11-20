@@ -88,6 +88,12 @@ const numberingFixture = "fixture-numbering-db"
 // revision and proposal a sub-table row with no repository.
 const revisionsFixture = "fixture-revisions-db"
 
+// commentsFixture is the DB fixture whose Ticket and Review implement
+// Comments (D103's step 4): its operations under Comments(), each message,
+// edit and reaction a sub-table row and each conversation's high-water
+// marks a shared table's, none with a repository.
+const commentsFixture = "fixture-comments-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -106,7 +112,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -236,6 +242,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// Revisions(), no repository of a sub-table, no upserts, and no
 		// queue.
 		{revisionsFixture, []string{"repository_note.go", "repository_policy.go", "rules.go"}},
+		// Tables of Comments (D103's step 4): its operations under
+		// Comments(), every writing one beside the row, no repository of a
+		// sub-table or of the shared table, no upserts, and no queue.
+		{commentsFixture, []string{"repository_review.go", "repository_ticket.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

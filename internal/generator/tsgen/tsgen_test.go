@@ -121,6 +121,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// revisions, its sub-tables with no repository, no upserts, and
 		// the sub-tables in the layout.
 		{service: "fixture-revisions-db", behaviors: true},
+		// Tables of Comments (D103's step 4): its operations under
+		// comments, its sub-tables and its shared table with no
+		// repository, no upserts, and the tables in the layout.
+		{service: "fixture-comments-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},
