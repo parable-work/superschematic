@@ -177,3 +177,58 @@ func TestDerivedAndProvenanceConfigsAreHeldToTheTable(t *testing.T) {
 		})
 	}
 }
+
+// derivedProvenanceAPIFixture is the API that serves
+// fixture-derived-provenance-db's Ticket's and Article's behavior
+// operations.
+const derivedProvenanceAPIFixture = "tsreader/testdata/services/fixture-derived-provenance-api"
+
+// TestDerivedProvenanceAPIFixtureLoads: the API serves Derived's pulls and
+// settles as routes of the table as a whole, taking no key, and its
+// applyDerived and rederive, Provenance's accept and reject and the status
+// Workflow's transition as routes of the row under each use's member, an
+// MCP tool each, with no worker, since neither behavior arms a deadline or
+// hears a write, and no warning; and its expanded IR is held to its golden
+// (D73 on D103's step 4).
+func TestDerivedProvenanceAPIFixtureLoads(t *testing.T) {
+	var warnings []string
+	warn := WithWarnings(func(d *verify.Diagnostic) { warnings = append(warnings, d.Msg) })
+	api, err := LoadService(filepath.FromSlash(derivedProvenanceAPIFixture), warn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
+	}
+	var operations []string
+	for _, set := range api.OperationSets {
+		if set.Name != "TicketTriage" {
+			continue
+		}
+		for _, op := range set.Operations {
+			if marker := op.BehaviorOperation; marker != nil {
+				var args []string
+				for _, arg := range op.Arguments {
+					args = append(args, arg.Name)
+				}
+				operations = append(operations, op.Name+" "+op.RestPath+" ("+strings.Join(args, ",")+") "+marker.Use)
+			}
+		}
+	}
+	if want := []string{
+		"derivedStaleDerivations ticket/derived/stale-derivations (input) Derived",
+		"derivedSettleDerivations ticket/derived/settle-derivations (input) Derived",
+		"derivedFailedDerivations ticket/derived/failed-derivations (input) Derived",
+		"derivedApplyDerived ticket/{id}/derived/apply-derived (id,input) Derived",
+		"derivedRederive ticket/{id}/derived/rederive (id,input) Derived",
+		"provenanceAccept ticket/{id}/provenance/accept (id,input) Provenance",
+		"provenanceReject ticket/{id}/provenance/reject (id,input) Provenance",
+		"statusTransition ticket/{id}/status/transition (id,input) status",
+	}; !slices.Equal(operations, want) {
+		t.Errorf("TicketTriage's behavior operations =\n%s\nwant\n%s", strings.Join(operations, "\n"), strings.Join(want, "\n"))
+	}
+	if len(api.Workers) != 0 {
+		t.Errorf("the API's workers = %s, want none", marshal(t, api.Workers))
+	}
+	compareExpanded(t, api, "fixture-derived-provenance-api.expanded.json")
+}

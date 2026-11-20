@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/fixture-derived-provenance-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the fixture-derived-provenance-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/fixture-derived-provenance-api-api": "workspace:*",
+    "@schemas/fixture-derived-provenance-api-types": "workspace:*",
+    "@schemas/fixture-derived-provenance-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}
