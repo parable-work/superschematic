@@ -478,7 +478,11 @@ class {{.Name}}(BaseModel):
 
         {{range .Fields}}
         # Validate {{.Name}}
-        {{- if and .Required (not .IsRelation)}}
+        {{- if .RequiredNull}}
+        # RequiredNull: the value is None and nothing else (D130).
+        if self.{{.TargetName}} is not None:
+            errors.add_field_error("{{snakeCase .Name}}", "invalid", "expected null")
+        {{- else if and .Required (not .IsRelation)}}
         {{- if isAnyJSONRoot .}}
         # Any JSON value but None is a value; None is a missing one.
         if self.{{.TargetName}} is None:
@@ -557,7 +561,7 @@ class {{.Name}}(BaseModel):
         Returns:
             Dictionary representation of the model.
         """
-        return self.model_dump(mode='python', exclude_none=False)
+        return self.model_dump(mode='python'{{if hasRequiredNullFields .Fields}}, by_alias=True{{end}}, exclude_none=False)
 
     def to_json_dict(self) -> Dict[str, Any]:
         """
@@ -566,7 +570,7 @@ class {{.Name}}(BaseModel):
         Returns:
             JSON-serializable dictionary representation.
         """
-        return self.model_dump(mode='json', exclude_none=False)
+        return self.model_dump(mode='json'{{if hasRequiredNullFields .Fields}}, by_alias=True{{end}}, exclude_none=False)
 
     def to_json(self) -> str:
         """
@@ -575,7 +579,7 @@ class {{.Name}}(BaseModel):
         Returns:
             JSON string representation.
         """
-        return self.model_dump_json(exclude_none=False)
+        return self.model_dump_json({{if hasRequiredNullFields .Fields}}by_alias=True, {{end}}exclude_none=False)
 
     @classmethod
     def from_dict(cls, input_data: Dict[str, Any]) -> "{{.Name}}":

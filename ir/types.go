@@ -537,6 +537,11 @@ type FieldDef struct {
 	// to clients (@secret).
 	Secret bool `json:"secret,omitempty" yaml:"secret,omitempty"`
 
+	// RequiredNull marks a field that must be present with the JSON null
+	// value and no other (RequiredNull). It has no value type: TypeRef is
+	// empty, and no wrapper, default or rule applies (D130).
+	RequiredNull bool `json:"requiredNull,omitempty" yaml:"requiredNull,omitempty"`
+
 	// Runtime marks an @envVars field the service reads again while it runs
 	// (Runtime<T>): the env loaders hold it in a Live handle whose apply
 	// takes a new value with no restart (D129).

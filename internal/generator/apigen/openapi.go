@@ -752,6 +752,9 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 			listMin: field.ValidateListMin, listMax: field.ValidateListMax,
 			dimensions: field.ValidateDimensions,
 		}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+		if field.RequiredNull {
+			fieldSchema = openAPINullOnlySchema()
+		}
 
 		if doc := codegen.DocText(field.Description, field.Comment); doc != "" {
 			fieldSchema["description"] = doc
@@ -763,7 +766,9 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 			required = append(required, field.Name)
 		}
 
-		addSchemaFromIR(schemas, field.TypeRef.Name, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
+		if !field.RequiredNull {
+			addSchemaFromIR(schemas, field.TypeRef.Name, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
+		}
 	}
 
 	schemaObj := map[string]interface{}{
@@ -1119,4 +1124,15 @@ func typeToOpenAPISchema(typeName string, scalarExamples, scalarDescriptions, sc
 	}
 
 	return schema
+}
+
+// openAPINullOnlySchema is a required-null field's schema (D130). OpenAPI
+// 3.0.3 has no null type: a nullable string whose only enum value is null
+// admits null and nothing else.
+func openAPINullOnlySchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type":     "string",
+		"nullable": true,
+		"enum":     []interface{}{nil},
+	}
 }

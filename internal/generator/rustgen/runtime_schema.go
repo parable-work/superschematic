@@ -55,6 +55,10 @@ func runtimeSchemas(schema *ir.Schema, dependencies map[string]*ir.Schema) (map[
 				typeDef := resolved.Types[symbol]
 				doc.Types[symbol] = typeDef
 				for _, field := range typeDef.Fields {
+					// A required-null field has no value type (D130).
+					if field.RequiredNull {
+						continue
+					}
 					if err := visit(resolved, field.TypeRef.Name); err != nil {
 						return err
 					}

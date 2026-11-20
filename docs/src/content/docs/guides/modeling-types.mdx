@@ -144,6 +144,28 @@ An integer scalar, such as `Generic.Int64`, is a pointer for the same
 reason, so an explicit `0` is written. With a default it stays the value
 type and is left out when `0`.
 
+### A field that is always null
+
+`RequiredNull`, from `@superschematic/schema`, is a field that is present
+with the value null and nothing else. Use it when a value is not known and
+the payload must say so, such as the time of an event that nobody saw:
+`voidedAt: RequiredNull`. The field is required: a payload that leaves it
+out, or gives it any other value, is refused (D130).
+
+| Language | A `RequiredNull` field |
+| --- | --- |
+| Go | `RequiredNull`, a type the package declares, whose JSON is `null`; the decoder refuses the field's absence |
+| TypeScript | `voidedAt: null`; the validator reports any other value as `expected null` |
+| Python | `voided_at: None`; `validate_all` reports any other value as `invalid` |
+| Rust | `()`, which serde reads from `null` only |
+| OpenAPI | a required `{"type": "string", "nullable": true, "enum": [null]}` |
+
+A union picks a member with a `RequiredNull` field only when the payload
+holds the field with null. `RequiredNull` takes no type argument and no
+wrapper, is not a list element or `Record` value, and is not an
+operation's argument or result. In a data form the field is
+`requiredNull: true` with `typeRef: { name: "" }`.
+
 ## Defaults
 
 `Default<T, V>` fills in a value when a payload leaves the field out. The

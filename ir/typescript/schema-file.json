@@ -4691,6 +4691,10 @@
           "default": false,
           "type": "boolean"
         },
+        "requiredNull": {
+          "default": false,
+          "type": "boolean"
+        },
         "restMethod": {
           "default": "",
           "type": "string"

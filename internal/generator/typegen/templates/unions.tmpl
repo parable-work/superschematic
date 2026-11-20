@@ -219,6 +219,8 @@ func unionReadsValue(field unionReadField, value any) bool {
 	case "union":
 		payload, ok := value.(map[string]any)
 		return ok && unionPickMember(field.ref, payload) >= 0
+	case "null":
+		return false
 	}
 	return true
 }
@@ -264,8 +266,11 @@ func unionReadsType(name string, value any) bool {
 		}
 	}
 	for _, field := range readType.fields {
-		fieldValue := payload[field.name]
+		fieldValue, present := payload[field.name]
 		if fieldValue == nil {
+			if field.kind == "null" && present {
+				continue
+			}
 			if field.required {
 				return false
 			}

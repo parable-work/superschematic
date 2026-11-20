@@ -87,11 +87,14 @@ type ScalarInfo struct {
 // FieldInfo holds information about a struct field (Go-specific wrapper).
 // The schema field name is the JSON name; there are no custom JSON tags.
 type FieldInfo struct {
-	Name             string
-	GoName           string
-	Type             string
-	GoType           string
-	Required         bool
+	Name     string
+	GoName   string
+	Type     string
+	GoType   string
+	Required bool
+	// RequiredNull marks a field present with null and nothing else (D130):
+	// its GoType is RequiredNull, and the decoder refuses its absence.
+	RequiredNull     bool
 	InternalMetadata bool
 	IsInput          bool
 	UsesWrapper      bool
@@ -293,6 +296,8 @@ type ModuleOutput struct {
 	TypePairs                []TypePair
 	CompositeDefaults        []CompositeDefaultInfo
 	HasInputFieldWrappers    bool
+	// HasRequiredNull declares the RequiredNull type (D130).
+	HasRequiredNull          bool
 	HasVersionedTypes        bool
 	HasShapeDispatchedUnions bool
 	HasInt64ScalarParsers    bool
@@ -557,6 +562,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		for _, field := range typeInfo.Fields {
 			if field.UsesWrapper {
 				output.HasInputFieldWrappers = true
+			}
+			if field.RequiredNull {
+				output.HasRequiredNull = true
 			}
 		}
 	}
@@ -939,12 +947,16 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			goType = fmt.Sprintf("InputField[%s]", innerType)
 		}
 
+		if cf.RequiredNull {
+			goType = "RequiredNull"
+		}
 		field := FieldInfo{
 			Name:             cf.Name,
 			GoName:           cf.TargetName,
 			Type:             cf.Type,
 			GoType:           goType,
 			Required:         cf.Required,
+			RequiredNull:     cf.RequiredNull,
 			InternalMetadata: cf.InternalMetadata,
 			IsInput:          isInput,
 			UsesWrapper:      usesWrapper,

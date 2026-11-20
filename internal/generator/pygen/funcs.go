@@ -45,7 +45,15 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		},
 		"hasNonRequiredValidations": hasNonRequiredValidations,
 		"isAnyJSONRoot":             isAnyJSONRoot,
-		"keptNullJSONFields":        keptNullJSONFields,
+		"hasRequiredNullFields": func(fields []codegen.FieldInfo) bool {
+			for _, field := range fields {
+				if field.RequiredNull {
+					return true
+				}
+			}
+			return false
+		},
+		"keptNullJSONFields": keptNullJSONFields,
 		"anyKeptNullJSONFields": func(types []codegen.TypeInfo) bool {
 			for _, typeInfo := range types {
 				if len(keptNullJSONFields(typeInfo)) > 0 {
@@ -460,7 +468,7 @@ func pythonMaskFieldExpr(field codegen.FieldInfo, enumLookup codegen.EnumLookup)
 
 func isPythonScalarTargetType(targetType string) bool {
 	switch targetType {
-	case "bool", "int", "float", "str", "dict", "Any":
+	case "bool", "int", "float", "str", "dict", "Any", "None":
 		return true
 	}
 	return strings.HasPrefix(targetType, "Dict[")

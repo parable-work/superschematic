@@ -56,6 +56,11 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{end}}
 
   {{range .Type.Fields}}
+  {{if .RequiredNull}}
+  if (value.{{.TSName}} !== null) {
+    addFieldError(errors, "{{.TSName}}", "null", "expected null");
+  }
+  {{end}}
   {{if and .IsArray (not .IsMap)}}
   expectList(errors, "{{.TSName}}", value.{{.TSName}});
   {{end}}
@@ -338,7 +343,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{end}}
   {{end}}
   {{else}}
-  {{if and .Required (not .InternalMetadata)}}
+  {{if and .Required (not .InternalMetadata) (not .RequiredNull)}}
   if (value.{{.TSName}} === null || value.{{.TSName}} === undefined) {
     addFieldError(errors, "{{.TSName}}", "required", "required field");
   }

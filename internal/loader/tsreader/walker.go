@@ -1051,6 +1051,8 @@ func (w *walker) fieldsFromTypeLiteral(node *astNode) ([]*ir.FieldDef, bool) {
 			Comment:  leadingComment(m),
 			TypeRef:  info.ref,
 			Required: !info.nullable && !optional,
+			// RequiredNull (D130) has no value type.
+			RequiredNull: info.requiredNull,
 		})
 	}
 	return fields, ok
@@ -1254,6 +1256,7 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 		ManyToMany:      info.manyToMany,
 		Secret:          info.secret || info.encryptedAtRest,
 		Runtime:         info.runtime,
+		RequiredNull:    info.requiredNull,
 		Encrypted:       info.encrypted,
 		EncryptedAtRest: info.encryptedAtRest,
 	}
@@ -1561,6 +1564,8 @@ func (w *walker) walkTypeAlias(node *astNode) {
 			TypeRef:    info.ref,
 			Required:   !info.nullable && !optional,
 			References: info.references,
+			// RequiredNull (D130) has no value type.
+			RequiredNull: info.requiredNull,
 		})
 	}
 	if _, exists := w.schema.Types[name]; exists {
@@ -1673,6 +1678,9 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 	info, serr := w.resolveTypeNode(method.Type)
 	if serr != nil {
 		return nil, nil, serr
+	}
+	if info.requiredNull {
+		return nil, nil, errorAtNode(m, "RequiredNull is only valid on object fields")
 	}
 	w.recordReference(info)
 
@@ -1811,6 +1819,9 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 	}
 	if info.platformDefault {
 		return nil, "", errorAtNode(p, "PlatformDefault<T> is only valid on object fields")
+	}
+	if info.requiredNull {
+		return nil, "", errorAtNode(p, "RequiredNull is only valid on object fields")
 	}
 	if info.encryptedAtRest {
 		return nil, "", errorAtNode(p, "Encrypted<T> marks a stored field of a DB table; an argument carries the value itself, and EncryptedField<T> encrypts a request body")

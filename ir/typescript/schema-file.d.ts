@@ -285,6 +285,7 @@ export interface FieldDef {
   relation?: RelationDef;
   requireOwnership?: boolean;
   required?: boolean;
+  requiredNull?: boolean;
   restMethod?: string;
   restPath?: string;
   runtime?: boolean;

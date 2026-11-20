@@ -271,6 +271,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 		Type:             field.TypeRef.Name,
 		TargetType:       targetType,
 		Required:         required,
+		RequiredNull:     field.RequiredNull,
 		DistinctNull:     field.DistinctNull,
 		InternalMetadata: field.InternalMetadata,
 		Secret:           field.Secret,
@@ -302,6 +303,23 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 
 	fieldInfo.Validations = buildValidations(fieldInfo.ScalarInfo, field, fieldInfo.Required)
 	fieldInfo.Digits = DigitRulesOf(field)
+
+	// A required-null field has no value type: each language holds it in
+	// its null-only type (D130).
+	if field.RequiredNull {
+		fieldInfo.IsPrimitive = false
+		fieldInfo.Validations = []ValidationRule{}
+		switch config.Language {
+		case "go":
+			fieldInfo.TargetType = "RequiredNull"
+		case "typescript":
+			fieldInfo.TargetType = "null"
+		case "python":
+			fieldInfo.TargetType = "None"
+		case "rust":
+			fieldInfo.TargetType = "()"
+		}
+	}
 
 	return fieldInfo
 }

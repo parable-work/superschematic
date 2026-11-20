@@ -54,3 +54,9 @@ export type Secret<T> = T & Wrapped<T> & { readonly __secret: true };
  * A `Secret<T>` field cannot be one; a credential changes with a restart.
  */
 export type Runtime<T> = T & Wrapped<T> & { readonly __runtime: true };
+/**
+ * A field that is present with the value null and nothing else, such as a
+ * time that is not known and must say so. It takes no wrapper, default or
+ * rule, and is no list element or Record value.
+ */
+export type RequiredNull = null;

@@ -100,6 +100,8 @@ function readsValue(field: ReadField, value: unknown): boolean {
       return readsType(field.ref ?? '', value);
     case 'union':
       return isJSONObject(value) && pickUnionMember(field.ref ?? '', value) >= 0;
+    case 'null':
+      return false;
     default:
       return true;
   }
@@ -133,6 +135,9 @@ function readsType(name: string, value: unknown): boolean {
   }
   return type.fields.every((field) => {
     const fieldValue = value[field.name];
+    if (fieldValue === null && field.kind === 'null') {
+      return true;
+    }
     if (fieldValue === undefined || fieldValue === null) {
       return !field.required;
     }

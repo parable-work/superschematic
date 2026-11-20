@@ -423,6 +423,14 @@ func templateFuncs() template.FuncMap {
 		"scalarValidateCall":          scalarValidateCall,
 		"inputFieldValueType":         inputFieldValueType,
 		"digitRulesCheck":             digitRulesCheck,
+		"hasRequiredNullFields": func(fields []FieldInfo) bool {
+			for _, field := range fields {
+				if field.RequiredNull {
+					return true
+				}
+			}
+			return false
+		},
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {
 				if f.IsUnion {
