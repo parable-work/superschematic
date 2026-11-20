@@ -404,6 +404,50 @@ func TestTrustedFunctionProjectionPredicate(t *testing.T) {
 	}
 }
 
+// TestSetRuleProjectionPredicate: a set rule renders as an uncorrelated
+// subquery, so Postgres runs the function once per scan, behind the guard
+// of each setting it reads; an unsafe name, column or setting is refused
+// (D127).
+func TestSetRuleProjectionPredicate(t *testing.T) {
+	for _, tc := range []struct {
+		name, function, column, setting string
+		refused                         bool
+	}{
+		{"trusted", "app.visible_preference_ids", "base.id", "app.user_id", false},
+		{"SQL injection", "app.f); DROP TABLE preference;--", "base.id", "app.user_id", true},
+		{"column expression", "app.f", "base.id OR TRUE", "app.user_id", true},
+		{"unknown column", "app.f", "base.absent", "app.user_id", true},
+		{"setting injection", "app.f", "base.id", "app.user_id');--", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := loadProjectionFixture(t)
+			def := schema.Types["AppPreference"].Projection
+			def.Predicates = []*ir.ProjectionPredicate{
+				def.Predicates[0],
+				{Column: tc.column, InFunction: tc.function, RequiredSettings: []string{tc.setting}},
+			}
+			output, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+			if tc.refused {
+				if err == nil {
+					t.Fatal("unsafe rule generated")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := output.Projections[0]
+			want := `(NULLIF(current_setting('app.user_id'), '') IS NOT null AND base.id IN (SELECT "app"."visible_preference_ids"()))`
+			if got := view.Predicates[1]; got != want {
+				t.Fatalf("set rule = %s, want %s", got, want)
+			}
+			if strings.Join(view.Settings, ",") != "app.account_id,app.user_id" {
+				t.Fatalf("required settings lost: %v", view.Settings)
+			}
+		})
+	}
+}
+
 func TestComputedProjectionColumnGeneration(t *testing.T) {
 	for _, tc := range []struct {
 		name, function    string

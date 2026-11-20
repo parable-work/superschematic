@@ -128,6 +128,25 @@ func TestProjectionFunctionRuleFromTypeScript(t *testing.T) {
 	}
 }
 
+// TestProjectionSetRuleFromTypeScript reads a set rule from source, and
+// refuses one that also passes args (D127).
+func TestProjectionSetRuleFromTypeScript(t *testing.T) {
+	schema, err := loadPatchedProjection(t, "where: [",
+		`where: [{ column: "base.id", inFunction: "app.visible_preference_ids", requiredSettings: ["app.user_id"] },`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := schema.Types["AppPreference"].Projection.Predicates[0]
+	if p.InFunction != "app.visible_preference_ids" || p.Column != "base.id" || len(p.RequiredSettings) != 1 || p.Function != "" {
+		t.Fatalf("set rule lost: %+v", p)
+	}
+	_, err = loadPatchedProjection(t, "where: [",
+		`where: [{ column: "base.id", inFunction: "app.visible_preference_ids", requiredSettings: ["app.user_id"], args: ["base.id"] } as never,`)
+	if err == nil || !strings.Contains(err.Error(), "set rule takes column, inFunction and requiredSettings only") {
+		t.Fatalf("a set rule with args: %v", err)
+	}
+}
+
 func TestComputedProjectionColumnFromTypeScript(t *testing.T) {
 	for _, tc := range []struct{ name, source, want string }{
 		{"structured call", `{ function: "app.preference_policy_key", args: ["base.id"] }`, ""},

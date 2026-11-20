@@ -5977,6 +5977,10 @@
           "default": "",
           "type": "string"
         },
+        "inFunction": {
+          "default": "",
+          "type": "string"
+        },
         "isNull": {
           "default": false,
           "type": "boolean"

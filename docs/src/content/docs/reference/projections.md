@@ -95,6 +95,7 @@ resolves to its foreign-key column. The declaration never carries SQL.
 | `{ column, isNull: true }`, `{ column, notNull: true }` | `column IS null`, `column IS NOT null`. |
 | `{ column, equals: literal }` | `column = literal`. The literal's type follows the column: a member of an enum column, a boolean, a number or a string. |
 | `{ function, args, requiredSettings }` | Every listed setting is set and non-empty, and `"schema"."function"(args...) IS true`. The function belongs to a hand-written migration. |
+| `{ column, inFunction, requiredSettings }` | Every listed setting is set and non-empty, and `column IN (SELECT "schema"."function"())`. The function takes no arguments and returns the set of values a row may hold, so Postgres runs it once per scan, not once per row as a function rule's call. It belongs to a hand-written migration (D127). |
 | any form with `when: { column, equals }` | `(column IS DISTINCT FROM 'equals' OR rule)`: the rule applies only to rows whose guard column equals the literal. |
 
 A setting is a dotted custom Postgres setting (`app.account_id`); a

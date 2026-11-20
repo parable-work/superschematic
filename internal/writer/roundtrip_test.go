@@ -247,7 +247,8 @@ func TestTSWriterRoundTripsJobs(t *testing.T) {
 }
 
 // TestTSWriterRoundTripsProjectionOptions: the TS writer writes a view's
-// sourceSchema (D126) and replica (D121), a join with no equality (D122)
+// sourceSchema (D126), replica (D121) and a set rule (D127), a join with
+// no equality (D122)
 // and a unique index whose nulls collide (D125), and the reader reads them
 // back.
 func TestTSWriterRoundTripsProjectionOptions(t *testing.T) {
@@ -260,6 +261,7 @@ func TestTSWriterRoundTripsProjectionOptions(t *testing.T) {
 	replica := false
 	def.Replica = &replica
 	def.Predicates = append([]*ir.ProjectionPredicate{{Column: "base.id", Setting: "app.preference_id"}}, def.Predicates...)
+	def.Predicates = append(def.Predicates, &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_preference_ids", RequiredSettings: []string{"app.user_id"}})
 	for _, j := range def.Joins {
 		if j.Alias == "channel" {
 			j.On = nil

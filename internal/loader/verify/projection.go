@@ -386,6 +386,22 @@ func checkProjectionPredicate(td *ir.TypeDef, label string, pred *ir.ProjectionP
 	switch {
 	case pred.IsLiteral():
 		checkProjectionLiteral(td, label, pred, scope, r)
+	case pred.InFunction != "":
+		parts := strings.Split(pred.InFunction, ".")
+		if len(parts) != 2 || !projectionIdentifierPattern.MatchString(parts[0]) || !projectionIdentifierPattern.MatchString(parts[1]) {
+			r.errorf(td.Owner, "%s: @projection %s inFunction must name schema.function, got %q", td.Name, label, pred.InFunction)
+		}
+		if pred.Function != "" || len(pred.Args) > 0 || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || len(pred.RequiredSettings) == 0 {
+			r.errorf(td.Owner, "%s: @projection %s set rule takes column, inFunction and requiredSettings only", td.Name, label)
+		}
+		if _, _, _, problem := scope.resolve(pred.Column); problem != "" {
+			r.errorf(td.Owner, "%s: @projection %s column %q: %s", td.Name, label, pred.Column, problem)
+		}
+		for _, setting := range pred.RequiredSettings {
+			if !settingNamePattern.MatchString(setting) {
+				r.errorf(td.Owner, "%s: @projection %s required setting must be a dotted custom Postgres setting name, got %q", td.Name, label, setting)
+			}
+		}
 	case pred.Function != "":
 		checkProjectionFunction(td, "@projection "+label, pred.Function, pred.Args, scope, r)
 		if pred.Column != "" || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || len(pred.Args) == 0 || len(pred.RequiredSettings) == 0 {
@@ -407,7 +423,7 @@ func checkProjectionPredicate(td *ir.TypeDef, label string, pred *ir.ProjectionP
 			r.errorf(td.Owner, "%s: @projection %s anyOf needs at least two alternatives", td.Name, label)
 		}
 		for i, alt := range pred.AnyOf {
-			if alt.When != nil || len(alt.AnyOf) > 0 || alt.Function != "" || alt.IsLiteral() {
+			if alt.When != nil || len(alt.AnyOf) > 0 || alt.Function != "" || alt.InFunction != "" || alt.IsLiteral() {
 				r.errorf(td.Owner, "%s: @projection %s anyOf[%d] carries only column, setting and optional", td.Name, label, i)
 				continue
 			}
@@ -460,7 +476,7 @@ func checkProjectionLiteral(td *ir.TypeDef, label string, pred *ir.ProjectionPre
 	if forms != 1 {
 		r.errorf(td.Owner, "%s: @projection %s carries exactly one of isNull, notNull and equals", td.Name, label)
 	}
-	if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
+	if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || pred.InFunction != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
 		r.errorf(td.Owner, "%s: @projection %s literal rule carries only column and when; it reads no setting", td.Name, label)
 	}
 	_, _, field, problem := scope.resolve(pred.Column)

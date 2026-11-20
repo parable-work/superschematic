@@ -451,7 +451,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		var sql string
 		switch {
 		case pred.IsLiteral():
-			if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
+			if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || pred.InFunction != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
 				return "", fmt.Errorf("a literal rule reads no setting")
 			}
 			expr, _, _, err := aliases.expr(pred.Column)
@@ -480,6 +480,30 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			default:
 				return "", fmt.Errorf("a literal rule carries exactly one of isNull, notNull and equals")
 			}
+		case pred.InFunction != "":
+			if len(pred.RequiredSettings) == 0 || pred.Function != "" || len(pred.Args) > 0 || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 {
+				return "", fmt.Errorf("a set rule takes column, inFunction and requiredSettings only")
+			}
+			if !projectionFunctionNamePattern.MatchString(pred.InFunction) {
+				return "", fmt.Errorf("a set rule needs a schema.function name")
+			}
+			expr, _, _, err := aliases.expr(pred.Column)
+			if err != nil {
+				return "", err
+			}
+			guards := []string{}
+			for _, setting := range pred.RequiredSettings {
+				if !projectionSettingPattern.MatchString(setting) {
+					return "", fmt.Errorf("required setting %q is not a dotted custom setting name", setting)
+				}
+				addSetting(setting, false)
+				guards = append(guards, fmt.Sprintf("NULLIF(current_setting(%s), '') IS NOT null", sqlLiteral(setting)))
+			}
+			// An uncorrelated subquery: Postgres runs the function once per
+			// scan and matches every row against its result (D127).
+			schemaName, function, _ := strings.Cut(pred.InFunction, ".")
+			guards = append(guards, fmt.Sprintf(`%s IN (SELECT "%s"."%s"())`, expr, schemaName, function))
+			sql = "(" + strings.Join(guards, " AND ") + ")"
 		case pred.Function != "":
 			if len(pred.RequiredSettings) == 0 || pred.Column != "" || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 {
 				return "", fmt.Errorf("a function rule takes function, args and requiredSettings only")

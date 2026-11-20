@@ -123,8 +123,9 @@ func applyProjection(td *ir.TypeDef, args []any) error {
 
 // projectionPredicate reads one row rule: a binding { column, setting,
 // optional? }, { anyOf: [binding, ...] }, a literal rule { column,
-// isNull: true | notNull: true | equals: literal }, or a function rule
-// { function, args, requiredSettings }, each with an optional
+// isNull: true | notNull: true | equals: literal }, a function rule
+// { function, args, requiredSettings }, or a set rule { column, inFunction,
+// requiredSettings } (D127), each with an optional
 // when: { column, equals }.
 func projectionPredicate(where string, value any) (*ir.ProjectionPredicate, error) {
 	obj, ok := value.(map[string]any)
@@ -135,12 +136,14 @@ func projectionPredicate(where string, value any) (*ir.ProjectionPredicate, erro
 	for _, key := range sortedKeys(obj) {
 		v := obj[key]
 		switch key {
-		case "column", "setting", "function":
+		case "column", "setting", "function", "inFunction":
 			s, ok := v.(string)
 			if !ok {
 				return nil, ArgErrorf(1, "@projection %s.%s must be a string literal", where, key)
 			}
 			switch key {
+			case "inFunction":
+				pred.InFunction = s
 			case "column":
 				pred.Column = s
 			case "setting":
@@ -232,8 +235,12 @@ func checkPredicateShape(where string, pred *ir.ProjectionPredicate) error {
 		if pred.Column == "" {
 			return ArgErrorf(1, "@projection %s literal rule requires column", where)
 		}
-		if readsSetting || pred.Function != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
+		if readsSetting || pred.Function != "" || pred.InFunction != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) > 0 {
 			return ArgErrorf(1, "@projection %s literal rule carries only column and when; it reads no setting", where)
+		}
+	case pred.InFunction != "":
+		if pred.Column == "" || readsSetting || pred.Function != "" || len(pred.Args) > 0 || len(pred.RequiredSettings) == 0 {
+			return ArgErrorf(1, "@projection %s set rule takes column, inFunction and requiredSettings only", where)
 		}
 	case pred.Function != "":
 		if pred.Column != "" || readsSetting || len(pred.Args) == 0 || len(pred.RequiredSettings) == 0 {

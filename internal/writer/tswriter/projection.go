@@ -103,7 +103,7 @@ func (e *emitter) projectionPredicateExpr(owner string, pred *ir.ProjectionPredi
 	var parts []string
 	switch {
 	case pred.IsLiteral():
-		if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" {
+		if pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || pred.Function != "" || pred.InFunction != "" {
 			e.failf("%s: literal rule on %s also carries a setting binding", owner, pred.Column)
 		}
 		parts = append(parts, fmt.Sprintf("column: %s", quote(pred.Column)))
@@ -121,6 +121,14 @@ func (e *emitter) projectionPredicateExpr(owner string, pred *ir.ProjectionPredi
 		default:
 			e.failf("%s: equals rule on %s has no literal", owner, pred.Column)
 		}
+	case pred.InFunction != "":
+		if pred.Function != "" || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 || len(pred.Args) > 0 {
+			e.failf("%s: set rule %s also carries a function call or a setting binding", owner, pred.InFunction)
+		}
+		parts = append(parts,
+			fmt.Sprintf("column: %s", quote(pred.Column)),
+			fmt.Sprintf("inFunction: %s", quote(pred.InFunction)),
+			fmt.Sprintf("requiredSettings: [%s]", quotedList(pred.RequiredSettings)))
 	case pred.Function != "":
 		if pred.Column != "" || pred.Setting != "" || pred.Optional || len(pred.AnyOf) > 0 {
 			e.failf("%s: function rule %s also carries a column binding", owner, pred.Function)
@@ -135,7 +143,7 @@ func (e *emitter) projectionPredicateExpr(owner string, pred *ir.ProjectionPredi
 		}
 		alts := make([]string, 0, len(pred.AnyOf))
 		for _, alt := range pred.AnyOf {
-			if alt.When != nil || len(alt.AnyOf) > 0 || alt.Function != "" || alt.IsLiteral() {
+			if alt.When != nil || len(alt.AnyOf) > 0 || alt.Function != "" || alt.InFunction != "" || alt.IsLiteral() {
 				e.failf("%s: anyOf alternative on %s carries more than column, setting and optional", owner, alt.Column)
 			}
 			alts = append(alts, e.projectionPredicateExpr(owner, alt))

@@ -140,6 +140,37 @@ func TestAJoinWithNoEqualityNeedsABaseOfOneRow(t *testing.T) {
 	}
 }
 
+// TestProjectionSetRuleVerification: a set rule names schema.function, a
+// column of the view's tables and the settings it reads, and carries
+// nothing else (D127).
+func TestProjectionSetRuleVerification(t *testing.T) {
+	with := func(rule *ir.ProjectionPredicate) *ir.Schema {
+		return projectionSchema(func(_ *ir.Schema, td *ir.TypeDef) {
+			td.Projection.Predicates = append(td.Projection.Predicates, rule)
+		})
+	}
+	if errs := projectionErrors(t, with(&ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids", RequiredSettings: []string{"app.user_id"}})); len(errs) != 0 {
+		t.Fatalf("a sound set rule: %v", errs)
+	}
+	for _, tc := range []struct {
+		name string
+		rule *ir.ProjectionPredicate
+		want string
+	}{
+		{"bare name", &ir.ProjectionPredicate{Column: "base.id", InFunction: "visible_ids", RequiredSettings: []string{"app.user_id"}}, `inFunction must name schema.function, got "visible_ids"`},
+		{"unknown column", &ir.ProjectionPredicate{Column: "base.absent", InFunction: "app.visible_ids", RequiredSettings: []string{"app.user_id"}}, `column "base.absent"`},
+		{"no settings", &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids"}, "set rule takes column, inFunction and requiredSettings only"},
+		{"with args", &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids", Args: []string{"base.id"}, RequiredSettings: []string{"app.user_id"}}, "set rule takes column, inFunction and requiredSettings only"},
+		{"bad setting", &ir.ProjectionPredicate{Column: "base.id", InFunction: "app.visible_ids", RequiredSettings: []string{"user"}}, `required setting must be a dotted custom Postgres setting name, got "user"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if errs := projectionErrors(t, with(tc.rule)); !containsMessage(errs, tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, errs)
+			}
+		})
+	}
+}
+
 // TestProjectionWithoutPoolPassesVerification: a plain view beside the
 // tables, with no pool and no row rule, which the ORMs read (D90).
 func TestProjectionWithoutPoolPassesVerification(t *testing.T) {

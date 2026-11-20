@@ -93,7 +93,7 @@ type ProjectionJoinKey struct {
 }
 
 // ProjectionPredicate is one row rule of a projection view. It takes one of
-// four forms:
+// five forms:
 //
 //   - a setting binding: Column = current_setting(Setting), cast to the
 //     column's type. An unset setting makes current_setting raise, so the
@@ -104,7 +104,11 @@ type ProjectionJoinKey struct {
 //   - a literal rule: Column IS NULL, IS NOT NULL, or equals a typed
 //     literal. It reads no setting;
 //   - a function rule: a named SQL function over alias.field arguments must
-//     return true, and every RequiredSettings entry must be set.
+//     return true, and every RequiredSettings entry must be set;
+//   - a set rule: Column is in the set a named SQL function with no
+//     arguments returns, and every RequiredSettings entry must be set. The
+//     view reads it as Column IN (SELECT schema.function()), so Postgres
+//     runs the function once per scan, not once per row (D127).
 //
 // When narrows any form to the rows whose When.Column equals When.Equals;
 // every other row passes the rule.
@@ -116,6 +120,11 @@ type ProjectionPredicate struct {
 	Function         string   `json:"function,omitempty" yaml:"function,omitempty"`
 	Args             []string `json:"args,omitempty" yaml:"args,omitempty"`
 	RequiredSettings []string `json:"requiredSettings,omitempty" yaml:"requiredSettings,omitempty"`
+
+	// InFunction names the schema-qualified SQL function with no arguments
+	// whose returned set Column must be in: a set rule (D127). It takes
+	// Column and RequiredSettings only.
+	InFunction string `json:"inFunction,omitempty" yaml:"inFunction,omitempty"`
 
 	// Column is the alias.field the rule reads. Empty for AnyOf and
 	// function rules.
@@ -154,7 +163,7 @@ func (p *ProjectionPredicate) IsLiteral() bool {
 // binding: not an AnyOf, a literal or a function rule. Optional and When
 // may still be set.
 func (p *ProjectionPredicate) IsBinding() bool {
-	return p != nil && !p.IsLiteral() && p.Function == "" && len(p.AnyOf) == 0 && p.Column != "" && p.Setting != ""
+	return p != nil && !p.IsLiteral() && p.Function == "" && p.InFunction == "" && len(p.AnyOf) == 0 && p.Column != "" && p.Setting != ""
 }
 
 // ProjectionLiteral is the typed literal of an equals rule; exactly one

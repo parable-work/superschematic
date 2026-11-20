@@ -82,7 +82,10 @@ export type ProjectionLiteral = string | number | boolean;
  * - a literal rule `{ column, isNull: true }`, `{ column, notNull: true }` or
  *   `{ column, equals: literal }`, which reads no setting;
  * - a function rule `{ function, args, requiredSettings }`: the function must
- *   return true, and every listed setting must be set.
+ *   return true, and every listed setting must be set;
+ * - a set rule `{ column, inFunction, requiredSettings }`: the column must be
+ *   in the set the function, which takes no arguments, returns. Postgres runs
+ *   the function once per scan, not once per row (D127).
  */
 export type ProjectionPredicate = (
   | ProjectionSettingBinding
@@ -91,6 +94,12 @@ export type ProjectionPredicate = (
   | { readonly column: string; readonly notNull: true }
   | { readonly column: string; readonly equals: ProjectionLiteral }
   | (ProjectionFunctionCall & { readonly requiredSettings: readonly string[] })
+  | {
+      readonly column: string;
+      /** `schema.function`, with no arguments; never SQL text. */
+      readonly inFunction: string;
+      readonly requiredSettings: readonly string[];
+    }
 ) & {
   /**
    * Apply the rule only to rows where `when.column` equals `when.equals`;

@@ -595,6 +595,7 @@ export interface ProjectionPredicate {
   column?: string;
   equals?: ProjectionLiteral;
   function?: string;
+  inFunction?: string;
   isNull?: boolean;
   notNull?: boolean;
   optional?: boolean;
