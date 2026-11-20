@@ -631,10 +631,19 @@ the file or on stdin with `-`:
 | `renames` | no | renames, as `--rename` takes them |
 | `failOn` | no | hazard classes, or `all`, as `--fail-on` takes them |
 | `allow` | no | hazard ids, as `--allow` takes them |
+| `layout` | no | `true` to have the response carry the layout document a runtime handler serves the documents' tables through |
 
 `from` is required, so a request that leaves out the model by mistake is
 refused and not planned from an empty database. A member the request does
 not have is refused too.
+
+With `layout`, the response also holds `layout`, in canonical JSON: each
+table the documents define, by its type's name, with its table, its key
+column, its version column, each own field's column, each behavior use's
+owned columns, sub-tables and shared tables, and its deadline, change and
+event queues. A runtime environment records it next to the model the plan
+takes its database to, since it has no generated code to read a layout
+from ([Runtime mode](/superschematic/guides/runtime-mode/)).
 
 The command prints one line of JSON. When it plans, it exits 0:
 
