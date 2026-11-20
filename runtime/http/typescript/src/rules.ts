@@ -1896,6 +1896,11 @@ function live(table: RulesTable): string {
 /**
  * The statements of a change set's unit, in the order D103 gives it:
  *
+ *  0. each write of a row of a use's shared table (D103's step 4), an
+ *     insert that must add one row and an update held to the version
+ *     expected (sharedRowStatement), first, so a count another writer moved
+ *     moves the unit before a row write a uniqueness over what it counts
+ *     would refuse;
  *  1. each row write in the change set's order: a create's insert of its
  *     key, own fields and owned columns, an update's set of the patch's own
  *     columns, its owned columns and the next version where the row is live
@@ -1910,9 +1915,7 @@ function live(table: RulesTable): string {
  *     its message (spend), which must delete one message;
  *  3. each sub-table row write, an insert that must add one row, an update
  *     of the values it names and a delete that must change one, a deleted
- *     row's left out; then each write of a row of a use's shared table
- *     (D103's step 4), an insert that must add one row and an update held
- *     to the version expected (sharedRowStatement);
+ *     row's left out;
  *  4. each event a behavior emits (D104), in the change set's order, a
  *     message of its row's table's event queue with the command's time, a
  *     deleted row's among them (eventStatement);
@@ -1935,6 +1938,15 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
   /** The rows the change set deletes, by type and key, and whether each delete is soft. */
   const deleted = new Map<string, { readonly table: RulesTable; readonly key: string; readonly soft: boolean }>();
   const rowId = (rowType: string, key: string) => `${rowType}\u0000${key}`;
+  // A shared table's rows first (D103's step 4): a concurrent writer that
+  // moved one, or inserted it first, moves the unit here, before a row write
+  // that a uniqueness over what the shared row counts (a label) would refuse
+  // as an error; and every command takes their locks before its rows'. A
+  // row's delete leaves them, and each write is held to one row.
+  for (const write of changes.sharedRows ?? []) {
+    const table = tableOf(host.layout, write.type);
+    statements.push(sharedRowStatement(table, sharedTableOf(table, write.useId, write.table), dialect, write));
+  }
   for (const write of changes.rows ?? []) {
     const table = tableOf(host.layout, write.type);
     const values: unknown[] = [];
@@ -2015,12 +2027,6 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
     if (deleted.has(rowId(write.row.type, key))) continue;
     const table = tableOf(host.layout, write.row.type);
     statements.push(...subRowStatements(table, subTableOf(table, write.useId, write.table), dialect, key, write));
-  }
-  // A shared table's rows are the table's as a whole: a row's delete leaves
-  // them, and each write is held to one row (D103's step 4).
-  for (const write of changes.sharedRows ?? []) {
-    const table = tableOf(host.layout, write.type);
-    statements.push(sharedRowStatement(table, sharedTableOf(table, write.useId, write.table), dialect, write));
   }
   for (const event of changes.events ?? []) {
     const key = keyOfRow(event.row);

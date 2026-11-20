@@ -105,6 +105,11 @@ func TestWriteTypesGolden(t *testing.T) {
 		// upserts, runDeadline and runEvent, and its deadline and event
 		// queues in queues.ts and the layout.
 		{service: "fixture-pool-db", behaviors: true},
+		// Tables whose fields carry Numbering (D103's step 4): assignNumber
+		// under number and reference, each label string | null, the counts
+		// each use keeps in a shared table with no repository, no upserts,
+		// and the shared tables in the layout.
+		{service: "fixture-numbering-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},

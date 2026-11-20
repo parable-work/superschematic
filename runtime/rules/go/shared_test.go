@@ -55,6 +55,10 @@ func createInvoices(t *testing.T, db *rulestest.DB) {
 	for _, ddl := range db.BumpVersion("invoice") {
 		db.Exec(t, ddl)
 	}
+	// A label unique within its customer, as the docs show: a racing create
+	// must meet its count's fence before this index, or it fails as an
+	// error rather than running again.
+	db.Exec(t, `CREATE UNIQUE INDEX uq_invoice_customer_number ON invoice (customer_id, number)`)
 	db.Exec(t, fmt.Sprintf(`CREATE TABLE invoice_number_counts (scope %s, last %s, counting %s, _version %s)`, types.Key, types.Integer, types.Text, types.Version))
 	for _, ddl := range db.BumpVersion("invoice_number_counts") {
 		db.Exec(t, ddl)

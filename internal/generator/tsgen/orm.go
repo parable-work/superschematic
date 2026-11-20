@@ -464,7 +464,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 				table.Events = layout.Events != nil
 				table.NoUpserts = table.Deadlines
 				for _, use := range layout.Uses {
-					if len(use.Tables) > 0 {
+					// A create that writes a sub-table's or a shared
+					// table's rows (Numbering's counts, D103's step 4) is
+					// no upsert's insert.
+					if len(use.Tables) > 0 || len(use.Shared) > 0 {
 						table.NoUpserts = true
 					}
 				}

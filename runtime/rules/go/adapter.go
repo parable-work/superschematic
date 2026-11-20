@@ -1026,6 +1026,19 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 	commandKey := keyOfCommand(command)
 	var statements []Statement
 	var deleted []deletedRow
+	// A shared table's rows first (D103's step 4): a concurrent writer that
+	// moved one, or inserted it first, moves the unit here, before a row
+	// write that a uniqueness over what the shared row counts (a label)
+	// would refuse as an error; and every command takes their locks before
+	// its rows'. A row's delete leaves them, and each write is held to one
+	// row.
+	for _, write := range changes.SharedRows {
+		statement, err := sharedRowStatement(host.Layout, dialect, write)
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, *statement)
+	}
 	for _, write := range changes.Rows {
 		table, err := host.Layout.table(write.Type)
 		if err != nil {
@@ -1193,16 +1206,6 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 		if statement != nil {
 			statements = append(statements, *statement)
 		}
-	}
-
-	// A shared table's rows are the table's as a whole: a row's delete
-	// leaves them, and each write is held to one row (D103's step 4).
-	for _, write := range changes.SharedRows {
-		statement, err := sharedRowStatement(host.Layout, dialect, write)
-		if err != nil {
-			return nil, err
-		}
-		statements = append(statements, *statement)
 	}
 
 	for _, event := range changes.Events {

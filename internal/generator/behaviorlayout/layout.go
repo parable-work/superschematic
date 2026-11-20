@@ -178,11 +178,13 @@ type Table struct {
 	// fields and no command writes: createdBy (D87), a scalar column the
 	// repositories stamp with an operation's caller, when a Workflow
 	// transition's by or a StateRules state's by names it, or an Approvals
-	// gate excludes the creator (D104). A row read holds each in its own
-	// fields by Field; a create's own fields, an update's patch and a change
-	// set never carry one, and a write's image (ImageColumns) leaves it out.
-	// Absent for a table without a scalar createdBy, and for one whose
-	// behaviors read it of none.
+	// gate excludes the creator (D104); and createdAt, the time the
+	// repositories stamp a create with, when a use is Numbering's, whose
+	// assignNumber numbers a row in the year it was made (D103's step 4). A
+	// row read holds each in its own fields by Field; a create's own fields,
+	// an update's patch and a change set never carry one, and a write's
+	// image (ImageColumns) leaves it out. Absent for a table without such a
+	// column, and for one whose behaviors read none.
 	Audit []Column `json:"audit,omitempty"`
 
 	// Uses are the type's table uses, implements and field uses, in the
@@ -337,6 +339,34 @@ type Use struct {
 	// Tables are the sub-tables the behavior keeps per row, in the
 	// declaration's order; absent when it declares none.
 	Tables []SubTable `json:"tables,omitempty"`
+
+	// Shared are the tables the behavior keeps for the table as a whole
+	// (D103's step 4: Numbering's counts), in the declaration's order;
+	// absent when it declares none.
+	Shared []SharedTable `json:"shared,omitempty"`
+}
+
+// SharedTable is a table a use keeps for the type's table as a whole
+// (D103's step 4), whose rows every row of the type shares: a table the
+// loader adds, keyed by its declared key alone, with no column of a row's
+// key, each row held to a version of its own, which a row's delete leaves.
+type SharedTable struct {
+	// Name is the table's name in the behavior's declaration (counts).
+	Name string `json:"name"`
+
+	// Table is the table, unquoted (invoice_number_counts).
+	Table string `json:"table"`
+
+	// Key is the declared key field and its column, the table's primary
+	// key.
+	Key OwnedField `json:"key"`
+
+	// Fields are its other declared fields and their columns, in the
+	// declaration's order.
+	Fields []OwnedField `json:"fields"`
+
+	// Version is the column each row's version is in, [VersionColumn].
+	Version string `json:"version"`
 }
 
 // SubTable is one sub-table a use keeps per row (D103): a child table of
@@ -699,6 +729,14 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			}
 		}
 		for _, declared := range behavior.Tables {
+			if declared.Shared() {
+				shared, err := sharedTableOf(schema, td, ref, declared, tables)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", where, err)
+				}
+				use.Shared = append(use.Shared, shared)
+				continue
+			}
 			sub, err := subTableOf(schema, td, ref, declared, tables)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", where, err)
@@ -836,12 +874,27 @@ func auditColumns(model *sqlutil.TableModel) []Column {
 // an Approvals gate excludes the creator (excludeCreator absent or true),
 // which creator_cannot_sign reads it for.
 func readAudit(td *ir.TypeDef, model *sqlutil.TableModel) []Column {
+	var out []Column
 	for _, ref := range td.TableBehaviors() {
 		if len(ref.Config) > 0 && readsCreatedBy(ref) {
-			return auditColumns(model)
+			out = auditColumns(model)
+			break
 		}
 	}
-	return nil
+	// A Numbering use reads createdAt (D103's step 4): assignNumber
+	// numbers a row made before the table composed Numbering in the UTC
+	// year the row was made, as the engine read its created_at.
+	for _, ref := range td.TableBehaviors() {
+		if ref.Name != "Numbering" {
+			continue
+		}
+		c := model.AuditColumn(sqlutil.AuditCreatedAt)
+		if c != nil && c.Def != nil && c.Relation == "" && !c.Def.TypeRef.IsArray && !c.Def.TypeRef.IsMap {
+			out = append(out, Column{Field: sqlutil.AuditCreatedAt, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
+		}
+		break
+	}
+	return out
 }
 
 // readsCreatedBy reports whether the table use ref reads the row's
@@ -1040,6 +1093,53 @@ func subTableOf(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, declared 
 		column, ok := columns[field.Name]
 		if fd == nil || !ok {
 			return SubTable{}, fmt.Errorf("behavior %s's table %s, the type %s, has no column of its field %s", ref.Name, declared.Name, sub.Name, field.Name)
+		}
+		owned := OwnedField{Name: field.Name, Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)}}
+		if field.Name == declared.Key {
+			out.Key = owned
+			continue
+		}
+		out.Fields = append(out.Fields, owned)
+	}
+	return out, nil
+}
+
+// sharedTableOf is the layout of the table declared for the use ref on td
+// that it keeps for the table as a whole (D103's step 4): the type the
+// loader added for it (ir.TypeDef.BehaviorTable, with no row field), each
+// declared field's column, the key's the primary key, and the version
+// column @optimistic gives it.
+func sharedTableOf(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, declared registry.BehaviorTable, tables []sqlutil.TableModel) (SharedTable, error) {
+	var shared *ir.TypeDef
+	for _, other := range schema.Types {
+		if m := other.BehaviorTable; m != nil && m.Row == td.Name && m.Use == ref.UseID() && m.Table == declared.Name {
+			shared = other
+		}
+	}
+	if shared == nil {
+		return SharedTable{}, fmt.Errorf("behavior %s's table %s has no shared table in the schema", ref.Name, declared.Name)
+	}
+	var model *sqlutil.TableModel
+	for i := range tables {
+		if tables[i].Type == shared.Name {
+			model = &tables[i]
+		}
+	}
+	if model == nil {
+		return SharedTable{}, fmt.Errorf("behavior %s's table %s is the type %s, which is no table of the schema", ref.Name, declared.Name, shared.Name)
+	}
+	out := SharedTable{Name: declared.Name, Table: model.Name, Fields: []OwnedField{}, Version: VersionColumn}
+	columns := map[string]string{}
+	for _, c := range model.Columns {
+		if c.Def != nil {
+			columns[c.Def.Name] = c.Name
+		}
+	}
+	for _, field := range declared.Fields {
+		fd := sqlutil.FieldNamed(shared, field.Name)
+		column, ok := columns[field.Name]
+		if fd == nil || !ok {
+			return SharedTable{}, fmt.Errorf("behavior %s's table %s, the type %s, has no column of its field %s", ref.Name, declared.Name, shared.Name, field.Name)
 		}
 		owned := OwnedField{Name: field.Name, Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)}}
 		if field.Name == declared.Key {

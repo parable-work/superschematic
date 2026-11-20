@@ -82,6 +82,10 @@ for (const dialect of dialects) {
       const t = columnTypes(db.dialect);
       await db.exec(`CREATE TABLE invoice (id ${t.key}, title ${t.text}, customer_id ${t.text}, number ${t.text}, number_seq ${t.integer}, _version ${t.version})`);
       for (const ddl of bumpVersion('invoice', db.dialect)) await db.exec(ddl);
+      // A label unique within its customer, as the docs show: a racing
+      // create must meet its count's fence before this index, or it fails
+      // as an error rather than running again.
+      await db.exec('CREATE UNIQUE INDEX uq_invoice_customer_number ON invoice (customer_id, number)');
       await db.exec(`CREATE TABLE invoice_number_counts (scope ${t.key}, last ${t.integer}, counting ${t.text}, _version ${t.version})`);
       for (const ddl of bumpVersion('invoice_number_counts', db.dialect)) await db.exec(ddl);
     });

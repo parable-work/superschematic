@@ -328,6 +328,9 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			if ref.Name == reconcileBehavior && behavior.ValidateConfig(ref.Config) == nil {
 				checkReconcileConfig(td, ref, r)
 			}
+			if ref.Name == numberingBehavior && behavior.ValidateConfig(ref.Config) == nil {
+				checkNumberingConfig(schema, td, ref, r)
+			}
 		} else {
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)
 			adder = "implements " + ref.Name + "'s"

@@ -1031,6 +1031,6 @@ type ChangeSet struct {
 	// (D103's step 4), absent in JSON for none.
 	SharedRows []SharedRowWrite `json:"sharedRows,omitempty"`
 	Events     []OutboxEvent    `json:"events"`
-	Deadlines []DeadlineChange `json:"deadlines"`
-	Result    json.RawMessage  `json:"result"`
+	Deadlines  []DeadlineChange `json:"deadlines"`
+	Result     json.RawMessage  `json:"result"`
 }

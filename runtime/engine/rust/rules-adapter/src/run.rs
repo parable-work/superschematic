@@ -1803,7 +1803,17 @@ async fn statements_of<S: Store>(
         .iter()
         .map(|event| event_of(layout, dialect, type_name, command, event))
         .collect::<Result<Vec<_>, Error>>()?;
-    let mut statements = Vec::new();
+    // A shared table's rows first (D103's step 4): a concurrent writer that
+    // moved one, or inserted it first, moves the unit here, before a row
+    // write that a uniqueness over what the shared row counts (a label)
+    // would refuse as an error; and every command takes their locks before
+    // its rows'. A row's delete leaves them, and each write is held to one
+    // row.
+    let mut statements = changes
+        .shared_rows
+        .iter()
+        .map(|write| shared_row_of(layout, dialect, write))
+        .collect::<Result<Vec<_>, Error>>()?;
     // Each row the change set deletes: its table, its key and whether it
     // is deleted for good.
     let mut deleted: Vec<(&Table, &str, bool)> = Vec::new();
@@ -1907,11 +1917,6 @@ async fn statements_of<S: Store>(
             continue;
         }
         statements.extend(sub_row_of(layout, dialect, write)?);
-    }
-    // A shared table's rows are the table's as a whole: a row's delete
-    // leaves them, and each write is held to one row (D103's step 4).
-    for write in &changes.shared_rows {
-        statements.push(shared_row_of(layout, dialect, write)?);
     }
     // The events after the sub-table rows, in the change set's order, a
     // deleted row's too: the app may still need to hear them (D104).

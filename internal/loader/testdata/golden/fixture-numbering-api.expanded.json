@@ -1,0 +1,294 @@
+{
+  "name": "fixture-numbering-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-numbering-db",
+      "types": [
+        "Invoice",
+        "Ticket"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-numbering-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "InvoiceNumberAssignNumberResult": {
+      "name": "InvoiceNumberAssignNumberResult",
+      "owner": "fixture-numbering-api",
+      "comment": "What Invoice's number assignNumber returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "label",
+          "comment": "The number as the format prints it.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "seq",
+          "comment": "Its number in its count.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketNumberAssignNumberResult": {
+      "name": "TicketNumberAssignNumberResult",
+      "owner": "fixture-numbering-api",
+      "comment": "What Ticket's number assignNumber returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "label",
+          "comment": "The number as the format prints it.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "seq",
+          "comment": "Its number in its count.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketReferenceAssignNumberResult": {
+      "name": "TicketReferenceAssignNumberResult",
+      "owner": "fixture-numbering-api",
+      "comment": "What Ticket's reference assignNumber returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "label",
+          "comment": "The number as the format prints it.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "seq",
+          "comment": "Its number in its count.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "InvoiceActions",
+      "comment": "An invoice's backfill for any signed-in caller (D103's step 4):\nassignNumber at invoice/{id}/number/assign-number numbers an invoice made\nbefore the table numbered, and answers the number of one numbered\nalready.",
+      "operations": [
+        {
+          "name": "numberAssignNumber",
+          "comment": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+          "docs": {
+            "title": "Invoice number: assign number",
+            "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+            "capability": "invoice.number.assign-number",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "invoice_number_assign_number",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "InvoiceNumberAssignNumberResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Invoice row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-numbering-db",
+            "type": "Invoice",
+            "key": "id",
+            "use": "number",
+            "behavior": "Numbering",
+            "operation": "assignNumber",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "invoice/{id}/number/assign-number",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Invoice"
+      },
+      "auth": true
+    },
+    {
+      "name": "TicketActions",
+      "comment": "A ticket's backfill of its number and its reference, each a route of its\nown (ticket/{id}/number/assign-number, ticket/{id}/reference/assign-number).",
+      "operations": [
+        {
+          "name": "numberAssignNumber",
+          "comment": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+          "docs": {
+            "title": "Ticket number: assign number",
+            "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+            "capability": "ticket.number.assign-number",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_number_assign_number",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketNumberAssignNumberResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-numbering-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "number",
+            "behavior": "Numbering",
+            "operation": "assignNumber",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/number/assign-number",
+          "origin": "behavior"
+        },
+        {
+          "name": "referenceAssignNumber",
+          "comment": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+          "docs": {
+            "title": "Ticket reference: assign number",
+            "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+            "capability": "ticket.reference.assign-number",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_reference_assign_number",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketReferenceAssignNumberResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-numbering-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "reference",
+            "behavior": "Numbering",
+            "operation": "assignNumber",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/reference/assign-number",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Ticket"
+      },
+      "auth": true
+    }
+  ]
+}

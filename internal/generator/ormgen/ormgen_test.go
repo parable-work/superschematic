@@ -70,6 +70,12 @@ const schedulesFixture = "fixture-schedules-db"
 // emit, messages of its event queue, which RunEvent spends.
 const poolFixture = "fixture-pool-db"
 
+// numberingFixture is the DB fixture whose Invoice and Ticket carry
+// Numbering on fields (D103's step 4): assignNumber under Number() and
+// Reference(), each label optional, and the counts each use keeps in a
+// shared table of its own, with no repository.
+const numberingFixture = "fixture-numbering-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -88,7 +94,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == numberingFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -205,6 +211,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// Budget(), no repository of a sub-table, and its deadline and
 		// event queues.
 		{poolFixture, []string{"repository_account.go", "rules.go", "queues.go"}},
+		// Tables of Numbering (D103's step 4): assignNumber under Number()
+		// and Reference(), no repository of a shared table of counts, no
+		// upserts, and no queue.
+		{numberingFixture, []string{"repository_customer.go", "repository_invoice.go", "repository_ticket.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)
