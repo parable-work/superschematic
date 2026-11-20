@@ -619,17 +619,23 @@ change's to settle.
 
 Status: steps 1 to 3 built, and step 4's ports of Constants,
 StateRules, Approvals, Lease, Retries, Presence, Budget, Seats,
-Reconcile, Schedules and Pool, each with D104's upgrade, and of Rollups
+Reconcile, Schedules and Pool, each with D104's upgrade; of Rollups
 (over the rows a `HasMany` lists) and Dependencies (its edges a sub-table
 of the dependent's), with the core's `Action::Read`, which computes a
-use's fields through reads and writes nothing. Left: the rest of step 4
-(Numbering, Comments, Derived, Provenance, Revisions, Variants, Holds,
-Stock, Calendar and Payments, each held to the test, and the folded
-Links, Search, Queue and Branches removed), and steps 5 to 7, whose step
-6 D117 renames development mode. What the built steps left follows. The
+use's fields through reads and writes nothing; and of Numbering (a field,
+`number: Numbering<{ format, scope?, reset? }>`, its counts a use's shared
+table) and Revisions (proposals reviewed into a write of the row's own
+fields), with two more primitives of the core: a use's shared table
+(`"scope": "schema"`, `ReadRequest::SharedRow`, `ChangeSet.shared_rows`,
+each write fenced on its version) and an operation's write of its row's
+own fields (`Cx::update`, held to an update's validation and guards).
+Development mode runs all eighteen. Left: the rest of step 4 (Comments,
+Derived, Provenance, Holds, Stock, Calendar and Payments, each held to the
+test, and the folded Links, Search, Queue and Branches removed), and steps
+5 to 7, whose step 6 D117 renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
-Two of step 4's ports met the test as follows, and each waits on a choice:
+Four of step 4's ports met the test as follows, and each waits on a choice:
 
 - Rollups fails it: it keeps no state of its own, its values are a
   function of other rows and its one rule a guard over another use's
@@ -643,6 +649,16 @@ Two of step 4's ports met the test as follows, and each waits on a choice:
   `create`, with Dependencies and Rollups for the edges and the gate.
   `workqueue-blueprint.json` stays the engine's, and `examples/engine-jobs`
   waits for the choice.
+- Revisions passes it for its review step, whose proposals are its own
+  state, and fails it for its log of revisions, a storage shape
+  `@versioned`'s history keeps on Postgres. It is ported whole. The fold
+  proposed: the log read from `@versioned`'s history where a table has it,
+  and the core's own log kept for SQLite and D1.
+- Variants fails it and is not ported: it keeps no state and is a
+  validation rule, a JSON field typed by a sibling field's value. The fold
+  proposed: a discriminated-union field type whose validators the build
+  writes, with a CHECK constraint where it can, or step 5's declarative
+  validation. `core-variants.json` stays unreplayed.
 
 What Rollups and Dependencies left: a route or field that serves Rollups'
 `values` and Dependencies' `blocked`, which only `Action::Read` reaches;
@@ -654,6 +670,18 @@ delete, where a blocker that is gone is ignored; a `status` member for a
 table with several Workflows; a config that names the `HasMany` rather
 than `{ schema, link }`; and a rollup over a table that composes no
 behavior.
+
+What Numbering and Revisions left: their SDK goldens and servers run end
+to end, and an API fixture of Revisions; a proposal's patch typed by the
+table's own fields, where `Generic.JSON` lets a patch name a field the
+table lacks and fail at the approval; `pendingProposals` served by the
+adapters and by development mode, which runs no `Action::Read` and so
+serves no Rollups `values` either; Retries' `resultField` and Budget's
+`limitField` with `setLimit`, which `Cx::update` now allows; Lease's
+`directOn` and Reactions' `when.revised`, which wait for Branches; a
+Reactions rule on `Revisions.pendingProposals`, which the build refuses;
+and an update command that changes nothing, which still writes and moves
+the version, as the engine's did not.
 
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are
