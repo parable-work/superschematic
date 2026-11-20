@@ -40,6 +40,12 @@ type Request struct {
 	FailOn []string `json:"failOn,omitempty"`
 	// Allow are hazard ids the publish allows, as --allow takes them.
 	Allow []string `json:"allow,omitempty"`
+	// Layout asks for the layout document a runtime handler serves the
+	// documents' tables through (behaviorlayout.RuntimeOf) beside the
+	// plan: a runtime environment records it next to the model the plan
+	// takes the database to, since it has no generated code to read one
+	// from (D117).
+	Layout bool `json:"layout,omitempty"`
 }
 
 // Response answers a Request: the plan, with its hazards and the ids of
@@ -53,6 +59,9 @@ type Response struct {
 	// Refused are the ids of the hazards of a FailOn class that Allow does
 	// not name, in step order.
 	Refused []string
+	// Layout is the layout document of the documents' tables, which a
+	// request with layout asks for; nil otherwise.
+	Layout json.RawMessage
 	// Error says why there is no plan; empty when there is one.
 	Error string
 }
@@ -63,6 +72,7 @@ type planned struct {
 	Plan    json.RawMessage      `json:"plan"`
 	Hazards []*sqlmigrate.Hazard `json:"hazards"`
 	Refused []string             `json:"refused"`
+	Layout  json.RawMessage      `json:"layout,omitempty"`
 }
 
 type refusal struct {
@@ -76,9 +86,10 @@ func ErrorResponse(err error) *Response {
 	return &Response{Error: err.Error()}
 }
 
-// JSON writes the response as one line of JSON: version, plan, hazards and
-// refused when it holds a plan, else version and error. The plan's bytes
-// are its canonical JSON, unescaped.
+// JSON writes the response as one line of JSON: version, plan, hazards,
+// refused and, when the request asked for it, layout when it holds a plan,
+// else version and error. The plan's bytes are its canonical JSON,
+// unescaped.
 func (r *Response) JSON() ([]byte, error) {
 	var value any = refusal{Version: RequestVersion, Error: r.Error}
 	if r.Error == "" {
@@ -89,7 +100,7 @@ func (r *Response) JSON() ([]byte, error) {
 		if refused == nil {
 			refused = []string{}
 		}
-		value = planned{Version: RequestVersion, Plan: r.Plan, Hazards: hazards, Refused: refused}
+		value = planned{Version: RequestVersion, Plan: r.Plan, Hazards: hazards, Refused: refused, Layout: r.Layout}
 	}
 	var b bytes.Buffer
 	encoder := json.NewEncoder(&b)
@@ -169,7 +180,7 @@ func Answer(req *Request, env Env) (*Response, error) {
 		sources[i] = Source{Name: fmt.Sprintf("documents[%d]", i), Data: doc}
 	}
 
-	plan, err := Plan(sources, from, req.Dialect, renames, env)
+	schema, plan, err := planDocuments(sources, from, req.Dialect, renames, env)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +191,11 @@ func Answer(req *Request, env Env) (*Response, error) {
 	response := &Response{Plan: canonical, Hazards: plan.Hazards()}
 	for _, hazard := range plan.Unallowed(classes, req.Allow) {
 		response.Refused = append(response.Refused, hazard.ID)
+	}
+	if req.Layout {
+		if response.Layout, err = Layout(schema, env); err != nil {
+			return nil, err
+		}
 	}
 	return response, nil
 }
