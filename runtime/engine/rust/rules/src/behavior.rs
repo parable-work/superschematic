@@ -744,6 +744,10 @@ pub enum Change<'a> {
         use_id: &'a str,
         operation: &'a str,
         params: &'a Value,
+        /// The own fields before the operation, when its handler or a call
+        /// it made wrote them ([`crate::Cx::update`]); `None` when nothing
+        /// in it did.
+        before: Option<&'a Map<String, Value>>,
     },
     /// A deadline of a use that fell due.
     Deadline {

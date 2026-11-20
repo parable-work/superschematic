@@ -1306,14 +1306,18 @@ func sortedAssignments(columns map[string]any) []assignment {
 }
 
 // ownColumns is the own columns a write sets: the caller's encoded columns
-// for the command's own row, sorted by name, else each own field of the
-// change set by the layout's column, in the layout's order. A null for a
+// for the command's own row, sorted by name, then each own field of the
+// change set by the layout's column that they do not name, in the layout's
+// order: an operation's write of the row's own fields (Revisions' approve,
+// D103's step 4) beside the audit stamps its caller encoded. A null for a
 // field the table has no column for clears nothing, as a merge patch's
 // null for a member the document lacks; a value for one refuses the
 // command as internal.
 func ownColumns(table *Table, dialect Dialect, own map[string]json.RawMessage, encoded map[string]any) ([]assignment, error) {
-	if encoded != nil {
-		return sortedAssignments(encoded), nil
+	out := sortedAssignments(encoded)
+	named := map[string]bool{}
+	for _, assigned := range out {
+		named[assigned.column] = true
 	}
 	known := map[string]bool{}
 	for _, column := range table.Own {
@@ -1329,10 +1333,9 @@ func ownColumns(table *Table, dialect Dialect, own map[string]json.RawMessage, e
 			return nil, Internal("%s has no own field %s in the behaviors' layout", table.Type, name)
 		}
 	}
-	var out []assignment
 	for _, column := range table.Own {
 		raw, ok := own[column.Field]
-		if !ok {
+		if !ok || named[column.Column] {
 			continue
 		}
 		value, err := toColumn(raw, column, table, dialect)

@@ -2642,22 +2642,22 @@ fn next_version(table: &Table) -> String {
 }
 
 /// The own columns a write sets: the caller's encoded columns for the
-/// command's own row, else each own field of the change set by the
-/// layout's column. A null for a field the table has no column for clears
-/// nothing, as a merge patch's null for a member the document lacks; a
-/// value for one refuses the command as internal.
+/// command's own row, then each own field of the change set by the
+/// layout's column that they do not name: an operation's write of the
+/// row's own fields (Revisions' approve, D103's step 4) beside the audit
+/// stamps its caller encoded. A null for a field the table has no column
+/// for clears nothing, as a merge patch's null for a member the document
+/// lacks; a value for one refuses the command as internal.
 fn own_columns(
     table: &Table,
     own: &Map<String, Value>,
     encoded: Option<&Map<String, Value>>,
 ) -> Result<Vec<(String, Bind)>, Error> {
-    if let Some(encoded) = encoded {
-        return Ok(encoded
-            .iter()
-            .map(|(column, value)| (column.clone(), Bind::of_json(value)))
-            .collect());
-    }
-    let mut out = Vec::new();
+    let mut out: Vec<(String, Bind)> = encoded
+        .into_iter()
+        .flatten()
+        .map(|(column, value)| (column.clone(), Bind::of_json(value)))
+        .collect();
     for (field, value) in own {
         let Some(column) = table.own.iter().find(|column| column.field == *field) else {
             if value.is_null() {
@@ -2669,6 +2669,9 @@ fn own_columns(
             ))
             .into());
         };
+        if encoded.is_some_and(|encoded| encoded.contains_key(&column.column)) {
+            continue;
+        }
         out.push((column.column.clone(), to_column(value, column, table)?));
     }
     Ok(out)

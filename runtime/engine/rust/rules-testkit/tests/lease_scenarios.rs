@@ -74,8 +74,9 @@ fn lease_beside_approvals_replays_on_the_core() {
 }
 
 /// `workqueue-lease-direct-on.json` composes Branches and Revisions, whose
-/// moves directOn sends its directives on, which wait for step 4 of D103:
-/// every step is skipped with that reason, and none mismatches.
+/// moves directOn sends its directives on. Revisions runs on the core since
+/// its wave of D103's step 4; Branches does not yet: every step is skipped
+/// with that reason, and none mismatches.
 #[test]
 fn lease_direct_on_is_skipped_with_its_reason() {
     let report = replayed("workqueue-lease-direct-on", 0);
@@ -85,7 +86,7 @@ fn lease_direct_on_is_skipped_with_its_reason() {
         for skipped in &scenario.skipped {
             assert_eq!(
                 skipped.reason,
-                "it composes behaviors the core does not run: Branches, Revisions"
+                "it composes behaviors the core does not run: Branches"
             );
         }
     }

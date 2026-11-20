@@ -16,7 +16,8 @@
     "Reconcile",
     "Schedules",
     "Pool",
-    "Numbering"
+    "Numbering",
+    "Revisions"
   ],
   "scenarios": [
     {

@@ -1339,6 +1339,89 @@ impl Behavior for Count {
     }
 }
 
+// Editor: an operation that writes its row's own fields (D103, step 4):
+// retitle patches the title, and the body with `body`, and answers whether
+// the patch changed them; its validation refuses the title `bad`, its guard
+// vetoes an update to the title `held`, naming the precondition it was
+// handed, and its after-change hook keeps the title the operation's change
+// heard as before (`none` when it heard none). peek, read-only, and a
+// create's after-change hook try to write the fields too.
+struct Editor;
+
+impl Behavior for Editor {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Editor")
+            .field("heard")
+            .operation("retitle", true)
+            .operation("peek", false)
+            .veto("held")
+            .preconditions()
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn validate(
+        &self,
+        _view: &View<'_, ()>,
+        request: &ValidationRequest<'_>,
+    ) -> Hook<Vec<ValidationIssue>> {
+        let after = match request {
+            ValidationRequest::Create { own } => own,
+            ValidationRequest::Update { after, .. } => after,
+            _ => return Ok(Vec::new()),
+        };
+        Ok(match after.get("title") {
+            Some(Value::String(title)) if title == "bad" => {
+                vec![ValidationIssue::new("title", "bad", "title may not be bad")]
+            }
+            _ => Vec::new(),
+        })
+    }
+
+    fn guard(&self, view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let GuardRequest::Update { after, .. } = request else {
+            return Ok(None);
+        };
+        if after.get("title") != Some(&json!("held")) {
+            return Ok(None);
+        }
+        Ok(Some(
+            Veto::new(format!("held (precondition {:?})", view.precondition())).with_code("held"),
+        ))
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        let mut patch = Map::new();
+        if let Some(title) = params.get("title") {
+            patch.insert("title".into(), title.clone());
+        }
+        let changed = cx.update(&Value::Object(patch))?;
+        if let (true, Some(body)) = (name == "retitle", params.get("body")) {
+            cx.update(&json!({ "body": body }))?;
+        }
+        Ok(Value::Bool(changed))
+    }
+
+    fn after_change(&self, cx: &Cx<'_, ()>, change: &Change<'_>) -> Hook<()> {
+        match change {
+            Change::Create if cx.own_field("title") == Some(json!("init")) => {
+                cx.update(&json!({"title": "later"})).map(|_| ())
+            }
+            Change::Operation { before, .. } => {
+                let heard = before
+                    .and_then(|fields| fields.get("title").cloned())
+                    .unwrap_or_else(|| json!("none"));
+                cx.set("heard", heard)
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -1363,6 +1446,7 @@ fn core() -> superschematic_rules::Core {
         .with(Gauge)
         .with(Dial)
         .with(Count)
+        .with(Editor)
 }
 
 fn alice() -> Caller {
@@ -2660,13 +2744,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count, Editor); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -4763,5 +4847,101 @@ fn a_shared_table_is_read_by_key_and_written_held_to_its_version() {
             {"name": "counts", "key": "scope", "fields": ["scope", "last"], "shared": true},
             {"name": "notes", "key": "at", "fields": ["at", "text"]}
         ])
+    );
+}
+
+#[test]
+fn an_operation_writes_its_rows_own_fields_through_an_updates_rules() {
+    let core = core();
+    let spec = TypeSpec::new("Page")
+        .with(UseSpec::on_type("Editor", None))
+        .with_field(FieldSpec::new("title", "string"))
+        .with_field(FieldSpec::new("body", "string"));
+    let page = || {
+        Memory::default().with(
+            "Page",
+            "p1",
+            row(json!({"title": "Old", "body": "b"}), json!({}), 4),
+        )
+    };
+    let retitle = |params: Value| {
+        command(alice(), invoke("p1", "Editor", "retitle", params))
+            .with_preconditions(object(json!({"Editor": {"at": 4}})))
+    };
+    // The patch is the row's write, each field it names at its value after
+    // it, and the after-change hook hears the fields as they were.
+    let written = changed(core.drive(
+        &spec,
+        &retitle(json!({"title": "New", "body": null})),
+        &mut page(),
+    ));
+    assert_eq!(written.result, json!(true));
+    assert_eq!(
+        serde_json::to_value(&written.rows).unwrap(),
+        json!([{"kind": "update", "type": "Page", "key": "p1", "expectedVersion": 4,
+                "own": {"title": "New", "body": null}, "owned": {"Editor": {"heard": "Old"}}}])
+    );
+    // A patch that changes nothing writes no own field and asks no guard,
+    // and the operation's change hears no fields before it.
+    let unchanged = changed(core.drive(&spec, &retitle(json!({"title": "Old"})), &mut page()));
+    assert_eq!(unchanged.result, json!(false));
+    assert_eq!(
+        serde_json::to_value(&unchanged.rows).unwrap(),
+        json!([{"kind": "update", "type": "Page", "key": "p1", "expectedVersion": 4,
+                "own": {}, "owned": {"Editor": {"heard": "none"}}}])
+    );
+    // The patch meets the update's validation, and every guard, which is
+    // handed no precondition: the command's are the operation's.
+    let invalid = refused(core.drive(&spec, &retitle(json!({"title": "bad"})), &mut page()));
+    assert_eq!(invalid.code, Code::InvalidInstance);
+    assert_eq!(
+        invalid.details.map(|details| Value::Object(*details)),
+        Some(
+            json!({"issues": [{"path": "title", "rule": "bad", "message": "title may not be bad"}]})
+        )
+    );
+    let vetoed = refused(core.drive(&spec, &retitle(json!({"title": "held"})), &mut page()));
+    assert_eq!(vetoed.code, Code::Vetoed);
+    assert_eq!(
+        vetoed.message,
+        "behavior Editor vetoes update of Page p1: held (precondition None)"
+    );
+    // A read-only operation, and a hook that is no operation's handler,
+    // write no own field.
+    let read_only = refused(core.drive(
+        &spec,
+        &command(
+            alice(),
+            invoke("p1", "Editor", "peek", json!({"title": "New"})),
+        ),
+        &mut page(),
+    ));
+    assert_eq!(read_only.code, Code::BehaviorError);
+    assert!(
+        read_only
+            .message
+            .ends_with("update(): a read-only operation writes nothing"),
+        "{}",
+        read_only.message
+    );
+    let hook = refused(core.drive(
+        &spec,
+        &command(
+            alice(),
+            Action::Create {
+                id: Some("p2".into()),
+                own: object(json!({"title": "init"})),
+                params: Map::new(),
+            },
+        ),
+        &mut page(),
+    ));
+    assert_eq!(hook.code, Code::BehaviorError);
+    assert!(
+        hook.message.ends_with(
+            "update() is an operation's: an initializer, a deadline and an after-change hook write the use's own state alone"
+        ),
+        "{}",
+        hook.message
     );
 }

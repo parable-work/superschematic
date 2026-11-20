@@ -90,7 +90,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 21] = [
+const TRANSCRIPTS: [(&str, usize); 22] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -112,6 +112,7 @@ const TRANSCRIPTS: [(&str, usize); 21] = [
     ("core-pool", POOL_FLOOR),
     ("core-numbering", NUMBERING_FLOOR),
     ("core-lease-numbering", LEASE_NUMBERING_FLOOR),
+    ("core-revisions", REVISIONS_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -124,9 +125,10 @@ const TIMERS_FLOOR: usize = 139;
 /// 476 commands (252 of them changes the runner ran) and 110 checks.
 const REACTIONS_FLOOR: usize = 586;
 
-/// core-reactions-changes' floor, as the core's milestone states it: 60
-/// steps, 48 commands (24 of them changes) and 12 checks.
-const REACTIONS_CHANGES_FLOOR: usize = 60;
+/// core-reactions-changes' floor, as the core's milestone states it: 62
+/// steps, 48 commands (24 of them changes) and 14 checks, the scenario
+/// beside Revisions holding its first define and publish (D103's step 4).
+const REACTIONS_CHANGES_FLOOR: usize = 62;
 
 /// core-workflow-principals' floor, as the core's milestone states it: 101
 /// steps of the scenarios written by hand (D104, and D113's of a state
@@ -141,9 +143,11 @@ const WORKFLOW_PRINCIPALS_FLOOR: usize = 101;
 /// among their values) and 19 checks (D104).
 const CONSTANTS_FLOOR: usize = 39;
 
-/// core-staterules' floor, as the core's milestone states it: 76 steps, 43
-/// commands (13 of them transitions) and 33 checks (D104).
-const STATERULES_FLOOR: usize = 76;
+/// core-staterules' floor, as the core's milestone states it: 88 steps, 49
+/// commands (transitions, test.Recorder's operations, each a write of the
+/// row's own fields through `update()`, and Revisions' writes beside
+/// StateRules') and 39 checks (D104, D103's step 4).
+const STATERULES_FLOOR: usize = 88;
 
 /// core-approvals' floor, as the core's milestone states it: 122 steps, 93
 /// commands (71 of them operations, the sign-offs kept in a sub-table, and
@@ -235,13 +239,19 @@ const SCHEDULES_FLOOR: usize = 161;
 /// whose result and events the replay compares.
 const POOL_FLOOR: usize = 82;
 
-/// core-numbering's floor (D103's step 4): 93 steps, 51 commands and 42
+/// core-numbering's floor (D103's step 4): 104 steps, 58 commands and 46
 /// checks, each create's number taken from Numbering's shared table of
-/// counts, which this replay keeps as a table of its own.
-const NUMBERING_FLOOR: usize = 93;
+/// counts, which this replay keeps as a table of its own, and the scenario
+/// beside Revisions among them.
+const NUMBERING_FLOOR: usize = 104;
 
 /// core-lease-numbering's floor: 14 steps, 8 commands and 6 checks.
 const LEASE_NUMBERING_FLOOR: usize = 14;
+
+/// core-revisions' floor (D103's step 4): 104 steps, 69 commands and 35
+/// checks, each revision and proposal a row of a sub-table of the use, and
+/// each approval an operation's write of the row's own fields.
+const REVISIONS_FLOOR: usize = 104;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

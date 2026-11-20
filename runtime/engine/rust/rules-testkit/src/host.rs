@@ -169,6 +169,10 @@ pub struct Logged {
     /// The owned fields the row held before the write, by use id; empty
     /// for a create.
     pub before: BTreeMap<String, Map<String, Value>>,
+    /// Whether the write left the row's own and owned fields as they were:
+    /// an update that changed nothing, which the engine answered with no
+    /// write and logged no event of.
+    pub unchanged: bool,
 }
 
 impl Logged {
@@ -910,6 +914,7 @@ impl Store {
                 deleted.push((write.type_name().to_owned(), key.clone()));
             }
             let left = self.row(write.type_name(), &key).map(StoredRow::image);
+            let unchanged = matches!(write, RowWrite::Update { .. }) && image == left;
             self.queue(write.type_name(), &key, command.now, image, left);
             let mut logged = write.clone();
             if let RowWrite::Create { key: slot, .. } = &mut logged {
@@ -921,6 +926,7 @@ impl Store {
                 command: command.clone(),
                 write: logged,
                 before,
+                unchanged,
             });
         }
         if let Action::Deadline {

@@ -11,8 +11,9 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-numbering.json` the replayer maps and compares: 127
-/// of its 209, in its 12 scenarios. The 82 it skips: the two scenarios whose
+/// The steps of `core-numbering.json` the replayer maps and compares: 140
+/// of its 209, in its 12 scenarios, the 13 of the scenario beside Revisions
+/// among them. The 69 it skips: the two scenarios whose
 /// test batches its creates in a function of its own (`storage.transaction`
 /// with a JavaScript callback), which only the recording's host runs (39
 /// steps); the 23 defines a type that lists Links refuses, whose paths and
@@ -20,11 +21,12 @@ use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 /// whose refusals in the core's words `rules-behaviors`' tests hold; the
 /// define of a scope link that holds many targets, which a relation cannot;
 /// the two creates and the update the store's own-field validation or Links
-/// refuses; a read of the event log that holds a Links operation; the two
-/// describes; and the 13 steps of the scenario beside Revisions, which the
-/// core does not run yet. The `open` steps that run count but compare
-/// nothing.
-const FLOOR: usize = 127;
+/// refuses; a read of the event log that holds a Links operation; and the
+/// two describes. The `open` steps that run count but compare nothing. A
+/// revision a Revisions operation answers is compared without the own
+/// fields the replayer gives a row (the link's key and createdAt), as a
+/// record is.
+const FLOOR: usize = 140;
 
 /// The steps of `workqueue-lease-numbering.json` it maps and compares: all
 /// 16 of its one scenario, a create numbered under another principal's

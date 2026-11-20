@@ -57,6 +57,11 @@
 //! read through [`capacity`], the first contract between behaviors, which a
 //! declaration names and the core resolves by declarations. Lease's
 //! `expireHolder` runs as a command without a row too.
+//! [`Numbering`] and [`Revisions`], in step 4 of D103's order of the work:
+//! a number per row printed by a format and counted per scope in a table
+//! the use keeps for the table as a whole; and the history of a row's own
+//! fields with a review step whose approval writes them through an
+//! update's rules.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -98,6 +103,7 @@ pub mod presence;
 pub mod reactions;
 pub mod reconcile;
 pub mod retries;
+pub mod revisions;
 pub mod schedules;
 mod schema;
 pub mod seats;
@@ -126,6 +132,7 @@ pub use reconcile::{Reconcile, ReconcileConfig};
 pub use retries::{
     Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
+pub use revisions::{Revisions, RevisionsConfig, RevisionsReview};
 pub use schedules::{Schedules, SchedulesConfig, SchedulesKind, SchedulesRetry};
 pub use seats::{SeatRef, Seats, SeatsConfig, SeatsOnFull, SeatsSeat};
 pub use staterules::{StateRule, StateRules, StateRulesConfig};
@@ -144,7 +151,7 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
 /// core implements (D104), then those D103's step 4 ports in its later
 /// waves, in the order they were ported.
-pub const NAMES: [&str; 15] = [
+pub const NAMES: [&str; 16] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -160,6 +167,7 @@ pub const NAMES: [&str; 15] = [
     schedules::NAME,
     pool::NAME,
     numbering::NAME,
+    revisions::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -167,7 +175,7 @@ pub const NAMES: [&str; 15] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 15] = [
+pub const DECLARATIONS: [&str; 16] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -183,6 +191,7 @@ pub const DECLARATIONS: [&str; 15] = [
     schedules::DECLARATION,
     pool::DECLARATION,
     numbering::DECLARATION,
+    revisions::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -210,6 +219,7 @@ pub fn core() -> Core {
         .with(Schedules)
         .with(Pool)
         .with(Numbering)
+        .with(Revisions)
 }
 
 #[cfg(test)]

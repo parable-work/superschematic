@@ -16,7 +16,8 @@
     "Reconcile",
     "Schedules",
     "Pool",
-    "Numbering"
+    "Numbering",
+    "Revisions"
   ],
   "scenarios": [
     {
@@ -4423,68 +4424,964 @@
     {
       "name": "StateRules (node) > Revisions: propose accepts a patch to a frozen field, which asks no guard, and approve is vetoed",
       "clock": "wall",
-      "types": [],
-      "steps": [],
+      "types": [
+        {
+          "name": "invoices",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "customer",
+              "type": "string"
+            },
+            {
+              "name": "amount",
+              "type": "object"
+            },
+            {
+              "name": "lines",
+              "type": "array"
+            },
+            {
+              "name": "notes",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "invoices",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "sent",
+                      "paid",
+                      "void"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "sent"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "draft"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "paid"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "void"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "void"
+                      }
+                    ],
+                    "outcomes": {
+                      "void": "neutral"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "StateRules",
+                  "config": {
+                    "states": {
+                      "sent": {
+                        "required": [
+                          "customer",
+                          "amount",
+                          "lines"
+                        ],
+                        "frozen": [
+                          "customer",
+                          "amount",
+                          "lines"
+                        ]
+                      },
+                      "paid": {
+                        "frozen": "all"
+                      },
+                      "void": {
+                        "frozen": "all"
+                      }
+                    },
+                    "permission": "invoices.amend"
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Revisions",
+                  "config": {
+                    "review": {
+                      "permission": "invoices.review"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "customer",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lines",
+                  "type": "string"
+                },
+                {
+                  "name": "notes",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "invoices",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "sent",
+                    "paid",
+                    "void"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "sent"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "paid"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "void"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "void"
+                    }
+                  ],
+                  "outcomes": {
+                    "void": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "sent": {
+                      "required": [
+                        "customer",
+                        "amount",
+                        "lines"
+                      ],
+                      "frozen": [
+                        "customer",
+                        "amount",
+                        "lines"
+                      ]
+                    },
+                    "paid": {
+                      "frozen": "all"
+                    },
+                    "void": {
+                      "frozen": "all"
+                    }
+                  },
+                  "permission": "invoices.amend"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "invoices.review"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "customer",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "lines",
+                "type": "string"
+              },
+              {
+                "name": "notes",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "invoices",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "sent",
+                    "paid",
+                    "void"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "sent"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "paid"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "void"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "void"
+                    }
+                  ],
+                  "outcomes": {
+                    "void": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "sent": {
+                      "required": [
+                        "customer",
+                        "amount",
+                        "lines"
+                      ],
+                      "frozen": [
+                        "customer",
+                        "amount",
+                        "lines"
+                      ]
+                    },
+                    "paid": {
+                      "frozen": "all"
+                    },
+                    "void": {
+                      "frozen": "all"
+                    }
+                  },
+                  "permission": "invoices.amend"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "invoices.review"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "customer",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "lines",
+                "type": "string"
+              },
+              {
+                "name": "notes",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "invoices",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "cleo",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "i1",
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ]
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "i1",
+            "row": {
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ]
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ]
+                      },
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "invoices",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "cleo",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "sent"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "sent"
+            },
+            "row": {
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ]
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "sent",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ]
+                      },
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "invoices",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "cleo",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "propose",
+              "params": {
+                "patch": {
+                  "amount": 1300
+                }
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "amount": 1300
+              },
+              "base": 1,
+              "state": "pending",
+              "createdBy": "cleo",
+              "createdAt": 1767225600005
+            },
+            "row": {
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ]
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "sent",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "amount": 1300
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600005
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ]
+                      },
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "invoices",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rae",
+              "permissions": [
+                "invoices.review"
+              ]
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "approve",
+              "params": {
+                "proposal": 1
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior StateRules vetoes update of invoices i1: invoices i1 is sent, which freezes amount: it does not change while it is sent; only a caller with invoices.amend may change it",
+              "details": {
+                "behavior": "StateRules",
+                "action": "update",
+                "reason": "invoices i1 is sent, which freezes amount: it does not change while it is sent; only a caller with invoices.amend may change it",
+                "vetoCode": "frozen_fields",
+                "vetoDetails": {
+                  "state": "sent",
+                  "fields": [
+                    "amount"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ]
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "sent",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "amount": 1300
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600005
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ]
+                      },
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "invoices",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "cleo",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "propose",
+              "params": {
+                "patch": {
+                  "notes": "Net 30"
+                }
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "patch": {
+                "notes": "Net 30"
+              },
+              "base": 1,
+              "state": "pending",
+              "createdBy": "cleo",
+              "createdAt": 1767225600008
+            },
+            "row": {
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ]
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                },
+                "Workflow": {
+                  "status": "sent",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "amount": 1300
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600005
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "patch": {
+                        "notes": "Net 30"
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600008
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ]
+                      },
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "invoices",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rae",
+              "permissions": [
+                "invoices.review"
+              ]
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "approve",
+              "params": {
+                "proposal": 2
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "id": 2,
+              "patch": {
+                "notes": "Net 30"
+              },
+              "base": 1,
+              "state": "approved",
+              "createdBy": "cleo",
+              "createdAt": 1767225600008,
+              "reviewedBy": "rae",
+              "reviewedAt": 1767225600009,
+              "revision": 2
+            },
+            "row": {
+              "own": {
+                "title": "March",
+                "customer": "Acme",
+                "amount": 1200,
+                "lines": [
+                  "Consulting"
+                ],
+                "notes": "Net 30"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                },
+                "Workflow": {
+                  "status": "sent",
+                  "enteredAt": 1767225600004
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "amount": 1300
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600005
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "patch": {
+                        "notes": "Net 30"
+                      },
+                      "base": 1,
+                      "state": "approved",
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600008,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 1767225600009,
+                      "revision": 2
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ]
+                      },
+                      "createdBy": "cleo",
+                      "createdAt": 1767225600003
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "March",
+                        "customer": "Acme",
+                        "amount": 1200,
+                        "lines": [
+                          "Consulting"
+                        ],
+                        "notes": "Net 30"
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 1767225600009,
+                      "proposal": 2
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 5,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 6,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 7,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 8,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 9,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 10,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 11,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         },
         {
           "step": 12,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         }
       ]
     },
@@ -8155,43 +9052,847 @@
     {
       "name": "StateRules (node) > it tells a create, a transition, an update and an approval what each state requires and freezes",
       "clock": "wall",
-      "types": [],
-      "steps": [],
+      "types": [
+        {
+          "name": "invoices",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "customer",
+              "type": "string"
+            },
+            {
+              "name": "amount",
+              "type": "object"
+            },
+            {
+              "name": "lines",
+              "type": "array"
+            },
+            {
+              "name": "notes",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "invoices",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "sent",
+                      "paid",
+                      "void"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "sent"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "draft"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "paid"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "void"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "void"
+                      }
+                    ],
+                    "outcomes": {
+                      "void": "neutral"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "StateRules",
+                  "config": {
+                    "states": {
+                      "draft": {
+                        "required": [
+                          "title"
+                        ]
+                      },
+                      "sent": {
+                        "required": [
+                          "customer",
+                          "amount"
+                        ],
+                        "frozen": [
+                          "customer",
+                          "amount"
+                        ]
+                      },
+                      "paid": {
+                        "frozen": "all"
+                      }
+                    },
+                    "permission": "invoices.amend"
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Revisions",
+                  "config": {
+                    "review": {
+                      "permission": "invoices.review"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "customer",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lines",
+                  "type": "string"
+                },
+                {
+                  "name": "notes",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "name": "invoices",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "sent",
+                      "paid",
+                      "void"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "sent"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "draft"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "paid"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "void"
+                      },
+                      {
+                        "from": "sent",
+                        "to": "void"
+                      }
+                    ],
+                    "outcomes": {
+                      "void": "neutral"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "StateRules",
+                  "config": {
+                    "states": {
+                      "paid": {
+                        "frozen": "all"
+                      }
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "customer",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "lines",
+                  "type": "string"
+                },
+                {
+                  "name": "notes",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "invoices",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "sent",
+                    "paid",
+                    "void"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "sent"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "paid"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "void"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "void"
+                    }
+                  ],
+                  "outcomes": {
+                    "void": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "draft": {
+                      "required": [
+                        "title"
+                      ]
+                    },
+                    "sent": {
+                      "required": [
+                        "customer",
+                        "amount"
+                      ],
+                      "frozen": [
+                        "customer",
+                        "amount"
+                      ]
+                    },
+                    "paid": {
+                      "frozen": "all"
+                    }
+                  },
+                  "permission": "invoices.amend"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "invoices.review"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "customer",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "lines",
+                "type": "string"
+              },
+              {
+                "name": "notes",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "invoices",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "sent",
+                    "paid",
+                    "void"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "sent"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "paid"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "void"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "void"
+                    }
+                  ],
+                  "outcomes": {
+                    "void": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "draft": {
+                      "required": [
+                        "title"
+                      ]
+                    },
+                    "sent": {
+                      "required": [
+                        "customer",
+                        "amount"
+                      ],
+                      "frozen": [
+                        "customer",
+                        "amount"
+                      ]
+                    },
+                    "paid": {
+                      "frozen": "all"
+                    }
+                  },
+                  "permission": "invoices.amend"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "invoices.review"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "customer",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "lines",
+                "type": "string"
+              },
+              {
+                "name": "notes",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "invoices",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "sent",
+                    "paid",
+                    "void"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "sent"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "paid"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "void"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "void"
+                    }
+                  ],
+                  "outcomes": {
+                    "void": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "paid": {
+                      "frozen": "all"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "customer",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "lines",
+                "type": "string"
+              },
+              {
+                "name": "notes",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "invoices",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "sent",
+                        "paid",
+                        "void"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "sent"
+                        },
+                        {
+                          "from": "sent",
+                          "to": "draft"
+                        },
+                        {
+                          "from": "sent",
+                          "to": "paid"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "void"
+                        },
+                        {
+                          "from": "sent",
+                          "to": "void"
+                        }
+                      ],
+                      "outcomes": {
+                        "void": "neutral"
+                      }
+                    },
+                    "anchor": "type"
+                  },
+                  {
+                    "behavior": "StateRules",
+                    "config": {
+                      "states": {
+                        "draft": {
+                          "required": [
+                            "title"
+                          ]
+                        },
+                        "sent": {
+                          "required": [
+                            "customer",
+                            "amount"
+                          ],
+                          "frozen": [
+                            "customer",
+                            "amount"
+                          ]
+                        },
+                        "paid": {
+                          "frozen": "all"
+                        }
+                      },
+                      "permission": "invoices.amend"
+                    },
+                    "anchor": "type"
+                  },
+                  {
+                    "behavior": "Revisions",
+                    "config": {
+                      "review": {
+                        "permission": "invoices.review"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "customer",
+                    "type": "string"
+                  },
+                  {
+                    "name": "amount",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "lines",
+                    "type": "string"
+                  },
+                  {
+                    "name": "notes",
+                    "type": "string"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "invoices",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "sent",
+                    "paid",
+                    "void"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "sent"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "draft"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "paid"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "void"
+                    },
+                    {
+                      "from": "sent",
+                      "to": "void"
+                    }
+                  ],
+                  "outcomes": {
+                    "void": "neutral"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "StateRules",
+                "config": {
+                  "states": {
+                    "paid": {
+                      "frozen": "all"
+                    }
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "customer",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "lines",
+                "type": "string"
+              },
+              {
+                "name": "notes",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "invoices",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "sent",
+                        "paid",
+                        "void"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "sent"
+                        },
+                        {
+                          "from": "sent",
+                          "to": "draft"
+                        },
+                        {
+                          "from": "sent",
+                          "to": "paid"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "void"
+                        },
+                        {
+                          "from": "sent",
+                          "to": "void"
+                        }
+                      ],
+                      "outcomes": {
+                        "void": "neutral"
+                      }
+                    },
+                    "anchor": "type"
+                  },
+                  {
+                    "behavior": "StateRules",
+                    "config": {
+                      "states": {
+                        "draft": {
+                          "required": [
+                            "title"
+                          ]
+                        },
+                        "sent": {
+                          "required": [
+                            "customer",
+                            "amount"
+                          ],
+                          "frozen": [
+                            "customer",
+                            "amount"
+                          ]
+                        },
+                        "paid": {
+                          "frozen": "all"
+                        }
+                      },
+                      "permission": "invoices.amend"
+                    },
+                    "anchor": "type"
+                  },
+                  {
+                    "behavior": "Revisions",
+                    "config": {
+                      "review": {
+                        "permission": "invoices.review"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "customer",
+                    "type": "string"
+                  },
+                  {
+                    "name": "amount",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "lines",
+                    "type": "string"
+                  },
+                  {
+                    "name": "notes",
+                    "type": "string"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 4,
           "call": "tools.describe",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 5,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 6,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "tools.describe is outside the reference host's surface; it changes nothing"
         },
         {
           "step": 7,
           "call": "tools.describe",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "tools.describe is outside the reference host's surface; it changes nothing"
         }
       ]
     }

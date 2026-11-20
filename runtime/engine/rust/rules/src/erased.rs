@@ -35,6 +35,9 @@ pub(crate) struct Scope<'s> {
     pub writable: bool,
     pub own: bool,
     pub fired: bool,
+    /// Whether this is an operation's handler, which may write its row's
+    /// own fields ([`crate::Cx::update`]).
+    pub handler: bool,
     pub precondition: Option<&'s Value>,
 }
 
@@ -148,6 +151,7 @@ impl<B: Behavior> Typed<B> {
             writable: scope.writable,
             own: scope.own,
             fired: scope.fired,
+            handler: scope.handler,
         })
     }
 }

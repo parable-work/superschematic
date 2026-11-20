@@ -119,10 +119,10 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-workflow', floor: 96 },
   { file: 'core-timers', floor: 139 },
   { file: 'core-reactions', floor: 586 },
-  { file: 'core-reactions-changes', floor: 60 },
+  { file: 'core-reactions-changes', floor: 62 },
   { file: 'core-workflow-principals', floor: 101 },
   { file: 'core-constants', floor: 39 },
-  { file: 'core-staterules', floor: 76 },
+  { file: 'core-staterules', floor: 88 },
   { file: 'core-approvals', floor: 122 },
   { file: 'core-freezes-and-sign-offs', floor: 115 },
   { file: 'core-lease', floor: 449 },
@@ -135,8 +135,9 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
   { file: 'core-pool', floor: 82 },
-  { file: 'core-numbering', floor: 93 },
+  { file: 'core-numbering', floor: 104 },
   { file: 'core-lease-numbering', floor: 14 },
+  { file: 'core-revisions', floor: 104 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

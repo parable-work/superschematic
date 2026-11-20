@@ -84,10 +84,10 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-workflow.transcript.json", 96},
 	{"../../engine/testdata/rules/core-timers.transcript.json", 139},
 	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
-	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
+	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 62},
 	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 101},
 	{"../../engine/testdata/rules/core-constants.transcript.json", 39},
-	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
+	{"../../engine/testdata/rules/core-staterules.transcript.json", 88},
 	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
 	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
 	{"../../engine/testdata/rules/core-lease.transcript.json", 449},
@@ -100,8 +100,9 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
-	{"../../engine/testdata/rules/core-numbering.transcript.json", 93},
+	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},
 	{"../../engine/testdata/rules/core-lease-numbering.transcript.json", 14},
+	{"../../engine/testdata/rules/core-revisions.transcript.json", 104},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of

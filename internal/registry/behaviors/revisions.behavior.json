@@ -17,8 +17,41 @@
     }
   },
   "fields": [
-    { "name": "revision", "description": "The number of the instance's latest revision." },
+    { "name": "revision", "description": "The number of the instance's latest revision; absent before its first.", "type": "Generic.Int64" },
     { "name": "pendingProposals", "description": "With review in the config, how many of the instance's proposals are pending; absent without review." }
+  ],
+  "tables": [
+    {
+      "name": "revisions",
+      "description": "On a table, one row per revision of the row, keyed by its number: the own fields as the change left them, who made it and when, and the proposal whose approval made it. A revision is never changed or removed while the row exists; a delete of the row deletes them.",
+      "key": "revision",
+      "fields": [
+        { "name": "revision", "description": "The revision's number on the row, from 1, in ten digits zero-padded so the key's order is theirs.", "type": "string" },
+        { "name": "data", "description": "The row's own fields as the change left them.", "type": "Generic.JSON" },
+        { "name": "createdBy", "description": "The subject of the caller whose change it records.", "type": "string" },
+        { "name": "createdAt", "description": "When, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "proposal", "description": "The proposal whose approval made it; absent for any other change.", "type": "Generic.Int64" }
+      ]
+    },
+    {
+      "name": "proposals",
+      "description": "On a table, one row per proposal on the row, keyed by its number: the merge patch, the note and the evidence it was proposed with, the revision it was made against, its state, and who settled it, when, why and the revision its approval made. A delete of the row deletes them.",
+      "key": "proposal",
+      "fields": [
+        { "name": "proposal", "description": "The proposal's number on the row, from 1, in ten digits zero-padded so the key's order is theirs.", "type": "string" },
+        { "name": "patch", "description": "The JSON merge patch of the row's own fields it proposes.", "type": "Generic.JSON" },
+        { "name": "note", "description": "Why, for the reviewer.", "type": "string" },
+        { "name": "evidence", "description": "The rows it cites, as given.", "type": "Generic.JSON" },
+        { "name": "base", "description": "The row's revision when it was proposed; absent before its first.", "type": "Generic.Int64" },
+        { "name": "state", "description": "pending, approved or rejected.", "type": "string" },
+        { "name": "createdBy", "description": "The subject of the caller who proposed it.", "type": "string" },
+        { "name": "createdAt", "description": "When it was proposed, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "reviewedBy", "description": "The subject of the caller who settled it.", "type": "string" },
+        { "name": "reviewedAt", "description": "When it was settled, in epoch milliseconds.", "type": "Temporal.DateTime" },
+        { "name": "reason", "description": "Why it was rejected, for the proposer.", "type": "string" },
+        { "name": "revision", "description": "The revision its approval made, or the latest one when the row already had its patch.", "type": "Generic.Int64" }
+      ]
+    }
   ],
   "operations": [
     {

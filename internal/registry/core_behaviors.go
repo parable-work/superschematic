@@ -117,11 +117,12 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // since the rest of it) and carries one that does on a field (status:
 // Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3,
 // and number: Numbering<C> since D103's step 4, which ports the engine's
-// remaining behaviors in waves after them). A test holds the list to the
-// behaviors each transcript of runtime/engine/testdata/rules records.
+// remaining behaviors in waves after them, and implements Revisions<T, C>
+// since that step too). A test holds the list to the behaviors each
+// transcript of runtime/engine/testdata/rules records.
 var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool",
 	// D103's step 4, its later waves, in the order they were ported.
-	"Numbering",
+	"Numbering", "Revisions",
 }
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name

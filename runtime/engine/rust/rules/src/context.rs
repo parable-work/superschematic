@@ -18,8 +18,11 @@
 //! A use writes only its own state: its owned fields and sub-tables, by
 //! their declared names, and its deadlines, on the row it runs on. It
 //! reaches another use's state, on its row or another, through that use's
-//! operations ([`Cx::call`], [`Cx::call_on`]). The command's own operation
-//! may write nothing at all ([`Cx::unchanged`]), as an idempotent one does.
+//! operations ([`Cx::call`], [`Cx::call_on`]). An operation's handler also
+//! writes its row's own fields, held to an update's validation and guards
+//! ([`Cx::update`], D103's step 4: Revisions' approve). The command's own
+//! operation may write nothing at all ([`Cx::unchanged`]), as an idempotent
+//! one does.
 //!
 //! An operation of the table as a whole (D104) runs on no row
 //! ([`View::on_table`]): it reads the rows of a type through
@@ -392,6 +395,9 @@ pub struct Cx<'r, C> {
     /// Whether this is the handler of the command's own operation, the one
     /// whose [`Cx::unchanged`] the core honors.
     pub(crate) own: bool,
+    /// Whether this is an operation's handler, the one context that writes
+    /// its row's own fields ([`Cx::update`]).
+    pub(crate) handler: bool,
     /// Whether this is a deadline's handler, whose calls on its row a guard
     /// is told are the worker's requests ([`crate::GuardRequest`]'s
     /// `fired`).
@@ -475,6 +481,52 @@ impl<'r, C> Cx<'r, C> {
         view.run
             .set_owned(view.frame.row, view.use_id(), field, value.into());
         Ok(())
+    }
+
+    /// Writes the row's own fields with a JSON merge patch, from an
+    /// operation's handler (D103's step 4; the engine's `update()`): the
+    /// patch is held to an update's validation and to every use's guard,
+    /// as a caller's update of the row is, though no guard is handed a
+    /// precondition, since the command's are the operation's; and the
+    /// operation's after-change hooks hear the own fields as they were
+    /// before it ([`crate::Change::Operation`]'s `before`). A field
+    /// anchor's field is its behavior's, which no patch writes. A patch
+    /// that leaves the fields as they are asks no guard and writes nothing.
+    /// Answers whether it changed them. A patch that is not an object, and
+    /// a call from any context but an operation's handler, is a defect.
+    pub fn update(&self, patch: &Value) -> Hook<bool> {
+        self.off_table("update()")?;
+        self.writing("update()")?;
+        if !self.handler {
+            return Err(self.defect(
+                "update() is an operation's: an initializer, a deadline and an after-change hook write the use's own state alone",
+            ));
+        }
+        let Some(patch) = patch.as_object() else {
+            return Err(self.defect(
+                "update() takes a JSON merge patch of the row's own fields: a JSON object",
+            ));
+        };
+        self.view
+            .run
+            .update_own(self.view.frame, self.view.index, patch)
+    }
+
+    /// Holds a JSON merge patch of the row's own fields to an update's
+    /// validation, as [`Cx::update`] would, and writes nothing: whether a
+    /// patch kept for later would leave the row valid now (Revisions'
+    /// propose). Asks no guard. A patch that is not an object is a defect.
+    pub fn validate_update(&self, patch: &Value) -> Hook<()> {
+        self.off_table("validate_update()")?;
+        let Some(patch) = patch.as_object() else {
+            return Err(self.defect(
+                "validate_update() takes a JSON merge patch of the row's own fields: a JSON object",
+            ));
+        };
+        self.view
+            .run
+            .validate_own(self.view.frame, self.view.index, patch)
+            .map(|_| ())
     }
 
     /// Inserts a row of one of the use's sub-tables, by a key it makes

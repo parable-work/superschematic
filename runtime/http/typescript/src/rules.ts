@@ -2152,20 +2152,23 @@ function deadlineStatements(table: RulesTable, dialect: RulesDialect, key: strin
 
 /**
  * The own columns a write sets: the caller's encoded columns for the
- * command's own row, else each own field of the change set by the layout's
- * column. A null for a field the table has no column for clears nothing,
- * as a merge patch's null for a member the document lacks; a value for one
- * refuses the command as internal.
+ * command's own row, then each own field of the change set by the layout's
+ * column that they do not name: an operation's write of the row's own
+ * fields (Revisions' approve, D103's step 4) beside the audit stamps its
+ * caller encoded. A null for a field the table has no column for clears
+ * nothing, as a merge patch's null for a member the document lacks; a
+ * value for one refuses the command as internal.
  */
 function ownColumns(table: RulesTable, dialect: RulesDialect, own: Readonly<Record<string, unknown>> | undefined, encoded: Readonly<Record<string, unknown>> | undefined): (readonly [string, unknown])[] {
-  if (encoded !== undefined) return Object.entries(encoded);
-  const out: (readonly [string, unknown])[] = [];
+  const out: (readonly [string, unknown])[] = Object.entries(encoded ?? {});
+  const named = new Set(out.map(([column]) => column));
   for (const [field, value] of Object.entries(own ?? {})) {
     const column = table.own.find(c => c.field === field);
     if (column === undefined) {
       if (value === null) continue;
       throw internal(`${table.type} has no own field ${field} in the behaviors' layout`);
     }
+    if (named.has(column.column)) continue;
     out.push([column.column, toColumn(value, column, table, dialect)]);
   }
   return out;

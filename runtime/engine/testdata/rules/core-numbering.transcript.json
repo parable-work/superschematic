@@ -16,7 +16,8 @@
     "Reconcile",
     "Schedules",
     "Pool",
-    "Numbering"
+    "Numbering",
+    "Revisions"
   ],
   "scenarios": [
     {
@@ -5914,74 +5915,824 @@
     },
     {
       "name": "Numbering (node) > beside Revisions: an approved proposal keeps the number, and a revision holds the own fields alone",
-      "clock": "wall",
-      "types": [],
-      "steps": [],
+      "clock": {
+        "fixed": 1772323200000
+      },
+      "types": [
+        {
+          "name": "Customer",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Customer",
+              "uses": [],
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Invoice",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "note",
+              "type": "string"
+            },
+            {
+              "name": "customerId",
+              "type": "string"
+            },
+            {
+              "name": "referrerId",
+              "type": "string"
+            },
+            {
+              "name": "createdAt",
+              "type": "number"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Invoice",
+              "uses": [
+                {
+                  "behavior": "Numbering",
+                  "config": {
+                    "format": "INV-{seq}"
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Revisions",
+                  "config": {
+                    "review": {
+                      "permission": "invoices.review"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "note",
+                  "type": "string"
+                },
+                {
+                  "name": "customerId",
+                  "type": "string",
+                  "relation": {
+                    "name": "customer",
+                    "type": "Customer"
+                  }
+                },
+                {
+                  "name": "referrerId",
+                  "type": "string",
+                  "relation": {
+                    "name": "referrer",
+                    "type": "Customer"
+                  }
+                },
+                {
+                  "name": "createdAt",
+                  "type": "Temporal.DateTime",
+                  "dateTime": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Customer",
+            "uses": [],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Customer",
+            "uses": [],
+            "fields": [
+              {
+                "name": "name",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Customer",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "name": "c1"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {
+                "name": "c1"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Customer",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": "c2"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "c2",
+            "row": {
+              "own": {
+                "name": "c2"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Invoice",
+            "uses": [
+              {
+                "behavior": "Numbering",
+                "config": {
+                  "format": "INV-{seq}"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "invoices.review"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "note",
+                "type": "string"
+              },
+              {
+                "name": "customerId",
+                "type": "string",
+                "relation": {
+                  "name": "customer",
+                  "type": "Customer"
+                }
+              },
+              {
+                "name": "referrerId",
+                "type": "string",
+                "relation": {
+                  "name": "referrer",
+                  "type": "Customer"
+                }
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Invoice",
+            "uses": [
+              {
+                "behavior": "Numbering",
+                "config": {
+                  "format": "INV-{seq}"
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "invoices.review"
+                  }
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "note",
+                "type": "string"
+              },
+              {
+                "name": "customerId",
+                "type": "string",
+                "relation": {
+                  "name": "customer",
+                  "type": "Customer"
+                }
+              },
+              {
+                "name": "referrerId",
+                "type": "string",
+                "relation": {
+                  "name": "referrer",
+                  "type": "Customer"
+                }
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Invoice",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "i1",
+              "own": {
+                "title": "i1",
+                "createdAt": 1772323200000,
+                "customerId": "c1"
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "i1",
+            "row": {
+              "own": {
+                "title": "i1",
+                "createdAt": 1772323200000,
+                "customerId": "c1"
+              },
+              "owned": {
+                "Numbering": {
+                  "seq": 1,
+                  "label": "INV-1"
+                },
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "i1",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Invoice",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "propose",
+              "params": {
+                "patch": {
+                  "note": "net 30"
+                }
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "note": "net 30"
+              },
+              "base": 1,
+              "state": "pending",
+              "createdBy": "alice",
+              "createdAt": 1772323200000
+            },
+            "row": {
+              "own": {
+                "title": "i1",
+                "createdAt": 1772323200000,
+                "customerId": "c1"
+              },
+              "owned": {
+                "Numbering": {
+                  "seq": 1,
+                  "label": "INV-1"
+                },
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "note": "net 30"
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "i1",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Invoice",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rae",
+              "permissions": [
+                "invoices.review"
+              ]
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "approve",
+              "params": {
+                "proposal": 1
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "note": "net 30"
+              },
+              "base": 1,
+              "state": "approved",
+              "createdBy": "alice",
+              "createdAt": 1772323200000,
+              "reviewedBy": "rae",
+              "reviewedAt": 1772323200000,
+              "revision": 2
+            },
+            "row": {
+              "own": {
+                "title": "i1",
+                "createdAt": 1772323200000,
+                "customerId": "c1",
+                "note": "net 30"
+              },
+              "owned": {
+                "Numbering": {
+                  "seq": 1,
+                  "label": "INV-1"
+                },
+                "Revisions": {
+                  "revision": 2
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "note": "net 30"
+                      },
+                      "base": 1,
+                      "state": "approved",
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 1772323200000,
+                      "revision": 2
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "i1",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "i1",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1",
+                        "note": "net 30"
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 1772323200000,
+                      "proposal": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Invoice",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "operation",
+              "key": "i1",
+              "useId": "Revisions",
+              "operation": "listRevisions",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "revision": 1,
+                  "data": {
+                    "title": "i1",
+                    "createdAt": 1772323200000,
+                    "customerId": "c1"
+                  },
+                  "createdBy": "alice",
+                  "createdAt": 1772323200000
+                },
+                {
+                  "revision": 2,
+                  "data": {
+                    "title": "i1",
+                    "createdAt": 1772323200000,
+                    "customerId": "c1",
+                    "note": "net 30"
+                  },
+                  "createdBy": "rae",
+                  "createdAt": 1772323200000,
+                  "proposal": 1
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "i1",
+                "createdAt": 1772323200000,
+                "customerId": "c1",
+                "note": "net 30"
+              },
+              "owned": {
+                "Numbering": {
+                  "seq": 1,
+                  "label": "INV-1"
+                },
+                "Revisions": {
+                  "revision": 2
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "note": "net 30"
+                      },
+                      "base": 1,
+                      "state": "approved",
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 1772323200000,
+                      "revision": 2
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "i1",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "i1",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1",
+                        "note": "net 30"
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 1772323200000,
+                      "proposal": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Invoice",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1772323200000,
+            "action": {
+              "kind": "create",
+              "id": "i2",
+              "own": {
+                "title": "i2",
+                "createdAt": 1772323200000,
+                "customerId": "c1"
+              },
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "key": "i2",
+            "row": {
+              "own": {
+                "title": "i2",
+                "createdAt": 1772323200000,
+                "customerId": "c1"
+              },
+              "owned": {
+                "Numbering": {
+                  "seq": 2,
+                  "label": "INV-2"
+                },
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "i2",
+                        "createdAt": 1772323200000,
+                        "customerId": "c1"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1772323200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 5,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 6,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 7,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 8,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 9,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 10,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         },
         {
           "step": 11,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 12,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Revisions"
-        },
-        {
-          "step": 13,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Revisions"
+          "reason": "a read of rows, which the transcript holds after each command that names one"
         }
       ]
     }

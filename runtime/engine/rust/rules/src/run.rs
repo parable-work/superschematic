@@ -146,6 +146,10 @@ pub(crate) struct Touched {
     pub write: Write,
     /// The owned fields the run set, by use id.
     pub set: BTreeMap<String, Map<String, Value>>,
+    /// The own fields as the run reached the row, once an operation wrote
+    /// them ([`crate::Cx::update`]): what its after-change hooks hear as
+    /// the fields before it.
+    pub initial: Option<Map<String, Value>>,
 }
 
 impl Touched {
@@ -158,6 +162,7 @@ impl Touched {
             version: Some(row.version),
             write: Write::Read,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -170,6 +175,7 @@ impl Touched {
             version: None,
             write: Write::Create,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -182,6 +188,7 @@ impl Touched {
             version: None,
             write: Write::Gone,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -196,6 +203,7 @@ impl Touched {
             version: None,
             write: Write::Table,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -1070,6 +1078,87 @@ impl<'a> Run<'a> {
             .insert(field.to_owned(), value);
     }
 
+    /// An operation's write of its row's own fields ([`crate::Cx::update`]):
+    /// the merge patch applied to the fields as the run has them, held to an
+    /// update's validation, the core's own issue first (a field anchor's
+    /// field), then to every use's guard, handed no precondition. One that
+    /// changes nothing asks no guard and writes nothing. The row's write
+    /// carries each field the patch names at its value after it, and the
+    /// row keeps its fields from before the first such write for its
+    /// after-change hooks. Answers whether it changed the fields.
+    pub fn update_own(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        patch: &Map<String, Value>,
+    ) -> Hook<bool> {
+        let (before, after) = self.validate_own(frame, index, patch)?;
+        if after == before {
+            return Ok(false);
+        }
+        self.guards_presenting(
+            frame,
+            &GuardRequest::Update {
+                patch,
+                after: &after,
+            },
+            false,
+        )?;
+        let written: Map<String, Value> = patch
+            .keys()
+            .map(|field| {
+                let value = after.get(field).cloned().unwrap_or(Value::Null);
+                (field.clone(), value)
+            })
+            .collect();
+        let mut rows = self.rows.borrow_mut();
+        let touched = &mut rows[frame.row];
+        touched.initial.get_or_insert(before);
+        match &mut touched.write {
+            Write::Read => touched.write = Write::Update(written),
+            Write::Update(own) => own.extend(written),
+            _ => {}
+        }
+        touched.own = after;
+        Ok(true)
+    }
+
+    /// Holds a merge patch of a row's own fields to an update's validation
+    /// ([`crate::Cx::validate_update`]), the core's own issue first, and
+    /// answers the fields before and after it; it writes nothing.
+    pub fn validate_own(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        patch: &Map<String, Value>,
+    ) -> Hook<(Map<String, Value>, Map<String, Value>)> {
+        let before = {
+            let rows = self.rows.borrow();
+            let touched = &rows[frame.row];
+            if !matches!(
+                touched.write,
+                Write::Read | Write::Create | Write::Update(_)
+            ) {
+                return Err(self.defect_of(
+                    frame,
+                    index,
+                    "the row is deleted, so a patch of its own fields changes nothing",
+                ));
+            }
+            touched.own.clone()
+        };
+        let after = merge_patch(&before, patch);
+        self.validation(
+            frame,
+            &ValidationRequest::Update {
+                before: &before,
+                after: &after,
+            },
+            anchored_writes(frame, patch),
+        )?;
+        Ok((before, after))
+    }
+
     /// A key for a row a use makes: derived from the command's request id,
     /// the use and a label, and counted, so each key of a run is new and a
     /// run again makes the same ones.
@@ -1295,12 +1384,14 @@ impl<'a> Run<'a> {
                         &format!("{use_id}.{operation} of {type_name} {key}"),
                     )?;
                     self.mark_updated(row);
+                    let initial = self.rows.borrow()[row].initial.clone();
                     self.after_change(
                         frame,
                         &Change::Operation {
                             use_id,
                             operation,
                             params,
+                            before: initial.as_ref(),
                         },
                         operation,
                     )?;
@@ -1560,12 +1651,14 @@ impl<'a> Run<'a> {
         // writes no row and runs no after-change hook.
         if declared.writes && !self.unchanged.get() {
             self.mark_updated(self.top.row);
+            let initial = self.rows.borrow()[self.top.row].initial.clone();
             self.after_change(
                 self.top,
                 &Change::Operation {
                     use_id,
                     operation,
                     params,
+                    before: initial.as_ref(),
                 },
                 operation,
             )?;
@@ -1922,6 +2015,7 @@ impl<'a> Run<'a> {
             writable,
             own: false,
             fired: false,
+            handler: false,
             precondition: None,
         }
     }
@@ -2135,7 +2229,6 @@ impl<'a> Run<'a> {
     /// command's preconditions; one asked about a create, any other
     /// `call()` or a `call_on()` is handed none (D16, D104).
     fn guards(&self, frame: Frame<'_>, request: &GuardRequest<'_>) -> Hook<()> {
-        let action = request.action();
         let presents = matches!(
             request,
             GuardRequest::Update { .. }
@@ -2146,6 +2239,18 @@ impl<'a> Run<'a> {
                     ..
                 }
         );
+        self.guards_presenting(frame, request, presents)
+    }
+
+    // guards_presenting asks every use's guard, handing each its entry of
+    // the command's preconditions when `presents`.
+    fn guards_presenting(
+        &self,
+        frame: Frame<'_>,
+        request: &GuardRequest<'_>,
+        presents: bool,
+    ) -> Hook<()> {
+        let action = request.action();
         for (index, bound) in frame.uses.iter().enumerate() {
             let precondition = if presents {
                 self.command.preconditions.get(bound.spec.id())
@@ -2257,6 +2362,7 @@ impl<'a> Run<'a> {
                 // command's own, whose unchanged() the core honors.
                 let scope = Scope {
                     own: caller.is_none(),
+                    handler: true,
                     ..self.scope(frame, index, &declared.name, declared.writes && writable)
                 };
                 let result = bound

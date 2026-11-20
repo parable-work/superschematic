@@ -255,7 +255,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries', 'Seats', 'Reconcile', 'Schedules', 'Pool', 'Numbering', 'Revisions']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -345,7 +345,9 @@ test('declarations are the registered files, each field typed and the value fiel
     { name: 'reconciledAt', type: 'Temporal.DateTime', optional: false },
   ]);
   expect(reconcile.operations?.map(o => [o.name, o.writes === true])).toEqual([['observe', true]]);
-  expect(declarations.filter(d => d.fields?.some(f => f.optional === true)).map(d => d.name)).toEqual(['Reconcile']);
+  // Numbering's label is optional too (D103's step 4): null on a row made
+  // before the table numbered.
+  expect(declarations.filter(d => d.fields?.some(f => f.optional === true)).map(d => d.name)).toEqual(['Reconcile', 'Numbering']);
   // Schedules, which only the core implements, keeps a row per schedule in
   // a sub-table keyed by its name and owns no field; it arms each live
   // schedule's next run, hears its row's writes (endOn), and emits the
