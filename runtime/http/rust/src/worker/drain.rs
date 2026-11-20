@@ -307,11 +307,20 @@ fn extending<T>(
                 }
             }
         });
-        let out = work();
-        *held(&done.0) = true;
-        done.1.notify_all();
-        out
+        // The extender stops as the handler answers, or unwinds.
+        let _finished = Finished(done);
+        work()
     })
+}
+
+/// Tells a drain's extender its handler is done, as it is dropped.
+struct Finished<'a>(&'a (Mutex<bool>, Condvar));
+
+impl Drop for Finished<'_> {
+    fn drop(&mut self) {
+        *held(&self.0 .0) = true;
+        self.0 .1.notify_all();
+    }
 }
 
 /// A queue whose handler completes its message itself, in the transaction
