@@ -1128,7 +1128,7 @@ D103's rule that servers hold no DDL, which chose it, is answered another
 way below. This entry names three modes and gives the second one tables.
 D103's steps 6 and 7 are not built, so nothing built is undone: the
 engine's store as it stands (D16, D58) is what development mode is built
-from. It records the design before any of it is built.
+from.
 
 ### Three modes
 
@@ -1147,11 +1147,31 @@ from. It records the design before any of it is built.
 
 ### Development mode
 
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| Development mode is D103's runtime layout, kept under this name: schema versions, instances with a schema column and a JSON `data` column, and one shared sub-table per behavior, in a SQLite file, a Postgres schema, or a SQLite database in memory that goes with its process. Publishing writes rows and never a table, so it needs no migration, no DDL and no compiler beside it. | Tables per type here too, which puts a plan between every edit and its sample row |
-| It has no compatibility rule. D16's rule, that a new version may only add, protects rows that matter, and these do not: a publish may rename, retype, remove and tighten. A publish that stored rows no longer satisfy changes nothing and lists them with what each fails, unless it says to discard them; then they are deleted in the publish's transaction. | D16's rule, which stops a person at their first rename; keeping rows the type no longer describes, which every read then has to explain; discarding without being told to |
-| It promises a table's answers and not a table's speed. A unique field refuses a second holder, a relation refuses an id no row has, and a filter, a sort and a search answer as runtime's would, by whatever means the store has. Nothing in it is tuned for volume, and the documentation and the agent skill (D76) say it is not where an application's data goes. Nothing refuses a person who puts it there. | Development answers that differ from a table's, which makes the sample misleading; a row limit that refuses, which leaves no way out |
+Built, in part: its layout, `runtime/engine/rust/rules-handler` (the pure
+handler: define, publish, describe, the instance requests, a list's
+filters, sorts and pages, unique fields, relations, the behaviors'
+operations, deadlines and changes) and `rules-dev` (its hosts over a
+SQLite file, a SQLite database in memory and a Postgres schema), with a
+publish under no compatibility rule that lists the rows a version fails
+and discards them when told to (`docs/src/content/docs/guides/development-mode.md`).
+Every rules transcript replays over the layout. Left:
+
+- The event stream and MCP. The event queue is written and nothing serves
+  it.
+- The access policy as data: define, publish and the instance requests
+  are open to any caller, and only the behaviors' permissions are checked.
+- Routes over HTTP. Requests are a typed JSON enum.
+- The library in TypeScript, Go and Python over the handler (WebAssembly
+  or the C ABI), and the prebuilt image (D103's step 6).
+- `examples/engine-notes` and `examples/engine-jobs` on development mode,
+  which wait for Comments, Revisions, Blueprint, Rollups and Dependencies
+  on the core.
+- A scalar's own rules beyond its kind (superscalar's normalization, a
+  pattern); `searchText`, `referencedBy`, vectors, a relation that holds a
+  list, and namespaces; D50's user, role and session shapes and the
+  `createdBy` stamp; unpublishing a type.
+- A rename hint in a publish. A rename is a remove and an add, and the
+  values do not carry over.
 
 ### Runtime mode
 
@@ -1205,9 +1225,17 @@ and an embedded environment is compiled.
 ### The order of the work
 
 1. Development mode: D103's step 6 as written, under this name, with the
-   database in memory and a publish that discards.
+   database in memory and a publish that discards. Built in part; what is
+   left is under "Development mode" above.
 2. The planner from documents: `migrate plan` over schema documents and a
-   recorded model, and the plan as a route and a tool.
+   recorded model, and the plan as a route and a tool. Built:
+   `migrate plan --documents` and `--request` (`internal/migrateplan`,
+   `docs/src/content/docs/reference/migrations.mdx`). Left: the plan as a
+   route and a tool of the handler; a Postgres plan of documents with
+   `@query` declarations, which is refused; documents that import another
+   service's types, which are refused; what a config carries beyond the
+   dialect (`viewOwner`, `sourceSchema`, platform defaults, sidecar files);
+   and readers, so a plan from documents has no `api-breaking` hazard.
 3. Runtime mode on a SQLite file and a local Postgres: the adapter's
    layout read from a recorded model, the handler over it, and a publish
    through the runner. Then a platform whose runner is a job.
