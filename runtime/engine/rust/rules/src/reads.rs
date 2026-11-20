@@ -119,6 +119,19 @@ pub enum ReadRequest {
         after: Option<String>,
         limit: usize,
     },
+    /// One row of a use's shared table by its key ([`Answer::SharedRow`]):
+    /// a table its behavior keeps for the type's table as a whole rather
+    /// than per row ([`crate::TableDecl::shared`]), by the type, the use's
+    /// id, the table's declared name and the row's key. What a rule across
+    /// rows reads of the state it keeps for them all (Numbering's count of
+    /// a scope).
+    SharedRow {
+        #[serde(rename = "type")]
+        type_name: String,
+        use_id: String,
+        table: String,
+        key: String,
+    },
 }
 
 /// One sub-table of a use, as a read across a table names it (D104): the
@@ -232,6 +245,21 @@ impl ReadRequest {
         }
     }
 
+    /// One row of a use's shared table, by its key.
+    pub fn shared_row(
+        type_name: impl Into<String>,
+        use_id: impl Into<String>,
+        table: impl Into<String>,
+        key: impl Into<String>,
+    ) -> Self {
+        ReadRequest::SharedRow {
+            type_name: type_name.into(),
+            use_id: use_id.into(),
+            table: table.into(),
+            key: key.into(),
+        }
+    }
+
     /// One page of a type's live rows whose own fields hold the values
     /// `equal` gives, each with the sub-tables `tables` names:
     /// [`LINKED_PAGE`] at most, after a key when given (D104).
@@ -305,6 +333,40 @@ impl SubRow {
     }
 }
 
+/// One row of a use's shared table as the host read it
+/// ([`ReadRequest::SharedRow`]): its key, its values by the declared field's
+/// name, the key's field left out and a NULL column absent, and the version
+/// its next write is held to, 1 when it was inserted and one more with each
+/// update.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedRow {
+    pub key: String,
+    #[serde(default)]
+    pub values: Map<String, Value>,
+    pub version: i64,
+}
+
+impl SharedRow {
+    /// A row by its key with its values, a null among them left out, at a
+    /// version.
+    pub fn new(key: impl Into<String>, values: Map<String, Value>, version: i64) -> Self {
+        SharedRow {
+            key: key.into(),
+            values: values
+                .into_iter()
+                .filter(|(_, value)| !value.is_null())
+                .collect(),
+            version,
+        }
+    }
+
+    /// A value; `None` when it has none.
+    pub fn value(&self, field: &str) -> Option<&Value> {
+        self.values.get(field).filter(|value| !value.is_null())
+    }
+}
+
 /// The host's answer to one request, of the variant the request asks for.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -321,6 +383,8 @@ pub enum Answer {
     /// The rows a [`ReadRequest::Linked`], a [`ReadRequest::Holding`] or a
     /// [`ReadRequest::Rows`] asks for, and whether more follow.
     Linked(LinkedRows),
+    /// The shared table's row of the key, or `None` when it has none.
+    SharedRow(Option<SharedRow>),
 }
 
 /// One page of the rows of a type whose own field holds a key, whose use's

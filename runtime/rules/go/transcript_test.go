@@ -100,6 +100,8 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
+	{"../../engine/testdata/rules/core-numbering.transcript.json", 93},
+	{"../../engine/testdata/rules/core-lease-numbering.transcript.json", 14},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of
@@ -331,6 +333,12 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, 
 				if sub.Key.Name == "" {
 					t.Fatalf("behavior %s's table %s names no key field %s", use.Behavior, declared.Name, declared.Key)
 				}
+				// A table kept for the table as a whole (D103's step 4):
+				// keyed by its declared key alone, with a version of its own.
+				if declared.Shared() {
+					out.Shared = append(out.Shared, rules.SharedTable{Name: sub.Name, Table: sub.Table, Key: sub.Key, Fields: sub.Fields, Version: "_version"})
+					continue
+				}
 				out.Tables = append(out.Tables, sub)
 			}
 			for _, field := range declaration.Fields {
@@ -523,6 +531,17 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 						columns = append(columns, fmt.Sprintf(`PRIMARY KEY ("%s", "%s")`, sub.Row, sub.Key.Column.Column))
 						db.Exec(t, fmt.Sprintf(`CREATE TABLE "%s" (%s)`, sub.Table, strings.Join(columns, ", ")))
 					}
+					for _, shared := range use.Shared {
+						columns := []string{fmt.Sprintf(`"%s" %s`, shared.Key.Column.Column, db.ColumnTypes().Key)}
+						for _, field := range shared.Fields {
+							columns = append(columns, fmt.Sprintf(`"%s" %s`, field.Column.Column, sqlType(db, field.Column)))
+						}
+						columns = append(columns, fmt.Sprintf(`"%s" %s`, shared.Version, db.ColumnTypes().Version))
+						db.Exec(t, fmt.Sprintf(`CREATE TABLE "%s" (%s)`, shared.Table, strings.Join(columns, ", ")))
+						for _, ddl := range db.BumpVersion(shared.Table) {
+							db.Exec(t, ddl)
+						}
+					}
 				}
 				if table.Deadlines != nil {
 					for _, ddl := range db.DeadlineQueue(table.Deadlines.Table, db.ColumnTypes().Text) {
@@ -587,6 +606,27 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 							for i := range typ.Versions {
 								if sameJSON(jsonOf(t, typ.Versions[i]), jsonOf(t, *step.Spec)) {
 									setLive(step.Database, step.Spec.Name, i)
+								}
+							}
+						}
+						// A use a published version drops loses its shared
+						// tables' rows, as the migration that drops its
+						// tables does (D103's step 4).
+						if step.Command.Action.Kind == rules.ActionPublish {
+							kept := map[string]bool{}
+							for _, use := range step.Spec.Uses {
+								id := use.Anchor.Field
+								if id == "" {
+									id = use.Behavior
+								}
+								kept[id] = true
+							}
+							for _, use := range tableOf(step.Database, step.Spec.Name, nil).Uses {
+								if kept[use.ID] {
+									continue
+								}
+								for _, shared := range use.Shared {
+									db.Exec(t, fmt.Sprintf(`DELETE FROM "%s"`, shared.Table))
 								}
 							}
 						}

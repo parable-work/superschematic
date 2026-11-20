@@ -64,10 +64,11 @@ use serde_json::{Map, Value};
 
 use crate::behavior::{
     Change, ConfigError, ConfigTarget, ContractQuery, Declaration, GuardRequest, Heard, Hook,
-    Listen, OperationDecl, Stop, ValidationRequest,
+    Listen, OperationDecl, Stop, TableDecl, ValidationRequest,
 };
 use crate::changes::{
-    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SubRowChange, SubRowWrite,
+    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SharedRowChange,
+    SharedRowWrite, SubRowChange, SubRowWrite,
 };
 use crate::command::{Action, Command};
 use crate::context::{listed, ConfigCx};
@@ -75,7 +76,8 @@ use crate::core::{Core, Outcome, Registered, Step};
 use crate::erased::{AnyConfig, Scope};
 use crate::patch::merge_patch;
 use crate::reads::{
-    key_of, Answer, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow, TableRef,
+    key_of, Answer, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SharedRow, SubRow,
+    TableRef,
 };
 use crate::refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
@@ -243,10 +245,12 @@ pub(crate) struct Invoked {
 }
 
 /// The sub-table rows, events and deadlines the run builds, each naming its
-/// row.
+/// row, and the rows of the uses' shared tables it writes, each naming its
+/// type and use.
 #[derive(Clone, Default)]
 pub(crate) struct Pending {
     pub sub_rows: Vec<SubRowWrite>,
+    pub shared_rows: Vec<SharedRowWrite>,
     pub events: Vec<OutboxEvent>,
     pub deadlines: Vec<DeadlineChange>,
 }
@@ -574,6 +578,16 @@ impl<'a> Run<'a> {
                 ),
             ));
         }
+        if declaration
+            .find_table(table)
+            .is_some_and(|table| table.shared)
+        {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!("sub_rows: {table} is a shared table, read by key with shared_row"),
+            ));
+        }
         let use_id = frame.uses[index].spec.id();
         let created = self.rows.borrow()[frame.row].version.is_none();
         let mut rows: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
@@ -621,6 +635,19 @@ impl<'a> Run<'a> {
             ));
         };
         if let Some(declaration) = self.core.declaration(&entry.behavior) {
+            if declaration
+                .find_table(table)
+                .is_some_and(|table| table.shared)
+            {
+                return Err(self.defect_of(
+                    frame,
+                    index,
+                    format!(
+                        "sub_rows_of: {table} is a shared table of {}, not a sub-table of a row",
+                        entry.behavior
+                    ),
+                ));
+            }
             if !declaration.has_table(table) {
                 return Err(self.defect_of(
                     frame,
@@ -696,6 +723,138 @@ impl<'a> Run<'a> {
             .collect()
     }
 
+    /// The row of a key of one of a use's shared tables (D103's step 4), as
+    /// the run has it: the host's ([`ReadRequest::SharedRow`]), with the
+    /// run's own writes of it applied in order, an insert at version 1 and
+    /// each update one more, a null value no value. A table the use's
+    /// behavior does not declare shared is a defect. A shared table is the
+    /// type's table's as a whole, so an operation of the table reads it too.
+    pub fn shared_row(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        table: &str,
+        key: &str,
+    ) -> Hook<Option<SharedRow>> {
+        self.shared_table(frame, index, "shared_row", table)?;
+        let use_id = frame.uses[index].spec.id();
+        let request = ReadRequest::shared_row(&frame.spec.name, use_id, table, key);
+        let mut row = match self.read(&request)? {
+            Answer::SharedRow(row) => row
+                .as_ref()
+                .map(|row| SharedRow::new(row.key.clone(), row.values.clone(), row.version)),
+            _ => return Err(mismatched(&request)),
+        };
+        for write in self.pending.borrow().shared_rows.iter().filter(|write| {
+            write.type_name == frame.spec.name
+                && write.use_id == use_id
+                && write.table == table
+                && write.key == key
+        }) {
+            match &write.change {
+                SharedRowChange::Insert { values } => {
+                    row = Some(SharedRow::new(key, values.clone(), 1));
+                }
+                SharedRowChange::Update { values, .. } => {
+                    if let Some(held) = row.as_mut() {
+                        for (name, value) in values {
+                            if value.is_null() {
+                                held.values.remove(name);
+                            } else {
+                                held.values.insert(name.clone(), value.clone());
+                            }
+                        }
+                        held.version += 1;
+                    }
+                }
+            }
+        }
+        Ok(row)
+    }
+
+    /// Writes a row of one of a use's shared tables: an insert, or an update
+    /// held to the version it was read at. Its values are held to the
+    /// table's declared fields, as a sub-table row's are, and its key is a
+    /// non-empty string.
+    pub fn write_shared(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        call: &str,
+        table: &str,
+        key: &str,
+        change: SharedRowChange,
+    ) -> Hook<()> {
+        let declared = self.shared_table(frame, index, call, table)?;
+        let values = match &change {
+            SharedRowChange::Insert { values } | SharedRowChange::Update { values, .. } => values,
+        };
+        if declared.is_checked() {
+            for name in values.keys() {
+                if declared.key.as_deref() == Some(name.as_str()) {
+                    return Err(self.defect_of(
+                        frame,
+                        index,
+                        format!("{call}: {name} is the row's key, which the write names"),
+                    ));
+                }
+                if !declared.fields.contains(name) {
+                    return Err(self.defect_of(
+                        frame,
+                        index,
+                        format!(
+                            "{call}: {table} has no field {name} (its fields: {})",
+                            listed(&declared.values())
+                        ),
+                    ));
+                }
+            }
+        }
+        if key.is_empty() {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!("{call}: a row of {table} takes a key: a non-empty string"),
+            ));
+        }
+        self.pending.borrow_mut().shared_rows.push(SharedRowWrite {
+            type_name: frame.spec.name.clone(),
+            use_id: frame.uses[index].spec.id().to_owned(),
+            table: table.to_owned(),
+            key: key.to_owned(),
+            change,
+        });
+        Ok(())
+    }
+
+    // shared_table is a use's declared table of a name, which must be
+    // shared; any other is the use's defect.
+    fn shared_table<'f>(
+        &self,
+        frame: Frame<'f>,
+        index: usize,
+        call: &str,
+        table: &str,
+    ) -> Hook<&'f TableDecl> {
+        let declaration = self.declaration(frame, index);
+        match declaration.find_table(table) {
+            Some(declared) if declared.shared => Ok(declared),
+            Some(_) => Err(self.defect_of(
+                frame,
+                index,
+                format!("{call}: {table} is a sub-table of each row, not a shared table"),
+            )),
+            None => Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "{call}: {table} is not a table it declares ({})",
+                    listed(&declaration.table_names())
+                ),
+            )),
+        }
+    }
+
     /// The first write the run has made, named for a defect's message;
     /// `None` when it has made none.
     pub fn written(&self) -> Option<String> {
@@ -714,6 +873,9 @@ impl<'a> Run<'a> {
         let pending = self.pending.borrow();
         if let Some(write) = pending.sub_rows.first() {
             return Some(format!("a write of sub-table {}", write.table));
+        }
+        if let Some(write) = pending.shared_rows.first() {
+            return Some(format!("a write of shared table {}", write.table));
         }
         if let Some(event) = pending.events.first() {
             return Some(format!("emit({})", event.kind));
@@ -1602,6 +1764,7 @@ impl<'a> Run<'a> {
         ChangeSet {
             rows: rows.into_iter().filter_map(Touched::into_write).collect(),
             sub_rows: pending.sub_rows,
+            shared_rows: pending.shared_rows,
             events: pending.events,
             deadlines: pending.deadlines,
             result,

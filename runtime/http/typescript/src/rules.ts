@@ -244,7 +244,9 @@ export type CoreReadRequest =
       readonly tables?: readonly CoreTableRef[];
       readonly after?: string;
       readonly limit: number;
-    };
+    }
+  /** The row of a key of a use's shared table, kept for the type's table as a whole (D103's step 4), with its version. */
+  | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string };
 
 /** One sub-table of a use, as a read across a table names it (D104): the use's id and the sub-table's declared name (superschematic_rules::TableRef). */
 export interface CoreTableRef {
@@ -284,13 +286,21 @@ export interface CoreLinkedRows {
   readonly more: boolean;
 }
 
+/** One row of a use's shared table as the host read it (D103's step 4): its key, its values by declared field name, the key's field left out and a NULL column absent, and the version its next write is held to. */
+export interface CoreSharedRow {
+  readonly key: string;
+  readonly values?: Readonly<Record<string, unknown>>;
+  readonly version: number;
+}
+
 /** The host's answer to one request, of the variant it asks for. */
 export type CoreAnswer =
   | { readonly row: CoreRow | null }
   | { readonly hasRows: boolean }
   | { readonly spec: CoreTypeSpec | null }
   | { readonly subRows: readonly CoreSubRow[] }
-  | { readonly linked: CoreLinkedRows };
+  | { readonly linked: CoreLinkedRows }
+  | { readonly sharedRow: CoreSharedRow | null };
 
 /** One answered request, and how many locks the host held when it made the read. */
 export interface CoreAnswered {
@@ -370,6 +380,17 @@ export interface CoreSubRowWrite {
   readonly change: { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'update'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'delete' };
 }
 
+/** One write of a row of a use's shared table (D103's step 4): an insert of a key the table does not hold, or an update held to the version the host read it at. */
+export interface CoreSharedRowWrite {
+  readonly type: string;
+  readonly useId: string;
+  readonly table: string;
+  readonly key: string;
+  readonly change:
+    | { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> }
+    | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> };
+}
+
 /** An event a behavior emits about a row (Cx::emit, D104), which the adapter writes to the event queue of the row's table in the change set's unit. */
 export interface CoreOutboxEvent {
   readonly row: CoreRowRef;
@@ -387,6 +408,8 @@ export type CoreDeadlineChange =
 export interface CoreChangeSet {
   readonly rows: readonly CoreRowWrite[];
   readonly subRows: readonly CoreSubRowWrite[];
+  /** The rows of the uses' shared tables it writes (D103's step 4); absent for none. */
+  readonly sharedRows?: readonly CoreSharedRowWrite[];
   readonly events: readonly CoreOutboxEvent[];
   readonly deadlines: readonly CoreDeadlineChange[];
   readonly result: unknown;
@@ -453,6 +476,25 @@ export interface RulesSubTable {
   readonly fields: readonly RulesOwnedField[];
 }
 
+/**
+ * A table a use keeps for the type's table as a whole (D103's step 4), its
+ * rows shared by every row of the type, as Numbering keeps its counts: keyed
+ * by its declared key alone, with no column of a row's key, each row with a
+ * version its writes are held to, which a row's delete leaves.
+ */
+export interface RulesSharedTable {
+  /** The declared name, as the core names it in a read and a change set (counts). */
+  readonly name: string;
+  /** The table, unquoted. */
+  readonly table: string;
+  /** The declared key field and its column, the table's primary key. */
+  readonly key: RulesOwnedField;
+  /** The declared fields but the key, in the declaration's order. */
+  readonly fields: readonly RulesOwnedField[];
+  /** The column its rows' versions are in. */
+  readonly version: string;
+}
+
 /** One use of a behavior on a table: one anchored on a field, or one the table implements (implements Timers<T, { ... }>). */
 export interface RulesUse {
   /** The use's id, by which the core names its owned fields, sub-tables and operations: the anchor field's name, or the behavior's for a type anchor. */
@@ -466,6 +508,8 @@ export interface RulesUse {
   readonly operations: readonly RulesOperation[];
   /** The sub-tables the behavior keeps per row; absent for none. */
   readonly tables?: readonly RulesSubTable[];
+  /** The tables the behavior keeps for the table as a whole (D103's step 4); absent for none. */
+  readonly shared?: readonly RulesSharedTable[];
 }
 
 /**
@@ -1174,7 +1218,7 @@ export async function prepareCreate(host: RulesHost, type: string, own: Readonly
   const { changes, reads } = await settle(host, table.spec, command);
   const [write, ...more] = changes.rows ?? [];
   const alone = write !== undefined && write.kind === 'create' && write.type === type && more.length === 0;
-  if (!alone || (changes.subRows ?? []).length > 0 || (changes.events ?? []).length > 0 || (changes.deadlines ?? []).length > 0) {
+  if (!alone || (changes.subRows ?? []).length > 0 || (changes.sharedRows ?? []).length > 0 || (changes.events ?? []).length > 0 || (changes.deadlines ?? []).length > 0) {
     throw internal(`an upsert of ${type} inserts the row a create of the core gives it, and that create writes more than the row; create the row with a create of its own`);
   }
   if (fencesOf(host, reads).length > 0) {
@@ -1629,8 +1673,83 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
       return { linked: await readHolding(host, request.type, request.useId, request.field, request.value, request.after, request.limit) };
     case 'rows':
       return { linked: await readRows(host, request.type, request.equal, request.tables, request.after, request.limit) };
+    case 'sharedRow':
+      return { sharedRow: await readSharedRow(host, request.type, request.useId, request.table, request.key) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
+  }
+}
+
+/** A shared table of a use of a table (D103's step 4), or an internal refusal for one the layout lacks. */
+function sharedTableOf(table: RulesTable, useId: string, name: string): RulesSharedTable {
+  const use = table.uses.find(u => u.id === useId);
+  if (use === undefined) throw internal(`${table.type} has no use ${useId} in the behaviors' layout`);
+  const shared = (use.shared ?? []).find(t => t.name === name);
+  if (shared === undefined) throw internal(`${table.type}'s use ${useId} (${use.behavior}) keeps no shared table ${name} in the behaviors' layout`);
+  return shared;
+}
+
+/**
+ * Reads the row of a key of a use's shared table, as the core reads it
+ * (ReadRequest::SharedRow, D103's step 4): its values by declared name,
+ * each converted from its column as an owned field is and a NULL column
+ * absent, and its version; null when the table holds no row of the key.
+ */
+export async function readSharedRow(host: RulesHost, type: string, useId: string, name: string, key: string): Promise<CoreSharedRow | null> {
+  const table = tableOf(host.layout, type);
+  const shared = sharedTableOf(table, useId, name);
+  const dialect = host.store.dialect;
+  const list = [`${quote(shared.version)} AS v`, ...shared.fields.map((field, i) => `${quote(field.column)} AS c${i}`)].join(', ');
+  const rows = await host.store.query(`SELECT ${list} FROM ${quote(shared.table)} WHERE ${quote(shared.key.column)} = ${placeholder(dialect, 1)}`, [key]);
+  const row = rows[0];
+  if (row === undefined) return null;
+  const values: Record<string, unknown> = {};
+  shared.fields.forEach((field, i) => {
+    const value = fromColumn(row[`c${i}`], field, table, dialect);
+    if (value !== undefined) values[field.name] = value;
+  });
+  return { key, values, version: Number(row.v) };
+}
+
+/**
+ * The statement of one write of a shared table's row (D103's step 4): an
+ * insert of the key, each value the change names and version 1, that adds
+ * the row unless the key is there and must add one; an update of the
+ * values it names and the next version where the row is at the version
+ * expected, which must change one. A concurrent writer that inserted the
+ * key first, or moved the row on, leaves it unchanged, and the unit runs
+ * the command again from fresh state, as a row held to its version does. A
+ * value the table has no field for, the key's among them, refuses the
+ * command as internal.
+ */
+function sharedRowStatement(table: RulesTable, shared: RulesSharedTable, dialect: RulesDialect, write: CoreSharedRowWrite): RulesStatement {
+  const p = (n: number) => placeholder(dialect, n);
+  const assigned = (values: Readonly<Record<string, unknown>>): (readonly [string, unknown])[] => {
+    for (const name of Object.keys(values)) {
+      if (!shared.fields.some(field => field.name === name)) throw internal(`shared table ${shared.table} has no field ${name}`);
+    }
+    return shared.fields.filter(field => field.name in values).map(field => [field.column, toColumn(values[field.name], field, table, dialect)] as const);
+  };
+  const change = write.change;
+  switch (change.kind) {
+    case 'insert': {
+      const columns = assigned(change.values ?? {});
+      const names = [shared.key.column, shared.version, ...columns.map(([column]) => column)].map(quote).join(', ');
+      const values = [write.key, 1, ...columns.map(([, value]) => value)];
+      const placeholders = values.map((_, i) => p(i + 1)).join(', ');
+      return { text: `INSERT INTO ${quote(shared.table)} (${names}) VALUES (${placeholders}) ON CONFLICT (${quote(shared.key.column)}) DO NOTHING`, values, expect: 1 };
+    }
+    case 'update': {
+      const columns = assigned(change.values ?? {});
+      const sets = [...columns.map(([column], i) => `${quote(column)} = ${p(i + 3)}`), `${quote(shared.version)} = ${quote(shared.version)} + 1`].join(', ');
+      return {
+        text: `UPDATE ${quote(shared.table)} SET ${sets} WHERE ${quote(shared.key.column)} = ${p(1)} AND ${quote(shared.version)} = ${p(2)}`,
+        values: [write.key, change.expectedVersion, ...columns.map(([, value]) => value)],
+        expect: 1,
+      };
+    }
+    default:
+      throw internal(`the adapter takes no shared-table row change of this kind: ${JSON.stringify(change)}`);
   }
 }
 
@@ -1791,7 +1910,9 @@ function live(table: RulesTable): string {
  *     its message (spend), which must delete one message;
  *  3. each sub-table row write, an insert that must add one row, an update
  *     of the values it names and a delete that must change one, a deleted
- *     row's left out;
+ *     row's left out; then each write of a row of a use's shared table
+ *     (D103's step 4), an insert that must add one row and an update held
+ *     to the version expected (sharedRowStatement);
  *  4. each event a behavior emits (D104), in the change set's order, a
  *     message of its row's table's event queue with the command's time, a
  *     deleted row's among them (eventStatement);
@@ -1894,6 +2015,12 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
     if (deleted.has(rowId(write.row.type, key))) continue;
     const table = tableOf(host.layout, write.row.type);
     statements.push(...subRowStatements(table, subTableOf(table, write.useId, write.table), dialect, key, write));
+  }
+  // A shared table's rows are the table's as a whole: a row's delete leaves
+  // them, and each write is held to one row (D103's step 4).
+  for (const write of changes.sharedRows ?? []) {
+    const table = tableOf(host.layout, write.type);
+    statements.push(sharedRowStatement(table, sharedTableOf(table, write.useId, write.table), dialect, write));
   }
   for (const event of changes.events ?? []) {
     const key = keyOfRow(event.row);

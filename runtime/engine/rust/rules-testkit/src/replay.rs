@@ -237,6 +237,19 @@ pub const CREATOR_READERS: [&str; 1] = ["Approvals"];
 /// The own field a table holds its row's creator in (D87).
 const CREATED_BY: &str = "createdBy";
 
+/// The behaviors whose engine read when an instance was created from its
+/// row (`created_at`), which a table holds in the own field `createdAt`, a
+/// date-time (D87): a recorded type that lists one in any version a
+/// scenario defines, and declares no such field, gets one in every version
+/// the host runs, which each create sets to its time unless it gives one,
+/// so a row made before the version that composed the behavior holds it, as
+/// the engine kept every instance's creation time, and which no comparison
+/// with the recording reads (Numbering's assignNumber, D103 step 4).
+pub const CREATION_READERS: [&str; 1] = ["Numbering"];
+
+/// The own field a table holds its row's creation time in (D87).
+const CREATED_AT: &str = "createdAt";
+
 /// The behavior whose moves the engine logged with their cause.
 const REACTIONS: &str = "Reactions";
 
@@ -694,9 +707,10 @@ struct Engine {
     drafts: BTreeMap<String, Vec<FieldDef>>,
     /// The own fields of each type's live version.
     fields: BTreeMap<String, Vec<FieldDef>>,
-    /// The types the replay gave an own field createdBy, which the
-    /// recording's documents do not declare ([`CREATOR_READERS`]).
-    creators: BTreeSet<String>,
+    /// The types the replay gave an own field createdBy or createdAt, each
+    /// with the fields it gave, which the recording's documents do not
+    /// declare ([`CREATOR_READERS`], [`CREATION_READERS`]).
+    creators: BTreeMap<String, Vec<&'static str>>,
     /// The principal its runner runs the due deadlines as.
     runner: Caller,
     /// The uses each row predates, by its type and key: those a publish
@@ -795,6 +809,9 @@ struct Run<'r> {
     /// The operations of the file's incidental behaviors, each with why
     /// its steps are not compared ([`INCIDENTAL`]).
     incidental_ops: Vec<(String, &'static str)>,
+    /// The types any define of the scenario gives a behavior that reads
+    /// when a row was created ([`CREATION_READERS`]).
+    stamped: BTreeSet<String>,
 }
 
 impl<'r> Run<'r> {
@@ -816,6 +833,7 @@ impl<'r> Run<'r> {
             recorded: None,
             recording: false,
             incidental_ops: incidental_operations(file),
+            stamped: stamped_types(scenario),
             report: ScenarioReport {
                 name: scenario
                     .get("name")
@@ -1183,7 +1201,7 @@ impl<'r> Run<'r> {
             off,
             drafts: BTreeMap::new(),
             fields: BTreeMap::new(),
-            creators: BTreeSet::new(),
+            creators: BTreeMap::new(),
             runner,
             predates: BTreeMap::new(),
         });
@@ -1339,10 +1357,19 @@ impl<'r> Run<'r> {
             without_runner_members(&mut defined.spec);
         }
         without_incidental_uses(self.file, &mut defined.spec);
-        if self.recording && with_creator(&mut defined) {
-            self.engines[cx.at]
-                .creators
-                .insert(defined.spec.name.clone());
+        if self.recording {
+            let mut given = Vec::new();
+            if with_creator(&mut defined) {
+                given.push(CREATED_BY);
+            }
+            if self.stamped.contains(&defined.spec.name) && with_creation(&mut defined) {
+                given.push(CREATED_AT);
+            }
+            if !given.is_empty() {
+                self.engines[cx.at]
+                    .creators
+                    .insert(defined.spec.name.clone(), given);
+            }
         }
         if let Some(reason) = &defined.unmapped {
             return Done::Halted(reason.clone());
@@ -1618,17 +1645,27 @@ impl<'r> Run<'r> {
         // The creator the engine kept beside an instance, in the field the
         // replay gave its type.
         let engine = &self.engines[cx.at];
-        let creates_creator = engine.creators.contains(type_name)
-            && engine
-                .host
-                .store()
-                .live(type_name)
-                .is_some_and(|spec| spec.field(CREATED_BY).is_some());
-        if creates_creator && !own.contains_key(CREATED_BY) && !cx.caller.subject.is_empty() {
+        let gives = |field: &str| {
+            engine
+                .creators
+                .get(type_name)
+                .is_some_and(|given| given.contains(&field))
+                && engine
+                    .host
+                    .store()
+                    .live(type_name)
+                    .is_some_and(|spec| spec.field(field).is_some())
+        };
+        if gives(CREATED_BY) && !own.contains_key(CREATED_BY) && !cx.caller.subject.is_empty() {
             own.insert(
                 CREATED_BY.to_owned(),
                 Value::from(cx.caller.subject.as_str()),
             );
+        }
+        // The time the engine kept beside an instance, epoch milliseconds as
+        // the core reads a date-time.
+        if gives(CREATED_AT) && !own.contains_key(CREATED_AT) {
+            own.insert(CREATED_AT.to_owned(), Value::from(cx.now));
         }
         let mut params = options
             .get("behaviors")
@@ -2758,7 +2795,7 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
 // replay gave its type left out, or null.
 fn record_of(
     host: &MemoryHost,
-    creators: &BTreeSet<String>,
+    creators: &BTreeMap<String, Vec<&'static str>>,
     type_name: &str,
     key: &str,
     now: i64,
@@ -2854,17 +2891,82 @@ fn with_creator(defined: &mut shape::Defined) -> bool {
     true
 }
 
-// without_creator is a record or an event of a type the replay gave an own
-// field createdBy with that field left out of its own fields (a record's
-// `data`, an event change's `data` and its patch's), which the recording's
-// document does not declare.
-fn without_creator(mut value: Value, creators: &BTreeSet<String>, type_name: &str) -> Value {
-    if !creators.contains(type_name) {
-        return value;
+// with_creation gives a document's type an own field createdAt, a
+// date-time, when it declares none, as the engine kept an instance's
+// creation time beside it: whether it did. The replay asks it of a type
+// that lists one of CREATION_READERS in any version its scenario defines,
+// so every version holds the field and a row made before the behavior
+// composed it holds its time.
+fn with_creation(defined: &mut shape::Defined) -> bool {
+    if defined.spec.field(CREATED_AT).is_some() {
+        return false;
     }
+    defined.spec = std::mem::replace(&mut defined.spec, TypeSpec::new(""))
+        .with_field(FieldSpec::date_time(CREATED_AT, "Temporal.DateTime"));
+    defined.fields.push(FieldDef {
+        name: CREATED_AT.to_owned(),
+        required: false,
+        json_type: "number".to_owned(),
+        type_name: "Temporal.DateTime".to_owned(),
+        date_time: true,
+    });
+    true
+}
+
+// stamped_types are the names of the types any define of a scenario gives
+// a behavior of CREATION_READERS: each document's name and each of its
+// types' names.
+fn stamped_types(scenario: &Value) -> BTreeSet<String> {
+    let mut stamped = BTreeSet::new();
+    let steps = scenario.get("steps").and_then(Value::as_array);
+    for step in steps.into_iter().flatten() {
+        if step.get("call").and_then(Value::as_str) != Some("schemas.define") {
+            continue;
+        }
+        let Some(document) = step.pointer("/args/0") else {
+            continue;
+        };
+        let types = document.get("types").and_then(Value::as_object);
+        for (name, td) in types.into_iter().flatten() {
+            let lists = td
+                .get("behaviors")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|entry| {
+                    entry
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|behavior| CREATION_READERS.contains(&behavior))
+                });
+            if lists {
+                stamped.insert(name.clone());
+                if let Some(schema) = document.get("name").and_then(Value::as_str) {
+                    stamped.insert(schema.to_owned());
+                }
+            }
+        }
+    }
+    stamped
+}
+
+// without_creator is a record or an event of a type the replay gave an own
+// field createdBy or createdAt with that field left out of its own fields
+// (a record's `data`, an event change's `data` and its patch's), which the
+// recording's document does not declare.
+fn without_creator(
+    mut value: Value,
+    creators: &BTreeMap<String, Vec<&'static str>>,
+    type_name: &str,
+) -> Value {
+    let Some(given) = creators.get(type_name) else {
+        return value;
+    };
     for path in ["/data", "/change/data", "/change/patch/data"] {
         if let Some(data) = value.pointer_mut(path).and_then(Value::as_object_mut) {
-            data.remove(CREATED_BY);
+            for field in given {
+                data.remove(*field);
+            }
         }
     }
     value

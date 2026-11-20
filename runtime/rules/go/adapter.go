@@ -449,7 +449,7 @@ func PrepareCreate(ctx context.Context, host Host, typeName string, own map[stri
 		return nil, busyOr(err, typeName, command, 1)
 	}
 	alone := len(changes.Rows) == 1 && changes.Rows[0].Kind == RowCreate && changes.Rows[0].Type == typeName
-	if !alone || len(changes.SubRows) > 0 || len(changes.Events) > 0 || len(changes.Deadlines) > 0 {
+	if !alone || len(changes.SubRows) > 0 || len(changes.SharedRows) > 0 || len(changes.Events) > 0 || len(changes.Deadlines) > 0 {
 		return nil, Internal("an upsert of %s inserts the row a create of the core gives it, and that create writes more than the row; create the row with a create of its own", typeName)
 	}
 	fences, err := fencesOf(host, reads)
@@ -887,6 +887,18 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 			return Answer{}, err
 		}
 		return Answer{Kind: ReadKindSubRows, SubRows: rows}, nil
+	case ReadKindSharedRow:
+		// Each write of a shared row is held to the version it was read
+		// at, so the read needs no check of its own under a lock.
+		table, err := host.Layout.table(request.Type)
+		if err != nil {
+			return Answer{}, err
+		}
+		row, err := readSharedRow(ctx, host.Store, table, request.UseID, request.Table, request.Key)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindSharedRow, SharedRow: row}, nil
 	case ReadKindLinked:
 		if held > 0 && host.Store.Locks() == LocksFenced {
 			return Answer{}, Internal("a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)")
@@ -1181,6 +1193,16 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 		if statement != nil {
 			statements = append(statements, *statement)
 		}
+	}
+
+	// A shared table's rows are the table's as a whole: a row's delete
+	// leaves them, and each write is held to one row (D103's step 4).
+	for _, write := range changes.SharedRows {
+		statement, err := sharedRowStatement(host.Layout, dialect, write)
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, *statement)
 	}
 
 	for _, event := range changes.Events {

@@ -259,12 +259,19 @@ type DeclaredEvent struct {
 
 // DeclaredTable is a sub-table a behavior declares: its name, the field
 // whose value keys a row within its row, and its typed fields, the key
-// among them.
+// among them. One whose Scope is schema is kept for the table as a whole,
+// its rows shared by every row of the type (D103's step 4).
 type DeclaredTable struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Key         string          `json:"key"`
+	Scope       string          `json:"scope,omitempty"`
 	Fields      []DeclaredField `json:"fields"`
+}
+
+// Shared reports whether the table is kept for the table as a whole.
+func (t DeclaredTable) Shared() bool {
+	return t.Scope == "schema"
 }
 
 // DeclaredField is a field a behavior declares: its declared name, and its

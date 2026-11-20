@@ -14,7 +14,7 @@
 use serde_json::{json, Value};
 
 use superschematic_rules::{
-    Behavior, ConfigError, ConfigTarget, Core, Cx, Declaration, GuardRequest, Hook,
+    Behavior, Change, ConfigError, ConfigTarget, Core, Cx, Declaration, GuardRequest, Hook,
     PermissionMatcher, SchemaIssue, Veto, View,
 };
 
@@ -28,6 +28,7 @@ pub fn register(file: &str, name: &str, core: &mut Core) -> bool {
         ("core-workflow-principals", "test.Gate") => core.push(Gate),
         ("workqueue-lease", "test.Gate") => core.push(LeaseGate),
         ("workqueue-lease", "test.Signal") => core.push(Signal),
+        ("core-numbering", "test.Refuser") => core.push(Refuser),
         _ => return false,
     }
     true
@@ -233,6 +234,33 @@ impl Behavior for FireHold {
             Some(Value::String(title)) if title.starts_with("stuck")
         );
         Ok(held.then(|| Veto::new("the test holds it").with_code("held")))
+    }
+}
+
+/// test.Refuser (`test/core-numbering.test.ts`): refuses a create whose
+/// title is `refuse` after every use listed before it has run, as the
+/// fixture's afterChange vetoes it, so a scenario shows a refused create
+/// takes no number (`refused`).
+pub struct Refuser;
+
+impl Behavior for Refuser {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Refuser").veto("refused")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn after_change(&self, cx: &Cx<'_, ()>, change: &Change<'_>) -> Hook<()> {
+        let refused = matches!(change, Change::Create)
+            && cx.own_field("title") == Some(Value::from("refuse"));
+        if refused {
+            return Err(cx.veto(Veto::new("refused").with_code("refused")));
+        }
+        Ok(())
     }
 }
 

@@ -90,6 +90,7 @@ mod declared;
 mod flow;
 pub mod lease;
 mod moves;
+pub mod numbering;
 mod paging;
 mod periods;
 pub mod pool;
@@ -114,6 +115,7 @@ pub use constants::{
 };
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
+pub use numbering::{Numbering, NumberingConfig};
 pub use pool::{Pool, PoolConfig};
 pub use presence::{Presence, PresenceConfig};
 pub use reactions::{
@@ -140,8 +142,9 @@ use superschematic_rules::Core;
 
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
-/// core implements (D104).
-pub const NAMES: [&str; 14] = [
+/// core implements (D104), then those D103's step 4 ports in its later
+/// waves, in the order they were ported.
+pub const NAMES: [&str; 15] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -156,6 +159,7 @@ pub const NAMES: [&str; 14] = [
     reconcile::NAME,
     schedules::NAME,
     pool::NAME,
+    numbering::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -163,7 +167,7 @@ pub const NAMES: [&str; 14] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 14] = [
+pub const DECLARATIONS: [&str; 15] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -178,6 +182,7 @@ pub const DECLARATIONS: [&str; 14] = [
     reconcile::DECLARATION,
     schedules::DECLARATION,
     pool::DECLARATION,
+    numbering::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -204,6 +209,7 @@ pub fn core() -> Core {
         .with(Reconcile)
         .with(Schedules)
         .with(Pool)
+        .with(Numbering)
 }
 
 #[cfg(test)]

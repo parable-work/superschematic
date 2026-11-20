@@ -15,7 +15,8 @@
     "Seats",
     "Reconcile",
     "Schedules",
-    "Pool"
+    "Pool",
+    "Numbering"
   ],
   "scenarios": [
     {

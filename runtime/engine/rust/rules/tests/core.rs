@@ -29,8 +29,9 @@ use superschematic_rules::{
     ConfigIssueKind, ConfigTarget, ContractQuery, Cx, DeadlineChange, Declaration, FieldSpec,
     GuardRequest, Heard, Hook, KeyedRow, LinkedRows, Listen, LockKey, OutboxEvent, Outcome,
     PermissionMatcher, ReadRequest, Refusal, Row, RowChange, RowImage, RowRef, RowWrite,
-    SchemaIssue, Source, Step, Stop, SubRow, SubRowChange, TableDecl, TableRef, TypeSpec, UseSpec,
-    ValidationIssue, ValidationRequest, Veto, View, WriteKind, LINKED_PAGE,
+    SchemaIssue, SharedRow, SharedRowChange, Source, Step, Stop, SubRow, SubRowChange, TableDecl,
+    TableRef, TypeSpec, UseSpec, ValidationIssue, ValidationRequest, Veto, View, WriteKind,
+    LINKED_PAGE,
 };
 
 const NOW: i64 = 1_000_000;
@@ -1277,6 +1278,67 @@ impl Behavior for Dial {
     }
 }
 
+// Count: a number each row takes at its create from a count the type's
+// rows share, kept in the shared table counts by a scope, which a delete
+// leaves where it was (D103's step 4). Its probe operation tries the reads
+// and writes a shared table refuses.
+struct Count;
+
+impl Behavior for Count {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Count")
+            .value("number")
+            .sub_table(TableDecl::new("counts", "scope", ["last"]).shared())
+            .sub_table(TableDecl::new("notes", "at", ["text"]))
+            .operation("probe", true)
+            .table_operation("peek", false)
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn initialize(&self, cx: &Cx<'_, ()>, _params: &Value) -> Hook<()> {
+        let scope = cx
+            .own_field("scope")
+            .and_then(|scope| scope.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let held = cx.shared_row("counts", &scope)?;
+        let last = held
+            .as_ref()
+            .and_then(|row| row.value("last"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let values = object(json!({ "last": last + 1 }));
+        match held {
+            Some(row) => cx.update_shared("counts", &scope, row.version, values)?,
+            None => cx.insert_shared("counts", &scope, values)?,
+        }
+        cx.set("number", last + 1)
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        let tried = params.get("try").and_then(Value::as_str).unwrap_or("");
+        match (name, tried) {
+            ("peek", _) => Ok(json!({ "counts": cx.shared_row("counts", "")? })),
+            (_, "sub_rows") => cx.sub_rows("counts").map(|_| Value::Null),
+            (_, "insert_row") => cx
+                .insert_row("counts", "x", object(json!({"last": 1})))
+                .map(|_| Value::Null),
+            (_, "notes") => cx.shared_row("notes", "x").map(|_| Value::Null),
+            (_, "field") => cx
+                .insert_shared("counts", "x", object(json!({"first": 1})))
+                .map(|_| Value::Null),
+            (_, "key") => cx
+                .insert_shared("counts", "", object(json!({"last": 1})))
+                .map(|_| Value::Null),
+            _ => Ok(Value::Null),
+        }
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -1300,6 +1362,7 @@ fn core() -> superschematic_rules::Core {
         .with(Gate)
         .with(Gauge)
         .with(Dial)
+        .with(Count)
 }
 
 fn alice() -> Caller {
@@ -1345,6 +1408,7 @@ fn row(own: Value, owned: Value, version: i64) -> Row {
 struct Memory {
     rows: BTreeMap<(String, String), Row>,
     sub_rows: BTreeMap<(String, String, String, String), Vec<SubRow>>,
+    shared: BTreeMap<(String, String, String, String), SharedRow>,
     specs: BTreeMap<String, TypeSpec>,
     log: Vec<String>,
 }
@@ -1513,6 +1577,22 @@ impl Source for Memory {
                 let more = rows.len() > *limit;
                 rows.truncate(*limit);
                 Ok(Answer::Linked(LinkedRows { rows, more }))
+            }
+            ReadRequest::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+            } => {
+                self.log
+                    .push(format!("shared {type_name} {use_id} {table} {key}"));
+                let at = (
+                    type_name.clone(),
+                    use_id.clone(),
+                    table.clone(),
+                    key.clone(),
+                );
+                Ok(Answer::SharedRow(self.shared.get(&at).cloned()))
             }
             other => Err(Refusal::internal(format!("an unexpected read: {other:?}"))),
         }
@@ -2580,13 +2660,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence, Witness, Proxy, Sweeper, Gate, Gauge, Dial, Count); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -4567,4 +4647,121 @@ fn a_table_operation_creates_a_row_as_a_caller_creates_one() {
     assert_eq!(changes.rows[0].owned("Counter", "count"), Some(&json!(0)));
     let kinds: Vec<&str> = changes.events.iter().map(|e| e.kind.as_str()).collect();
     assert_eq!(kinds, ["create"]);
+}
+
+/// A use's shared table (D103's step 4) is the type's table's as a whole: a
+/// create reads its row of a key and inserts it when the table holds none,
+/// or updates it held to the version it read. An operation of the table
+/// reads it too. A shared table is no row's sub-table: reading or writing it
+/// as one, a value it does not declare and an empty key are the behavior's
+/// defects.
+#[test]
+fn a_shared_table_is_read_by_key_and_written_held_to_its_version() {
+    let core = core();
+    let spec = TypeSpec::new("Invoice")
+        .with(UseSpec::on_type("Count", None))
+        .with_field(FieldSpec::new("scope", "string"));
+    let create = |key: &str, scope: &str| {
+        command(
+            alice(),
+            Action::Create {
+                id: Some(key.into()),
+                own: object(json!({"scope": scope})),
+                params: Map::new(),
+            },
+        )
+    };
+    let mut memory = Memory::default();
+    let first = changed(core.drive(&spec, &create("i1", "c1"), &mut memory));
+    assert_eq!(first.owned("Count", "number"), Some(&json!(1)));
+    assert_eq!(
+        serde_json::to_value(&first.shared_rows).unwrap(),
+        json!([{"type": "Invoice", "useId": "Count", "table": "counts", "key": "c1",
+                "change": {"kind": "insert", "values": {"last": 1}}}])
+    );
+    assert_eq!(memory.log, ["shared Invoice Count counts c1"]);
+    // The table holds the scope's count at version 3: the next create takes
+    // the number after it and updates it held to 3.
+    let at = (
+        "Invoice".to_owned(),
+        "Count".to_owned(),
+        "counts".to_owned(),
+        "c1".to_owned(),
+    );
+    memory
+        .shared
+        .insert(at, SharedRow::new("c1", object(json!({"last": 7})), 3));
+    let next = changed(core.drive(&spec, &create("i2", "c1"), &mut memory));
+    assert_eq!(next.owned("Count", "number"), Some(&json!(8)));
+    assert_eq!(
+        next.shared_rows[0].change,
+        SharedRowChange::Update {
+            expected_version: 3,
+            values: object(json!({"last": 8}))
+        }
+    );
+    // A change set with no shared write writes no member of it.
+    let plain = superschematic_rules::ChangeSet::default();
+    assert!(serde_json::to_value(&plain)
+        .unwrap()
+        .get("sharedRows")
+        .is_none());
+    // An operation of the table as a whole reads the table too.
+    let peeked = changed(core.drive(
+        &spec,
+        &command(alice(), table_op("Count", "peek", json!({}))),
+        &mut memory,
+    ));
+    assert_eq!(peeked.result, json!({"counts": null}));
+    // The defects.
+    let mut memory = Memory::default().with(
+        "Invoice",
+        "i1",
+        row(json!({"scope": "c1"}), json!({"Count": {"number": 1}}), 1),
+    );
+    for (tried, message) in [
+        (
+            "sub_rows",
+            "sub_rows: counts is a shared table, read by key with shared_row",
+        ),
+        (
+            "insert_row",
+            "insert_row: counts is a shared table, written by insert_shared and update_shared",
+        ),
+        (
+            "notes",
+            "shared_row: notes is a sub-table of each row, not a shared table",
+        ),
+        (
+            "field",
+            "insert_shared: counts has no field first (its fields: last)",
+        ),
+        (
+            "key",
+            "insert_shared: a row of counts takes a key: a non-empty string",
+        ),
+    ] {
+        let refusal = refused(core.drive(
+            &spec,
+            &command(
+                alice(),
+                invoke("i1", "Count", "probe", json!({"try": tried})),
+            ),
+            &mut memory,
+        ));
+        assert_eq!(refusal.code, Code::BehaviorError, "{tried}");
+        assert!(
+            refusal.message.ends_with(message),
+            "{tried}: {}",
+            refusal.message
+        );
+    }
+    let declared = core.declaration("Count").expect("registered");
+    assert_eq!(
+        serde_json::to_value(&declared.tables).unwrap(),
+        json!([
+            {"name": "counts", "key": "scope", "fields": ["scope", "last"], "shared": true},
+            {"name": "notes", "key": "at", "fields": ["at", "text"]}
+        ])
+    );
 }

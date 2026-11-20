@@ -77,7 +77,8 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{Answer, Answers, Core, ReadRequest, Refusal, RowWrite, Step};
 use superschematic_rules_adapter::{
     Action, Column, Command, Convert, Deadlines, Error, Events, ExecuteOptions, Executed, Host,
-    Layout, Operation, OwnedField, QueuedEvent, Row, SubRow, SubTable, Table, TypeSpec, Use,
+    Layout, Operation, OwnedField, QueuedEvent, Row, SharedTable, SubRow, SubTable, Table,
+    TypeSpec, Use,
 };
 use superschematic_rules_testkit::{
     transcript_path, Transcript, TranscriptExpect, TranscriptScenario, TranscriptStep,
@@ -89,7 +90,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 19] = [
+const TRANSCRIPTS: [(&str, usize); 21] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -109,6 +110,8 @@ const TRANSCRIPTS: [(&str, usize); 19] = [
     ("core-reconcile", RECONCILE_FLOOR),
     ("core-schedules", SCHEDULES_FLOOR),
     ("core-pool", POOL_FLOOR),
+    ("core-numbering", NUMBERING_FLOOR),
+    ("core-lease-numbering", LEASE_NUMBERING_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -232,6 +235,14 @@ const SCHEDULES_FLOOR: usize = 161;
 /// whose result and events the replay compares.
 const POOL_FLOOR: usize = 82;
 
+/// core-numbering's floor (D103's step 4): 93 steps, 51 commands and 42
+/// checks, each create's number taken from Numbering's shared table of
+/// counts, which this replay keeps as a table of its own.
+const NUMBERING_FLOOR: usize = 93;
+
+/// core-lease-numbering's floor: 14 steps, 8 commands and 6 checks.
+const LEASE_NUMBERING_FLOOR: usize = 14;
+
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
 
@@ -264,6 +275,8 @@ struct DeclaredTable {
     name: String,
     key: String,
     fields: Vec<(String, String)>,
+    /// Whether it is kept for the table as a whole (D103's step 4).
+    shared: bool,
 }
 
 /// The declaration files of the core's behaviors.
@@ -319,6 +332,7 @@ fn declarations() -> Vec<Declared> {
                                 .filter(|(name, _)| *name != key)
                                 .collect(),
                             key,
+                            shared: table["scope"] == "schema",
                         }
                     })
                     .collect(),
@@ -377,9 +391,40 @@ fn uses_of(declared: &[Declared], type_def: &TranscriptType, table: &str) -> Vec
                 Some(anchor) => anchor.to_owned(),
                 None => camel(&storage_key(&entry.behavior)),
             };
+            let key_of = |declared: &DeclaredTable| OwnedField {
+                name: declared.key.clone(),
+                column: Column::new(&declared.key, snake(&declared.key), "string"),
+                value: false,
+            };
+            let fields_of = |declared: &DeclaredTable| -> Vec<OwnedField> {
+                declared
+                    .fields
+                    .iter()
+                    .map(|(name, type_name)| OwnedField {
+                        name: name.clone(),
+                        column: column_of(name, snake(name), type_name),
+                        value: false,
+                    })
+                    .collect()
+            };
+            // A table kept for the table as a whole (D103's step 4): keyed
+            // by its declared key alone, with a version of its own.
+            let shared = declaration
+                .tables
+                .iter()
+                .filter(|declared| declared.shared)
+                .map(|declared| SharedTable {
+                    name: declared.name.clone(),
+                    table: format!("{table}_{}_{}", snake(&member), snake(&declared.name)),
+                    key: key_of(declared),
+                    fields: fields_of(declared),
+                    version: "_version".to_owned(),
+                })
+                .collect();
             let tables = declaration
                 .tables
                 .iter()
+                .filter(|declared| !declared.shared)
                 .map(|declared| SubTable {
                     name: declared.name.clone(),
                     table: format!("{table}_{}_{}", snake(&member), snake(&declared.name)),
@@ -408,6 +453,7 @@ fn uses_of(declared: &[Declared], type_def: &TranscriptType, table: &str) -> Vec
                 fields,
                 operations: declaration.operations.clone(),
                 tables,
+                shared,
             });
         }
     }
@@ -839,6 +885,31 @@ impl<'s> Scenario<'s> {
             )
             .await;
         }
+        // Each shared table (D103's step 4), keyed by its key alone and
+        // held to a version of its own.
+        for shared in table.uses.iter().flat_map(|used| &used.shared) {
+            let mut columns = vec![format!("\"{}\" {}", shared.key.column.column, t.key)];
+            for field in &shared.fields {
+                columns.push(format!(
+                    "\"{}\" {}",
+                    field.column.column,
+                    sql_type(postgres, &field.column)
+                ));
+            }
+            columns.push(format!("\"{}\" {}", shared.version, t.version));
+            db.exec(
+                &format!("CREATE TABLE \"{}\" ({})", shared.table, columns.join(", ")),
+                &[],
+            )
+            .await;
+            if postgres {
+                for ddl in common::postgres_bump(&shared.table) {
+                    db.exec(&ddl, &[]).await;
+                }
+            } else {
+                db.exec(&common::sqlite_bump(&shared.table), &[]).await;
+            }
+        }
         if let Some(queue) = &table.deadlines {
             for ddl in common::deadline_queue_ddl(postgres, &queue.table, "TEXT") {
                 db.exec(&ddl, &[]).await;
@@ -928,6 +999,20 @@ impl<'s> Scenario<'s> {
                     }
                 }
                 other => panic!("step {at}: a check asked for {other:?}"),
+            }
+        }
+        // A use a published version drops loses its shared tables' rows, as
+        // the migration that drops its tables does (D103's step 4).
+        if refused.is_none() && matches!(command.action, Action::Publish { .. }) {
+            for used in table
+                .uses
+                .iter()
+                .filter(|used| !spec.uses.iter().any(|entry| entry.id() == used.id))
+            {
+                for shared in &used.shared {
+                    db.exec(&format!("DELETE FROM \"{}\"", shared.table), &[])
+                        .await;
+                }
             }
         }
         self.compare(*at, call, "refused", json!(expect.refused), json!(refused));

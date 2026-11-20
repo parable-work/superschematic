@@ -194,6 +194,15 @@ fn is_false(flag: &bool) -> bool {
 /// within its row (the key a sub-row write names), and its fields, the key
 /// among them. A table declared with no fields is not checked: the core
 /// takes any value of a row of it.
+///
+/// A table may be shared (a declaration file's `"scope": "schema"`, D103's
+/// step 4): kept for the table as a whole rather than per row, one row per
+/// key across every row of the type, each with a version its writes are
+/// held to, as a row's are. What a rule across rows keeps that outlives any
+/// one row reads it (Numbering's counts, which a delete leaves where they
+/// were). A shared table's rows are read by key ([`crate::View::shared_row`])
+/// and written by [`crate::Cx::insert_shared`] and
+/// [`crate::Cx::update_shared`], never by a sub-row write.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableDecl {
@@ -202,6 +211,10 @@ pub struct TableDecl {
     pub key: Option<String>,
     #[serde(default)]
     pub fields: Vec<String>,
+    /// Whether the table is kept for the table as a whole, its rows shared
+    /// by every row of the type, rather than per row.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub shared: bool,
 }
 
 impl TableDecl {
@@ -221,7 +234,15 @@ impl TableDecl {
             name: name.into(),
             key: Some(key),
             fields,
+            shared: false,
         }
+    }
+
+    /// The table kept for the table as a whole, its rows shared by every row
+    /// of the type.
+    pub fn shared(mut self) -> Self {
+        self.shared = true;
+        self
     }
 
     /// Whether the core checks the values a write of a row of it names:

@@ -32,9 +32,11 @@ use std::ops::Deref;
 use serde_json::{Map, Value};
 
 use crate::behavior::{ContractQuery, Hook, Stop};
-use crate::changes::{DeadlineChange, OutboxEvent, SubRowChange, SubRowWrite};
+use crate::changes::{DeadlineChange, OutboxEvent, SharedRowChange, SubRowChange, SubRowWrite};
 use crate::command::Caller;
-use crate::reads::{Answer, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow, TableRef};
+use crate::reads::{
+    Answer, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SharedRow, SubRow, TableRef,
+};
 use crate::refusal::{Refusal, Veto};
 use crate::run::{Frame, Run};
 use crate::spec::{Anchor, TypeSpec};
@@ -327,6 +329,16 @@ impl<'r, C> View<'r, C> {
             .sub_rows_of(self.frame, self.index, type_name, key, use_id, table)
     }
 
+    /// The row of a key of one of the use's shared tables, kept for the
+    /// type's table as a whole ([`crate::TableDecl::shared`]): the host's
+    /// ([`ReadRequest::SharedRow`]) with the run's own writes of it applied,
+    /// with the version an update of it is held to; `None` when the table
+    /// holds none of the key. A table the declaration does not declare
+    /// shared is a defect.
+    pub fn shared_row(&self, table: &str, key: &str) -> Hook<Option<SharedRow>> {
+        self.run.shared_row(self.frame, self.index, table, key)
+    }
+
     /// A type's live version, its uses and their configs; `None` when no
     /// type has the name. The command's own type is the version the command
     /// runs on, read from no host.
@@ -495,6 +507,11 @@ impl<'r, C> Cx<'r, C> {
                 listed(&declaration.table_names())
             )));
         };
+        if declared.shared {
+            return Err(self.defect(format!(
+                "{call}: {table} is a shared table, written by insert_shared and update_shared"
+            )));
+        }
         if let (true, SubRowChange::Insert { values } | SubRowChange::Update { values }) =
             (declared.is_checked(), &change)
         {
@@ -520,6 +537,51 @@ impl<'r, C> Cx<'r, C> {
             change,
         });
         Ok(())
+    }
+
+    /// Inserts a row of one of the use's shared tables by its key, with its
+    /// values by declared field: a key the table holds already inserts
+    /// nothing, and the host runs the command again from fresh state, so two
+    /// writers that both found none write one row between them. A shared
+    /// table is the type's table's as a whole, so an operation of the table
+    /// writes it too.
+    pub fn insert_shared(&self, table: &str, key: &str, values: Map<String, Value>) -> Hook<()> {
+        self.writing(&format!("a write of shared table {table}"))?;
+        let view = &self.view;
+        view.run.write_shared(
+            view.frame,
+            view.index,
+            "insert_shared",
+            table,
+            key,
+            SharedRowChange::Insert { values },
+        )
+    }
+
+    /// Sets values of the row of a key of one of the use's shared tables,
+    /// held to the version it was read at ([`View::shared_row`]); a null
+    /// clears one. A row a concurrent writer moved past that version updates
+    /// nothing, and the host runs the command again from fresh state.
+    pub fn update_shared(
+        &self,
+        table: &str,
+        key: &str,
+        expected_version: i64,
+        values: Map<String, Value>,
+    ) -> Hook<()> {
+        self.writing(&format!("a write of shared table {table}"))?;
+        let view = &self.view;
+        view.run.write_shared(
+            view.frame,
+            view.index,
+            "update_shared",
+            table,
+            key,
+            SharedRowChange::Update {
+                expected_version,
+                values,
+            },
+        )
     }
 
     /// Emits an event of the use's about its row (D104), which the host

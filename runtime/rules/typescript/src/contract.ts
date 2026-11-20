@@ -135,7 +135,9 @@ export type ReadRequest =
       readonly tables?: readonly TableRef[];
       readonly after?: string;
       readonly limit: number;
-    };
+    }
+  /** The row of a key of a use's shared table (Answer sharedRow), a table its behavior keeps for the type's table as a whole rather than per row (D103's step 4: Numbering's counts), with its version. */
+  | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string };
 
 /** One sub-table of a use, as a read across a table names it (superschematic_rules::TableRef, D104): the use's id and the sub-table's declared name. */
 export interface TableRef {
@@ -170,13 +172,21 @@ export interface LinkedRows {
   readonly more: boolean;
 }
 
+/** One row of a use's shared table as the host read it (superschematic_rules::SharedRow, D103's step 4): its key, its values by the declared field's name, the key's field left out and a NULL column absent, and the version its next write is held to. */
+export interface SharedRow {
+  readonly key: string;
+  readonly values?: Readonly<Record<string, unknown>>;
+  readonly version: number;
+}
+
 /** The host's answer to one request, of the variant it asks for. */
 export type Answer =
   | { readonly row: Row | null }
   | { readonly hasRows: boolean }
   | { readonly spec: TypeSpec | null }
   | { readonly subRows: readonly SubRow[] }
-  | { readonly linked: LinkedRows };
+  | { readonly linked: LinkedRows }
+  | { readonly sharedRow: SharedRow | null };
 
 /** A key the host locks before it answers the reads a rule across rows decides on. */
 export type LockKey = string;
@@ -265,6 +275,20 @@ export interface SubRowWrite {
   readonly change: SubRowChange;
 }
 
+/** What happens to a row of a shared table (D103's step 4), tagged by kind. Open. */
+export type SharedRowChange =
+  | { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> };
+
+/** One write of a row of a use's shared table (superschematic_rules::SharedRowWrite): an insert of a key the table does not hold, or an update held to the version the host read it at, each of which the host holds to one row. */
+export interface SharedRowWrite {
+  readonly type: string;
+  readonly useId: string;
+  readonly table: string;
+  readonly key: string;
+  readonly change: SharedRowChange;
+}
+
 /**
  * An event a behavior emits about a row (Cx::emit, D104), which the host
  * writes to the event queue of its row's table in the change set's
@@ -287,6 +311,8 @@ export type DeadlineChange =
 export interface ChangeSet {
   readonly rows: readonly RowWrite[];
   readonly subRows: readonly SubRowWrite[];
+  /** The rows of the uses' shared tables it writes (D103's step 4); absent for none. */
+  readonly sharedRows?: readonly SharedRowWrite[];
   readonly events: readonly OutboxEvent[];
   readonly deadlines: readonly DeadlineChange[];
   /** An operation's result; null for the rest. */
@@ -305,11 +331,12 @@ export interface DeclaredField {
   readonly optional?: boolean;
 }
 
-/** A sub-table a behavior declares, as its declaration file has it: its name, the field whose value keys a row within its row, and its typed fields, the key among them. */
+/** A sub-table a behavior declares, as its declaration file has it: its name, the field whose value keys a row within its row, and its typed fields, the key among them. One whose scope is schema is kept for the table as a whole, its rows shared by every row of the type (D103's step 4). */
 export interface DeclaredTable {
   readonly name: string;
   readonly description?: string;
   readonly key: string;
+  readonly scope?: 'instance' | 'schema';
   readonly fields: readonly DeclaredField[];
 }
 

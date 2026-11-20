@@ -260,8 +260,9 @@ mod tests {
     }
 
     /// Schedules declares the event it emits (D104), with its payloadSchema,
-    /// which a binding hands its host whole; Pool, the last, its operation of
-    /// the table as a whole and the contract it asks.
+    /// which a binding hands its host whole; Pool its operation of the table
+    /// as a whole and the contract it asks; and Numbering its shared table
+    /// (D103's step 4).
     #[test]
     fn schedules_declares_the_event_it_emits() {
         let (out, ok) = run_json(Op::Declarations, b"");
@@ -274,7 +275,7 @@ mod tests {
                 .unwrap()
                 .clone()
         };
-        let pool = files.as_array().and_then(|files| files.last()).unwrap();
+        let pool = named("Pool");
         assert_eq!(pool["name"], "Pool");
         assert_eq!(pool["operations"][2]["scope"], "schema");
         assert_eq!(pool["contracts"][0]["role"], "asks");
@@ -287,6 +288,9 @@ mod tests {
             schedules["events"][0]["payloadSchema"]["additionalProperties"],
             false
         );
+        let numbering = named("Numbering");
+        assert_eq!(numbering["value"], "label");
+        assert_eq!(numbering["tables"][0]["scope"], "schema");
     }
 
     // A job whose lease's token a command presents as its precondition.

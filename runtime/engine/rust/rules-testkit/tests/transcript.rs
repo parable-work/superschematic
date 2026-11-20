@@ -282,6 +282,23 @@ const SCHEDULES_FLOOR: usize = 161;
 /// adapter's replay holds its own count to this one.
 const POOL_FLOOR: usize = 82;
 
+/// The steps `core-numbering.transcript.json` holds, of
+/// `core-numbering.json` (D103's step 4): its define and publish checks and
+/// its creates, updates, deletes and assignNumbers, each create's number
+/// taken from the use's shared table `counts`, which an adapter keeps as a
+/// table of its own and holds each write of to its version. The rest left
+/// out are what the replay skips (a scenario whose test batched its creates
+/// in a function of its own, test.Refuser's own-field refusals, the defines
+/// that name Links, Revisions) and opens and reads. An adapter's replay
+/// holds its own count to this one.
+const NUMBERING_FLOOR: usize = 93;
+
+/// The steps `core-lease-numbering.transcript.json` holds, of
+/// `workqueue-lease-numbering.json`: a create numbered under another
+/// principal's lease, and assignNumber held by Lease's guard until its
+/// `exempt` names it.
+const LEASE_NUMBERING_FLOOR: usize = 14;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -301,6 +318,12 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ("core-presence", "workqueue-presence", PRESENCE_FLOOR),
         ("core-budget", "workqueue-budget", BUDGET_FLOOR),
         ("core-retries", "workqueue-retries", RETRIES_FLOOR),
+        ("core-numbering", "core-numbering", NUMBERING_FLOOR),
+        (
+            "core-lease-numbering",
+            "workqueue-lease-numbering",
+            LEASE_NUMBERING_FLOOR,
+        ),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {

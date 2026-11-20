@@ -354,6 +354,10 @@ pub struct Use {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<SubTable>,
+    /// The tables the behavior keeps for the table as a whole (D103's step
+    /// 4), in its declaration's order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared: Vec<SharedTable>,
 }
 
 impl Use {
@@ -399,6 +403,33 @@ pub struct SubTable {
 }
 
 impl SubTable {
+    /// A declared field other than the key, by its name.
+    pub fn field(&self, name: &str) -> Option<&OwnedField> {
+        self.fields.iter().find(|field| field.name == name)
+    }
+}
+
+/// A table a use keeps for the type's table as a whole (D103's step 4), its
+/// rows shared by every row of the type, as Numbering keeps its counts:
+/// keyed by its declared key alone, with no column of a row's key, each row
+/// held to a version of its own, which a row's delete leaves.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedTable {
+    /// The declared name, as the core names the table (`counts`).
+    pub name: String,
+    /// The table, unquoted.
+    pub table: String,
+    /// The declared key field and its column, the table's primary key.
+    pub key: OwnedField,
+    /// The other declared fields, in the declaration's order, the key left
+    /// out.
+    #[serde(default)]
+    pub fields: Vec<OwnedField>,
+    /// The column its rows' versions are in.
+    pub version: String,
+}
+
+impl SharedTable {
     /// A declared field other than the key, by its name.
     pub fn field(&self, name: &str) -> Option<&OwnedField> {
         self.fields.iter().find(|field| field.name == name)
