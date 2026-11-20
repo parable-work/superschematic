@@ -45,6 +45,11 @@ type ProjectionView struct {
 	// must scan the view on its database's primary (D121).
 	Replica bool
 
+	// SourceSchema is the declaration's own sourceSchema, which replaces
+	// outputs.sql.sourceSchema for this view (D126). Empty uses the
+	// service's.
+	SourceSchema string
+
 	UpFileName   string
 	DownFileName string
 
@@ -280,6 +285,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		Relation:        def.Relation(),
 		Migration:       def.Migration,
 		Replica:         def.AllowsReplica(),
+		SourceSchema:    def.SourceSchema,
 		UpFileName:      fmt.Sprintf("%s_%s_projection.up.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		DownFileName:    fmt.Sprintf("%s_%s_projection.down.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		QuotedBaseTable: base.QuotedName,

@@ -39,6 +39,13 @@ type ProjectionDef struct {
 	// Source is the DB table type the view reads, addressed as "base".
 	Source string `json:"source" yaml:"source"`
 
+	// SourceSchema is the Postgres schema that holds the source table and
+	// every joined table of this view. It replaces the service's
+	// outputs.sql.sourceSchema for this view alone, for a database that
+	// keeps its tables in more than one schema. Empty uses the service's
+	// (D126).
+	SourceSchema string `json:"sourceSchema,omitempty" yaml:"sourceSchema,omitempty"`
+
 	// Joins lists the other tables the view reads, in declaration order.
 	Joins []*ProjectionJoin `json:"joins,omitempty" yaml:"joins,omitempty"`
 

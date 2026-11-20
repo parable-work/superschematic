@@ -33,6 +33,12 @@ func (e *emitter) emitProjection(def *ir.TypeDef) {
 		fmt.Fprintf(&e.body, "  pool: %s,\n", quote(p.Pool))
 	}
 	fmt.Fprintf(&e.body, "  name: %s,\n  migration: %s,\n", quote(p.Name), quote(p.Migration))
+	if p.SourceSchema != "" {
+		fmt.Fprintf(&e.body, "  sourceSchema: %s,\n", quote(p.SourceSchema))
+	}
+	if p.Replica != nil {
+		fmt.Fprintf(&e.body, "  replica: %t,\n", *p.Replica)
+	}
 	if len(p.Predicates) > 0 {
 		e.body.WriteString("  where: [\n")
 		for _, pred := range p.Predicates {

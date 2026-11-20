@@ -137,6 +137,12 @@ export interface ProjectionOptions {
    * name, since an applied migration is never rewritten (D102).
    */
   readonly migration: string;
+  /**
+   * The Postgres schema that holds the source table and every joined table,
+   * for a database that keeps its tables in more than one schema. It
+   * replaces the service's `outputs.sql.sourceSchema` for this view (D126).
+   */
+  readonly sourceSchema?: string;
   /** The row rules, all ANDed, in order. */
   readonly where?: readonly ProjectionPredicate[];
   /**

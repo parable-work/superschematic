@@ -5680,6 +5680,10 @@
         },
         "source": {
           "type": "string"
+        },
+        "sourceSchema": {
+          "default": "",
+          "type": "string"
         }
       },
       "required": [

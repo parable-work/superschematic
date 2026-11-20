@@ -572,21 +572,31 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			projections[i].QuotedViewOwner = sqlutil.QuoteIdentifier(opts.ViewOwner)
 		}
 	}
-	if opts.SourceSchema != "" {
-		if !plainIdentifierPattern.MatchString(opts.SourceSchema) {
-			return nil, fmt.Errorf("outputs.sql.sourceSchema %q must be a lowercase Postgres schema name", opts.SourceSchema)
+	if opts.SourceSchema != "" && !plainIdentifierPattern.MatchString(opts.SourceSchema) {
+		return nil, fmt.Errorf("outputs.sql.sourceSchema %q must be a lowercase Postgres schema name", opts.SourceSchema)
+	}
+	// A view's own sourceSchema replaces the service's, so one database can
+	// serve views over tables in different schemas (D126).
+	for i := range projections {
+		sourceSchema := opts.SourceSchema
+		if own := projections[i].SourceSchema; own != "" {
+			if !plainIdentifierPattern.MatchString(own) {
+				return nil, fmt.Errorf("projection %s: sourceSchema %q must be a lowercase Postgres schema name", projections[i].Relation, own)
+			}
+			sourceSchema = own
 		}
-		qualifier := sqlutil.QuoteIdentifier(opts.SourceSchema) + "."
-		for i := range projections {
-			if projections[i].Pool == "" {
-				// A view without a pool is created beside the tables (D90).
-				projections[i].Schema = opts.SourceSchema
-				projections[i].QualifiedView = qualifier + projections[i].QuotedName
-			}
-			projections[i].QuotedBaseTable = qualifier + projections[i].QuotedBaseTable
-			for j := range projections[i].Joins {
-				projections[i].Joins[j].QuotedTable = qualifier + projections[i].Joins[j].QuotedTable
-			}
+		if sourceSchema == "" {
+			continue
+		}
+		qualifier := sqlutil.QuoteIdentifier(sourceSchema) + "."
+		if projections[i].Pool == "" {
+			// A view without a pool is created beside the tables (D90).
+			projections[i].Schema = sourceSchema
+			projections[i].QualifiedView = qualifier + projections[i].QuotedName
+		}
+		projections[i].QuotedBaseTable = qualifier + projections[i].QuotedBaseTable
+		for j := range projections[i].Joins {
+			projections[i].Joins[j].QuotedTable = qualifier + projections[i].Joins[j].QuotedTable
 		}
 	}
 	metadataKeyPrefix := opts.MetadataKeyPrefix

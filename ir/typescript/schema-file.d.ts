@@ -556,6 +556,7 @@ export interface ProjectionDef {
   predicates?: ProjectionPredicate[];
   replica?: boolean;
   source: string;
+  sourceSchema?: string;
 }
 
 export interface ProjectionFunctionCall {

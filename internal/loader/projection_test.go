@@ -72,6 +72,25 @@ func TestProjectionReplicaFromTypeScript(t *testing.T) {
 	}
 }
 
+// TestProjectionSourceSchemaFromTypeScript: `sourceSchema` reaches the IR,
+// and one that is no SQL identifier fails the load at the projection file
+// (D126).
+func TestProjectionSourceSchemaFromTypeScript(t *testing.T) {
+	const stamp = `migration: "20260902120000",`
+	schema, err := LoadService(patchedProjection(t, stamp, stamp+"\n  sourceSchema: \"archive\","))
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	if got := schema.Types["AppPreference"].Projection.SourceSchema; got != "archive" {
+		t.Fatalf("sourceSchema = %q, want archive", got)
+	}
+	_, err = LoadService(patchedProjection(t, stamp, stamp+"\n  sourceSchema: \"Archive\","))
+	if err == nil || !strings.Contains(err.Error(), `@projection sourceSchema must be a snake_case SQL identifier, got "Archive"`) ||
+		!strings.Contains(err.Error(), "app-preference.projection.schema.ts") {
+		t.Fatalf("a bad sourceSchema must fail at the projection file, got %v", err)
+	}
+}
+
 // TestJoinWithNoEqualityFromTypeScript: `@join<T>(alias, {})` loads beside
 // a base the first rule binds by its key, and fails the load, at the
 // projection file, beside any other base (D122).

@@ -127,6 +127,9 @@ func checkProjectionIdentifiers(td *ir.TypeDef, def *ir.ProjectionDef, r *Result
 			r.errorf(td.Owner, "%s: @projection %s must be a snake_case SQL identifier, got %q", td.Name, part.key, part.value)
 		}
 	}
+	if def.SourceSchema != "" && !projectionIdentifierPattern.MatchString(def.SourceSchema) {
+		r.errorf(td.Owner, "%s: @projection sourceSchema must be a snake_case SQL identifier, got %q", td.Name, def.SourceSchema)
+	}
 	if !migrationStampPattern.MatchString(def.Migration) {
 		r.errorf(td.Owner, "%s: @projection migration must be a 14-digit migration version stamp, got %q", td.Name, def.Migration)
 	}

@@ -730,6 +730,34 @@ func TestProjectionSourceSchemaQualifiesTables(t *testing.T) {
 	}
 }
 
+// TestProjectionOwnSourceSchemaWins: a view's own sourceSchema qualifies its
+// source and joined tables in place of the service's, and an unsafe one
+// fails the build (D126).
+func TestProjectionOwnSourceSchemaWins(t *testing.T) {
+	for _, service := range []string{"", "ledger"} {
+		schema := loadProjectionFixture(t)
+		schema.Types["AppPreference"].Projection.SourceSchema = "archive"
+		output, err := Generate(schema, Options{SchemaName: "fixture-projection", SourceSchema: service})
+		if err != nil {
+			t.Fatal(err)
+		}
+		view := output.Projections[0]
+		if view.QuotedBaseTable != "archive.preference" {
+			t.Errorf("service schema %q: source table = %q, want archive.preference", service, view.QuotedBaseTable)
+		}
+		for _, join := range view.Joins {
+			if join.QuotedTable != "archive.channel" {
+				t.Errorf("service schema %q: joined table = %q, want archive.channel", service, join.QuotedTable)
+			}
+		}
+	}
+	schema := loadProjectionFixture(t)
+	schema.Types["AppPreference"].Projection.SourceSchema = "archive; DROP SCHEMA public"
+	if _, err := Generate(schema, Options{SchemaName: "fixture-projection"}); err == nil || !strings.Contains(err.Error(), "sourceSchema") {
+		t.Fatalf("an unsafe view source schema generated: %v", err)
+	}
+}
+
 // TestSchemaWithoutProjectionsWritesNoProjectionFiles: a DB service that
 // declares no view gets no projections directory and no migrations.
 func TestSchemaWithoutProjectionsWritesNoProjectionFiles(t *testing.T) {

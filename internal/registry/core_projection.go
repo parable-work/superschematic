@@ -42,7 +42,7 @@ func projectionDecorators() []DecoratorSpec {
 }
 
 // applyProjection reads @projection<Source>({ pool, name, migration,
-// where?, collapse?, replica? }). args[0] is the source class name the frontend
+// sourceSchema?, where?, collapse?, replica? }). args[0] is the source class name the frontend
 // resolved from the type argument. Joins a @join above the @projection
 // already collected are kept.
 func applyProjection(td *ir.TypeDef, args []any) error {
@@ -64,12 +64,14 @@ func applyProjection(td *ir.TypeDef, args []any) error {
 	for _, key := range sortedKeys(opts) {
 		value := opts[key]
 		switch key {
-		case "pool", "name", "migration":
+		case "pool", "name", "migration", "sourceSchema":
 			s, ok := value.(string)
 			if !ok {
 				return ArgErrorf(1, "@projection %s must be a string literal", key)
 			}
 			switch key {
+			case "sourceSchema":
+				def.SourceSchema = s
 			case "pool":
 				def.Pool = s
 			case "name":
