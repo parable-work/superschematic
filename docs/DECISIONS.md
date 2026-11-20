@@ -358,9 +358,9 @@ pages; "or" between a filter's members; a helper that copies a typed
 filter into a repository's whole; a filter through a relation without a
 projection.
 
-**D113** (L 17917). Dependencies and Rollups on a table, and what a
-dependent does when its blocker is reopened; the same on an engine type,
-where `finished` is refused until it is designed.
+**D113** (L 17917). What a dependent does when its blocker is reopened
+(on a table a finished blocker reopened blocks again); the same on an
+engine type, where `finished` is refused until it is designed.
 
 **D114** (L 17971). A key's use log beyond `lastUsedAt`; a hint of the
 token in the list; rotation as one call; rate limits per key; a key bound
@@ -619,13 +619,41 @@ change's to settle.
 
 Status: steps 1 to 3 built, and step 4's ports of Constants,
 StateRules, Approvals, Lease, Retries, Presence, Budget, Seats,
-Reconcile, Schedules and Pool, each with D104's upgrade. Left: the rest
-of step 4 (Numbering, Comments, Rollups, Derived, Dependencies,
-Provenance, Revisions, Variants, Blueprint, Holds, Stock, Calendar and
-Payments, each held to the test, and the folded Links, Search, Queue and
-Branches removed), and steps 5 to 7, whose step 6 D117 renames
-development mode. What the built steps left follows. The names and rules
-are reversible until the first release.
+Reconcile, Schedules and Pool, each with D104's upgrade, and of Rollups
+(over the rows a `HasMany` lists) and Dependencies (its edges a sub-table
+of the dependent's), with the core's `Action::Read`, which computes a
+use's fields through reads and writes nothing. Left: the rest of step 4
+(Numbering, Comments, Derived, Provenance, Revisions, Variants, Holds,
+Stock, Calendar and Payments, each held to the test, and the folded
+Links, Search, Queue and Branches removed), and steps 5 to 7, whose step
+6 D117 renames development mode. What the built steps left follows. The
+names and rules are reversible until the first release.
+
+Two of step 4's ports met the test as follows, and each waits on a choice:
+
+- Rollups fails it: it keeps no state of its own, its values are a
+  function of other rows and its one rule a guard over another use's
+  Workflow. It is ported because D104's Barrier needs it. The fold its
+  module doc proposes for step 5: its values a derived field or a query
+  of the table, and its gate a StateRules rule on the Workflow that reads
+  a rollup.
+- Blueprint fails it on a table and is not ported: it creates a tree of
+  rows from a template, and once they exist it holds no state. The fold
+  proposed: a procedure that creates rows through each table's own
+  `create`, with Dependencies and Rollups for the edges and the gate.
+  `workqueue-blueprint.json` stays the engine's, and `examples/engine-jobs`
+  waits for the choice.
+
+What Rollups and Dependencies left: a route or field that serves Rollups'
+`values` and Dependencies' `blocked`, which only `Action::Read` reaches;
+the TypeScript and Rust servers of `fixture-steps-api`, run end to end,
+and their SDK goldens; Rollups' `latest`, which needs a creation time the
+core can read; `listDependents` on a table (`registry.TableLeavesOut`),
+which needs a read across tables outside the core; hearing a blocker's
+delete, where a blocker that is gone is ignored; a `status` member for a
+table with several Workflows; a config that names the `HasMany` rather
+than `{ schema, link }`; and a rollup over a table that composes no
+behavior.
 
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are
@@ -967,7 +995,7 @@ Two of the app's patterns need no rules of their own, and wait for step
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| *Barrier* is Workflow (`waiting`, `released`, `cancelled`), Rollups' `all` over the rows that relate to it, gating `released`, a Timers deadline whose `then` releases it, and a `release` transition behind a permission, a person's go-ahead: an update that waits for every running agent to say it is ready, for five minutes when a person started it, or for a person's go-ahead. It needs Rollups ported over a `HasMany` relation (step 4). | A behavior of its own |
+| *Barrier* is Workflow (`waiting`, `released`, `cancelled`), Rollups' `all` over the rows that relate to it, gating `released`, a Timers deadline whose `then` releases it, and a `release` transition behind a permission, a person's go-ahead: an update that waits for every running agent to say it is ready, for five minutes when a person started it, or for a person's go-ahead. It needed Rollups ported over a `HasMany` relation, which step 4 has built. | A behavior of its own |
 | *Mailbox* is Workflow (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`), StateRules freezing a taken message, `by: ["createdBy"]` on the sender's moves, and Lease on a taken message, whose expiry moves it back to `queued`. A take is the declared read of a conversation's oldest waiting message and Lease's `acquire`, as above. | Comments, whose deliveries tell a subject of a message and are no work an agent takes in turn |
 
 ### What the built steps left
