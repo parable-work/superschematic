@@ -1961,6 +1961,15 @@ which calls the engine on the blocking pool and waits on the storage's
 notifier. A stack runs one as a deployable of its own, from a `@deriver`
 on an API ([Stacks](/superschematic/guides/stacks/)).
 
+On a table, `implements Derived<T, { ... }>` takes the same config, its
+fields and inputs named by the table's own. Its state is a sub-table of
+the use, `staleDerivations`, `settleDerivations` and `failedDerivations`
+are operations of the table as a whole, and the value a field's type
+refuses is held to the field's JSON Schema, which the build writes into
+the table's layout
+([Fields a model fills, and who set each](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)).
+A `@deriver` runs over an engine's types alone so far.
+
 ## Provenance
 
 Who set each own field last and through what, and a review that holds
@@ -2034,6 +2043,11 @@ acts only where a transition exists and every guard allows it. So key a
 rule on a derived value only when the record is sure to be in a state
 the rule's move leaves from; otherwise move on the gate's own signals,
 as here.
+
+On a table, `implements Provenance<T, { ... }>` takes the same config.
+Its records are a sub-table of the use and `inReview` is a column of the
+table, `provenance_in_review`, which a list filters on
+([Fields a model fills, and who set each](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)).
 
 ## Where to go next
 

@@ -96,8 +96,8 @@ the field itself (`status`), and its other fields follow the field's name
 
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
-Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering and
-Revisions. A read serves no Rollups value yet. Comments and Blueprint are
+Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
+Revisions, Derived and Provenance. A read serves no Rollups value yet. Comments and Blueprint are
 not ported yet, so `examples/engine-notes` and `examples/engine-jobs`
 still run on the engine.
 
@@ -108,6 +108,11 @@ still run on the engine.
   the type's fields, relations and unique keys as an update is, so a
   patch the type refuses is kept as a proposal and its approval is
   refused with `422 invalid_instance` or `409 conflict`.
+- Derived's pulls and settles run on the type as a whole. A derived
+  field's output, the JSON Schema its value is held to, comes from the
+  type's fields: an enum's values and a primitive's type.
+- Provenance's `inReview` is an owned field of each row, which a list
+  filters on as `Provenance.inReview`.
 
 ## Requests
 

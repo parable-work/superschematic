@@ -1800,6 +1800,8 @@ or Schedules ([A row's schedules](#a-rows-schedules)), or Pool
 ([Values a row's children roll up, and blockers between rows](#values-a-rows-children-roll-up-and-blockers-between-rows)),
 or types a field as a Numbering or implements Revisions
 ([A row's number and its history](#a-rows-number-and-its-history)),
+or implements Derived and Provenance
+([Fields a model fills, and who set each](#fields-a-model-fills-and-who-set-each)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -3235,3 +3237,108 @@ held where a request's types and the database hold it, so a patch that
 breaks it is kept and fails at its approval. A `@versioned` table keeps a
 history of its own on Postgres: Revisions adds the review step, and keeps
 its log on SQLite and D1 too.
+
+### Fields a model fills, and who set each
+
+A table implements `Derived` for own fields a model outside the core
+fills from other own fields: a ticket's category, an article's summary
+(D73, D103). A derived field is an own field of the table, typed by it,
+and its JSON Schema is the output the model is asked for: an enum is a
+pick, a string text, a bounded number a score. The core calls no model.
+A deriver holding the config's permission pulls what is stale, asks its
+model, and settles the answers with the hash it pulled.
+
+```ts
+// tickets-db
+export enum Category { Billing = "billing", Bug = "bug", Other = "other" }
+
+export abstract class Ticket
+  implements
+    Derived<Ticket, {
+      fields: {
+        category: { from: ["subject", "body"]; instruction: "Classify the request."; model: "standard" };
+        priority: { from: ["subject", "body"]; instruction: "How urgent is this?"; model: "standard"; states: ["new", "triage"] };
+      };
+      permission: "tickets.derive";
+    }>,
+    Provenance<Ticket, {
+      review: { sources: ["Derived"]; below: 0.8; permission: "tickets.review" };
+      gates: { assigned: { reviewed: ["category", "priority"] } };
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  subject: string;
+  body: Nullable<string>;
+  category: Nullable<Category>;
+  priority: Nullable<string>;
+  status: Workflow<{ states: ["new", "triage", "assigned"]; transitions: [/* ... */] }>;
+}
+```
+
+Derived keeps one row per derived field of each row in a sub-table of
+the use (`ticket_derived_derivations`): the hash of the field's inputs,
+instruction, model label and output, the hash of its last settled value,
+who settled it and when, an override, and the failed attempts. Every
+write of the row through the core keeps them in line. A field is stale
+when its hash moved since its last value. Its value stays until a new one
+settles.
+
+`derived.staleDerivations` lists the stale fields a page at a time, each
+with its row's key, its inputs, its instruction, its model label, its
+output and the hash to present. `derived.settleDerivations` takes each
+answer, a value or a failure, with that hash. Both run on the table as a
+whole and take no key. A settle writes each row's values through
+`derived.applyDerived`, an update attributed to Derived with each value's
+confidence, so every rule an update meets judges it, and a refusal skips
+that row alone. An answer whose hash moved, whose row is gone, or whose
+field was overridden is skipped. A failure, a value the field's type
+refuses and another behavior's veto count an attempt and write no own
+field. After `maxAttempts` the field waits for its inputs to move, and
+`derived.failedDerivations` lists it.
+
+```ts
+const deriving = orm.withBehaviorCaller({ subject: "deriver", permissions: ["tickets.derive"] });
+const { items } = await deriving.ticket.derived.staleDerivations({ limit: 50 });
+await deriving.ticket.derived.settleDerivations({
+  items: items.map(item => ({ id: item.id, field: item.field, sourceHash: item.sourceHash, value: answer(item), confidence: 0.9 })),
+});
+```
+
+A caller's write of a derived field, and another behavior's, overrides
+it: Derived stops deriving it until `derived.rederive` asks for it again.
+A value a row holds when Derived is added to its table counts as
+overridden, so adding Derived writes over no value a person gave. A field
+with `states` is derived only while the table's Workflow is in one of
+them. An input is never a `Secret<T>` field: a secret never goes to a
+model, and the build refuses it.
+
+A table implements `Provenance` to record, for each own field, who set it
+last and through what. A record names its source, `caller` for a
+caller's create or update or else the behavior whose operation wrote it,
+the caller's subject and the subject it acted for, when, and the
+confidence the write's attribution gave. The records are a sub-table of
+the use (`ticket_provenance_records`).
+
+With `review`, a write from a source it names is proposed, unless its
+confidence reaches `below`, which accepts it with no reviewer. A caller
+holding the review's permission accepts a proposal with
+`provenance.accept`, or rejects it with `provenance.reject`, which writes
+the field, cleared or set to the patch's value, as the reviewer's own
+write: Derived records it as an override and does not propose it again.
+A caller's write over a proposal makes it edited. The owned column
+`provenance_in_review` says whether any field is proposed, so a list
+filters on it. A gate holds a move of the table's Workflow into its
+state while a field it lists is proposed, refused as
+`unreviewed_fields`.
+
+Neither runs a model or a schedule of its own. A stack's deriver
+deployable runs over an engine's types so far, not a table's
+([Engine behaviors](/superschematic/guides/engine-behaviors/#derived)):
+on a table, a worker of your own pulls and settles through the
+repository's operations, as above. Each of Derived's pulls reads the
+table's rows a page at a time, a scan, since the core keeps no index of
+stale fields yet. Neither behavior can be removed from a table with rows.
+A raw write of the table runs none of these rules: its derived fields'
+hashes catch up at the row's next write through the core, and its fields
+go unrecorded.
