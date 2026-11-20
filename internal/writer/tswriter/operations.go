@@ -316,7 +316,11 @@ func (e *emitter) emitMiddlewareDecorators(indent string, mw *ir.MiddlewareConfi
 		return
 	}
 	if mw.RateLimit != nil {
-		fmt.Fprintf(&e.body, "%s@%s({ requestsPerMinute: %d })\n", indent, e.use("rateLimit"), *mw.RateLimit)
+		if mw.RateLimitKey != "" {
+			fmt.Fprintf(&e.body, "%s@%s({ requestsPerMinute: %d, key: %q })\n", indent, e.use("rateLimit"), *mw.RateLimit, mw.RateLimitKey)
+		} else {
+			fmt.Fprintf(&e.body, "%s@%s({ requestsPerMinute: %d })\n", indent, e.use("rateLimit"), *mw.RateLimit)
+		}
 	}
 	if mw.BodyLimit != nil {
 		fmt.Fprintf(&e.body, "%s@%s({ megabytes: %d })\n", indent, e.use("bodyLimit"), *mw.BodyLimit)

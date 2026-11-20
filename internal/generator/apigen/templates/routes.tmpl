@@ -67,6 +67,9 @@ import (
 {{- range .RawBodyCheckImports }}
 	{{ .Name }} "{{ .Path }}"
 {{- end }}
+{{- range .PrincipalRateLimitImports }}
+	{{ if .Alias }}{{ .Alias }} {{ end }}"{{ .Path }}"
+{{- end }}
 {{- if .IsPublic }}
 	orm "{{ .ORMModule }}"
 {{- else if .TakesDatabase }}
@@ -158,6 +161,13 @@ type Config struct {
 	// PayloadDecryptor decrypts encrypted endpoint request bodies.
 	PayloadDecryptor runtimemiddleware.PayloadDecryptor
 {{- end }}
+{{- if .HasPrincipalRateLimit }}
+
+	// PrincipalRateLimitStore holds the counters of every route whose
+	// @rateLimit counts per principal (D131), so each limit holds across
+	// replicas. Required: RegisterRoutes refuses to start without one.
+	PrincipalRateLimitStore runtimemiddleware.PrincipalRateLimitStore
+{{- end }}
 {{- if .Deps.RateLimitStore }}
 
 	// RateLimitStore is {{ .Deps.RateLimitStore }}, the memory store the API's config names
@@ -240,6 +250,11 @@ func (c *Config) Validate() error {
 {{- if .HasEncryptedEndpoints }}
 	if c.PayloadDecryptor == nil {
 		return fmt.Errorf("Config.PayloadDecryptor is required for encrypted endpoints")
+	}
+{{- end }}
+{{- if .HasPrincipalRateLimit }}
+	if c.PrincipalRateLimitStore == nil {
+		return fmt.Errorf("Config.PrincipalRateLimitStore is required for routes whose @rateLimit counts per principal")
 	}
 {{- end }}
 	if err := c.Implementations.ValidateImplementations(); err != nil {
@@ -372,14 +387,14 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 	return routes
 }
 
-{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
+{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. Its data is route $ <endpoint>. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the service step, the permission check), then a rate limit that counts per principal (D131), which needs the caller the permission check admitted, so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. A server with a service clause anywhere runs the service step on every route (D37): it verifies a service credential wherever one is present. A route with a clause then applies it, and runs its end-user step after it (Require) or in place of it for a listed caller (AllowOr); such a route sits outside the protected group, so the step includes the AuthMiddleware the group would have run. */ -}}
 {{- define "routeMiddlewares" }}
 			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") .Output.HasServiceCallers }}
 			Middlewares: []runtimerouting.Middleware{
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
 				{{- end }}
-				{{- if .RateLimit }}
+				{{- if and .RateLimit (not .PrincipalRateLimited) }}
 				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext{{ if .Output.Deps.RateLimitStore }}, runtimemiddleware.WithStore(cfg.RateLimitStore, {{ printf "%q" .Output.SchemaName }}, {{ printf "%q" .RateLimitOperation }}){{ end }}),
 				{{- end }}
 				{{- if .BodyLimit }}
@@ -400,6 +415,9 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 					{{- if .ServiceCallers.From }}[]string{ {{- range $i, $api := .ServiceCallers.From }}{{ if $i }}, {{ end }}{{ printf "%q" $api }}{{ end }}}{{ else }}nil{{ end }},
 					{{- template "routeUserStep" . }}
 				),
+				{{- end }}
+				{{- if .PrincipalRateLimited }}
+				runtimemiddleware.PrincipalRateLimit(cfg.PrincipalRateLimitStore, {{ printf "%q" .RateLimitBucket }}, {{ .RateLimit }}, time.Minute, {{ .PrincipalReader }}, LoggerFromContext),
 				{{- end }}
 				{{- if .Encrypted }}
 				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),

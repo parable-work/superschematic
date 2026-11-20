@@ -261,8 +261,11 @@ type EndpointInfo struct {
 	// Middleware values resolved from the operation set defaults plus
 	// field-level overrides. Nil means no directive.
 	RateLimit *int
-	BodyLimit *int
-	Timeout   *int
+	// RateLimitKey is what RateLimit counts per (D131): "" or "ip" per
+	// client IP address, "principal" or an extension's key per principal.
+	RateLimitKey string
+	BodyLimit    *int
+	Timeout      *int
 
 	Encrypted bool
 
@@ -451,6 +454,18 @@ type APIOutput struct {
 	// ToolInvocation is the invocation policy the tool documents write
 	// each visible tool's policy under (Options.ToolInvocation).
 	ToolInvocation ToolInvocationPolicy
+
+	// RateLimitKeys are the extensions' principal @rateLimit keys
+	// (Options.RateLimitKeys).
+	RateLimitKeys []RateLimitKey `json:"-"`
+	// HasPrincipalRateLimit reports that a route the router mounts has a
+	// principal @rateLimit (D131): Config then takes a
+	// PrincipalRateLimitStore, and Validate refuses a nil one.
+	HasPrincipalRateLimit bool
+	// PrincipalRateLimitImports are the imports the routes' principal
+	// readers need, beyond the runtime's: those of the extension keys the
+	// routes use, sorted by path.
+	PrincipalRateLimitImports []GoImport `json:"-"`
 
 	// EnvConfig holds environment-variable loader output when populated by
 	// the dispatch layer before WriteAPI.
@@ -829,6 +844,11 @@ type Options struct {
 	// supplies it from the registered scalar catalog.
 	RawBodyChecks RawBodyChecks
 
+	// RateLimitKeys are the principal @rateLimit keys extensions name
+	// (D131), beside the core's "ip" and "principal". The registry's
+	// RateLimitKeys supplies them.
+	RateLimitKeys []RateLimitKey
+
 	// Engine is the API's engine database (D58), nil when its database
 	// holds no engine type. The generator package reads it from the
 	// database's IR and config.
@@ -886,6 +906,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		Naming:              opts.Naming,
 		Provider:            opts.Provider,
 		ToolInvocation:      opts.ToolInvocation,
+		RateLimitKeys:       opts.RateLimitKeys,
 		Endpoints:           []EndpointInfo{},
 		Timestamp:           opts.Clock.RFC3339(),
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
@@ -1050,6 +1071,9 @@ func (o *APIOutput) summarizeEndpoints() error {
 	o.HasPermissionEndpoints, o.HasFilteredEndpoints, o.HasWebhookHMACEndpoints = false, false, false
 	o.HasServiceCallers, o.NeedsTypesImport = false, false
 	o.RequiredWebhookProviders, o.Namespaces = nil, nil
+	if err := o.summarizeRateLimits(); err != nil {
+		return err
+	}
 	for _, endpoint := range o.Endpoints {
 		o.summarizeRoute(endpoint)
 		if endpoint.HasFileUpload {
@@ -1284,7 +1308,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 
 	requiresAuth := op.Auth || op.RequireOwnership || len(op.Permissions) > 0
 
-	rateLimit, bodyLimit, timeout := resolveMiddleware(set.Middleware, op.Middleware)
+	rateLimit, rateLimitKey, bodyLimit, timeout := resolveMiddleware(set.Middleware, op.Middleware)
 
 	outputGoType := types.qualifiedGoType(op.TypeRef.Name)
 	outputScalar, _ := types.findScalarDef(op.TypeRef.Name)
@@ -1344,6 +1368,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		FileUploadFields:             fileUploadFields,
 		FileDownload:                 op.FileDownload,
 		RateLimit:                    rateLimit,
+		RateLimitKey:                 rateLimitKey,
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
 		Encrypted:                    operationEncrypted(set, op),
@@ -1420,16 +1445,19 @@ func buildPath(op *ir.FieldDef, namespace string, pathParams []Param, embeddedPa
 }
 
 // resolveMiddleware merges set-level middleware defaults with field-level
-// overrides.
-func resolveMiddleware(setMW, fieldMW *ir.MiddlewareConfig) (rateLimit, bodyLimit, timeout *int) {
+// overrides. The rate limit's key travels with it: an operation's own
+// @rateLimit replaces the set's, key and all (D131).
+func resolveMiddleware(setMW, fieldMW *ir.MiddlewareConfig) (rateLimit *int, rateLimitKey string, bodyLimit, timeout *int) {
 	if setMW != nil {
 		rateLimit = setMW.RateLimit
+		rateLimitKey = setMW.RateLimitKey
 		bodyLimit = setMW.BodyLimit
 		timeout = setMW.Timeout
 	}
 	if fieldMW != nil {
 		if fieldMW.RateLimit != nil {
 			rateLimit = fieldMW.RateLimit
+			rateLimitKey = fieldMW.RateLimitKey
 		}
 		if fieldMW.BodyLimit != nil {
 			bodyLimit = fieldMW.BodyLimit
@@ -1438,7 +1466,7 @@ func resolveMiddleware(setMW, fieldMW *ir.MiddlewareConfig) (rateLimit, bodyLimi
 			timeout = fieldMW.Timeout
 		}
 	}
-	return rateLimit, bodyLimit, timeout
+	return rateLimit, rateLimitKey, bodyLimit, timeout
 }
 
 // extractEmbeddedParams returns the set of parameter names embedded in a

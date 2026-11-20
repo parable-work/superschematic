@@ -5236,6 +5236,10 @@
         "rateLimit": {
           "type": "integer"
         },
+        "rateLimitKey": {
+          "default": "",
+          "type": "string"
+        },
         "timeout": {
           "type": "integer"
         }

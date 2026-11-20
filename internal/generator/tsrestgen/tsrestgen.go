@@ -161,6 +161,11 @@ type EndpointInfo struct {
 	// the adapter applies them with the Go runtime's semantics.
 	RateLimitPerMinute *int
 	TimeoutSeconds     *int
+	// RateLimitPrincipal marks a RateLimitPerMinute that counts per
+	// principal, the core's @rateLimit key 'principal' (D131): the spec
+	// says rateLimitKey 'principal', and the runtime counts each caller
+	// the permission gate admits in RouterOptions.principalRateLimitStore.
+	RateLimitPrincipal bool
 	// WebhookProvider is the @hmacVerified provider, or empty. The router
 	// mounts the route with Implementations.webhookVerifiers[provider],
 	// which runs before every other step.
@@ -596,9 +601,13 @@ type PackageImport struct {
 
 // APIOutput is the template data for the generated package.
 type APIOutput struct {
-	SchemaName   string
-	PackageName  string
-	TypesPackage string
+	// HasPrincipalRateLimit reports whether a route's @rateLimit counts per
+	// principal (D131): RouterOptions then requires a
+	// principalRateLimitStore.
+	HasPrincipalRateLimit bool
+	SchemaName            string
+	PackageName           string
+	TypesPackage          string
 	// RuntimePackage is the TypeScript HTTP runtime the router is built on
 	// (Naming.HTTPRuntimeNpmPackage); ScalarPackage is the scalar library
 	// subpath scalar wire types come from, the one tsgen re-exports.
@@ -980,6 +989,9 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.HasPages {
 		types = append(types, "PageSpec")
 	}
+	if o.HasPrincipalRateLimit {
+		types = append(types, "PrincipalRateLimitStore")
+	}
 	if o.HasTableOperations() {
 		types = append(types, "TableOperation")
 	}
@@ -1032,8 +1044,18 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		return nil, nil
 	}
 
+	for _, ep := range apiOutput.Endpoints {
+		// The TypeScript runtime counts the principal its gate admits, the
+		// core key's (D131); an extension's key reads another, which only
+		// its Go readers know.
+		if ep.PrincipalRateLimited() && ep.RateLimitKey != ir.RateLimitKeyPrincipal {
+			return nil, fmt.Errorf("tsrestgen: operation %s.%s: @rateLimit key %q is an extension's, which only Go routers read; the TypeScript router counts per 'ip' or 'principal'", ep.Namespace, ep.Name, ep.RateLimitKey)
+		}
+	}
+
 	b := newBuilder(schema, opts)
 	output := &APIOutput{
+		HasPrincipalRateLimit: apiOutput.HasPrincipalRateLimit,
 		SchemaName:            opts.SchemaName,
 		PackageName:           opts.Naming.NpmAPIPackage(opts.SchemaName),
 		TypesPackage:          opts.Naming.NpmTypesPackage(opts.SchemaName),
@@ -1579,6 +1601,7 @@ func (b *builder) identityEndpoint(ep apigen.EndpointInfo) EndpointInfo {
 	if ep.RateLimit != nil {
 		rateLimit := *ep.RateLimit
 		endpoint.RateLimitPerMinute = &rateLimit
+		endpoint.RateLimitPrincipal = ep.PrincipalRateLimited()
 	}
 	if ep.Timeout != nil {
 		timeout := *ep.Timeout
@@ -1631,6 +1654,7 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 	if ep.RateLimit != nil {
 		rateLimit := *ep.RateLimit
 		endpoint.RateLimitPerMinute = &rateLimit
+		endpoint.RateLimitPrincipal = ep.PrincipalRateLimited()
 	}
 	if ep.Timeout != nil {
 		timeout := *ep.Timeout

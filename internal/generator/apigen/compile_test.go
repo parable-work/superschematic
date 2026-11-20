@@ -168,6 +168,13 @@ func buildFixtureAPIOver(t *testing.T, provider apigen.AuthProvider, dbSchema *i
 // generated as a public API over fixture-db.
 func buildPublicAPIOver(t *testing.T, provider apigen.AuthProvider, apiService string, dbSchema *ir.Schema, mutateAPI ...func(*ir.Schema)) string {
 	t.Helper()
+	return buildPublicAPIWithKeys(t, provider, apiService, dbSchema, nil, mutateAPI...)
+}
+
+// buildPublicAPIWithKeys is buildPublicAPIOver with the extensions'
+// principal @rateLimit keys (D131).
+func buildPublicAPIWithKeys(t *testing.T, provider apigen.AuthProvider, apiService string, dbSchema *ir.Schema, rateLimitKeys []apigen.RateLimitKey, mutateAPI ...func(*ir.Schema)) string {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -259,6 +266,7 @@ func buildPublicAPIOver(t *testing.T, provider apigen.AuthProvider, apiService s
 		IsPublic:       true,
 		UpstreamSchema: "fixture-db",
 		UpstreamIR:     dbSchema,
+		RateLimitKeys:  rateLimitKeys,
 		Clock:          fixedClock,
 	})
 	if err != nil {

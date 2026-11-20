@@ -479,6 +479,7 @@ type (
 	OpenAPIHook          = apigen.OpenAPIHook
 	ToolHook             = apigen.ToolHook
 	ToolInvocationPolicy = apigen.ToolInvocationPolicy
+	RateLimitKey         = apigen.RateLimitKey
 )
 
 // GenerateContext is the per-run state every generator in a pipeline shares.

@@ -121,3 +121,19 @@ export function remoteAddressKey(ctx: RequestContext): string {
 export function clientIpKey(ctx: RequestContext): string {
   return ctx.clientIp ?? 'unknown';
 }
+
+/**
+ * Holds the counters behind the routes whose @rateLimit counts per
+ * principal (`key: 'principal'`, D131). The service supplies one, so the
+ * counter lives wherever it keeps shared state. `take` counts the request
+ * and decides in one atomic step, so replicas sharing the store share one
+ * count. A rejection is a store failure, which the route answers 503.
+ */
+export interface PrincipalRateLimitStore {
+  /**
+   * Counts one request for `bucket` (the route's method and path) and
+   * `principal` in the window of `windowMs` that contains now, and reports
+   * whether that count is within `limit`.
+   */
+  take(bucket: string, principal: string, limit: number, windowMs: number): Promise<RateLimitDecision>;
+}

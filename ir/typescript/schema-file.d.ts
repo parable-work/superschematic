@@ -437,6 +437,7 @@ export interface MemoryStorePart {
 export interface MiddlewareConfig {
   bodyLimit?: number;
   rateLimit?: number;
+  rateLimitKey?: string;
   timeout?: number;
 }
 

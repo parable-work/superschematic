@@ -49,7 +49,9 @@ type (
 	// ToolHook edits the vendor keys of an API's SDK tool documents and the
 	// resolved @mcp records of its operations. It edits a ToolSet: the
 	// ToolKeys (with ToolKeyValue entries) and one Tool per operation.
-	ToolHook     = registry.ToolHook
+	ToolHook = registry.ToolHook
+	// RateLimitKey is a principal @rateLimit key an extension names (D131).
+	RateLimitKey = apigen.RateLimitKey
 	ToolSet      = apigen.ToolSet
 	Tool         = apigen.Tool
 	ToolKeys     = apigen.ToolKeys

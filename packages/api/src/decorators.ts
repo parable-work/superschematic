@@ -1,7 +1,22 @@
 import type { HttpMethod } from "./enums";
 
+/**
+ * The keys a `@rateLimit` may count per (D131). `ip`, the default, counts
+ * per client IP address; `principal` per the principal the auth provider
+ * resolves for the request, in a store every replica shares. An extension
+ * that registers a principal key of its own adds it here by declaration
+ * merging: `declare module "@superschematic/api" { interface RateLimitKeys { key: true } }`.
+ */
+export interface RateLimitKeys {
+  readonly ip: true;
+  readonly principal: true;
+}
+
+export type RateLimitKey = keyof RateLimitKeys;
+
 export type RateLimitConfig = {
   readonly requestsPerMinute: number;
+  readonly key?: RateLimitKey;
 };
 
 export type BodyLimitConfig = {

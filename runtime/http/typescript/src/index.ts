@@ -52,7 +52,7 @@ export {
   unprocessableEntity,
 } from './problem.js';
 export { MemoryRateLimitStore, clientIpKey, clientIpOf, remoteAddressKey } from './ratelimit.js';
-export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit.js';
+export type { PrincipalRateLimitStore, RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit.js';
 export {
   Channel,
   InProcessMemoryStore,
