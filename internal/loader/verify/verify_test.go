@@ -853,6 +853,25 @@ func TestImplementingNonTraitIsAnError(t *testing.T) {
 	}
 }
 
+// TestEnvVarsClassMayImplementAPlainClass: an @envVars class composes a
+// plain class without config arguments; config arguments to a plain class
+// still fail (D120).
+func TestEnvVarsClassMayImplementAPlainClass(t *testing.T) {
+	schema := traitSchema([]ir.TraitRef{{Name: "Plain"}})
+	schema.Types["Plain"] = &ir.TypeDef{Name: "Plain", Role: ir.RoleEmbeddedStruct}
+	schema.Types["Notification"].EnvVars = true
+	if r := Run(schema, Input{}); len(r.Errors) > 0 {
+		t.Errorf("an @envVars class may implement a plain class, got %v", errorStrings(r))
+	}
+
+	schema.Types["Notification"].Implements = []ir.TraitRef{
+		{Name: "Plain", ConfigArgs: map[string]any{"channel": "email"}},
+	}
+	if r := Run(schema, Input{}); !hasError(r, "Notification implements Plain, which is not a trait") {
+		t.Errorf("config arguments to a plain class should still fail, got %v", errorStrings(r))
+	}
+}
+
 func TestOpenTraitConfigAcceptsAnyKeys(t *testing.T) {
 	schema := traitSchema(nil)
 	schema.Types["Branded"] = &ir.TypeDef{

@@ -859,6 +859,10 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 				if !ok {
 					continue
 				}
+				if !td.EnvVars && w.traitCarrierIsPartial(t) {
+					w.addErr(errorAtNode(t, "Trait<Partial<%s>> is valid only on an @envVars class", id.name))
+					continue
+				}
 				ref := ir.TraitRef{Name: id.name}
 				if len(typeArgs) > 0 {
 					if len(typeArgs) > 1 {
@@ -915,7 +919,7 @@ func (w *walker) traitHeritageTarget(t *astNode, report bool) (symbolIdentity, [
 	if len(typeArgs) != 1 {
 		return fail(t, "Trait<T> takes exactly one trait type argument")
 	}
-	inner := typeArgs[0]
+	inner, _ := w.unwrapPartial(typeArgs[0])
 	if inner.Kind != kindTypeReference {
 		return fail(inner, "the Trait<T> argument must name a trait class")
 	}
@@ -928,6 +932,36 @@ func (w *walker) traitHeritageTarget(t *astNode, report bool) (symbolIdentity, [
 		return id, ref.TypeArguments.Nodes, true
 	}
 	return id, nil, true
+}
+
+// unwrapPartial returns X for TypeScript's built-in Partial<X>, and true. Any
+// other node comes back unchanged, with false. An @envVars class names
+// Trait<Partial<X>> to compose the class X with every field optional (D120).
+func (w *walker) unwrapPartial(node *astNode) (*astNode, bool) {
+	if node.Kind != kindTypeReference {
+		return node, false
+	}
+	ref := node.AsTypeReferenceNode()
+	if ref.TypeArguments == nil || len(ref.TypeArguments.Nodes) != 1 {
+		return node, false
+	}
+	id, ok := w.identityOf(ref.TypeName)
+	if !ok || id.pkg != "" || id.name != "Partial" || id.decl == nil || id.decl.Kind != kindTypeAliasDeclaration {
+		return node, false
+	}
+	return ref.TypeArguments.Nodes[0], true
+}
+
+// traitCarrierIsPartial reports whether an implements entry is
+// Trait<Partial<X>>.
+func (w *walker) traitCarrierIsPartial(t *astNode) bool {
+	ewta := t.AsExpressionWithTypeArguments()
+	id, ok := w.identityOf(ewta.Expression)
+	if !ok || !id.is("@superschematic/schema", "Trait") || ewta.TypeArguments == nil || len(ewta.TypeArguments.Nodes) != 1 {
+		return false
+	}
+	_, partial := w.unwrapPartial(ewta.TypeArguments.Nodes[0])
+	return partial
 }
 
 // applyTraitConfig captures a configurable trait's Config schema from its
@@ -1131,10 +1165,15 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				ok = false
 				continue
 			}
+			// Trait<Partial<X>> composes X's fields, each one optional.
+			optional := hc.Token != kindExtendsKeyword && w.traitCarrierIsPartial(t)
 			for _, bf := range baseFields {
 				inherited := *bf
 				if inherited.InheritedFrom == "" {
 					inherited.InheritedFrom = id.name
+				}
+				if optional {
+					inherited.Required = false
 				}
 				if decl := w.relationTargets[bf]; decl != nil {
 					w.relationTargets[&inherited] = decl

@@ -653,6 +653,67 @@ func TestVerifyTraitCarrierOfNonTrait(t *testing.T) {
 	}
 }
 
+// TestTraitPartialOnlyOnEnvVars: Trait<Partial<T>> loosens every composed
+// field, so a class that is not @envVars cannot use it (D120).
+func TestTraitPartialOnlyOnEnvVars(t *testing.T) {
+	_, err := LoadService(filepath.Join("tsreader", "testdata", "services", "broken-trait-partial-not-env-vars"))
+	if err == nil {
+		t.Fatal("expected schema errors")
+	}
+	if !strings.Contains(err.Error(), "Trait<Partial<Stamped>> is valid only on an @envVars class") {
+		t.Errorf("expected the Partial error, got: %s", err.Error())
+	}
+}
+
+// TestEnvVarsClassComposesPlainClasses: an @envVars class composes plain
+// classes through Trait<X>, which keeps each field as X declares it, and
+// through Trait<Partial<X>>, which makes each of X's fields optional. The
+// composed classes stay types of their own (D120).
+func TestEnvVarsClassComposesPlainClasses(t *testing.T) {
+	schema, err := LoadService(filepath.Join("tsreader", "testdata", "services", "fixture-env-composed"))
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	config, err := schema.EnvVarsType()
+	if err != nil || config == nil || config.Name != "InvoiceConfig" {
+		t.Fatalf("EnvVarsType = %v, %v; want InvoiceConfig", config, err)
+	}
+	type field struct {
+		from     string
+		required bool
+	}
+	got := map[string]field{}
+	var order []string
+	for _, f := range config.Fields {
+		got[f.Name] = field{f.InheritedFrom, f.Required}
+		order = append(order, f.Name)
+	}
+	want := map[string]field{
+		"INVOICE_QUEUE":          {"InvoiceWorkerEnv", true},
+		"INVOICE_REGION":         {"InvoiceWorkerEnv", false},
+		"INVOICE_RELEASE":        {"InvoiceDeployEnv", false},
+		"INVOICE_SIGNING_KEY_ID": {"InvoiceDeployEnv", false},
+		"SERVICE_NAME":           {"", true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("config fields = %v, want %v", order, want)
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s = %+v, want %+v", name, got[name], w)
+		}
+	}
+	deploy := schema.Types["InvoiceDeployEnv"]
+	if deploy == nil {
+		t.Fatal("InvoiceDeployEnv is not a type of the schema")
+	}
+	for _, f := range deploy.Fields {
+		if !f.Required {
+			t.Errorf("InvoiceDeployEnv.%s lost its own required flag", f.Name)
+		}
+	}
+}
+
 // TestVerifySourceProjectionTS: the full @source verification fires for a
 // TypeScript service through compiler-resolved external types: an
 // assignability mismatch and an unmarked extra field are hard errors, and

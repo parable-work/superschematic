@@ -406,6 +406,34 @@ load, which names both: make one extend the other, or remove `@envVars`
 from one. A plain base class, without `@envVars`, works as well, since an
 `@envVars` class holds every field it inherits.
 
+An `@envVars` class can also compose plain classes, one per part of the
+environment that other code writes, through the `Trait<T>` carrier.
+`Trait<X>` adds X's fields as X declares them. `Trait<Partial<X>>` adds
+them with each one optional, for a part that a local run leaves unset:
+
+```ts
+import { Trait } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
+
+export abstract class WorkerEnv {
+  QUEUE_NAME: string;
+}
+
+export abstract class DeployEnv {
+  RELEASE: string;
+}
+
+@envVars
+export abstract class WorkerConfig implements Trait<WorkerEnv>, Trait<Partial<DeployEnv>> {
+  SERVICE_NAME: string;
+}
+```
+
+`QUEUE_NAME` and `SERVICE_NAME` are required and `RELEASE` is optional.
+`WorkerEnv` and `DeployEnv` stay types of their own, with their fields as
+they declare them. Only an `@envVars` class may implement a plain class
+or use `Partial<>` (D120).
+
 The build writes a loader that reads and checks every variable and
 reports every one that is missing or invalid at once, never a value:
 

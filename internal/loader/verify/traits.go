@@ -10,7 +10,9 @@ import (
 // Config arguments land in TraitRef.ConfigArgs. The pass asserts the two
 // sides against each other:
 //
-//   - implementing a non-trait type is an error;
+//   - implementing a non-trait type is an error, except that an @envVars
+//     class may implement a plain class without config arguments, to
+//     compose env classes (D120);
 //   - supplying config arguments to a marker (non-configurable) trait is an
 //     error;
 //   - a configurable trait's required Config fields must all be supplied;
@@ -31,6 +33,12 @@ func checkTraits(schema *ir.Schema, r *Result) {
 				continue
 			}
 			if !trait.IsTrait && trait.Role != ir.RoleTrait {
+				// An @envVars class composes plain env classes: Trait<X>
+				// flattens X's fields into it, and X stays its own type for
+				// the code that writes that part of the environment.
+				if td.EnvVars && trait.TraitConfig == nil && len(tr.ConfigArgs) == 0 {
+					continue
+				}
 				r.errorf(td.Owner, "%s implements %s, which is not a trait", td.Name, tr.Name)
 				continue
 			}
