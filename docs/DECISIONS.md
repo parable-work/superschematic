@@ -1203,22 +1203,29 @@ from.
 Built, in part: its layout, `runtime/engine/rust/rules-handler` (the pure
 handler: define, publish, describe, the instance requests, a list's
 filters, sorts and pages, unique fields, relations, the behaviors'
-operations, deadlines and changes) and `rules-dev` (its hosts over a
-SQLite file, a SQLite database in memory and a Postgres schema), with a
-publish under no compatibility rule that lists the rows a version fails
-and discards them when told to (`docs/src/content/docs/guides/development-mode.md`).
-Every rules transcript replays over the layout. Left:
+operations and the fields they compute at a read, deadlines and changes,
+the access policy as data in D58's form, routes over HTTP with no
+transport under them, the event stream and the tools) and `rules-dev`
+(its hosts over a SQLite file, a SQLite database in memory and a Postgres
+schema, an axum server behind the `server` feature with MCP, and the
+`superschematic-dev` binary), with a publish under no compatibility rule
+that lists the rows a version fails and discards them when told to
+(`docs/src/content/docs/guides/development-mode.md`). Every rules
+transcript replays over the layout, and the recorded access steps through
+its policy. Left:
 
-- The event stream and MCP. The event queue is written and nothing serves
-  it.
-- The access policy as data: define, publish and the instance requests
-  are open to any caller, and only the behaviors' permissions are checked.
-- Routes over HTTP. Requests are a typed JSON enum.
 - The library in TypeScript, Go and Python over the handler (WebAssembly
-  or the C ABI), and the prebuilt image (D103's step 6).
+  with a JSON ABI, or the C ABI), and the prebuilt image (D103's step 6).
 - `examples/engine-notes` and `examples/engine-jobs` on development mode:
   engine-notes waits for Comments on the core, and engine-jobs for the
   choice on Blueprint (D103's status).
+- The policy asked of a behavior's reads of other types (Dependencies'
+  blockers, Revisions' evidence, Rollups' links), as the engine asked
+  them; the runner's requests made by a system principal the policy sees.
+- `If-Match` on an update, a delete and an operation (the `Preconditions`
+  header is served); routes for a draft, a version, a lookup, namespaces,
+  behaviors, search and values; a notifier under the event stream, which
+  polls; acting for a subject (D77); MCP confirmations (D93).
 - A scalar's own rules beyond its kind (superscalar's normalization, a
   pattern); `searchText`, `referencedBy`, vectors, a relation that holds a
   list, and namespaces; D50's user, role and session shapes and the
