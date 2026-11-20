@@ -15,15 +15,15 @@ use serde_json::{Map, Value};
 use superschematic_rules::{
     Action, Answer, Answered, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
     KeyedRow, LinkedRows, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage,
-    RowWrite, Step, SubRow, SubRowChange, SubRowWrite, TableRef, TypeSpec, ValidationIssue,
-    WriteKind,
+    RowWrite, SharedRow, SharedRowChange, SharedRowWrite, Step, SubRow, SubRowChange, SubRowWrite,
+    TableRef, TypeSpec, ValidationIssue, WriteKind,
 };
 
 use crate::convert::{
     base62, from_cell, internal, key_value, to_column, uuid_value, Bind, Cell, UUID_TYPES,
 };
 use crate::host::Host;
-use crate::layout::{Changes, Column, Deadlines, Events, Layout, SubTable, Table};
+use crate::layout::{Changes, Column, Deadlines, Events, Layout, SharedTable, SubTable, Table};
 use crate::{busy_refusal, CreateOptions, Error, ExecuteOptions, Executed, Owned};
 use crate::{ChangeRun, Claim, Deadline, DeadlineRun, EventRun, QueuedEvent, TableChange};
 use crate::{MAX_ATTEMPTS, MAX_ROUNDS, VETOED_RETRY_SECONDS};
@@ -889,8 +889,10 @@ pub(crate) async fn prepare_create<S: Store>(
     let (changes, answers) = settle(host, store, &table.spec, &command)
         .await
         .map_err(|error| busy_or(store, error, type_name, &command, 1))?;
-    let alone =
-        changes.sub_rows.is_empty() && changes.events.is_empty() && changes.deadlines.is_empty();
+    let alone = changes.sub_rows.is_empty()
+        && changes.shared_rows.is_empty()
+        && changes.events.is_empty()
+        && changes.deadlines.is_empty();
     let owned = match changes.rows.as_slice() {
         [RowWrite::Create {
             type_name: created,
@@ -1181,6 +1183,20 @@ async fn answer_of<S: Store>(
             let sub = sub_table_of(table, use_id, name)?;
             Ok(Answer::SubRows(
                 read_sub_rows(store, table, sub, key).await?,
+            ))
+        }
+        // Each write of a shared row is held to the version it was read at,
+        // so the read needs no check of its own under a lock (D103's step 4).
+        ReadRequest::SharedRow {
+            type_name,
+            use_id,
+            table: name,
+            key,
+        } => {
+            let table = table_of(layout, type_name)?;
+            let shared = shared_table_of(table, use_id, name)?;
+            Ok(Answer::SharedRow(
+                read_shared_row(store, table, shared, key).await?,
             ))
         }
         ReadRequest::Linked {
@@ -1629,6 +1645,49 @@ async fn read_sub_rows<S: Store>(
     Ok(rows)
 }
 
+/// The row of a key of a use's shared table (D103's step 4): its values by
+/// the declared field's name, converted as an owned field's are, a NULL
+/// column absent, and its version; `None` when the table holds no row of the
+/// key.
+async fn read_shared_row<S: Store>(
+    store: &S,
+    table: &Table,
+    shared: &SharedTable,
+    key: &str,
+) -> Result<Option<SharedRow>, Error> {
+    let dialect = store.dialect();
+    let list: Vec<String> = std::iter::once(selected(dialect, &shared.version))
+        .chain(
+            shared
+                .fields
+                .iter()
+                .map(|field| selected(dialect, &field.column.column)),
+        )
+        .enumerate()
+        .map(|(i, column)| format!("{column} AS c{i}"))
+        .collect();
+    let text = format!(
+        "SELECT {} FROM {} WHERE {} = {}",
+        list.join(", "),
+        quote(&shared.table),
+        quote(&shared.key.column.column),
+        placeholder(dialect, 1)
+    );
+    let bound = to_column(&Value::String(key.to_owned()), &shared.key.column, table)?;
+    let Some(cells) = store.query(&text, &[bound]).await?.into_iter().next() else {
+        return Ok(None);
+    };
+    let mut cells = cells.into_iter();
+    let version = version_of(cells.next(), table, key)?;
+    let mut values = Map::new();
+    for field in &shared.fields {
+        if let Some(value) = from_cell(cells.next().unwrap_or(Cell::Null), &field.column, table)? {
+            values.insert(field.name.clone(), value);
+        }
+    }
+    Ok(Some(SharedRow::new(key, values, version)))
+}
+
 /// A row's version as its column holds it.
 fn version_of(cell: Option<Cell>, table: &Table, key: &str) -> Result<i64, Error> {
     let version = match &cell {
@@ -1744,7 +1803,17 @@ async fn statements_of<S: Store>(
         .iter()
         .map(|event| event_of(layout, dialect, type_name, command, event))
         .collect::<Result<Vec<_>, Error>>()?;
-    let mut statements = Vec::new();
+    // A shared table's rows first (D103's step 4): a concurrent writer that
+    // moved one, or inserted it first, moves the unit here, before a row
+    // write that a uniqueness over what the shared row counts (a label)
+    // would refuse as an error; and every command takes their locks before
+    // its rows'. A row's delete leaves them, and each write is held to one
+    // row.
+    let mut statements = changes
+        .shared_rows
+        .iter()
+        .map(|write| shared_row_of(layout, dialect, write))
+        .collect::<Result<Vec<_>, Error>>()?;
     // Each row the change set deletes: its table, its key and whether it
     // is deleted for good.
     let mut deleted: Vec<(&Table, &str, bool)> = Vec::new();
@@ -2255,6 +2324,127 @@ fn sub_values<'s>(
         .collect()
 }
 
+/// The statement of one write of a shared table's row (D103's step 4): an
+/// insert of its key, version 1 and its values, a key the table holds left
+/// as it is, or an update of the values it sets and the next version where
+/// the row is at the version expected, each held to change one row, so a
+/// concurrent writer that inserted the key first or moved the row on moves
+/// the unit. A value of a field the table does not hold, the key's among
+/// them, or a kind of change the adapter does not know, is internal.
+fn shared_row_of(
+    layout: &Layout,
+    dialect: Dialect,
+    write: &SharedRowWrite,
+) -> Result<Statement, Error> {
+    let table = table_of(layout, &write.type_name)?;
+    let shared = shared_table_of(table, &write.use_id, &write.table)?;
+    let bound_key = to_column(&Value::String(write.key.clone()), &shared.key.column, table)?;
+    let set = |given: &Map<String, Value>| -> Result<Vec<(&str, Bind)>, Error> {
+        if let Some(name) = given.keys().find(|name| shared.field(name).is_none()) {
+            return Err(
+                internal(format!("shared table {} has no field {name}", shared.table)).into(),
+            );
+        }
+        shared
+            .fields
+            .iter()
+            .filter_map(|field| given.get(&field.name).map(|value| (field, value)))
+            .map(|(field, value)| {
+                Ok((
+                    field.column.column.as_str(),
+                    to_column(value, &field.column, table)?,
+                ))
+            })
+            .collect()
+    };
+    match &write.change {
+        SharedRowChange::Insert { values: given } => {
+            let mut columns = vec![quote(&shared.key.column.column), quote(&shared.version)];
+            let mut values = vec![bound_key, Bind::Int(1)];
+            for (column, value) in set(given)? {
+                columns.push(quote(column));
+                values.push(value);
+            }
+            let placeholders: Vec<String> = (1..=values.len())
+                .map(|n| placeholder(dialect, n))
+                .collect();
+            Ok(Statement::write(
+                format!(
+                    "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING",
+                    quote(&shared.table),
+                    columns.join(", "),
+                    placeholders.join(", "),
+                    quote(&shared.key.column.column)
+                ),
+                values,
+            ))
+        }
+        SharedRowChange::Update {
+            expected_version,
+            values: given,
+        } => {
+            let mut values = vec![bound_key, Bind::Int(*expected_version)];
+            let mut sets = Vec::new();
+            for (column, value) in set(given)? {
+                values.push(value);
+                sets.push(format!(
+                    "{} = {}",
+                    quote(column),
+                    placeholder(dialect, values.len())
+                ));
+            }
+            sets.push(format!(
+                "{} = {} + 1",
+                quote(&shared.version),
+                quote(&shared.version)
+            ));
+            Ok(Statement::write(
+                format!(
+                    "UPDATE {} SET {} WHERE {} = {} AND {} = {}",
+                    quote(&shared.table),
+                    sets.join(", "),
+                    quote(&shared.key.column.column),
+                    placeholder(dialect, 1),
+                    quote(&shared.version),
+                    placeholder(dialect, 2)
+                ),
+                values,
+            ))
+        }
+        other => Err(internal(format!(
+            "the adapter takes no shared-table row change of this kind: {}",
+            serde_json::to_string(other).unwrap_or_default()
+        ))
+        .into()),
+    }
+}
+
+/// A use's shared table on a table by the use's id and the table's declared
+/// name (D103's step 4), or an internal refusal for one the layout lacks.
+fn shared_table_of<'t>(
+    table: &'t Table,
+    use_id: &str,
+    name: &str,
+) -> Result<&'t SharedTable, Error> {
+    let Some(used) = table.uses.iter().find(|used| used.id == use_id) else {
+        return Err(internal(format!(
+            "{} has no use {use_id} in the behaviors' layout",
+            table.type_name
+        ))
+        .into());
+    };
+    used.shared
+        .iter()
+        .find(|shared| shared.name == name)
+        .ok_or_else(|| {
+            internal(format!(
+                "{}'s use {use_id} ({}) keeps no shared table {name} in the behaviors' layout",
+                table.type_name, used.behavior
+            ))
+            .into()
+        })
+}
+
 /// A use's sub-table on a table by the use's id and the table's declared
 /// name, or an internal refusal for one the layout lacks.
 fn sub_table_of<'t>(table: &'t Table, use_id: &str, name: &str) -> Result<&'t SubTable, Error> {
@@ -2452,22 +2642,22 @@ fn next_version(table: &Table) -> String {
 }
 
 /// The own columns a write sets: the caller's encoded columns for the
-/// command's own row, else each own field of the change set by the
-/// layout's column. A null for a field the table has no column for clears
-/// nothing, as a merge patch's null for a member the document lacks; a
-/// value for one refuses the command as internal.
+/// command's own row, then each own field of the change set by the
+/// layout's column that they do not name: an operation's write of the
+/// row's own fields (Revisions' approve, D103's step 4) beside the audit
+/// stamps its caller encoded. A null for a field the table has no column
+/// for clears nothing, as a merge patch's null for a member the document
+/// lacks; a value for one refuses the command as internal.
 fn own_columns(
     table: &Table,
     own: &Map<String, Value>,
     encoded: Option<&Map<String, Value>>,
 ) -> Result<Vec<(String, Bind)>, Error> {
-    if let Some(encoded) = encoded {
-        return Ok(encoded
-            .iter()
-            .map(|(column, value)| (column.clone(), Bind::of_json(value)))
-            .collect());
-    }
-    let mut out = Vec::new();
+    let mut out: Vec<(String, Bind)> = encoded
+        .into_iter()
+        .flatten()
+        .map(|(column, value)| (column.clone(), Bind::of_json(value)))
+        .collect();
     for (field, value) in own {
         let Some(column) = table.own.iter().find(|column| column.field == *field) else {
             if value.is_null() {
@@ -2479,6 +2669,9 @@ fn own_columns(
             ))
             .into());
         };
+        if encoded.is_some_and(|encoded| encoded.contains_key(&column.column)) {
+            continue;
+        }
         out.push((column.column.clone(), to_column(value, column, table)?));
     }
     Ok(out)

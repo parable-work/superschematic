@@ -70,6 +70,24 @@ const schedulesFixture = "fixture-schedules-db"
 // emit, messages of its event queue, which RunEvent spends.
 const poolFixture = "fixture-pool-db"
 
+// stepsFixture is the DB fixture whose Batch implements Rollups over the
+// steps that point at it and whose Step implements Dependencies, each
+// beside its status Workflow (D104's step 4): Dependencies' operations
+// under Dependencies(), listDependents left out, no repository of its
+// sub-table, and no queue.
+const stepsFixture = "fixture-steps-db"
+
+// numberingFixture is the DB fixture whose Invoice and Ticket carry
+// Numbering on fields (D103's step 4): assignNumber under Number() and
+// Reference(), each label optional, and the counts each use keeps in a
+// shared table of its own, with no repository.
+const numberingFixture = "fixture-numbering-db"
+
+// revisionsFixture is the DB fixture whose Policy and Note implement
+// Revisions (D103's step 4): its operations under Revisions(), each
+// revision and proposal a sub-table row with no repository.
+const revisionsFixture = "fixture-revisions-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -88,7 +106,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -205,6 +223,19 @@ func TestWriteORMGolden(t *testing.T) {
 		// Budget(), no repository of a sub-table, and its deadline and
 		// event queues.
 		{poolFixture, []string{"repository_account.go", "rules.go", "queues.go"}},
+		// Tables of Rollups and Dependencies (D104's step 4): Step's
+		// Dependencies' operations under Dependencies(), its blockers in a
+		// sub-table with no repository, Batch's Rollups with no operation,
+		// and no queue.
+		{stepsFixture, []string{"repository_batch.go", "repository_step.go", "rules.go"}},
+		// Tables of Numbering (D103's step 4): assignNumber under Number()
+		// and Reference(), no repository of a shared table of counts, no
+		// upserts, and no queue.
+		{numberingFixture, []string{"repository_customer.go", "repository_invoice.go", "repository_ticket.go", "rules.go"}},
+		// Tables of Revisions (D103's step 4): its operations under
+		// Revisions(), no repository of a sub-table, no upserts, and no
+		// queue.
+		{revisionsFixture, []string{"repository_note.go", "repository_policy.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

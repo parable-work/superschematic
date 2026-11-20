@@ -9,8 +9,11 @@ rust_crate_prefix = "notes-"
 # Where the runtime crates live, relative to the parent of the schemas root
 # (examples/embedded-notes), so the example builds against this checkout.
 # migrate_rust is the migration runner the environment's binary links
-# (D116).
+# (D116), and rules_adapter_rust and rules_behaviors_rust the behaviors'
+# core, which notes-db's Rust types bind to write the Task table (D103).
 [paths]
+rules_adapter_rust = "../../runtime/engine/rust/rules-adapter"
+rules_behaviors_rust = "../../runtime/engine/rust/rules-behaviors"
 scalar_go = "../../third_party/superscalar/go"
 scalar_typescript = "../../third_party/superscalar/bindings/typescript"
 scalar_rust = "../../third_party/superscalar/crates/core"

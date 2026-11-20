@@ -24,7 +24,10 @@
 //! ([`fieldcrypt`]), and writes a table that composes behaviors through
 //! the behaviors' core (D103): a create, an update, a delete and an
 //! operation of one of its behaviors, each run by the `Rules` of its
-//! dialect, which a generated types crate binds to the core's adapter.
+//! dialect, which a generated types crate binds to the core's adapter. An
+//! upsert of such a table reads whether a row holds the key, then runs the
+//! core's create or update; an update of many rows runs the core's update
+//! of each; and a hard delete of a live row is the core's delete.
 
 pub mod fieldcrypt;
 mod plan;
@@ -86,6 +89,12 @@ pub struct Definition {
     pub dialect: Dialect,
     /// The parts of statements written around a column.
     pub clauses: Clauses,
+    /// The conditions of a JSON column's filter where they are not
+    /// [`Clauses`]': SQLite's, which compare JSON values where its text
+    /// would compare text (D116). Postgres's JSONB compares its values
+    /// itself, and carries none.
+    #[serde(default, rename = "jsonClauses")]
+    pub json_clauses: Option<JsonClauses>,
     /// The rows `find_many` and `find_page` read unless told.
     pub default_limit: u32,
     /// Who a repository opened as the system acts as (D87): the DB
@@ -193,6 +202,22 @@ pub struct Clauses {
     pub null: String,
 }
 
+/// The conditions of a JSON column's filter, `sqlutil.JSONClauses`: `eq`
+/// and `ne` of the column `%s` and its parameter's number `%d`, `in` and
+/// `noneOf` of the column `%s` and the list `%s` of its parameters, each a
+/// `value` of the parameter numbered `%d`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct JsonClauses {
+    pub eq: String,
+    pub ne: String,
+    #[serde(rename = "in")]
+    pub in_: String,
+    pub none_of: String,
+    pub value: String,
+}
+
 /// A table's statements, `sqlutil.TableStatements`: format strings of `%s`
 /// and `%d` alone. One a table has none of is empty.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -230,6 +255,10 @@ pub struct Statements {
     pub delete: String,
     pub delete_if_version: String,
     pub version: String,
+    /// A table with an Encrypted<T> column's: the read of the rows another
+    /// key sealed, and their reseal under the current one (D85).
+    pub stale: String,
+    pub reseal: String,
 }
 
 /// A table, as a types crate's `orm` module describes it.
@@ -949,6 +978,17 @@ pub trait FieldKeys: Send + Sync {
     /// The plaintext of `envelope`, which a key of the ring sealed for
     /// `cell`.
     fn open(&self, cell: FieldCell<'_>, envelope: &str) -> Result<String, String>;
+    /// The start of every envelope the current key seals, as a LIKE
+    /// pattern, by which a reencrypt reads the rows another key sealed;
+    /// none for keys that cannot say, which reseal nothing.
+    fn current_prefix(&self) -> Option<String> {
+        None
+    }
+    /// Whether `envelope` was sealed under the current key.
+    fn is_current(&self, envelope: &str) -> bool {
+        let _ = envelope;
+        false
+    }
 }
 
 /// Who a behavior's command runs as (D103): the subject and the
@@ -1114,6 +1154,33 @@ pub struct CoreOperation<'a> {
     pub preconditions: Option<&'a Values>,
     /// Who the command runs as.
     pub caller: Caller,
+}
+
+/// An operation of one of a table's behaviors on the table as a whole
+/// (D104), a command without a row, through the core: a Pool's `pick`. It
+/// takes no preconditions, which are a row's.
+#[derive(Clone, Debug)]
+pub struct CoreTableOperation<'a> {
+    /// The table.
+    pub table: &'a Table,
+    /// The member the use's operations sit under.
+    pub member: &'a str,
+    /// The operation, as the behavior declares it.
+    pub operation: &'a str,
+    /// The operation's parameters, in their wire form.
+    pub params: Value,
+    /// Who the command runs as.
+    pub caller: Caller,
+}
+
+/// The refusal of an operation of a table as a whole by a dialect's
+/// `Rules` that run none: a binding written before they could (D104).
+#[allow(dead_code)]
+pub(crate) fn no_table_operations(operation: &CoreTableOperation<'_>) -> Error {
+    Error::Definition(format!(
+        "{}.{}.{} is an operation of the table as a whole (D104), and the repositories' rules run none: regenerate the types crate, whose rules run them",
+        operation.table.name, operation.member, operation.operation
+    ))
 }
 
 /// A value a statement binds, and what its column holds: what a

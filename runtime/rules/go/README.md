@@ -371,21 +371,21 @@ soft-deleted row left out, sub-table rows with a row that has none, and
 the refusal under a lock on SQLite) and a command without a row
 (`TestATableOperationRunsWithNoRow`: a read-only one writing nothing and a
 writing one's rows fenced), on SQLite and on Postgres. `transcript_test.go`
-replays the nineteen transcripts in `runtime/engine/testdata/rules` on SQLite
+replays the 24 transcripts in `runtime/engine/testdata/rules` on SQLite
 and on Postgres, as the TypeScript adapter does:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, one raw
 write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
 deadlines and 29 changes, and 54 checks);
-`core-reactions.transcript.json`, 586 steps (476 commands, 252 of them
-changes, and 110 checks); `core-reactions-changes.transcript.json`, 60
-steps (48 commands, 24 of them changes, and 12 checks);
+`core-reactions.transcript.json`, 618 steps (504 commands, 266 of them
+changes, and 114 checks); `core-reactions-changes.transcript.json`, 62
+steps (48 commands, 24 of them changes, and 14 checks);
 `core-constants.transcript.json`, 39 steps (20 commands and 19 checks);
-`core-staterules.transcript.json`, 76 steps (43 commands and 33 checks);
+`core-staterules.transcript.json`, 88 steps (49 commands and 39 checks);
 `core-approvals.transcript.json`, 122 steps (93 commands, 71 of them
 operations and 5 changes, and 29 checks); the work queue's, on the core
-(D104): `core-lease.transcript.json`, 449 steps (334 commands, 3 of them
+(D104): `core-lease.transcript.json`, 464 steps (345 commands, 3 of them
 deadlines, 84 presenting Lease's token as their precondition and 8
-expireHolder's commands without a row, and 115 checks);
+expireHolder's commands without a row, and 119 checks);
 `core-presence.transcript.json`, 141 steps (89 commands, 8 of them
 deadlines, and 52 checks); `core-budget.transcript.json`, 495 steps
 (331 commands and 164 checks); `core-retries.transcript.json`, 250 steps
@@ -413,7 +413,18 @@ them deadlines and 10 changes, each compared with its row's
 picks, commands without a row whose `expect` holds a result or a refusal,
 its others and its events, 4 of them recheck deadlines with their events
 and one a repeat answered unchanged, each command on a row compared with
-its row's `expect.version`, and 17 checks), each command held to its
+its row's `expect.version`, and 17 checks); and those of Rollups and
+Dependencies (D104's step 4), `core-rollups.transcript.json`, 180 steps
+(108 commands, the gate's `not_held` among their refusals, and 72
+checks), and `core-dependencies.transcript.json`, 266 steps (159
+commands, the blockers kept as sub-table rows, and 107 checks); and
+those of Numbering and Revisions (D103's step 4),
+`core-numbering.transcript.json`, 104 steps (58 commands, each create's
+number taken from a shared table of counts, and 46 checks),
+`core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
+checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
+each approval an operation's write of the row's own fields, and 35
+checks), each command held to its
 `expect.events` by reading every event queue of its database back after
 it and deleting what it read; each held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every

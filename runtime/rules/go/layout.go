@@ -213,6 +213,9 @@ type Use struct {
 	Operations []Operation  `json:"operations"`
 	// Tables are the sub-tables the use's behavior keeps per row.
 	Tables []SubTable `json:"tables,omitempty"`
+	// Shared are the tables the use's behavior keeps for the table as a
+	// whole (D103's step 4).
+	Shared []SharedTable `json:"shared,omitempty"`
 }
 
 // SubTable is a sub-table a use keeps per row (D103): a child table of the

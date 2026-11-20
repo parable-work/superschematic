@@ -413,6 +413,10 @@ const (
 	// names, answered as a linked read is: what a rule over a table's rows
 	// reads (Pool's pick).
 	ReadKindRows ReadKind = "rows"
+	// ReadKindSharedRow is the row of a key of a use's shared table (D103's
+	// step 4), UseID, Table and Key naming it: what a rule over the state a
+	// behavior keeps for the table as a whole reads (Numbering's counts).
+	ReadKindSharedRow ReadKind = "sharedRow"
 )
 
 // LinkedPage is how many rows a linked read asks for at a time, the core's
@@ -578,6 +582,9 @@ type Answer struct {
 	Spec    *TypeSpec
 	SubRows []SubRow
 	Linked  *LinkedRows
+	// SharedRow is a shared-row read's answer (D103's step 4), nil for a
+	// key the table holds no row of: {"sharedRow": SharedRow|null}.
+	SharedRow *SharedRow
 }
 
 // MarshalJSON writes the answer as the variant its kind names.
@@ -614,6 +621,10 @@ func (a Answer) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			Linked LinkedRows `json:"linked"`
 		}{linked})
+	case ReadKindSharedRow:
+		return json.Marshal(struct {
+			SharedRow *SharedRow `json:"sharedRow"`
+		}{a.SharedRow})
 	default:
 		return nil, fmt.Errorf("rules: no answer of kind %q", a.Kind)
 	}
@@ -643,6 +654,8 @@ func (a *Answer) UnmarshalJSON(data []byte) error {
 			err = json.Unmarshal(value, &out.SubRows)
 		case ReadKindLinked:
 			err = json.Unmarshal(value, &out.Linked)
+		case ReadKindSharedRow:
+			err = json.Unmarshal(value, &out.SharedRow)
 		default:
 			err = fmt.Errorf("rules: no answer of kind %q", variant)
 		}
@@ -1012,9 +1025,12 @@ func (e OutboxEvent) MarshalJSON() ([]byte, error) {
 // its rows (D104), which the adapter applies by the layout: an event as a
 // message of its row's table's event queue.
 type ChangeSet struct {
-	Rows      []RowWrite       `json:"rows"`
-	SubRows   []SubRowWrite    `json:"subRows"`
-	Events    []OutboxEvent    `json:"events"`
-	Deadlines []DeadlineChange `json:"deadlines"`
-	Result    json.RawMessage  `json:"result"`
+	Rows    []RowWrite    `json:"rows"`
+	SubRows []SubRowWrite `json:"subRows"`
+	// SharedRows are the writes of the rows of the uses' shared tables
+	// (D103's step 4), absent in JSON for none.
+	SharedRows []SharedRowWrite `json:"sharedRows,omitempty"`
+	Events     []OutboxEvent    `json:"events"`
+	Deadlines  []DeadlineChange `json:"deadlines"`
+	Result     json.RawMessage  `json:"result"`
 }

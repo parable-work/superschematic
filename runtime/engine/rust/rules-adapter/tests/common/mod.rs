@@ -386,6 +386,7 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
             member: "status".into(),
             anchor: Some("status".into()),
             fields: vec![owned("status", "status", "status", "string", true), entered],
+            shared: Vec::new(),
             operations: vec![Operation::new("transition", true)],
             tables: Vec::new(),
         }],
@@ -499,10 +500,12 @@ pub fn task_table() -> Table {
         member: behavior.to_ascii_lowercase(),
         anchor: None,
         fields: Vec::new(),
+        shared: Vec::new(),
         operations: Vec::new(),
         tables: Vec::new(),
     };
     let approvals = Use {
+        shared: Vec::new(),
         operations: [
             ("signOff", true),
             ("withdrawSignOff", true),
@@ -684,6 +687,7 @@ pub fn job_table() -> Table {
         ],
         // Its operations of a row, then expireHolder, of the table as a
         // whole (D104).
+        shared: Vec::new(),
         operations: operations(&[
             "acquire",
             "heartbeat",
@@ -727,6 +731,7 @@ pub fn job_table() -> Table {
             at("failingSince", "retries_failing_since"),
             field("keyedBy", "retries_keyed_by", "string"),
         ],
+        shared: Vec::new(),
         operations: operations(&["recordAttempt"]),
         tables: vec![SubTable {
             name: "attempts".into(),
@@ -752,6 +757,7 @@ pub fn job_table() -> Table {
         member: "finder".into(),
         anchor: None,
         fields: Vec::new(),
+        shared: Vec::new(),
         operations: vec![
             Operation::new("find", false),
             Operation::of_table("rows", false),
@@ -881,6 +887,7 @@ pub fn timers_use(table: &str, row: &str) -> Use {
         member: "timers".into(),
         anchor: None,
         fields: Vec::new(),
+        shared: Vec::new(),
         operations: ["fireTimer", "resetTimer", "snoozeTimer"]
             .into_iter()
             .map(|name| Operation::new(name, true))
@@ -989,6 +996,7 @@ pub fn store_layout_in(room: &str) -> Layout {
                 member: "hold".into(),
                 anchor: None,
                 fields: Vec::new(),
+                shared: Vec::new(),
                 operations: Vec::new(),
                 tables: Vec::new(),
             },
@@ -1013,6 +1021,7 @@ pub fn store_layout_in(room: &str) -> Layout {
             member: "shout".into(),
             anchor: None,
             fields: Vec::new(),
+            shared: Vec::new(),
             operations: vec![Operation::new("say", true)],
             tables: Vec::new(),
         }],
@@ -1066,6 +1075,7 @@ pub fn probe_table() -> Table {
                 member: "echo".into(),
                 anchor: None,
                 fields: vec![owned("heard", "echoHeard", "echo_heard", "string", false)],
+                shared: Vec::new(),
                 operations: Vec::new(),
                 tables: Vec::new(),
             },

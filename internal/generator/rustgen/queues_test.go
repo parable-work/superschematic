@@ -163,10 +163,13 @@ func descriptorOf(t *testing.T, q QueueInfo) any {
 	literal := strings.TrimLeft(strings.TrimPrefix(q.Literal, "r"), "#")
 	literal = strings.TrimRight(literal, "#")
 	literal = strings.TrimSuffix(strings.TrimPrefix(literal, `"`), `"`)
-	var out any
+	var out map[string]any
 	if err := json.Unmarshal([]byte(literal), &out); err != nil {
 		t.Fatalf("queue %s: the constant holds no JSON: %v\n%s", q.Name, err, q.Literal)
 	}
+	// The statements at a given time are a Rust worker's drain's alone
+	// (D116), which queues.ts carries none of.
+	delete(out, "sqliteAtStatements")
 	return out
 }
 

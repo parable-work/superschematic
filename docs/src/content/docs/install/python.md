@@ -138,7 +138,7 @@ Each namespace is a snake_case property of the SDK: `ProductQueries` and
 
 `service_credential=ServiceCredential(token=..., headers=...)` is the
 calling service's own credential
-([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
 `token(fresh)` returns it, and the SDK sends `Bearer <token>` in
 `Service-Authorization`, or in each of `headers`, on every request. A 401
 whose code is `service_unauthorized` calls `token(True)` once and retries,

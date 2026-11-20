@@ -449,7 +449,7 @@ func PrepareCreate(ctx context.Context, host Host, typeName string, own map[stri
 		return nil, busyOr(err, typeName, command, 1)
 	}
 	alone := len(changes.Rows) == 1 && changes.Rows[0].Kind == RowCreate && changes.Rows[0].Type == typeName
-	if !alone || len(changes.SubRows) > 0 || len(changes.Events) > 0 || len(changes.Deadlines) > 0 {
+	if !alone || len(changes.SubRows) > 0 || len(changes.SharedRows) > 0 || len(changes.Events) > 0 || len(changes.Deadlines) > 0 {
 		return nil, Internal("an upsert of %s inserts the row a create of the core gives it, and that create writes more than the row; create the row with a create of its own", typeName)
 	}
 	fences, err := fencesOf(host, reads)
@@ -887,6 +887,18 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 			return Answer{}, err
 		}
 		return Answer{Kind: ReadKindSubRows, SubRows: rows}, nil
+	case ReadKindSharedRow:
+		// Each write of a shared row is held to the version it was read
+		// at, so the read needs no check of its own under a lock.
+		table, err := host.Layout.table(request.Type)
+		if err != nil {
+			return Answer{}, err
+		}
+		row, err := readSharedRow(ctx, host.Store, table, request.UseID, request.Table, request.Key)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindSharedRow, SharedRow: row}, nil
 	case ReadKindLinked:
 		if held > 0 && host.Store.Locks() == LocksFenced {
 			return Answer{}, Internal("a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)")
@@ -1014,6 +1026,19 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 	commandKey := keyOfCommand(command)
 	var statements []Statement
 	var deleted []deletedRow
+	// A shared table's rows first (D103's step 4): a concurrent writer that
+	// moved one, or inserted it first, moves the unit here, before a row
+	// write that a uniqueness over what the shared row counts (a label)
+	// would refuse as an error; and every command takes their locks before
+	// its rows'. A row's delete leaves them, and each write is held to one
+	// row.
+	for _, write := range changes.SharedRows {
+		statement, err := sharedRowStatement(host.Layout, dialect, write)
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, *statement)
+	}
 	for _, write := range changes.Rows {
 		table, err := host.Layout.table(write.Type)
 		if err != nil {
@@ -1281,14 +1306,18 @@ func sortedAssignments(columns map[string]any) []assignment {
 }
 
 // ownColumns is the own columns a write sets: the caller's encoded columns
-// for the command's own row, sorted by name, else each own field of the
-// change set by the layout's column, in the layout's order. A null for a
+// for the command's own row, sorted by name, then each own field of the
+// change set by the layout's column that they do not name, in the layout's
+// order: an operation's write of the row's own fields (Revisions' approve,
+// D103's step 4) beside the audit stamps its caller encoded. A null for a
 // field the table has no column for clears nothing, as a merge patch's
 // null for a member the document lacks; a value for one refuses the
 // command as internal.
 func ownColumns(table *Table, dialect Dialect, own map[string]json.RawMessage, encoded map[string]any) ([]assignment, error) {
-	if encoded != nil {
-		return sortedAssignments(encoded), nil
+	out := sortedAssignments(encoded)
+	named := map[string]bool{}
+	for _, assigned := range out {
+		named[assigned.column] = true
 	}
 	known := map[string]bool{}
 	for _, column := range table.Own {
@@ -1304,10 +1333,9 @@ func ownColumns(table *Table, dialect Dialect, own map[string]json.RawMessage, e
 			return nil, Internal("%s has no own field %s in the behaviors' layout", table.Type, name)
 		}
 	}
-	var out []assignment
 	for _, column := range table.Own {
 		raw, ok := own[column.Field]
-		if !ok {
+		if !ok || named[column.Column] {
 			continue
 		}
 		value, err := toColumn(raw, column, table, dialect)

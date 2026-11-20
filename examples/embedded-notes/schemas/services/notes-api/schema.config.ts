@@ -13,7 +13,10 @@ export default defineConfig({
     types: {
       [TargetLanguage.Rust]: { enabled: true }
     },
-    api: { enabled: true, language: "RUST" },
+    // mcp serves its visible tools, each table operation and behavior
+    // operation among them, at POST /api/mcp, an endpoint the binary
+    // answers under /api/notes-api (D81, D111, D116).
+    api: { enabled: true, language: "RUST", mcp: true },
     // notes-digest calls it through its Rust SDK.
     sdk: {
       [TargetLanguage.Rust]: { enabled: true }

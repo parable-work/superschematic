@@ -105,6 +105,22 @@ func TestWriteTypesGolden(t *testing.T) {
 		// upserts, runDeadline and runEvent, and its deadline and event
 		// queues in queues.ts and the layout.
 		{service: "fixture-pool-db", behaviors: true},
+		// A table that implements Rollups beside its status Workflow over
+		// the rows a HasMany lists, and one that implements Dependencies
+		// beside its own (D104's step 4): Dependencies' addBlocker,
+		// removeBlocker and listBlockers under dependencies, listDependents
+		// left out, its blockers in a sub-table with no repository and no
+		// upserts; Rollups, with no operation, under none; no queue.
+		{service: "fixture-steps-db", behaviors: true},
+		// Tables whose fields carry Numbering (D103's step 4): assignNumber
+		// under number and reference, each label string | null, the counts
+		// each use keeps in a shared table with no repository, no upserts,
+		// and the shared tables in the layout.
+		{service: "fixture-numbering-db", behaviors: true},
+		// Tables of Revisions (D103's step 4): its operations under
+		// revisions, its sub-tables with no repository, no upserts, and
+		// the sub-tables in the layout.
+		{service: "fixture-revisions-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},

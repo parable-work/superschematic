@@ -241,7 +241,7 @@ SDK's `Login`, and drive it through the SDK:
 - `SDKConfig.ServiceCredential` sends a calling service's own credential in
   `Service-Authorization` and asks its `Token` for a fresh one once after a
   401 with the code `service_unauthorized`
-  ([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
+  ([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
   A server forwards its own caller by setting `GetToken` to
   `serviceauth.ForwardedToken`, which reads the token of the request on the
   call's context.

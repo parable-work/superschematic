@@ -21,6 +21,9 @@ import (
 //go:embed testdata/orm/workflow_rules.rs
 var workflowRulesTest string
 
+//go:embed testdata/orm/note_rules.rs
+var noteRulesTest string
+
 // TestRepositoriesWriteABehaviorTableThroughTheCore generates the Rust
 // types of fixture-workflow-db, whose tables' fields are Workflows, with
 // their repositories on both dialects (D103, D116), and runs the
@@ -29,15 +32,67 @@ var workflowRulesTest string
 // starts each Workflow in its initial state, stamped, at version 1; an
 // update writes the row's own fields, moves the version and stamps nothing
 // a behavior owns, and one that names an owned field is the core's refusal;
-// a Workflow's transition runs as an operation of its member, vetoed or
-// forbidden as the core refuses it; a delete removes the row; a key no row
-// holds is not found; and a client outside a transaction is refused by
-// name on Postgres. The types crate
-// binds the core through superschematic-rules-adapter, by path.
+// an update of many rows runs the core's update of each; an upsert reads
+// whether its key is held, then runs the core's create or update, and one
+// whose update sets no field writes nothing; a Workflow's transition runs
+// as an operation of its member, vetoed or forbidden as the core refuses
+// it; a delete and a hard delete remove the row; a key no row holds is not
+// found; and a client outside a transaction is refused by name on
+// Postgres. The types crate binds the core through
+// superschematic-rules-adapter, by path.
 //
 // It needs cargo, which it skips without, and runs outside -short. Without
 // the database the Postgres half is skipped, and the test says so.
 func TestRepositoriesWriteABehaviorTableThroughTheCore(t *testing.T) {
+	runBehaviorRepositories(t, "fixture-workflow-db", "workflow_rules", workflowRulesTest)
+}
+
+// TestRepositoriesUpsertABehaviorTableThroughTheCore runs the Rust
+// repositories of fixture-approvals-db's Note, whose Constants and
+// StateRules guard its updates (D104), on both dialects, the cases
+// TestNoteUpsertsOnPostgres holds the Go ORM's upserts to: an upsert of a
+// new slug is the core's create; one of a held slug is the core's update,
+// so a change of a constant, a move of a one-way field back and a change of
+// a draft's frozen body by a caller its rule does not name are refused and
+// write nothing, and a caller holding notes.admin may change a constant;
+// only if changed, an update of the values a note holds leaves it as it
+// was; and an upsert of a deleted note's slug is not found. An update of
+// many notes is held to the same guards, a note at a time, and a hard
+// delete removes a live note through the core and a deleted one by the
+// repository's own statement.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database the Postgres half is skipped, and the test says so.
+func TestRepositoriesUpsertABehaviorTableThroughTheCore(t *testing.T) {
+	runBehaviorRepositories(t, "fixture-approvals-db", "note_rules", noteRulesTest)
+}
+
+//go:embed testdata/orm/pool_rules.rs
+var poolRulesTest string
+
+// TestRepositoriesTypeEachBehaviorOperation runs fixture-pool-db's
+// Account, which implements Pool and Budget, through the typed methods
+// src/orm.rs writes per behavior operation (D103, D116), on both dialects:
+// the repositories open a struct of each use's operations
+// (account_pool(), account_budget()), Pool's pick runs on the table as a
+// whole, a command without a row (D104), with its parameters and its
+// result typed, and Budget's reserve on a row, refused past its limit.
+// TestRepositoriesWriteABehaviorTableThroughTheCore runs a Workflow's
+// typed transition.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database the Postgres half is skipped, and the test says so.
+func TestRepositoriesTypeEachBehaviorOperation(t *testing.T) {
+	runBehaviorRepositories(t, "fixture-pool-db", "pool_rules", poolRulesTest)
+}
+
+// runBehaviorRepositories generates fixture's Rust types with both
+// dialects' repositories and the core bound, holds the types crate to
+// cargo clippy, and runs source, the test crate's tests/<name>.rs, over the
+// SQLite DDL the build writes, at create.sql, and the Postgres DDL, at
+// postgres/create.sql.
+func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping the behavior tables' cargo test in -short mode")
 	}
@@ -45,7 +100,6 @@ func TestRepositoriesWriteABehaviorTableThroughTheCore(t *testing.T) {
 	if err != nil {
 		t.Skip("cargo not found, skipping the behavior tables' repositories")
 	}
-	const fixture = "fixture-workflow-db"
 	paths := testpaths.Local(t)
 	reg := registry.New(naming.Default())
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture), loader.WithRegistry(reg))
@@ -112,11 +166,11 @@ func TestRepositoriesWriteABehaviorTableThroughTheCore(t *testing.T) {
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":              fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir)),
-		"Cargo.lock":              string(lock),
-		"src/lib.rs":              "//! The behavior tables' repositories: see tests/.\n",
-		"create.sql":              sqliteDDL,
-		"tests/workflow_rules.rs": workflowRulesTest,
+		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir)),
+		"Cargo.lock":            string(lock),
+		"src/lib.rs":            "//! The behavior tables' repositories: see tests/.\n",
+		"create.sql":            sqliteDDL,
+		"tests/" + name + ".rs": source,
 	} {
 		if err := os.WriteFile(filepath.Join(crateDir, file), []byte(content), 0o644); err != nil {
 			t.Fatal(err)

@@ -9,9 +9,9 @@ use std::fmt::Display;
 use serde_json::Value;
 
 use super::{
-    invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreUpdate, Definition, Dialect,
-    Error, Fence, FieldCell, FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey,
-    Values, WriteOptions,
+    invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate,
+    Definition, Dialect, Error, Fence, FieldCell, FieldKeys, FindOptions, Marks, OrderBy,
+    PageOptions, Session, Table, UniqueKey, Values, WriteOptions,
 };
 use crate::search::{like_pattern, terms};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
@@ -128,6 +128,18 @@ pub(crate) struct UpsertPlan {
     pub(crate) sealing: Values,
 }
 
+/// An upsert of a table that composes behaviors (D103, D116): the read of
+/// whether a row holds the key, before the core's create or update.
+pub(crate) struct CoreUpsertPlan {
+    /// The read of the rows that hold the input's value of the key; none
+    /// when the input leaves a column of the key unset, which no row then
+    /// holds.
+    pub(crate) held: Option<Statement>,
+    /// Whether the update sets a field: one that sets none leaves a row
+    /// that holds the key as it is (D105).
+    pub(crate) sets: bool,
+}
+
 /// A delete's statements.
 pub(crate) struct DeletePlan {
     pub(crate) statement: Statement,
@@ -242,18 +254,27 @@ impl<'a> Plan<'a> {
                 });
                 Ok(args.len())
             };
+            // A JSON column compares JSON values, by the dialect's own
+            // conditions where its column holds text (D116).
+            let json = if column.json {
+                self.definition.json_clauses.as_ref()
+            } else {
+                None
+            };
             for op in &column.filter {
                 let Some(value) = member.get(op).filter(|value| !value.is_null()) else {
                     continue;
                 };
                 match op.as_str() {
                     "eq" | "ne" | "gt" | "gte" | "lt" | "lte" => {
-                        let clause = match op.as_str() {
-                            "eq" => &c.eq,
-                            "ne" => &c.ne,
-                            "gt" => &c.gt,
-                            "gte" => &c.gte,
-                            "lt" => &c.lt,
+                        let clause = match (op.as_str(), json) {
+                            ("eq", Some(json)) => &json.eq,
+                            ("ne", Some(json)) => &json.ne,
+                            ("eq", None) => &c.eq,
+                            ("ne", None) => &c.ne,
+                            ("gt", _) => &c.gt,
+                            ("gte", _) => &c.gte,
+                            ("lt", _) => &c.lt,
                             _ => &c.lte,
                         };
                         let n = push(value, op, args)?;
@@ -285,9 +306,17 @@ impl<'a> Plan<'a> {
                         let mut placeholders = Vec::with_capacity(values.len());
                         for value in values {
                             let n = push(value, op, args)?;
-                            placeholders.push(self.placeholder(n)?);
+                            placeholders.push(match json {
+                                Some(json) => fill(&json.value, &[&n])?,
+                                None => self.placeholder(n)?,
+                            });
                         }
-                        let clause = if op == "in" { &c.in_ } else { &c.none_of };
+                        let clause = match (op == "in", json) {
+                            (true, Some(json)) => &json.in_,
+                            (false, Some(json)) => &json.none_of,
+                            (true, None) => &c.in_,
+                            (false, None) => &c.none_of,
+                        };
                         conditions.push(fill(clause, &[q, &placeholders.join(", ")])?);
                     }
                     "between" => {
@@ -791,6 +820,119 @@ impl<'a> Plan<'a> {
         Ok(row)
     }
 
+    /// The keys a reencrypt seals with, refusing a table with no
+    /// `Encrypted<T>` field, repositories opened with no keys, and keys that
+    /// name no current key.
+    fn reencrypt_keys(&self) -> Result<&'a dyn FieldKeys, Error> {
+        let table = self.table;
+        let s = &table.statements;
+        let Some(first) = table.encrypted().next() else {
+            return Err(invalid(format!(
+                "{} has no Encrypted<T> field to reencrypt",
+                table.name
+            )));
+        };
+        if s.stale.is_empty() || s.reseal.is_empty() {
+            return Err(Error::Definition(format!(
+                "{} has no statements to reencrypt with: regenerate the types crate",
+                table.name
+            )));
+        }
+        self.session.keys.ok_or_else(|| {
+            Error::Encryption(format!(
+                "{}.{} is an Encrypted<T> field, and the repositories were opened with no field keys",
+                table.name, first.field
+            ))
+        })
+    }
+
+    /// The read of up to `batch` rows, deleted ones too, in key order, a
+    /// column of which another key than the current one sealed (D85), and
+    /// the columns it reads: the key, then each encrypted column.
+    pub(crate) fn stale(&self, batch: Option<u32>) -> Result<(Statement, Vec<&'a Column>), Error> {
+        let keys = self.reencrypt_keys()?;
+        let prefix = keys.current_prefix().ok_or_else(|| {
+            Error::Encryption(format!(
+                "{}: the field keys name no current key, so a reencrypt cannot tell another key's envelope",
+                self.table.name
+            ))
+        })?;
+        let batch = batch
+            .filter(|batch| *batch > 0)
+            .unwrap_or(self.definition.default_limit);
+        let columns = std::iter::once(self.table.key_column())
+            .chain(self.table.encrypted())
+            .collect();
+        let statement = Statement {
+            sql: self.table.statements.stale.clone(),
+            args: vec![
+                Bound {
+                    value: Value::String(prefix),
+                    marks: Marks::TEXT,
+                },
+                Bound {
+                    value: Value::from(batch),
+                    marks: Marks::TEXT,
+                },
+            ],
+        };
+        Ok((statement, columns))
+    }
+
+    /// The reseal of a row the stale read returned, its key and then the
+    /// envelope each encrypted column held: each envelope another key
+    /// sealed is opened and sealed again under the current key, for the
+    /// row, and the statement sets them on the row when each column still
+    /// holds what was read, so a write between the two keeps its own.
+    pub(crate) fn reseal(&self, cells: &[Value]) -> Result<Statement, Error> {
+        let keys = self.reencrypt_keys()?;
+        let table = self.table;
+        let key = cells.first().cloned().unwrap_or(Value::Null);
+        let row = self.cell_key(&key).ok_or_else(|| {
+            Error::Definition(format!(
+                "a row of {} holds no {}, which its envelopes are bound to",
+                table.name, table.key
+            ))
+        })?;
+        let mut sealed = Vec::new();
+        let mut held = Vec::new();
+        for (i, column) in table.encrypted().enumerate() {
+            let envelope = cells.get(i + 1).cloned().unwrap_or(Value::Null);
+            let next = match &envelope {
+                Value::String(text) if !keys.is_current(text) => {
+                    let cell = FieldCell {
+                        table: &table.name,
+                        field: &column.field,
+                        row: &row,
+                    };
+                    let plaintext = keys.open(cell, text).map_err(|err| {
+                        Error::Encryption(format!("{}.{}: {err}", table.name, column.field))
+                    })?;
+                    let resealed = keys.seal(cell, &plaintext).map_err(|err| {
+                        Error::Encryption(format!("{}.{}: {err}", table.name, column.field))
+                    })?;
+                    Value::String(resealed)
+                }
+                other => other.clone(),
+            };
+            sealed.push(Bound {
+                value: next,
+                marks: Marks::of(column),
+            });
+            held.push(Bound {
+                value: envelope,
+                marks: Marks::of(column),
+            });
+        }
+        let mut args = sealed;
+        args.push(self.key(&key)?);
+        args.extend(held);
+        Ok(Statement {
+            sql: table.statements.reseal.clone(),
+            args,
+        })
+    }
+
     /// Whether a create writes the column, and what: the member when set,
     /// else its default, as Go writes an unset enum's. Null sets a JSON
     /// column that takes no NULL to the JSON null.
@@ -1250,15 +1392,9 @@ impl<'a> Plan<'a> {
         only_if_changed: bool,
     ) -> Result<UpsertPlan, Error> {
         let table = self.table;
-        if let Some(behaviors) = &table.behaviors {
-            if behaviors.no_upsert {
-                return Err(invalid(format!(
-                    "upsert_one of {}: the table's behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten, so the table has no upserts (D103); create the row with create_one",
-                    table.name
-                )));
-            }
-            return Err(invalid(format!(
-                "upsert_one of {}: a table that composes behaviors writes its rows through the core (D103); create the row with create_one and update it with update_one",
+        if table.behaviors.is_some() {
+            return Err(Error::Definition(format!(
+                "upsert_one of {}: a table that composes behaviors upserts through the core (D103), with core_upsert",
                 table.name
             )));
         }
@@ -1429,6 +1565,88 @@ impl<'a> Plan<'a> {
 
     // ---- Behaviors (D103) ----
 
+    /// An upsert of a table that composes behaviors (D103, D116): the read
+    /// of the rows that hold the input's value of the unique key `on`, after
+    /// which the repository runs the core's create of the input, or the
+    /// core's update of the row that holds it. The input and the update are
+    /// checked before anything is read: a member the table has no column
+    /// for, a field the update sets that a behavior owns, which only the
+    /// behavior's operations change, and a value its column refuses.
+    pub(crate) fn core_upsert(
+        &self,
+        input: &Values,
+        on: &[&str],
+        update: &Values,
+    ) -> Result<CoreUpsertPlan, Error> {
+        let table = self.table;
+        if table.behaviors.as_ref().is_some_and(|b| b.no_upsert) {
+            return Err(invalid(format!(
+                "upsert_one of {}: the table's behaviors keep sub-tables or arm deadlines, so the table has no upserts in any language (D103); create the row with create_one",
+                table.name
+            )));
+        }
+        self.known_members(input, "upsert")?;
+        if let Some(member) = update.keys().find(|member| self.owned().contains(member)) {
+            return Err(invalid(format!(
+                "upsert_one of {} sets the fields an update sets, not {member}, which a behavior owns (D103): only its operations change it",
+                table.name
+            )));
+        }
+        let name = on.join(",");
+        let key = self.unique_key(&name)?;
+        let sets = self.set_clauses(update, &mut Vec::new(), None)?;
+        Ok(CoreUpsertPlan {
+            held: self.held(&name, key, &self.stamped(input)?)?,
+            sets: !sets.is_empty(),
+        })
+    }
+
+    /// The read of the live row whose key is `key` when a column `update`
+    /// sets holds another value than the one it sets, as the database
+    /// compares them, for an upsert only if changed (D89): none when the
+    /// update sets no column the database can compare, an encrypted one's
+    /// envelope being bound to its row.
+    pub(crate) fn changed(&self, key: &Value, update: &Values) -> Result<Option<Statement>, Error> {
+        let mut plain = update.clone();
+        for column in self.table.encrypted() {
+            plain.remove(&column.name);
+        }
+        let c = &self.definition.clauses;
+        let key_column = self.table.key_column();
+        let mut args = vec![self.key(key)?];
+        let mut compared = (Vec::new(), Vec::new());
+        self.set_clauses(&plain, &mut args, Some(&mut compared))?;
+        if compared.0.is_empty() {
+            return Ok(None);
+        }
+        let conditions = [
+            fill(&c.eq, &[&key_column.qualified, &1])?,
+            fill(
+                &c.changed,
+                &[&compared.0.join(", "), &compared.1.join(", ")],
+            )?,
+        ];
+        let where_ = self.live_where(self.where_of(&conditions), false);
+        let s = &self.table.statements;
+        Ok(Some(Statement {
+            sql: fill(&s.find_one, &[&s.columns, &where_, &""])?,
+            args,
+        }))
+    }
+
+    /// The read of the live rows `filter` finds, in the key's order, every
+    /// one of them: the rows an update of many of a table that composes
+    /// behaviors updates through the core, a row at a time (D103, D116).
+    pub(crate) fn rows_of(&self, filter: Option<&Values>) -> Result<Statement, Error> {
+        let mut args = Vec::new();
+        let conditions = self.conditions(self.table, filter, &mut args)?;
+        let where_ = self.live_where(self.where_of(&conditions), false);
+        let s = &self.table.statements;
+        let order = self.order_by(&[OrderBy::asc(self.table.key.clone())])?;
+        let sql = fill(&s.find_many, &[&s.qualified_columns, &where_, &order, &""])?;
+        Ok(Statement { sql, args })
+    }
+
     /// The members of the columns the table's behaviors own.
     fn owned(&self) -> &[String] {
         self.table
@@ -1572,17 +1790,19 @@ impl<'a> Plan<'a> {
     }
 
     /// A delete of a row through the core: a soft-deletable table's live
-    /// row stamped deleted in place of deleted.
+    /// row stamped deleted in place of deleted, unless `hard`, which removes
+    /// the row whatever the table.
     pub(crate) fn core_delete<'p>(
         &self,
         key: &Value,
         options: &'p WriteOptions,
+        hard: bool,
     ) -> Result<CoreDelete<'p>, Error>
     where
         'a: 'p,
     {
         let table = self.table;
-        let soft_delete = if table.soft_delete {
+        let soft_delete = if table.soft_delete && !hard {
             let user = self.require_user()?;
             let mut stamps = Vec::new();
             if let Some(deleted_at) = table.audit("deletedAt") {
@@ -1666,6 +1886,36 @@ impl<'a> Plan<'a> {
         })
     }
 
+    /// An operation of one of the table's behaviors on the table as a
+    /// whole (D104), through the core: its parameters, and who it runs as.
+    pub(crate) fn core_table_operation<'p>(
+        &self,
+        member: &'p str,
+        operation: &'p str,
+        params: &Value,
+    ) -> Result<CoreTableOperation<'p>, Error>
+    where
+        'a: 'p,
+    {
+        let table = self.table;
+        if table.behaviors.is_none() {
+            return Err(invalid(format!(
+                "{} composes no behaviors (D103), so it has no operation {member}.{operation}",
+                table.name
+            )));
+        }
+        Ok(CoreTableOperation {
+            table,
+            member,
+            operation,
+            params: match params {
+                Value::Null => Value::Object(Values::new()),
+                params => params.clone(),
+            },
+            caller: self.session.caller(),
+        })
+    }
+
     /// The key a command names, in its wire form: a UUID in base62, which
     /// the core names a row by, in whichever form the caller wrote it.
     fn wire_key(&self, key: &Value) -> Result<String, Error> {
@@ -1686,13 +1936,13 @@ impl<'a> Plan<'a> {
     }
 
     /// The statements a delete through the core of a versioned table's row
-    /// runs around it, on a table that keeps no deleted rows: the one that
-    /// sets the transaction's history actor to the acting user, which the
-    /// history trigger reads the tombstone's actor from, and the one that
-    /// clears it (D17, D32), as a hard delete's do. None for any other
-    /// table.
-    pub(crate) fn core_delete_actor(&self) -> Option<(Statement, Statement)> {
-        if self.table.soft_delete || !self.table.history_actor {
+    /// runs around it, when it removes the row (`hard`, or a table that
+    /// keeps no deleted rows): the one that sets the transaction's history
+    /// actor to the acting user, which the history trigger reads the
+    /// tombstone's actor from, and the one that clears it (D17, D32), as a
+    /// hard delete's do. None for any other table.
+    pub(crate) fn core_delete_actor(&self, hard: bool) -> Option<(Statement, Statement)> {
+        if (self.table.soft_delete && !hard) || !self.table.history_actor {
             return None;
         }
         let set = Statement {

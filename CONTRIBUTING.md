@@ -83,7 +83,7 @@ By making a contribution to this project, I certify that:
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
 | [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
-| [`docs/`](docs/) | The docs site, the decision log and the design documents |
+| [`docs/`](docs/) | The docs site, the open decisions and the design documents |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
 The repository has thirteen Go modules: the root (the compiler), `ir`,
@@ -118,8 +118,12 @@ release's `superschematic_<version>_<platform>.tar.gz`.
 
 [`docs/extension-model.md`](docs/extension-model.md) is the design of the
 extension seam, [`docs/stack-model.md`](docs/stack-model.md) the design of
-stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md) records
-every design decision (cited as D1, D2, ... in code and commits).
+stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md) holds
+the decisions that are not built yet. Code, commits and the docs cite
+decisions by number (D1, D2, ...). A decision leaves the file once it is
+built, and the code, the docs site and the commit that built it are its
+record from then on. Every entry up to D119 is in the file at commit
+e8e685a51: `git show e8e685a51:docs/DECISIONS.md`.
 [`docs/README.md`](docs/README.md) covers writing docs pages.
 
 ## Toolchain
@@ -220,7 +224,7 @@ pin does not name yet, as when you test one you packed yourself
 ## Running the gates
 
 The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
-(`docs/DECISIONS.md`, D40):
+(D40):
 
 - A pull request runs the quick tier: the lints and drift checks, the Go
   tests with `-short` (which skips every test that compiles and runs a

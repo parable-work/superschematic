@@ -37,6 +37,15 @@ pub struct ChangeSet {
     /// Sub-table row writes, in the order the behaviors made them.
     #[serde(default)]
     pub sub_rows: Vec<SubRowWrite>,
+    /// Writes of rows of the uses' shared tables, kept for a type's table
+    /// as a whole ([`crate::TableDecl::shared`]), in the order the behaviors
+    /// made them: an insert of a key the table does not hold, and an update
+    /// held to the version the host read the row at. The host applies each
+    /// held to one row, so one a concurrent writer moved, or inserted first,
+    /// runs the command again from fresh state, as a row write held to its
+    /// version does. Absent in JSON when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_rows: Vec<SharedRowWrite>,
     /// The events the behaviors emitted about rows, in the order they
     /// emitted them ([`crate::Cx::emit`], D104): the host writes each to the
     /// event queue of its row's table in the change set's transaction, with
@@ -291,6 +300,43 @@ pub enum SubRowChange {
         values: Map<String, Value>,
     },
     Delete,
+}
+
+/// One write of a row of a use's shared table: the type, the use that owns
+/// the table, the table's declared name, and the row's key in it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedRowWrite {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    pub use_id: String,
+    pub table: String,
+    pub key: String,
+    pub change: SharedRowChange,
+}
+
+/// What happens to a row of a shared table. The list of kinds is open, so
+/// a host matches it with a fallback arm.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[non_exhaustive]
+pub enum SharedRowChange {
+    /// A new row with its values, by declared field, at version 1. A key the
+    /// table already holds inserts nothing, and the host runs the command
+    /// again.
+    Insert { values: Map<String, Value> },
+    /// The values it sets on the row of the key, held to the version the
+    /// host read it at, which the write moves on by one; a null clears one.
+    /// A row at another version, or none, updates nothing, and the host runs
+    /// the command again.
+    Update {
+        expected_version: i64,
+        values: Map<String, Value>,
+    },
 }
 
 /// An event a behavior emits about a row, which the host writes to the

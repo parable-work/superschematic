@@ -523,6 +523,10 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 		for _, op := range declaration.Operations {
 			if !behaviorops.Serves(op) {
 				r.warnf("", "%s: %s's %s is %s, whose operation %s runs on a namespace as a whole: @behaviorOperations serves the operations a behavior runs on a row or on its table, and leaves %s out (D103, D104)", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, op.Name)
+				continue
+			}
+			if why := registry.TableLeavesOut(ref.Name, op.Name); why != "" {
+				r.warnf("", "%s: %s's %s is %s, whose operation %s a table leaves out: %s, and @behaviorOperations leaves it out (D104)", set.Name, typeName, ref.UseID(), behaviortypes.An(ref.Name), op.Name, why)
 			}
 		}
 	}

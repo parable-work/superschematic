@@ -1,0 +1,197 @@
+{
+  "dialect": "sqlite",
+  "from": "",
+  "hash": "f1be9da822ae0173f1d806945bf527953b3979a1e2fd958e6920c6e58bac66bd",
+  "service": "tasks-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"comment\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"task_id\" TEXT NOT NULL,\n  \"body\" TEXT NOT NULL,\n  \"legacy_id\" TEXT NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"task_id\") REFERENCES \"task\" (\"id\") ON DELETE CASCADE\n)"
+      ],
+      "subject": "table/comment",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"project\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\")\n)"
+      ],
+      "subject": "table/project",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"task\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"project_id\" TEXT NOT NULL,\n  \"title\" TEXT NOT NULL,\n  \"done\" INTEGER NOT NULL,\n  \"due_at\" TEXT,\n  \"remind_before\" TEXT DEFAULT '[]' NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"project_id\") REFERENCES \"project\" (\"id\") ON DELETE CASCADE\n)"
+      ],
+      "subject": "table/task",
+      "transactional": true
+    }
+  ],
+  "to": "288da563a4c63dd5f6805bd32a1509d3501ad56808f1feefc1b419c76c5190d8",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "tasks-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Comment.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "task_id",
+            "origin": "Comment.task",
+            "type": "TEXT"
+          },
+          {
+            "name": "body",
+            "origin": "Comment.body",
+            "type": "TEXT"
+          },
+          {
+            "name": "legacy_id",
+            "origin": "Comment.legacyId",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Comment.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "name": "fk_comment_task_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "task"
+          }
+        ],
+        "kind": "entity",
+        "name": "comment",
+        "origin": "Comment",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "comment_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Project.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Project.name",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Project.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "project",
+        "origin": "Project",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "project_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Task.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "project_id",
+            "origin": "Task.project",
+            "type": "TEXT"
+          },
+          {
+            "name": "title",
+            "origin": "Task.title",
+            "type": "TEXT"
+          },
+          {
+            "name": "done",
+            "origin": "Task.done",
+            "type": "INTEGER"
+          },
+          {
+            "name": "due_at",
+            "nullable": true,
+            "origin": "Task.dueAt",
+            "type": "TEXT"
+          },
+          {
+            "default": "'[]'",
+            "element": "TEXT",
+            "holds": "list",
+            "name": "remind_before",
+            "origin": "Task.remindBefore",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Task.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "name": "fk_task_project_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "project"
+          }
+        ],
+        "kind": "entity",
+        "name": "task",
+        "origin": "Task",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "task_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

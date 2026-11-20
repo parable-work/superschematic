@@ -439,6 +439,86 @@ macro_rules! script {
                 found,
             ),
         ));
+        // A JSON column's filter compares JSON values, as Postgres's JSONB
+        // does: an object whose members come in another order, and a
+        // number written another way, are the value the row holds.
+        calls.push((
+            "createEntriesWithMetadata",
+            answer(
+                $run!(entries.create_many(&[
+                    EntryCreate {
+                        metadata: Some(json!({"tip": 1, "where": {"city": "Oslo", "floor": 2}, "tags": ["a", "b"]})),
+                        ..entry(14, cash, -900, "2026-10-28")
+                    },
+                    EntryCreate { metadata: Some(json!([1, 2.5, "x"])), ..entry(15, bank, 300, "2026-10-28") },
+                    EntryCreate { metadata: Some(json!("receipt")), ..entry(16, bank, 200, "2026-10-29") },
+                ])),
+                row,
+            ),
+        ));
+        let same = json!({"where": {"floor": 2.0, "city": "Oslo"}, "tags": ["a", "b"], "tip": 1.0});
+        calls.push((
+            "findEntriesByMetadata",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter { metadata: Some(Equals::eq(same.clone())), ..Default::default() }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesByOtherMetadata",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        metadata: Some(Equals { ne: Some(same.clone()), ..Default::default() }),
+                        ..Default::default()
+                    }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesByMetadataIn",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        metadata: Some(Equals {
+                            in_: vec![json!([1.0, 2.5, "x"]), json!("receipt"), json!({"tip": 2})],
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesByMetadataNotIn",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        metadata: Some(Equals { not_in: vec![same.clone(), json!("receipt")], ..Default::default() }),
+                        ..Default::default()
+                    }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesByMetadataOrder",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter { metadata: Some(Equals::eq(json!([2.5, 1, "x"]))), ..Default::default() }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
         for (name, desc) in [("pageEntriesByMemo", false), ("pageEntriesByMemoDescending", true)] {
             let options = |after| PageOptions { sort: Some("memo".to_owned()), desc, after, limit: Some(2), ..Default::default() };
             let first = $run!(entries.find_page(None, &options(None)));
@@ -508,7 +588,7 @@ macro_rules! script {
             answer(
                 $run!(entries.find_many(
                     Some(&EntryFilter { account_id: Some(Equals::eq(key(cash))), ..Default::default() }),
-                    &FindOptions { include_deleted: true, ..Default::default() },
+                    &FindOptions { include_deleted: true, ..by_amount.clone() },
                 )),
                 found,
             ),

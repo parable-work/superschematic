@@ -18,14 +18,14 @@
 //! many it handles at a time, a connection each: 2 unless it says
 //! otherwise. It completes a message when its method returns `Ok`, fails it
 //! when the method returns an error or panics, and logs each outcome. A
-//! drain extends no claim, so a method has its queue's lease to finish;
-//! after it the message is due again. Between drains it sleeps until the
+//! drain extends the claim of a method that runs past half its queue's
+//! lease, so the message is not due again while it runs. Between drains it sleeps until the
 //! next message falls due, a second at most, when it hears a write another
 //! process made, or until a write its own Deps commit to the file wakes it.
 //! As it starts and every five minutes it prunes the queue's done messages
 //! past their retention. On SIGTERM or SIGINT it claims no more, lets the
-//! running methods finish for 5s, and exits 0; a method that still runs then is left
-//! to its claim's expiry. It serves no port, and builds no identity service
+//! running methods finish for 5s, and exits 0; the message of a method that still runs then is
+//! due again when its claim expires. It serves no port, and builds no identity service
 //! and no router (D53, D65). When the environment names an OTLP endpoint
 //! (`OTEL_EXPORTER_OTLP_ENDPOINT`), it exports a span per message (D67).
 //!

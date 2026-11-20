@@ -20,6 +20,7 @@ import {
   type RulesHost,
   type RulesLayout,
   type RulesOwnedField,
+  type RulesSharedTable,
   type RulesSubTable,
   type RulesTable,
   type RulesUse,
@@ -117,14 +118,14 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] = [
   { file: 'core-workflow', floor: 96 },
   { file: 'core-timers', floor: 139 },
-  { file: 'core-reactions', floor: 586 },
-  { file: 'core-reactions-changes', floor: 60 },
+  { file: 'core-reactions', floor: 618 },
+  { file: 'core-reactions-changes', floor: 62 },
   { file: 'core-workflow-principals', floor: 101 },
   { file: 'core-constants', floor: 39 },
-  { file: 'core-staterules', floor: 76 },
+  { file: 'core-staterules', floor: 88 },
   { file: 'core-approvals', floor: 122 },
   { file: 'core-freezes-and-sign-offs', floor: 115 },
-  { file: 'core-lease', floor: 449 },
+  { file: 'core-lease', floor: 464 },
   { file: 'core-presence', floor: 141 },
   { file: 'core-budget', floor: 495 },
   { file: 'core-retries', floor: 250 },
@@ -134,6 +135,11 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
   { file: 'core-pool', floor: 82 },
+  { file: 'core-rollups', floor: 180 },
+  { file: 'core-dependencies', floor: 266 },
+  { file: 'core-numbering', floor: 104 },
+  { file: 'core-lease-numbering', floor: 14 },
+  { file: 'core-revisions', floor: 104 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
@@ -295,18 +301,41 @@ function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUs
       const operations = (declaration.operations ?? [])
         .filter(operation => operation.scope !== 'namespace')
         .map(operation => ({ name: operation.name, writes: operation.writes === true, ...(operation.scope === 'schema' ? { table: true } : {}) }));
-      const tables: RulesSubTable[] = (declaration.tables ?? []).map(declared => {
+      const keyOf = (declared: { readonly name: string; readonly key: string; readonly fields: readonly { readonly name: string; readonly type?: string }[] }) => {
         const key = declared.fields.find(field => field.name === declared.key);
         if (key === undefined) throw new Error(`behavior ${use.behavior}'s table ${declared.name} has no key field ${declared.key}`);
-        return {
+        return key;
+      };
+      const tables: RulesSubTable[] = (declaration.tables ?? [])
+        .filter(declared => declared.scope !== 'schema')
+        .map(declared => ({
           name: declared.name,
           table: `${table}_${snake(member)}_${snake(declared.name)}`,
           row: `${snake(type.name)}_id`,
-          key: subField(key),
+          key: subField(keyOf(declared)),
           fields: declared.fields.filter(field => field.name !== declared.key).map(subField),
-        };
+        }));
+      // A table kept for the table as a whole (D103's step 4): keyed by its
+      // declared key alone, with a version of its own.
+      const shared: RulesSharedTable[] = (declaration.tables ?? [])
+        .filter(declared => declared.scope === 'schema')
+        .map(declared => ({
+          name: declared.name,
+          table: `${table}_${snake(member)}_${snake(declared.name)}`,
+          key: subField(keyOf(declared)),
+          fields: declared.fields.filter(field => field.name !== declared.key).map(subField),
+          version: '_version',
+        }));
+      uses.set(id, {
+        id,
+        behavior: use.behavior,
+        member,
+        ...(anchor !== undefined ? { anchor } : {}),
+        fields,
+        operations,
+        ...(tables.length > 0 ? { tables } : {}),
+        ...(shared.length > 0 ? { shared } : {}),
       });
-      uses.set(id, { id, behavior: use.behavior, member, ...(anchor !== undefined ? { anchor } : {}), fields, operations, ...(tables.length > 0 ? { tables } : {}) });
     }
   }
   return { uses: [...uses.values()], armsDeadlines, emitsEvents };
@@ -382,6 +411,15 @@ for (const { file, floor } of TRANSCRIPTS) {
                 `PRIMARY KEY ("${sub.row}", "${sub.key.column}")`,
               ];
               await db.exec(`CREATE TABLE "${sub.table}" (${subColumns.join(', ')})`);
+            }
+            for (const shared of table.uses.flatMap(use => use.shared ?? [])) {
+              const sharedColumns = [
+                `"${shared.key.column}" ${t.key}`,
+                ...shared.fields.map(field => `"${field.column}" ${sqlType(db.dialect, field)}`),
+                `"${shared.version}" ${t.version}`,
+              ];
+              await db.exec(`CREATE TABLE "${shared.table}" (${sharedColumns.join(', ')})`);
+              for (const ddl of bumpVersion(shared.table, db.dialect)) await db.exec(ddl);
             }
             const q = table.deadlines;
             if (q !== undefined) {
@@ -477,7 +515,15 @@ for (const { file, floor } of TRANSCRIPTS) {
                 }
               }
               compare(step, 'refused', step.expect.refused, refused);
-              if (refused === undefined && step.command.action.kind === 'publish') live.set(liveKey(step.database, step.spec.name), step.spec);
+              if (refused === undefined && step.command.action.kind === 'publish') {
+                live.set(liveKey(step.database, step.spec.name), step.spec);
+                // A use the version drops loses its shared tables' rows, as
+                // the migration that drops its tables does (D103's step 4).
+                const kept = new Set((step.spec.uses ?? []).map(use => (use.anchor === undefined || use.anchor === 'type' ? use.behavior : use.anchor.field)));
+                for (const use of table.uses.filter(u => !kept.has(u.id))) {
+                  for (const shared of use.shared ?? []) await db.exec(`DELETE FROM "${shared.table}"`);
+                }
+              }
               continue;
             }
             const type = scenario.types.find(t => t.name === step.type)!;

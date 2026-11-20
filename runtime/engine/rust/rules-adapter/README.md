@@ -363,21 +363,21 @@ on Postgres, each command over a layout of every type of its database:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, 1 raw
 write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
 deadlines and 29 changes, and 54 checks), the scenario whose fire StateRules
-vetoes among them; `core-reactions.transcript.json`, 586 steps (476
-commands, 252 of them changes, and 110 checks);
-`core-reactions-changes.transcript.json`, 60 steps (48 commands, 24 of them
-changes, and 12 checks); `core-constants.transcript.json`, 39 steps (20
-commands and 19 checks); `core-staterules.transcript.json`, 76 steps (43
-commands and 33 checks); `core-approvals.transcript.json`, 122 steps (93
+vetoes among them; `core-reactions.transcript.json`, 618 steps (504
+commands, 266 of them changes, and 114 checks);
+`core-reactions-changes.transcript.json`, 62 steps (48 commands, 24 of them
+changes, and 14 checks); `core-constants.transcript.json`, 39 steps (20
+commands and 19 checks); `core-staterules.transcript.json`, 88 steps (49
+commands and 39 checks); `core-approvals.transcript.json`, 122 steps (93
 commands, 71 of them operations and 5 changes, and 29 checks); and the
 hand-written `core-workflow-principals.transcript.json` (D104, D113), 101
 steps (63 commands, each compared with its row's `expect.version`, and 38
 checks), and `core-freezes-and-sign-offs.transcript.json` (D104), 115 steps
 (75 commands, each compared with its row's `expect.version`, and 40
 checks); from the work queue's recordings of the behaviors D104 ports to
-tables, `core-lease.transcript.json`, 436 steps (323 commands, 84 of them
+tables, `core-lease.transcript.json`, 464 steps (345 commands, 84 of them
 presenting Lease's token as the command's `preconditions` and 3 deadlines,
-and 113 checks), `core-presence.transcript.json`, 141 steps (89 commands, 8
+and 119 checks), `core-presence.transcript.json`, 141 steps (89 commands, 8
 of them a miss's deadline, and 52 checks), `core-budget.transcript.json`,
 495 steps (331 commands, 46 of them writing a scope's row, and 164 checks),
 and `core-retries.transcript.json`, 250 steps (196 commands and 54
@@ -393,12 +393,23 @@ of them repeats and two the stale deadline, each compared with its row's
 `expect.version`, and 22 checks), whose Workflow and Reconcile are
 anchored on fields, and `core-schedules.transcript.json`, 161 steps (131
 commands, 19 of them deadlines and 10 changes, each compared with its
-row's `expect.version`, 29 checks and one raw write), each command's
+row's `expect.version`, 29 checks and one raw write); and, of Rollups and
+Dependencies (D104's step 4), `core-rollups.transcript.json`, 180 steps
+(108 commands and 72 checks), and `core-dependencies.transcript.json`, 266
+steps (159 commands, the blockers kept as sub-table rows, and 107 checks);
+and, of Numbering and Revisions (D103's step 4),
+`core-numbering.transcript.json`, 104 steps (58 commands, each create's
+number taken from Numbering's shared table of counts, which the replay
+keeps as a table of its own, and 46 checks),
+`core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
+checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
+each approval an operation's write of the row's own fields, and 35
+checks); each command's
 `expect.events` compared with what `read_queued_events` reads of every
 type's event queue after it, which it then empties; each held to a floor
 of its step count, its `expect.others` compared on every command step and
 its numbers by value, 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
-schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are
-skipped without it, saying so.
+schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), each
+transcript's replay too, and are skipped without it, saying so.

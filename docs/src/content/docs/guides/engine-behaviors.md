@@ -952,6 +952,10 @@ engine.instances.get(alice, 'Task', 't1')?.behaviors;
   `removeBlocker` event, as the caller who deleted it.
 - Blockers are read as the caller. A caller who may not read a blocker's
   schema cannot read `blocked` on what it blocks.
+- A DB table implements Dependencies too, `implements Dependencies<Task,
+  { ... }>`, its edges a sub-table of its own and `listDependents` left
+  out
+  ([Database tables](/superschematic/guides/database-tables/#values-a-rows-children-roll-up-and-blockers-between-rows)).
 
 ## Links
 
@@ -1051,6 +1055,10 @@ they ended.
   `{ "over": true }`, and a gate on it does not hold.
 - A misconfigured rollup (an unknown link, a `sum` over a text field) is
   refused when the schema is defined, as `invalid_schema`.
+- A DB table implements Rollups too, `implements Rollups<Project, { ...
+  }>`, over the rows a `HasMany` of it lists, its link their to-one
+  relation; `latest` waits there
+  ([Database tables](/superschematic/guides/database-tables/#values-a-rows-children-roll-up-and-blockers-between-rows)).
 
 ## Search
 
@@ -1394,7 +1402,7 @@ shows how a behavior of your own judges the fields a write stores.
 ## Branches
 
 `Branches` makes each instance the root of a version graph (D17, D19,
-D32 in `docs/DECISIONS.md`). Rows of the kinds its config names live on
+D32 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). Rows of the kinds its config names live on
 refs: a primary line, which each instance gets when it is created, and
 drafts of it, which only a merge brings back. A tagged commit of the
 primary line is released with `releaseCommit`, the version graph's
@@ -1719,6 +1727,12 @@ engine.instances.list(me, "invoices", { where: { "Numbering.label": "INV-2026-00
 - **Lease.** On a type that composes `Lease`, list
   `"Numbering.assignNumber"` in its `exempt`, or a backfill of a leased
   instance is refused for anyone but its holder.
+- **On a table.** A table carries it on a field, `number:
+  Numbering<{ format, scope?, reset? }>`, whose column holds the label,
+  and keeps its counts in a table of the use's own
+  ([A row's number and its history](/superschematic/guides/database-tables/#a-rows-number-and-its-history)).
+  `Revisions` runs on a table too, its revisions and proposals in
+  sub-tables of the row.
 
 ## Timers
 

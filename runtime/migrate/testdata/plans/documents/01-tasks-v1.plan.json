@@ -1,0 +1,234 @@
+{
+  "dialect": "postgres",
+  "from": "",
+  "hash": "edaceb5cc9aa1d83f94c30f4bbfb46cbe2f716f616c9eccf357b4a09a47bc08b",
+  "service": "tasks-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+      ],
+      "subject": "extension/pgcrypto",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"comment\" (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  task_id UUID NOT NULL,\n  body TEXT NOT NULL,\n  legacy_id TEXT NOT NULL,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT comment_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE \"comment\" IS 'A comment on a task.'"
+      ],
+      "subject": "table/comment",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE project (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" VARCHAR(80) NOT NULL,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT project_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE project IS 'A list of tasks that belong together.'"
+      ],
+      "subject": "table/project",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE task (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  project_id UUID NOT NULL,\n  title TEXT NOT NULL,\n  done BOOLEAN NOT NULL,\n  due_at TIMESTAMPTZ,\n  remind_before TEXT[] DEFAULT '{}' NOT NULL,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT task_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE task IS 'Something to do in a project.'"
+      ],
+      "subject": "table/task",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"comment\" ADD CONSTRAINT fk_comment_task_id FOREIGN KEY (task_id) REFERENCES task (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/comment/constraint/fk_comment_task_id",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE task ADD CONSTRAINT fk_task_project_id FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/task/constraint/fk_task_project_id",
+      "transactional": true
+    }
+  ],
+  "to": "5114b56a847c1f1aead0821a376bc6f01951f6e79419bb66fff1bec1de0dd120",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "tasks-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Comment.id",
+            "type": "UUID"
+          },
+          {
+            "name": "task_id",
+            "origin": "Comment.task",
+            "type": "UUID"
+          },
+          {
+            "name": "body",
+            "origin": "Comment.body",
+            "type": "TEXT"
+          },
+          {
+            "name": "legacy_id",
+            "origin": "Comment.legacyId",
+            "type": "TEXT"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Comment.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "A comment on a task.",
+        "foreignKeys": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "name": "fk_comment_task_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "task"
+          }
+        ],
+        "kind": "entity",
+        "name": "comment",
+        "origin": "Comment",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "comment_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Project.id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Project.name",
+            "type": "VARCHAR(80)"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Project.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "A list of tasks that belong together.",
+        "kind": "entity",
+        "name": "project",
+        "origin": "Project",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "project_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Task.id",
+            "type": "UUID"
+          },
+          {
+            "name": "project_id",
+            "origin": "Task.project",
+            "type": "UUID"
+          },
+          {
+            "name": "title",
+            "origin": "Task.title",
+            "type": "TEXT"
+          },
+          {
+            "name": "done",
+            "origin": "Task.done",
+            "type": "BOOLEAN"
+          },
+          {
+            "name": "due_at",
+            "nullable": true,
+            "origin": "Task.dueAt",
+            "type": "TIMESTAMPTZ"
+          },
+          {
+            "default": "'{}'",
+            "name": "remind_before",
+            "origin": "Task.remindBefore",
+            "type": "TEXT[]"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Task.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "Something to do in a project.",
+        "foreignKeys": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "name": "fk_task_project_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "project"
+          }
+        ],
+        "kind": "entity",
+        "name": "task",
+        "origin": "Task",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "task_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

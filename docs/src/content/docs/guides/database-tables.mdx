@@ -652,8 +652,9 @@ the envelope.
 
 To rotate the key, put a new key first in the secret's value and keep the
 old ones after it: the first seals, and each opens what it sealed. Then
-reseal the rows: `Reencrypt(ctx, batch)` on each Go repository, or
-`reencrypt({ batch })` on each TypeScript one, reseals every envelope an
+reseal the rows: `Reencrypt(ctx, batch)` on each Go repository,
+`reencrypt({ batch })` on each TypeScript one, or `reencrypt(Some(batch))`
+on each Rust one, on Postgres or SQLite, reseals every envelope an
 older key sealed under the current one, `batch` rows at a time (100),
 deleted rows among them, and returns how many rows it resealed. A row a
 write changes meanwhile keeps the write's envelope. Once every table's
@@ -798,7 +799,7 @@ of a table with `updatedBy` need an acting user too, so a nullable
 An enum column's `CHECK` says which values the column holds. It does not
 say which value may follow which. `@stateMachine`, from
 `@superschematic/schema`, declares the moves an enum field may make
-([D118](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+([D118](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)).
 On a table, the database then refuses every other move, whatever writes
 the row: a repository, a job's own SQL, a script or `psql`. The generated
 types carry the same moves in Go, TypeScript, Python and Rust, so a
@@ -1235,7 +1236,7 @@ write, as long as every writer advances the counter. One writer that
 forgets breaks every such compare, and nothing reports it. `@fenced`,
 from `@superschematic/schema`, names the counter, the fence, on a table
 of a DB schema
-([D119](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+([D119](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)).
 The database then refuses a write that does not advance it, whatever
 writes the row, and the generated repositories advance it themselves.
 
@@ -1604,7 +1605,10 @@ rows assigned to anyone else and the rows assigned to no one, as `IS
 DISTINCT FROM` does and `<>` does not, and `notIn` is `(column IN (...))
 IS NOT TRUE`. Add `isNull: false` to leave the nulls out. A `Generic.JSON` column's Go
 filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
-alike, and whose `ILike` Postgres refuses on JSONB.
+alike, and whose `ILike` Postgres refuses on JSONB. A Rust repository on a
+SQLite file compares them alike too (D116): SQLite holds the value as
+text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
+reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
 ORM does. SQLite repositories are not built.
@@ -1792,7 +1796,10 @@ or Lease, Retries, Presence and Budget
 or Seats, or types a field as a Reconcile
 ([A row's seats, and a field that follows observations](#a-rows-seats-and-a-field-that-follows-observations)),
 or Schedules ([A row's schedules](#a-rows-schedules)), or Pool
-([A pool of members](#a-pool-of-members)),
+([A pool of members](#a-pool-of-members)), or Rollups and Dependencies
+([Values a row's children roll up, and blockers between rows](#values-a-rows-children-roll-up-and-blockers-between-rows)),
+or types a field as a Numbering or implements Revisions
+([A row's number and its history](#a-rows-number-and-its-history)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -2427,7 +2434,8 @@ operations are `budget.reserve`, the read-only `checkReserve`,
   within every limit up the chain (409 `over_limit`, `{ meter, amount,
   remaining, limit, scope }`, `scope` the row whose limit refused it), and
   usage counts at each. An update of the relation while the meter holds a
-  reservation is `scope_reserved`.
+  reservation is `scope_reserved`. The core walks at most 16 scopes up a
+  chain, and the build refuses a chain that comes back to its own table.
 - **Observe.** `observe({ meter, used, limit?, resetsAt? })` records the
   usage a provider reports, which replaces what the meter counts, and its
   `limit` the meter's, until `resetsAt`, else until the meter's next
@@ -3029,8 +3037,201 @@ const picked = await orm.withBehaviorCaller({ subject: agent, permissions: [] })
 
 In Go it is `db.GetAccountRepository().Pool().Pick(ctx,
 orm.AccountPoolPickParams{...})`, which answers a
-`*orm.AccountPoolPickResult`. It takes no preconditions, which are a
-row's; one that writes no row applies nothing, and one that only reads,
+`*orm.AccountPoolPickResult`. In Rust it is
+`orm.account_pool()?.pick(&AccountPoolPickParams { .. })`, which answers
+an `AccountPoolPickResult`, and an operation on a row takes the key and
+the write's options first: `orm.order_status()?.transition(&key,
+&OrderStatusTransitionParams { to: OrderStatusState::Paid, from: None },
+&WriteOptions::default())`. An operation of the table as a whole takes
+no preconditions, which are a row's; one that writes no row applies
+nothing, and one that only reads,
 as `pick`, writes nothing in your transaction. An operation a behavior
 declares on a namespace as a whole (Comments') is left out:
 `@behaviorOperations` warns of it.
+
+### Values a row's children roll up, and blockers between rows
+
+A table implements `Rollups` and `Dependencies` as it implements Pool
+(D104's step 4). A rollup reads the rows that point at a row through a
+to-one relation of theirs: the rows a `HasMany` of the table lists. A
+dependency is an edge from a row to a row that blocks it.
+
+```ts
+// steps-db
+export abstract class Batch
+  implements
+    Rollups<Batch, {
+      rollups: {
+        done: { schema: "Step"; link: "batch"; function: "all"; outcomes: ["success"]; gatedStates: ["done"] };
+        steps: { schema: "Step"; link: "batch"; function: "count" };
+        byStatus: { schema: "Step"; link: "batch"; function: "countBy"; field: "status" };
+        estimate: { schema: "Step"; link: "batch"; function: "sum"; field: "estimate" };
+      };
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  status: Workflow<{ /* running, done, failed */ }>;
+  steps: HasMany<Step>;
+}
+
+export abstract class Step implements Dependencies<Step, { gatedStates: ["doing", "done"] }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  estimate?: Generic.Int64;
+  batch: Relation<Batch>;
+  status: Workflow<{ /* todo, doing, done, failed */ }>;
+}
+```
+
+Above, a batch is done only once every step that points at it is done
+with a success, and a step starts and finishes only once the steps it
+comes after are done.
+
+A rollup names its table (`schema`) and that table's to-one relation to
+this one (`link`), and a function:
+
+| Function | Value | Over no row |
+| --- | --- | --- |
+| `count` | how many rows point here | `0` |
+| `countBy` | `{ <value>: count }` over a string, enum or boolean field, or `Workflow.status`; a bare name that is a Workflow field of the table reads its status | `{}` |
+| `sum` | the sum of a number field | `0` |
+| `min`, `max` | the least or greatest value | absent |
+| `all` | whether every row is in a terminal state of its table's Workflow, or one its `finished` names, with an outcome `outcomes` lists when given | `true` |
+| `any` | whether some row is | `false` |
+
+- The build refuses a rollup whose table is no table of the database,
+  whose table composes no behavior (the behaviors' core holds only the
+  rows of a table that composes one), whose `link` is no to-one relation
+  of it to this table, and a field a function cannot read. `latest` waits
+  for a later step: the core reads no time a row was created at.
+- `gatedStates` names states of the table's one Workflow. A transition
+  into one is refused as `not_held` until every rollup that gates it
+  holds, whoever asks, with the rollup and its counts in the veto's
+  details. A rollup reads one page of 500 rows; past it the value is
+  `{ "over": true }` and its gate does not hold.
+- Rollups keeps no column. A read of the row computes its values through
+  the core; no repository, route or SDK serves that read yet. Rollups
+  joins and leaves a table with rows.
+
+Dependencies keeps a row's edges in a sub-table,
+`<table>_dependencies_blockers`, each keyed by its number on the row, with
+the blocker's table and key and who added it when. Its config is
+`schemas`, the tables a blocker may be a row of, each composing one
+Workflow (the table itself when absent), `gatedStates` (every terminal
+state when absent) and `satisfiedBy` (`["success"]` when absent).
+
+- `addBlocker({ schema?, id })`, `removeBlocker({ schema?, id })` and
+  `listBlockers({ limit?, cursor? })` are its operations, under the
+  member `dependencies`: `orm.step.dependencies.addBlocker(key, { id })`
+  in TypeScript, `db.GetStepRepository().Dependencies().AddBlocker(ctx,
+  id, orm.StepDependenciesAddBlockerParams{...})` in Go, and the route
+  `POST step/{id}/dependencies/add-blocker`. A create gives blockers in
+  its parameters too, each held to `addBlocker`'s checks.
+- A transition into a gated state while a blocker is open is refused as
+  `blocked`, the open blockers in the veto's details. A blocker is
+  finished in a terminal state, or one its Workflow's `finished` names,
+  whose outcome `satisfiedBy` lists; a reopened one blocks again, and a
+  dependent that went through its gate meanwhile stays where it is.
+- `addBlocker` refuses the row itself, a table the config does not list,
+  a row that does not exist, one already there (`already_blocking`), an
+  edge that would close a cycle through any table (`cycle`), and an open
+  blocker of a row in a gated state no transition leaves (`gated`).
+- A blocker that is gone neither blocks nor is listed; its edge stays
+  until `removeBlocker` takes it, and deleting a dependent deletes its
+  edges. `listDependents` is an engine type's alone: on a table the rows
+  a row blocks are a query over every table's blockers, and
+  `@behaviorOperations` leaves it out, of which the build warns.
+- Dependencies joins a table with rows, each starting with no blockers,
+  and cannot leave one.
+
+### A row's number and its history
+
+A field typed `Numbering<C>` holds a number a person reads, set when the
+row is created (D56, D103). The config's `format` prints it, with
+`{seq}`, or `{seq:N}` padded to N digits, exactly once, and `{yyyy}` or
+`{yy}`, the UTC year the row was created in. `scope: { link }` counts per
+target of a required to-one relation of the table, and `reset: "yearly"`
+counts each year from 1, which needs the year in the format.
+
+```ts
+// invoices-db
+@index<Invoice>(["customer", "number"], { unique: true })
+export abstract class Invoice {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  customer: Relation<Customer>;
+  title: string;
+  createdAt: Temporal.DateTime;
+  number: Numbering<{ format: "INV-{yyyy}-{seq:4}"; scope: { link: "customer" }; reset: "yearly" }>;
+}
+```
+
+The field's column holds the label, `INV-2026-0042`, and `number_seq` the
+number in its count. The counts are a table of the use's own, kept for
+the table as a whole (`invoice_number_counts`), one row per customer and
+year. A create reads its count's row and writes it held to the version it
+read, so two creates at once never take one number, on Postgres, SQLite
+and D1 alike. A refused create takes no number. A delete leaves the
+count where it was, so a delete leaves a gap. A label is unique within
+its scope alone, and the core keeps no index of labels: the unique index
+over the customer and the number holds it. A table whose behaviors keep
+such a table has no upserts.
+
+Numbering can be added to a table with rows. Each one holds no number
+until its `number.assignNumber` gives it the next number of the year in
+its `createdAt`, or of the command's year when the table has none. On a
+numbered row it writes nothing and answers the number. While the table
+has rows, the format, the scope and the reset stay, and Numbering cannot
+be removed. A write around the core, raw SQL of the columns or of the
+counts, runs none of these rules.
+
+A table implements `Revisions` to keep every change of its rows' own
+fields (D16, D103):
+
+```ts
+// policies-db
+export abstract class Policy implements Revisions<Policy, { review: { permission: "policies.review" } }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  body: Nullable<string>;
+  updatedAt: Temporal.DateTime;
+}
+```
+
+A create keeps revision 1 of the row's own fields, and each change of
+them the next, in a sub-table of the use (`policy_revisions_revisions`).
+The owned column `revisions_revision` holds the latest number. A
+revision holds the own fields the layout gives the core, not the audit
+stamps. `revisions.listRevisions` reads them a page at a time, oldest
+first, and `revisions.getRevision` one by its number. An update that
+changes nothing keeps no revision.
+
+With `review`, `revisions.propose` keeps a merge patch of the own fields
+as a pending proposal (`policy_revisions_proposals`), after holding it to
+an update's validation and to changing the row. Nothing else changes. A
+caller who holds the permission approves it with `revisions.approve`,
+which writes the patch to the row through every rule an update meets,
+every use's guard among them, and keeps the revision it made with the
+proposal's number; or rejects it with `revisions.reject` and a reason.
+`base` names the revision a proposal was made against, so a reviewer
+sees the row moved since. `revisions.listProposals` reads them, by state
+when asked. A delete of the row deletes its revisions and its proposals.
+Revisions can be added to a table with rows, whose history starts at
+their next change, and cannot be removed from one.
+
+```ts
+await orm.policy.revisions.propose(id, { patch: { body: "Economy only." }, note: "Costs." });
+await orm.withBehaviorCaller({ subject: reviewer, permissions: ["policies.review"] })
+  .policy.revisions.approve(id, { proposal: 1 });
+```
+
+A proposal's patch is held to the behaviors' rules alone. The table's
+own validation, a required field, a length or a field the table lacks, is
+held where a request's types and the database hold it, so a patch that
+breaks it is kept and fails at its approval. A `@versioned` table keeps a
+history of its own on Postgres: Revisions adds the review step, and keeps
+its log on SQLite and D1 too.

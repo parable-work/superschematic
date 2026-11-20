@@ -49,6 +49,20 @@
     }
   },
   "requires": ["Workflow"],
+  "tables": [
+    {
+      "name": "blockers",
+      "description": "On a table, one row per blocker of the row, keyed by its number on the row, the order they were added in: the blocker's table and key, and who added it when. removeBlocker deletes its row, and the row's delete deletes them all.",
+      "key": "number",
+      "fields": [
+        { "name": "number", "description": "The edge's number on the row, one past the greatest when it was added, in ten digits zero-padded so the key's order is theirs.", "type": "string" },
+        { "name": "blockerType", "description": "The blocker's table.", "type": "string" },
+        { "name": "blockerKey", "description": "The blocker's key, a hyphenated UUID kept in base62.", "type": "string" },
+        { "name": "addedBy", "description": "The subject of the caller that added it, a hyphenated UUID kept in base62; absent for a caller with none.", "type": "string" },
+        { "name": "addedAt", "description": "When it was added, in epoch milliseconds.", "type": "Temporal.DateTime" }
+      ]
+    }
+  ],
   "fields": [
     { "name": "blocked", "description": "Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.", "volatile": true }
   ],

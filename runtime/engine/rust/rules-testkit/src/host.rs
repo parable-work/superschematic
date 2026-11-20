@@ -38,8 +38,8 @@ use serde_json::{Map, Value};
 use superschematic_rules::{
     key_of, merge_patch, Action, Answer, Answers, Caller, ChangeSet, Code, Command, Core,
     DeadlineChange, KeyedRow, LinkedRows, LockKey, OutboxEvent, Outcome, ReadRequest, Refusal, Row,
-    RowChange, RowImage, RowRef, RowWrite, Step, SubRow, SubRowChange, TableRef, TypeSpec,
-    WriteKind, MAX_ROUNDS,
+    RowChange, RowImage, RowRef, RowWrite, SharedRow, SharedRowChange, Step, SubRow, SubRowChange,
+    TableRef, TypeSpec, WriteKind, MAX_ROUNDS,
 };
 use superschematic_rules_behaviors::subjects::canonical_subject;
 
@@ -169,6 +169,10 @@ pub struct Logged {
     /// The owned fields the row held before the write, by use id; empty
     /// for a create.
     pub before: BTreeMap<String, Map<String, Value>>,
+    /// Whether the write left the row's own and owned fields as they were:
+    /// an update that changed nothing, which the engine answered with no
+    /// write and logged no event of.
+    pub unchanged: bool,
 }
 
 impl Logged {
@@ -274,6 +278,10 @@ pub struct Store {
     types: BTreeMap<String, TypeVersions>,
     rows: BTreeMap<String, BTreeMap<String, StoredRow>>,
     sub_rows: BTreeMap<SubRowKey, Map<String, Value>>,
+    /// The rows of the uses' shared tables (D103's step 4), by type, use
+    /// id, table and key, each with its version, which no row's delete
+    /// takes.
+    shared_rows: BTreeMap<(String, String, String, String), SharedRow>,
     outbox: Vec<Outboxed>,
     deadlines: BTreeMap<DeadlineKey, Armed>,
     log: Vec<Logged>,
@@ -640,8 +648,92 @@ impl Store {
                 after.as_deref(),
                 *limit,
             ))),
+            ReadRequest::SharedRow {
+                type_name,
+                use_id,
+                table,
+                key,
+            } => Some(Answer::SharedRow(
+                self.shared_row(type_name, use_id, table, key).cloned(),
+            )),
             _ => None,
         }
+    }
+
+    /// The row of a key of a use's shared table, with its version.
+    pub fn shared_row(
+        &self,
+        type_name: &str,
+        use_id: &str,
+        table: &str,
+        key: &str,
+    ) -> Option<&SharedRow> {
+        self.shared_rows.get(&(
+            type_name.to_owned(),
+            use_id.to_owned(),
+            table.to_owned(),
+            key.to_owned(),
+        ))
+    }
+
+    /// Every row of a type's uses' shared tables, by use id, table and
+    /// key.
+    pub fn shared_rows(&self, type_name: &str) -> Vec<(&str, &str, &SharedRow)> {
+        self.shared_rows
+            .iter()
+            .filter(|((named, ..), _)| named == type_name)
+            .map(|((_, use_id, table, _), row)| (use_id.as_str(), table.as_str(), row))
+            .collect()
+    }
+
+    /// Drops the shared rows of a type's uses that a version no longer
+    /// lists, as the migration that drops a removed use's table does (D103:
+    /// the core writes no row at a publish).
+    pub fn drop_shared_rows_of_removed_uses(&mut self, type_name: &str, spec: &TypeSpec) {
+        self.shared_rows.retain(|(named, use_id, ..), _| {
+            named != type_name || spec.uses.iter().any(|entry| entry.id() == use_id)
+        });
+    }
+
+    // write_shared_row applies one write of a shared table's row: an insert
+    // of a key the table lacks, at version 1, or an update held to the
+    // version it expects, which it moves on by one; any other runs the
+    // command again from fresh state.
+    fn write_shared_row(
+        &mut self,
+        at: (String, String, String, String),
+        change: &SharedRowChange,
+    ) -> Result<(), ApplyError> {
+        match change {
+            SharedRowChange::Insert { values } => {
+                if self.shared_rows.contains_key(&at) {
+                    return Err(ApplyError::Moved);
+                }
+                let row = SharedRow::new(at.3.clone(), values.clone(), 1);
+                self.shared_rows.insert(at, row);
+            }
+            SharedRowChange::Update {
+                expected_version,
+                values,
+            } => {
+                let Some(row) = self.shared_rows.get_mut(&at) else {
+                    return Err(ApplyError::Moved);
+                };
+                if row.version != *expected_version {
+                    return Err(ApplyError::Moved);
+                }
+                for (name, value) in values {
+                    if value.is_null() {
+                        row.values.remove(name);
+                    } else {
+                        row.values.insert(name.clone(), value.clone());
+                    }
+                }
+                row.version += 1;
+            }
+            other => return Err(ApplyError::Refused(unknown("shared-table write", other))),
+        }
+        Ok(())
     }
 
     /// The live rows of a type whose own fields hold the values `equal`
@@ -822,6 +914,7 @@ impl Store {
                 deleted.push((write.type_name().to_owned(), key.clone()));
             }
             let left = self.row(write.type_name(), &key).map(StoredRow::image);
+            let unchanged = matches!(write, RowWrite::Update { .. }) && image == left;
             self.queue(write.type_name(), &key, command.now, image, left);
             let mut logged = write.clone();
             if let RowWrite::Create { key: slot, .. } = &mut logged {
@@ -833,6 +926,7 @@ impl Store {
                 command: command.clone(),
                 write: logged,
                 before,
+                unchanged,
             });
         }
         if let Action::Deadline {
@@ -879,6 +973,17 @@ impl Store {
                 sub_key: sub.key.clone(),
             };
             self.write_sub_row(at, &sub.change)?;
+        }
+        // A shared table's rows are the table's as a whole, so a row's
+        // delete leaves them, and each write is held to one row.
+        for shared in &changes.shared_rows {
+            let at = (
+                shared.type_name.clone(),
+                shared.use_id.clone(),
+                shared.table.clone(),
+                shared.key.clone(),
+            );
+            self.write_shared_row(at, &shared.change)?;
         }
         // Every event is written, whatever rows the change set writes, a
         // deleted row's among them, with the command's time (D104).
@@ -1290,6 +1395,10 @@ impl MemoryHost {
             return Ok(None);
         };
         self.check(&draft, &command)?;
+        // A use the version no longer lists loses its shared tables, as the
+        // migration that drops their tables does.
+        self.store
+            .drop_shared_rows_of_removed_uses(type_name, &draft);
         let versions = self.store.types.entry(type_name.to_owned()).or_default();
         versions.published.push(draft);
         versions.draft = None;
@@ -1322,6 +1431,37 @@ impl MemoryHost {
         match self.settle(spec, command)?.0 {
             Outcome::Refused(refusal) => Err(refusal),
             Outcome::Changed(_) => Ok(()),
+        }
+    }
+
+    /// The fields each use of a type's live version computes through reads
+    /// on one of its rows (D104's step 4, [`Action::Read`]: Rollups'
+    /// values, Dependencies' blocked), by use id, read as the store has it
+    /// and applying nothing; none for a type or a row the store lacks.
+    pub fn read_view(
+        &self,
+        type_name: &str,
+        key: &str,
+        now: i64,
+    ) -> Result<Map<String, Value>, Refusal> {
+        let Some(spec) = self.store.live(type_name) else {
+            return Ok(Map::new());
+        };
+        if self.store.row(type_name, key).is_none() {
+            return Ok(Map::new());
+        }
+        let command = Command::new(
+            Caller::default(),
+            now,
+            Action::Read {
+                key: key.to_owned(),
+            },
+        );
+        match self.settle(spec, &command)?.0 {
+            Outcome::Refused(refusal) => Err(refusal),
+            Outcome::Changed(changes) => {
+                Ok(changes.result.as_object().cloned().unwrap_or_default())
+            }
         }
     }
 

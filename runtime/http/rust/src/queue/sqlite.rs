@@ -21,9 +21,11 @@
 //! and two workers that claim at once take different messages. The lease,
 //! the attempts, the backoff, the dead messages and the retention are
 //! Postgres's. Times are the database's clock, in RFC 3339 in UTC to the
-//! millisecond. The same statements run where a worker's drain stands, on
-//! its host's thread, with no runtime under them (D116; the `worker`
-//! module's `drain`).
+//! millisecond. A worker's drain runs the same statements where it stands,
+//! on its host's thread, with no runtime under them, at the time its host
+//! gave it: the descriptor's statements at a time (`sqliteAtStatements`),
+//! which take the time as their last parameter (D116; the `worker` module's
+//! `drain`).
 //!
 //! A message crosses to its row through its serde form, as on Postgres, each
 //! field as the descriptor marks it: a JSON value as its JSON text; a list
@@ -38,7 +40,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{params_from_iter, Connection, OptionalExtension};
@@ -67,6 +69,48 @@ fn sqlite_statements(queue: &QueueDefinition) -> Result<&QueueStatements, QueueE
             queue.name
         ))
     })
+}
+
+/// The time a queue's statement on SQLite goes by: the database's clock,
+/// as [`SqliteQueue`] claims, or a time the caller gives, as a worker's
+/// drain claims at the time its host gave it (D116).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Clock {
+    /// The database's clock.
+    Database,
+    /// The given time.
+    At(SystemTime),
+}
+
+/// The statements `clock` goes by, and the time they take after their own
+/// parameters: the descriptor's statements at a time, with the time as
+/// RFC 3339 text in UTC, for a given time; the statements on SQLite, which
+/// read the database's clock and take none, for the database's clock or a
+/// descriptor written before the statements at a time.
+fn statements_by(
+    queue: &QueueDefinition,
+    clock: Clock,
+) -> Result<(&QueueStatements, Option<SqlValue>), QueueError> {
+    match (clock, queue.sqlite_at_statements.as_ref()) {
+        (Clock::At(at), Some(statements)) => Ok((
+            statements,
+            Some(SqlValue::Text(crate::orm::rfc3339_millis(at))),
+        )),
+        _ => Ok((sqlite_statements(queue)?, None)),
+    }
+}
+
+/// `params`, a statement's own and then the time a statement at a time
+/// takes, cut to the `count` parameters the statement takes: a statement
+/// at a time that reads no time, the complete of a queue that keeps no done
+/// message, which deletes it, takes none.
+fn bound(
+    count: usize,
+    params: impl IntoIterator<Item = SqlValue>,
+) -> rusqlite::ParamsFromIter<Vec<SqlValue>> {
+    let mut params: Vec<SqlValue> = params.into_iter().collect();
+    params.truncate(count);
+    params_from_iter(params)
 }
 
 /// A rusqlite error, with its causes, after `context`.
@@ -226,7 +270,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     /// others are returned.
     pub async fn claim(&self, n: usize, lease: Duration) -> Result<Vec<Claim<M>>, QueueError> {
         self.with("claim", move |connection, definition| {
-            claim_on(connection, definition, n, lease)
+            claim_on(connection, definition, n, lease, Clock::Database)
         })
         .await
     }
@@ -235,7 +279,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     pub async fn complete(&self, id: &str, token: &str) -> Result<(), QueueError> {
         let (id, token) = (id.to_string(), token.to_string());
         self.with("complete", move |connection, definition| {
-            complete_on(connection, definition, &id, &token)
+            complete_on(connection, definition, &id, &token, Clock::Database)
         })
         .await
     }
@@ -247,7 +291,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     pub async fn fail(&self, id: &str, token: &str, cause: &str) -> Result<bool, QueueError> {
         let (id, token, cause) = (id.to_string(), token.to_string(), cause.to_string());
         self.with("fail", move |connection, definition| {
-            fail_on(connection, definition, &id, &token, &cause)
+            fail_on(connection, definition, &id, &token, &cause, Clock::Database)
         })
         .await
     }
@@ -265,6 +309,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
                 &id,
                 &token,
                 extra,
+                Clock::Database,
             )
         })
         .await
@@ -283,6 +328,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
                 &id,
                 &token,
                 None,
+                Clock::Database,
             )
         })
         .await
@@ -293,7 +339,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     /// deletes a dead message.
     pub async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
         self.with("prune", move |connection, definition| {
-            prune_on(connection, definition, limit)
+            prune_on(connection, definition, limit, Clock::Database)
         })
         .await
     }
@@ -320,16 +366,18 @@ pub(crate) fn claim_on<M: DeserializeOwned>(
     definition: &QueueDefinition,
     n: usize,
     lease: Duration,
+    clock: Clock,
 ) -> Result<Vec<Claim<M>>, QueueError> {
     if n == 0 {
         return Ok(Vec::new());
     }
     let context = &format!("claim on {}", definition.table);
-    let statements = sqlite_statements(definition)?;
+    let (statements, at) = statements_by(definition, clock)?;
+    let with_time = |params: Vec<SqlValue>| params.into_iter().chain(at.clone());
     if !statements.due.is_empty() {
         let due = connection
             .prepare_cached(&statements.due)
-            .and_then(|mut s| s.exists([]))
+            .and_then(|mut s| s.exists(params_from_iter(with_time(Vec::new()))))
             .map_err(|err| failed(context, &err))?;
         if !due {
             return Ok(Vec::new());
@@ -337,14 +385,21 @@ pub(crate) fn claim_on<M: DeserializeOwned>(
     }
     connection
         .prepare_cached(&statements.expire)
-        .and_then(|mut s| s.execute([i64::from(definition.retries)]))
+        .and_then(|mut s| {
+            s.execute(params_from_iter(with_time(vec![SqlValue::Integer(
+                i64::from(definition.retries),
+            )])))
+        })
         .map_err(|err| failed(context, &err))?;
     let mut statement = connection
         .prepare_cached(&statements.claim)
         .map_err(|err| failed(context, &err))?;
     let n = i64::try_from(n).unwrap_or(i64::MAX);
     let mut rows = statement
-        .query(rusqlite::params![n, lease.as_secs_f64()])
+        .query(params_from_iter(with_time(vec![
+            SqlValue::Integer(n),
+            SqlValue::Real(lease.as_secs_f64()),
+        ])))
         .map_err(|err| failed(context, &err))?;
     let mut claims = Vec::new();
     let mut unreadable = Vec::new();
@@ -368,6 +423,7 @@ pub(crate) fn claim_on<M: DeserializeOwned>(
             &id,
             &token,
             &format!("{UNREADABLE}: {reason}"),
+            clock,
         );
     }
     Ok(claims)
@@ -379,6 +435,7 @@ pub(crate) fn complete_on(
     definition: &QueueDefinition,
     id: &str,
     token: &str,
+    clock: Clock,
 ) -> Result<(), QueueError> {
     update_on(
         connection,
@@ -388,6 +445,7 @@ pub(crate) fn complete_on(
         id,
         token,
         None,
+        clock,
     )
 }
 
@@ -398,9 +456,10 @@ pub(crate) fn fail_on(
     id: &str,
     token: &str,
     cause: &str,
+    clock: Clock,
 ) -> Result<bool, QueueError> {
     let context = format!("fail message {id} on {}", definition.table);
-    let state = fail_row(connection, definition, id, token, cause)?
+    let state = fail_row(connection, definition, id, token, cause, clock)?
         .map_err(|err| failed(&context, &err))?;
     match state {
         None => Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}"))),
@@ -413,26 +472,30 @@ pub(crate) fn prune_on(
     connection: &Connection,
     definition: &QueueDefinition,
     limit: usize,
+    clock: Clock,
 ) -> Result<u64, QueueError> {
     if limit == 0 {
         return Ok(0);
     }
     let context = format!("prune {}", definition.table);
-    let statements = sqlite_statements(definition)?;
+    let (statements, at) = statements_by(definition, clock)?;
+    let params = [
+        SqlValue::Integer(i64::try_from(definition.retain_seconds).unwrap_or(i64::MAX)),
+        SqlValue::Integer(i64::try_from(limit).unwrap_or(i64::MAX)),
+    ]
+    .into_iter()
+    .chain(at);
     let deleted = connection
         .prepare_cached(&statements.prune)
-        .and_then(|mut s| {
-            s.execute(rusqlite::params![
-                i64::try_from(definition.retain_seconds).unwrap_or(i64::MAX),
-                i64::try_from(limit).unwrap_or(i64::MAX),
-            ])
-        })
+        .and_then(|mut s| s.execute(params_from_iter(params)))
         .map_err(|err| failed(&context, &err))?;
     Ok(u64::try_from(deleted).unwrap_or(0))
 }
 
 /// Runs the statement `which` picks, which changes the message `id` while
-/// `token` claims it, and refuses a change of no row as a lost claim.
+/// `token` claims it, by `clock`, and refuses a change of no row as a lost
+/// claim.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn update_on(
     connection: &Connection,
     definition: &QueueDefinition,
@@ -441,19 +504,24 @@ pub(crate) fn update_on(
     id: &str,
     token: &str,
     extra: Option<SqlValue>,
+    clock: Clock,
 ) -> Result<(), QueueError> {
     let context = format!("{what} message {id} on {}", definition.table);
+    let (statements, at) = statements_by(definition, clock)?;
     let params: Vec<SqlValue> = [
         SqlValue::Text(id.to_string()),
         SqlValue::Text(token.to_string()),
     ]
     .into_iter()
     .chain(extra)
+    .chain(at)
     .collect();
-    let statements = sqlite_statements(definition)?;
     let changed = connection
         .prepare_cached(which(statements))
-        .and_then(|mut s| s.execute(params_from_iter(params)))
+        .and_then(|mut s| {
+            let count = s.parameter_count();
+            s.execute(bound(count, params))
+        })
         .map_err(|err| failed(&context, &err))?;
     if changed == 0 {
         return Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}")));
@@ -513,23 +581,24 @@ fn fail_row(
     id: &str,
     token: &str,
     cause: &str,
+    clock: Clock,
 ) -> Result<Result<Option<String>, rusqlite::Error>, QueueError> {
-    let statements = sqlite_statements(definition)?;
+    let (statements, at) = statements_by(definition, clock)?;
+    let params = [
+        SqlValue::Text(id.to_string()),
+        SqlValue::Text(token.to_string()),
+        SqlValue::Integer(i64::from(definition.retries)),
+        SqlValue::Integer(i64::try_from(definition.backoff_seconds).unwrap_or(i64::MAX)),
+        SqlValue::Text(cause.to_string()),
+        SqlValue::Integer(i64::try_from(definition.max_backoff_seconds).unwrap_or(i64::MAX)),
+    ]
+    .into_iter()
+    .chain(at);
     Ok(connection
         .prepare_cached(&statements.fail)
         .and_then(|mut s| {
-            s.query_row(
-                rusqlite::params![
-                    id,
-                    token,
-                    i64::from(definition.retries),
-                    i64::try_from(definition.backoff_seconds).unwrap_or(i64::MAX),
-                    cause,
-                    i64::try_from(definition.max_backoff_seconds).unwrap_or(i64::MAX),
-                ],
-                |row| row.get(0),
-            )
-            .optional()
+            s.query_row(params_from_iter(params), |row| row.get(0))
+                .optional()
         }))
 }
 

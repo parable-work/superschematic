@@ -6,12 +6,13 @@ exactly in `package.json`. The site is deployed by the `docs-deploy` job of
 `.github/workflows/release.yml` on every `vX.Y.Z` tag once the repository is
 public. Pull requests also build the site (the `docs` job in `ci.yml`); that
 is a recorded deviation from superscalar, which only builds docs in
-`release.yml` (see `docs/DECISIONS.md`, D9).
+`release.yml` (D9).
 
-`docs/DECISIONS.md` is the decision log for this repository,
-`docs/extension-model.md` is the design of the extension seam and
-`docs/stack-model.md` is the design of the stack model (D30). None is a
-Starlight page; source comments cite them by path.
+`docs/DECISIONS.md` holds the decisions that are not built yet. A built
+decision leaves it; every entry up to D119 is in the file at commit
+e8e685a51. `docs/extension-model.md` is the design of the extension seam
+and `docs/stack-model.md` is the design of the stack model (D30). None is
+a Starlight page; source comments cite them by path.
 
 ## Local development
 
@@ -40,7 +41,7 @@ docs/
     start/                prerequisites, getting started, how it works,
                           the capability map, examples
     first-project/        the tutorial over examples/acme-shop
-    guides/               one guide per area: types, tables, routes, auth, SDKs, stacks, the engine, its behaviors, work queues and Topcoat
+    guides/               one guide per area: types, tables, routes, auth, SDKs, stacks, the engine, development mode, its behaviors, work queues and Topcoat
     install/              per-language pages (the "Languages" group)
     extending/            write an extension, stack targets
     reference/            naming file, CLI, one page per feature
@@ -48,7 +49,7 @@ docs/
   src/components/Snippet.astro  quotes a file of examples/acme-shop, examples/engine-notes, examples/engine-jobs or examples/migrations
   src/lib/snippet.ts      picks the declaration or line range a page quotes
   src/content/i18n/en.json  empty UI-string overrides; keeps the i18n collection non-empty
-  DECISIONS.md            repository decision log (not a Starlight page)
+  DECISIONS.md            decisions not built yet (not a Starlight page)
   extension-model.md      extension seam design (not a Starlight page)
   stack-model.md          stack model design (not a Starlight page)
 ```

@@ -194,6 +194,15 @@ fn is_false(flag: &bool) -> bool {
 /// within its row (the key a sub-row write names), and its fields, the key
 /// among them. A table declared with no fields is not checked: the core
 /// takes any value of a row of it.
+///
+/// A table may be shared (a declaration file's `"scope": "schema"`, D103's
+/// step 4): kept for the table as a whole rather than per row, one row per
+/// key across every row of the type, each with a version its writes are
+/// held to, as a row's are. What a rule across rows keeps that outlives any
+/// one row reads it (Numbering's counts, which a delete leaves where they
+/// were). A shared table's rows are read by key ([`crate::View::shared_row`])
+/// and written by [`crate::Cx::insert_shared`] and
+/// [`crate::Cx::update_shared`], never by a sub-row write.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableDecl {
@@ -202,6 +211,10 @@ pub struct TableDecl {
     pub key: Option<String>,
     #[serde(default)]
     pub fields: Vec<String>,
+    /// Whether the table is kept for the table as a whole, its rows shared
+    /// by every row of the type, rather than per row.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub shared: bool,
 }
 
 impl TableDecl {
@@ -221,7 +234,15 @@ impl TableDecl {
             name: name.into(),
             key: Some(key),
             fields,
+            shared: false,
         }
+    }
+
+    /// The table kept for the table as a whole, its rows shared by every row
+    /// of the type.
+    pub fn shared(mut self) -> Self {
+        self.shared = true;
+        self
     }
 
     /// Whether the core checks the values a write of a row of it names:
@@ -723,6 +744,10 @@ pub enum Change<'a> {
         use_id: &'a str,
         operation: &'a str,
         params: &'a Value,
+        /// The own fields before the operation, when its handler or a call
+        /// it made wrote them ([`crate::Cx::update`]); `None` when nothing
+        /// in it did.
+        before: Option<&'a Map<String, Value>>,
     },
     /// A deadline of a use that fell due.
     Deadline {
@@ -1015,6 +1040,17 @@ pub trait Behavior: Send + Sync + 'static {
     ) -> Map<String, Value> {
         let _ = (config, row, tables);
         Map::new()
+    }
+
+    /// The fields a read of the row shows for the use that it computes
+    /// through reads of other rows (D104's step 4): Rollups' values over the
+    /// rows that point at the row, Dependencies' blocked over its blockers'
+    /// statuses. A read ([`crate::Action::Read`]) asks it of every use, in
+    /// list order, on the row as the host has it; it reads through the view,
+    /// as a guard does, and writes nothing. None by default.
+    fn read_view(&self, view: &View<'_, Self::Config>) -> Hook<Map<String, Value>> {
+        let _ = view;
+        Ok(Map::new())
     }
 
     /// The fields a read shows for the use at a time, beyond its owned

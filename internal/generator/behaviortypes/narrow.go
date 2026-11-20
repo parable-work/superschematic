@@ -607,11 +607,17 @@ func narrowRevisions(n *Narrowing, _ map[string]any, target Target) error {
 // type's own. The create parameters are the engine's narrowing
 // (dependenciesCreateParams).
 func narrowDependencies(n *Narrowing, config map[string]any, target Target) error {
+	// A blocker names an engine type by its schema, and a table's by the
+	// table, which the core defaults to the table itself (D104's step 4).
+	self := target.Schema
+	if target.Instance != nil && target.Instance.Role == ir.RoleDBTable && !target.Instance.IsEngineType() {
+		self = target.Instance.Name
+	}
 	schemas := stringsOf(config["schemas"])
 	if len(schemas) == 0 {
-		schemas = []string{target.Schema}
+		schemas = []string{self}
 	}
-	own := slices.Contains(schemas, target.Schema)
+	own := slices.Contains(schemas, self)
 	required := []any{"id"}
 	if !own {
 		required = []any{"id", "schema"}
@@ -619,7 +625,7 @@ func narrowDependencies(n *Narrowing, config map[string]any, target Target) erro
 	blockerSchema := func() map[string]any {
 		schema := EnumOf(schemas)
 		if own {
-			schema["description"] = fmt.Sprintf("The blocker's schema; %s when absent.", target.Schema)
+			schema["description"] = fmt.Sprintf("The blocker's schema; %s when absent.", self)
 		} else {
 			schema["description"] = "The blocker's schema."
 		}

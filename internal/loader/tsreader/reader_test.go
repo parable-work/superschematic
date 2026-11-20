@@ -57,6 +57,8 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-schedules-api",
 		"fixture-pool-db",
 		"fixture-pool-api",
+		"fixture-steps-db",
+		"fixture-steps-api",
 		"fixture-tracker-db",
 		"fixture-tracker-api",
 		"fixture-state-machine-db",

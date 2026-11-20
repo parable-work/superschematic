@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -54,6 +55,45 @@ type ORMInfo struct {
 	Rules       bool
 	RulesTables []string
 	RulesLayout string
+
+	// OperationStructs and OperationEnums are the types the operations of
+	// the tables' behaviors name (behaviortypes.Operations): each
+	// operation's parameters and result and what they hold, which orm.rs
+	// writes beside the tables' own.
+	OperationStructs []behaviortypes.Struct
+	OperationEnums   []behaviortypes.Enum
+}
+
+// ORMUse is a use of a behavior on a table that has operations (D103), as
+// orm.rs types them: a struct of a method per operation, which each
+// dialect's repositories open, as the Go ORM's db.Order.Status() and the
+// TypeScript repositories' orm.order.status are.
+type ORMUse struct {
+	// Struct is the operations' type (OrderStatusOperations), Fn the
+	// repositories' method that opens it (order_status), Member the member
+	// the use's operations sit under (status), and Doc its doc.
+	Struct string
+	Fn     string
+	Member string
+	Doc    string
+
+	Operations []ORMOperation
+}
+
+// ORMOperation is one operation of a use as orm.rs types it.
+type ORMOperation struct {
+	// Name is the operation as the behavior declares it (fireTimer), Fn
+	// its method (fire_timer) and Doc the method's doc.
+	Name string
+	Fn   string
+	Doc  string
+	// Params and Result are the Rust types of its parameters and its
+	// result.
+	Params string
+	Result string
+	// Table is an operation of the table as a whole (D104), whose method
+	// takes no key and no preconditions.
+	Table bool
 }
 
 // ORMRefusal is a table with no repository in a dialect, and why.
@@ -78,8 +118,10 @@ type ORMTable struct {
 	Update []ORMMember
 	Filter []ORMMember
 
-	// Behaviors is whether the table composes behaviors (D103).
+	// Behaviors is whether the table composes behaviors (D103), and Uses
+	// its uses that have operations, each typed.
 	Behaviors bool
+	Uses      []ORMUse
 }
 
 // ORMMember is a member of one of a table's types.
@@ -105,8 +147,12 @@ type ORMMember struct {
 // runtime's orm::Definition: the members of the TypeScript OrmDefinition
 // the Rust repositories read.
 type ormDefinition struct {
-	Dialect          string         `json:"dialect"`
-	Clauses          orderedStrings `json:"clauses"`
+	Dialect string         `json:"dialect"`
+	Clauses orderedStrings `json:"clauses"`
+	// JSONClauses are the conditions of a Generic.JSON column's filter
+	// where they are not Clauses' (sqlutil.SQLiteJSONClauses); absent on
+	// Postgres, whose JSONB column compares its values itself.
+	JSONClauses      orderedStrings `json:"jsonClauses,omitempty"`
 	DefaultLimit     int            `json:"defaultLimit"`
 	SystemActor      *ormActor      `json:"systemActor,omitempty"`
 	RequireUpdatedBy bool           `json:"requireUpdatedBy,omitempty"`
@@ -238,6 +284,25 @@ var ormStatements = []string{
 	"softDelete", "softDeleteIfVersion", "delete", "deleteIfVersion", "version",
 }
 
+// ormEncryptedStatements are the statements of a table with an
+// Encrypted<T> column the Rust runtime runs too (D85): its reencrypt's read
+// of the rows another key sealed and their reseal, which a table without
+// one has none of, and its definition leaves out.
+var ormEncryptedStatements = []string{"stale", "reseal"}
+
+// tableStatements are a table's statements the Rust runtime runs, by the
+// names its orm::Statements declares: ormStatements, then each of
+// ormEncryptedStatements the table has.
+func tableStatements(all []sqlutil.NamedStatement) orderedStrings {
+	out := named(all, ormStatements)
+	for _, st := range named(all, ormEncryptedStatements) {
+		if st.SQL != "" {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
 // ormClauses are the clauses the Rust runtime writes, by the names its
 // orm::Clauses declares.
 var ormClauses = []string{
@@ -270,6 +335,16 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	layout, err := behaviorlayout.Of(schema, opts.Registry)
 	if err != nil {
 		return nil, err
+	}
+	operations := map[string]behaviortypes.TableOperations{}
+	if layout != nil {
+		all, err := behaviortypes.Operations(schema, opts.Registry)
+		if err != nil {
+			return nil, fmt.Errorf("rustgen: the operations of %s's behaviors: %w", schema.Name, err)
+		}
+		for _, table := range all {
+			operations[table.Type] = table
+		}
 	}
 	types := map[string]*TypeInfo{}
 	for i := range output.Types {
@@ -307,7 +382,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	}
 	info := &ORMInfo{}
 	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
-	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
 	if opts.Actor.SystemSet {
 		actor := &ormActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 		postgres.SystemActor, sqlite.SystemActor = actor, actor
@@ -343,12 +418,20 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			l := layout.Types[t.Type]
 			behaviors = &ormBehaviors{Owned: []string{}, NoUpsert: l.Deadlines != nil}
 			for _, use := range l.Uses {
-				if len(use.Tables) > 0 {
+				// A create that writes a sub-table's or a shared table's
+				// rows (Numbering's counts, D103's step 4) is no upsert's
+				// insert.
+				if len(use.Tables) > 0 || len(use.Shared) > 0 {
 					behaviors.NoUpsert = true
 				}
 			}
 			typed.Behaviors, info.Rules = true, true
 			info.RulesTables = append(info.RulesTables, t.Type)
+			if ops, ok := operations[t.Type]; ok {
+				typed.Uses = ormUses(typed, ops)
+				info.OperationStructs = append(info.OperationStructs, ops.Structs...)
+				info.OperationEnums = append(info.OperationEnums, ops.Enums...)
+			}
 		}
 		table.Behaviors = behaviors
 		for _, c := range t.Columns {
@@ -408,7 +491,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			postgres.HistoryActorCTE = sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting)
 			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
 		}
-		onPostgres.Statements = named(sqlutil.TableStatementsOf(t).AllStatements(), ormStatements)
+		onPostgres.Statements = tableStatements(sqlutil.TableStatementsOf(t).AllStatements())
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}
@@ -420,7 +503,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				onSQLite.Statements = orderedStrings{}
 				info.SQLiteRefused = append(info.SQLiteRefused, ORMRefusal{Type: t.Type, Reason: reason})
 			} else {
-				onSQLite.Statements = named(sqlutil.SQLiteTableStatementsOf(t).AllStatements(), ormStatements)
+				onSQLite.Statements = tableStatements(sqlutil.SQLiteTableStatementsOf(t).AllStatements())
 				for _, k := range t.UniqueKeys {
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
@@ -627,4 +710,145 @@ func rustFilterType(kind sqlutil.FilterKind, t string) string {
 		return "orm::Ordered<" + t + ">"
 	}
 	return ""
+}
+
+// ormUses are the uses of table's behaviors that have operations, as
+// orm.rs types them from ops: a struct per use, opened by the
+// repositories' method <table>_<member>, with a method per operation.
+func ormUses(table ORMTable, ops behaviortypes.TableOperations) []ORMUse {
+	var out []ORMUse
+	for _, use := range ops.Uses {
+		member := strings.TrimPrefix(toRustFieldName(use.Member), "r#")
+		u := ORMUse{
+			Struct: use.Base + "Operations",
+			Fn:     table.Fn + "_" + member,
+			Member: use.Member,
+			Doc: fmt.Sprintf("The operations of `%s`'s `%s`, %s (D103), each run through the behaviors' core in the transaction the repositories were opened over: on the row whose key it takes, or on the table as a whole (D104).",
+				table.Type, use.Member, behaviortypes.An(use.Behavior)),
+		}
+		if !use.Anchored {
+			u.Doc = fmt.Sprintf("The operations of the %s `%s` implements, under `%s` (D103), each run through the behaviors' core in the transaction the repositories were opened over: on the row whose key it takes, or on the table as a whole (D104).",
+				use.Behavior, table.Type, use.Member)
+		}
+		for _, op := range use.Operations {
+			doc := strings.Join(strings.Fields(op.Doc), " ")
+			switch {
+			case doc != "":
+			case op.Table:
+				doc = fmt.Sprintf("Runs the operation %s on the table as a whole, as a command without a row (D104).", op.Name)
+			default:
+				doc = fmt.Sprintf("Runs the operation %s on the row whose key is `key`.", op.Name)
+			}
+			u.Operations = append(u.Operations, ORMOperation{
+				Name:   op.Name,
+				Fn:     toRustFieldName(op.Name),
+				Doc:    doc,
+				Params: rustOperationType(op.Params, true),
+				Result: rustOperationType(op.Result, true),
+				Table:  op.Table,
+			})
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+// ORMOperationExample is a call of the first operation on a row of the
+// first use of the first table with one, as orm.rs's doc shows one:
+// orm.order_status()?.transition(&key, &params, &options); "" for a crate
+// with none.
+func (o *ModuleOutput) ORMOperationExample() string {
+	if o.ORM == nil {
+		return ""
+	}
+	for _, table := range o.ORM.Tables {
+		for _, use := range table.Uses {
+			for _, op := range use.Operations {
+				if !op.Table {
+					return fmt.Sprintf("orm.%s()?.%s(&key, &params, &options)", use.Fn, op.Fn)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// repositoriesMethods are the methods a dialect's generated Repositories
+// holds whatever its tables, which a use's method may not take.
+var repositoriesMethods = []string{"new", "acting", "as_system", "with_keys", "with_rules", "with_caller", "with_trace", "untyped"}
+
+// checkOperationNames refuses a name the operations of a table's behaviors
+// would give in orm.rs that another of the crate's already names: a type
+// (a use's struct, an operation's parameters, result or what they hold, or
+// an enum their narrowing names) that the schema, its behaviors' fields or
+// the repositories name, and a method of a dialect's Repositories that
+// opens a table's repository or another use.
+func checkOperationNames(output *ModuleOutput) error {
+	if output.ORM == nil {
+		return nil
+	}
+	types := map[string]string{}
+	claim := func(name, owner string) error {
+		if prev, taken := types[name]; taken {
+			return fmt.Errorf("rustgen: %s would name a type %s, which %s already names", owner, name, prev)
+		}
+		types[name] = owner
+		return nil
+	}
+	for _, t := range output.Types {
+		types[t.Name] = "the schema's type " + t.Name
+	}
+	for _, t := range output.ImportedTypes {
+		types[t.Name] = "the import " + t.Name
+	}
+	for _, e := range output.Enums {
+		types[e.Name] = "the schema's enum " + e.Name
+	}
+	for _, u := range output.Unions {
+		types[u.Name] = "the schema's union " + u.Name
+	}
+	for _, s := range output.Scalars {
+		types[s.Name] = "the scalar " + s.Name
+	}
+	for _, b := range output.Behaviors {
+		for _, s := range b.Structs {
+			types[s.Name] = "the behaviors of " + b.Name
+		}
+		for _, e := range b.Enums {
+			types[e.Name] = "the behaviors of " + b.Name
+		}
+	}
+	methods := map[string]string{}
+	for _, name := range repositoriesMethods {
+		methods[name] = "the repositories"
+	}
+	for _, table := range output.ORM.Tables {
+		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "Repository"} {
+			types[table.Type+suffix] = "the repository of " + table.Type
+		}
+		methods[table.Fn] = "the repository of " + table.Type
+	}
+	for _, s := range output.ORM.OperationStructs {
+		if err := claim(s.Name, "an operation of a table's behaviors"); err != nil {
+			return err
+		}
+	}
+	for _, e := range output.ORM.OperationEnums {
+		if err := claim(e.Name, "an operation of a table's behaviors"); err != nil {
+			return err
+		}
+	}
+	for _, table := range output.ORM.Tables {
+		for _, use := range table.Uses {
+			owner := fmt.Sprintf("the operations of %s's %s", table.Type, use.Member)
+			if err := claim(use.Struct, owner); err != nil {
+				return err
+			}
+			if prev, taken := methods[use.Fn]; taken {
+				return fmt.Errorf("rustgen: %s would open by the repositories' method %s, which %s already takes", owner, use.Fn, prev)
+			}
+			methods[use.Fn] = owner
+		}
+	}
+	return nil
 }

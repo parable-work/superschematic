@@ -93,7 +93,8 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		t.Fatalf("Workflow's transition = %+v, want an operation that writes, with its parameters' schema", transition)
 	}
 	// The core registers its behaviors in one order (D104), the four only
-	// it implements last; Reconcile's value field is optional, its column
+	// it implements after the engine's, then those D103's step 4 ports
+	// (Rollups, Dependencies, Numbering, Revisions); Reconcile's value field is optional, its column
 	// NULL before the behavior sets it, Schedules and Pool each declare the
 	// one event they emit, run and recheck, whose payload's schema the
 	// declaration holds, Pool's pick and Lease's expireHolder run on the
@@ -105,7 +106,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		names = append(names, declaration.Name)
 		byName[declaration.Name] = declaration
 	}
-	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool"}; !slices.Equal(names, want) {
+	if want := []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups", "Dependencies", "Numbering", "Revisions"}; !slices.Equal(names, want) {
 		t.Fatalf("the core declares %q, want %q", names, want)
 	}
 	reconcile := byName["Reconcile"]

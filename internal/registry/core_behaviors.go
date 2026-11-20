@@ -110,15 +110,42 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Retries), then Seats and Reconcile, which D104's step 3 built on the core
 // alone (RulesPackage), so a build-time table may compose them, then
 // Schedules, D104's step 3's second part, then Pool, the rest of its step
-// 3. Of these, a table implements one that names no value field
-// (implements Timers<T, C>, and Constants, StateRules and Approvals since
-// D104's step 2, Lease, Presence, Budget and Retries since its second
-// batch, Seats since its step 3, Schedules since its second part, and Pool
-// since the rest of it) and carries one that does on a field (status:
-// Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3). A
-// test holds the list to the behaviors each transcript of
-// runtime/engine/testdata/rules records.
-var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool"}
+// 3, then Rollups and Dependencies, the first of D103's step 4's waves
+// after D104's, then Numbering and Revisions, its next. Of these, a table
+// implements one that names no value field (implements Timers<T, C>, and
+// Constants, StateRules and Approvals since D104's step 2, Lease,
+// Presence, Budget and Retries since its second batch, Seats since its
+// step 3, Schedules since its second part, and Pool since the rest of it)
+// and carries one that does on a field (status:
+// Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3,
+// and number: Numbering<C> since D103's step 4, which ports the engine's
+// remaining behaviors in waves after them, and implements Rollups,
+// Dependencies and Revisions<T, C> since that step too). A test holds the
+// list to the behaviors each transcript of runtime/engine/testdata/rules
+// records.
+var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool",
+	// D103's step 4, its later waves, in the order they were ported.
+	"Rollups", "Dependencies", "Numbering", "Revisions",
+}
+
+// tableLeavesOut are the operations of a behavior's declaration that a
+// table's use of it leaves out, by behavior and operation, each with why:
+// one the engine serves and the behaviors' core declares none of (D104's
+// step 4). Per-behavior code, as BehaviorListens is, until step 5 derives
+// it from the behavior's class (D103).
+var tableLeavesOut = map[string]map[string]string{
+	"Dependencies": {
+		"listDependents": "the rows a row blocks are a query over every table's blockers, which the behaviors' core cannot enumerate, so the engine serves it alone",
+	},
+}
+
+// TableLeavesOut is why a table's use of the behavior name leaves its
+// operation out, or "" for one the behaviors' core runs: the layout lists
+// no such operation, so neither ORM binds it, and @behaviorOperations
+// serves none of it, of which the build warns (D104's step 4).
+func TableLeavesOut(name, operation string) string {
+	return tableLeavesOut[name][operation]
+}
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name
 // (RulesBehaviors).

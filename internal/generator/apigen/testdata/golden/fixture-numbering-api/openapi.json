@@ -1,0 +1,497 @@
+{
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InvoiceNumberAssignNumberResult": {
+        "description": "What Invoice's number assignNumber returns.",
+        "properties": {
+          "label": {
+            "description": "The number as the format prints it.",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Its number in its count.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "seq"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "TicketNumberAssignNumberResult": {
+        "description": "What Ticket's number assignNumber returns.",
+        "properties": {
+          "label": {
+            "description": "The number as the format prints it.",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Its number in its count.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "seq"
+        ],
+        "type": "object"
+      },
+      "TicketReferenceAssignNumberResult": {
+        "description": "What Ticket's reference assignNumber returns.",
+        "properties": {
+          "label": {
+            "description": "The number as the format prints it.",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Its number in its count.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "seq"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-numbering-api schema",
+    "title": "Fixture-Numbering-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/invoice/{id}/number/assign-number": {
+      "post": {
+        "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+        "operationId": "InvoiceNumberAssignNumberHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InvoiceNumberAssignNumberResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Invoice number: assign number",
+        "tags": [
+          "invoice"
+        ],
+        "x-superschematic-docs": {
+          "capability": "invoice.number.assign-number",
+          "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Invoice number: assign number",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/number/assign-number": {
+      "post": {
+        "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+        "operationId": "TicketNumberAssignNumberHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketNumberAssignNumberResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket number: assign number",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.number.assign-number",
+          "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket number: assign number",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/reference/assign-number": {
+      "post": {
+        "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+        "operationId": "TicketReferenceAssignNumberHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketReferenceAssignNumberResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket reference: assign number",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.reference.assign-number",
+          "description": "Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket reference: assign number",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

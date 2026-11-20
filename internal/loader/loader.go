@@ -80,6 +80,21 @@ type loadOptions struct {
 	// warn receives the verification pass's warnings (WithWarnings); nil
 	// prints them to WarningWriter.
 	warn func(*verify.Diagnostic)
+	// dialects are the SQL dialects LoadDocuments checks a DB schema's
+	// documents for (WithDialects), as a service load reads them from its
+	// config's outputs.sql.dialects.
+	dialects []string
+}
+
+// WithDialects names the SQL dialects LoadDocuments checks a database's
+// documents for, which a service load reads from its config's
+// outputs.sql.dialects instead: a document has no config, so the caller
+// says the dialect of the database it plans (D117). Without the option the
+// dialects' rules are unchecked, as for an engine's document.
+func WithDialects(dialects ...string) Option {
+	return func(o *loadOptions) {
+		o.dialects = dialects
+	}
 }
 
 // ModuleRunner runs the TypeScript module file of the service at

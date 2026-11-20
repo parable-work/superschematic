@@ -79,6 +79,7 @@ pub(crate) fn order_table() -> Table {
             member: "status".into(),
             anchor: Some("status".into()),
             fields: vec![status, entered],
+            shared: Vec::new(),
             operations: vec![Operation::new("transition", true)],
             tables: Vec::new(),
         }],
@@ -107,6 +108,7 @@ pub(crate) fn toy_table() -> Table {
             member: "toy".into(),
             anchor: None,
             fields: vec![owned_field("seen", "toySeen", "toy_seen", "string")],
+            shared: Vec::new(),
             operations: Vec::new(),
             tables: vec![SubTable {
                 name: "notes".into(),
@@ -2612,6 +2614,7 @@ fn probe_table() -> Table {
             member: "toy".into(),
             anchor: None,
             fields: vec![owned_field("seen", "toySeen", "toy_seen", "string")],
+            shared: Vec::new(),
             operations: Vec::new(),
             tables: vec![SubTable {
                 name: "notes".into(),

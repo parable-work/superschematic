@@ -501,6 +501,56 @@ export interface ReconcileConfig {
  */
 export type Reconcile<C extends ReconcileConfig> = string | null;
 
+/** Numbering's config on a field (D56, D103's step 4). */
+export interface NumberingConfig {
+  /** How a number prints: text with {seq}, or {seq:N} zero-padded to N digits (1 to 10), exactly once, and {yyyy} or {yy}, the UTC year the row was created in, as often as wanted. No other {...} is allowed. */
+  readonly format: string;
+  /** Counts per target of a required to-one relation of the table, named by the relation's field: each target's rows are numbered 1, 2, 3, ... of their own. */
+  readonly scope?: { readonly link: string };
+  /** yearly starts the count again at 1 each UTC year, the year the row was created in; the format must then print the year. */
+  readonly reset?: "yearly";
+}
+
+/**
+ * A number a person reads on each row, set when the row is created from a
+ * count per table, per target of a relation, or per year (D56, D103's step
+ * 4): `number: Numbering<{ format: "INV-{yyyy}-{seq:4}"; scope: { link: "customer" }; reset: "yearly" }>`,
+ * INV-2026-0042. The type stays a table: the field's column holds the
+ * label, null on a row made before the table composed Numbering until
+ * assignNumber numbers it, and the number in its count takes the column
+ * named for the field (number_seq). Its counts are a table of the use's
+ * own, kept for the table as a whole (invoice_number_counts), which a
+ * delete leaves, so a delete leaves a gap and a refused create takes no
+ * number. Nothing changes a number once set: only its operation
+ * (number.assignNumber) writes it, and only on a row with none. A
+ * repository's row types the field string | null.
+ */
+export type Numbering<C extends NumberingConfig> = string | null;
+
+/** Revisions' config on a table (D16, D103's step 4): with review, a caller proposes a change of the own fields and a caller who holds the permission approves or rejects it. */
+export interface RevisionsOn {
+  /** Turns on the review step: propose, approve, reject and listProposals. */
+  readonly review?: { readonly permission: string };
+}
+
+/**
+ * The history of a table's rows' own fields, with an optional review step
+ * (D16, D103's step 4):
+ * `export abstract class Policy implements Revisions<Policy, { review: { permission: "policies.review" } }>`.
+ * The type stays a table. A create keeps revision 1 of the row's own
+ * fields, and every change of them the next, in a sub-table of the use
+ * (policy_revisions_revisions), and the owned column revisions_revision
+ * holds the latest number. With review, propose keeps a merge patch of the
+ * own fields as a pending proposal (policy_revisions_proposals), and
+ * approve applies it through every rule an update meets and records the
+ * revision it makes; reject settles it. Its operations (revisions.
+ * listRevisions, getRevision, propose, approve, reject, listProposals)
+ * read and change them. A delete of the row deletes both. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Revisions<T, C extends RevisionsOn> = NonNullable<unknown>;
+
 /** A kind of schedule (D104): after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names. */
 export type ScheduleKind = "after" | "every" | "cron";
 
@@ -572,3 +622,75 @@ export interface PoolOn<T> {
  * type argument is the table itself.
  */
 export type Pool<T, C extends PoolOn<T>> = NonNullable<unknown>;
+
+/**
+ * Where a rollup reads from on a table (D104's step 4): the table whose
+ * rows point at the row (schema) and its to-one relation to this table
+ * (link), the rows a HasMany of the table lists.
+ */
+export interface RollupSourceOn {
+  /** The table whose rows point at this one; it composes a behavior, Workflow among them. */
+  readonly schema: string;
+  /** Its to-one relation to this table. */
+  readonly link: string;
+}
+
+/**
+ * One rollup of RollupsOn<T> (D104's step 4). count, all and any take no
+ * field; countBy takes a string, enum or boolean field of the linking
+ * table, or "Workflow.status", its Workflow's status; sum, min and max a
+ * number field. all and any may gate states of the table's one Workflow
+ * and count only terminal states with the outcomes they list. latest
+ * waits for a later step on a table.
+ */
+export type RollupOn =
+  | (RollupSourceOn & { readonly function: "count" })
+  | (RollupSourceOn & { readonly function: "countBy" | "sum" | "min" | "max"; readonly field: string })
+  | (RollupSourceOn & {
+      readonly function: "all" | "any";
+      /** The states of the table's Workflow that a transition into waits for the rollup to hold. */
+      readonly gatedStates?: readonly string[];
+      /** The outcomes a linked row's terminal state must have to count; every outcome when absent. */
+      readonly outcomes?: readonly WorkflowOutcome[];
+    });
+
+/** Rollups' config on a table (D104's step 4): the rollups, by name. */
+export interface RollupsOn<T> {
+  /** The rollups, by name: camelCase, at most 64 characters. */
+  readonly rollups: Readonly<Record<string, RollupOn>>;
+}
+
+/**
+ * Values derived from the rows that point at a table's row (D104's step
+ * 4): `export abstract class Project implements Rollups<Project, { rollups:
+ * { done: { schema: "Task"; link: "project"; function: "all"; gatedStates:
+ * ["done"] } } }>`. The type stays a table. Rollups keeps no column: a
+ * read of the row computes its values through the core, and an all or any
+ * rollup that gates a state holds a transition into it until the rollup
+ * holds. Like Timers, it resolves to the empty object type; the first type
+ * argument is the table itself.
+ */
+export type Rollups<T, C extends RollupsOn<T>> = NonNullable<unknown>;
+
+/** Dependencies' config on a table (D104's step 4): the tables whose rows may block it, the gated states and the outcomes that finish a blocker. */
+export interface DependenciesOn<T> {
+  /** The tables whose rows may block this table's, each composing one Workflow; the table itself when absent. */
+  readonly schemas?: readonly string[];
+  /** The states of the table's Workflow that a transition into waits for every blocker to finish; every terminal state when absent. */
+  readonly gatedStates?: readonly string[];
+  /** The outcomes of a blocker's terminal state that finish it; success when absent. */
+  readonly satisfiedBy?: readonly WorkflowOutcome[];
+}
+
+/**
+ * Blockers between a table's rows (D104's step 4): `export abstract class
+ * Task implements Dependencies<Task, { gatedStates: ["done"] }>`. The type
+ * stays a table. Dependencies keeps a row's blockers in a sub-table
+ * (task_dependencies_blockers), and holds a transition of the table's one
+ * Workflow into a gated state while a blocker is not finished; its
+ * operations (dependencies.addBlocker, removeBlocker, listBlockers) change
+ * and read them, and a create takes blockers in its parameters. Like
+ * Timers, it resolves to the empty object type; the first type argument is
+ * the table itself.
+ */
+export type Dependencies<T, C extends DependenciesOn<T>> = NonNullable<unknown>;

@@ -83,14 +83,14 @@ type transcriptFile struct {
 var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-workflow.transcript.json", 96},
 	{"../../engine/testdata/rules/core-timers.transcript.json", 139},
-	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
-	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
+	{"../../engine/testdata/rules/core-reactions.transcript.json", 618},
+	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 62},
 	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 101},
 	{"../../engine/testdata/rules/core-constants.transcript.json", 39},
-	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
+	{"../../engine/testdata/rules/core-staterules.transcript.json", 88},
 	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
 	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
-	{"../../engine/testdata/rules/core-lease.transcript.json", 449},
+	{"../../engine/testdata/rules/core-lease.transcript.json", 464},
 	{"../../engine/testdata/rules/core-presence.transcript.json", 141},
 	{"../../engine/testdata/rules/core-budget.transcript.json", 495},
 	{"../../engine/testdata/rules/core-retries.transcript.json", 250},
@@ -100,6 +100,11 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
+	{"../../engine/testdata/rules/core-rollups.transcript.json", 180},
+	{"../../engine/testdata/rules/core-dependencies.transcript.json", 266},
+	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},
+	{"../../engine/testdata/rules/core-lease-numbering.transcript.json", 14},
+	{"../../engine/testdata/rules/core-revisions.transcript.json", 104},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of
@@ -331,6 +336,12 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, 
 				if sub.Key.Name == "" {
 					t.Fatalf("behavior %s's table %s names no key field %s", use.Behavior, declared.Name, declared.Key)
 				}
+				// A table kept for the table as a whole (D103's step 4):
+				// keyed by its declared key alone, with a version of its own.
+				if declared.Shared() {
+					out.Shared = append(out.Shared, rules.SharedTable{Name: sub.Name, Table: sub.Table, Key: sub.Key, Fields: sub.Fields, Version: "_version"})
+					continue
+				}
 				out.Tables = append(out.Tables, sub)
 			}
 			for _, field := range declaration.Fields {
@@ -523,6 +534,17 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 						columns = append(columns, fmt.Sprintf(`PRIMARY KEY ("%s", "%s")`, sub.Row, sub.Key.Column.Column))
 						db.Exec(t, fmt.Sprintf(`CREATE TABLE "%s" (%s)`, sub.Table, strings.Join(columns, ", ")))
 					}
+					for _, shared := range use.Shared {
+						columns := []string{fmt.Sprintf(`"%s" %s`, shared.Key.Column.Column, db.ColumnTypes().Key)}
+						for _, field := range shared.Fields {
+							columns = append(columns, fmt.Sprintf(`"%s" %s`, field.Column.Column, sqlType(db, field.Column)))
+						}
+						columns = append(columns, fmt.Sprintf(`"%s" %s`, shared.Version, db.ColumnTypes().Version))
+						db.Exec(t, fmt.Sprintf(`CREATE TABLE "%s" (%s)`, shared.Table, strings.Join(columns, ", ")))
+						for _, ddl := range db.BumpVersion(shared.Table) {
+							db.Exec(t, ddl)
+						}
+					}
 				}
 				if table.Deadlines != nil {
 					for _, ddl := range db.DeadlineQueue(table.Deadlines.Table, db.ColumnTypes().Text) {
@@ -587,6 +609,27 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 							for i := range typ.Versions {
 								if sameJSON(jsonOf(t, typ.Versions[i]), jsonOf(t, *step.Spec)) {
 									setLive(step.Database, step.Spec.Name, i)
+								}
+							}
+						}
+						// A use a published version drops loses its shared
+						// tables' rows, as the migration that drops its
+						// tables does (D103's step 4).
+						if step.Command.Action.Kind == rules.ActionPublish {
+							kept := map[string]bool{}
+							for _, use := range step.Spec.Uses {
+								id := use.Anchor.Field
+								if id == "" {
+									id = use.Behavior
+								}
+								kept[id] = true
+							}
+							for _, use := range tableOf(step.Database, step.Spec.Name, nil).Uses {
+								if kept[use.ID] {
+									continue
+								}
+								for _, shared := range use.Shared {
+									db.Exec(t, fmt.Sprintf(`DELETE FROM "%s"`, shared.Table))
 								}
 							}
 						}

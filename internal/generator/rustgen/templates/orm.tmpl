@@ -35,6 +35,12 @@
 //! transaction, so each behavior's initializer, validation and guards run,
 //! and its sub-tables, deadlines and events are written with the row. The
 //! core's refusal is [`Error::Refused`].
+{{- with .ORMOperationExample}}
+//!
+//! Each behavior's operations are typed methods, under a method of the
+//! repositories named for the table and the use's member:
+//! `{{.}}`.
+{{- end}}
 {{- else if .ORM.Rules}}
 //!
 //! {{sentenceList .ORM.RulesTables}} compose{{if eq (len .ORM.RulesTables) 1}}s{{end}} behaviors (D103), whose writes go
@@ -139,6 +145,31 @@ pub struct {{.Type}}Filter {
 {{- end}}
 }
 {{end}}
+{{- range .ORM.OperationEnums}}
+{{rustDoc .Doc 0}}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum {{.Name}} {
+{{- range .Members}}
+    #[serde(rename = {{rustString .Value}})]
+    {{rustBehaviorVariant .Name}},
+{{- end}}
+}
+{{end}}
+{{- range .ORM.OperationStructs}}
+{{rustDoc .Doc 0}}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct {{.Name}} {
+{{- range .Members}}
+{{- with rustDoc .Comment 1}}
+{{.}}
+{{- end}}
+{{- with rustBehaviorAttr .}}
+    {{.}}
+{{- end}}
+    pub {{rustBehaviorField .}}: {{rustOperationType .Shape .Required}},
+{{- end}}
+}
+{{end}}
 {{if .BindsRules -}}
 /// The layout document of the tables of `{{.SchemaName}}` that compose behaviors
 /// (D103), as the Go ORM's `RulesLayout` and the TypeScript repositories
@@ -206,11 +237,12 @@ pub mod rules {
 
     /// The id of the use whose operations sit under `member` of `table`,
     /// its field or the behavior's own member, which declares `operation`
-    /// on a row.
+    /// on a row, or on the table as a whole when `whole` (D104).
     pub(super) fn use_of(
         table: &orm::Table,
         member: &str,
         operation: &str,
+        whole: bool,
     ) -> Result<&'static str, orm::Error> {
         let uses = layout()?
             .table(&table.name)
@@ -221,14 +253,15 @@ pub mod rules {
                 if found
                     .operations
                     .iter()
-                    .any(|declared| declared.name == operation && !declared.table) =>
+                    .any(|declared| declared.name == operation && declared.table == whole) =>
             {
                 Ok(&found.id)
             }
             Some(found) => Err(orm::Error::Invalid(format!(
-                "{}.{member}, {}, has no operation {operation} on a row",
+                "{}.{member}, {}, has no operation {operation} {}",
                 table.name,
-                found.behavior
+                found.behavior,
+                if whole { "on the table as a whole" } else { "on a row" }
             ))),
             None => Err(orm::Error::Invalid(format!(
                 "{} has no behavior under {member}",
@@ -407,7 +440,7 @@ pub mod postgres {
                     preconditions: operation.preconditions.cloned().unwrap_or_default(),
                     ..Default::default()
                 };
-                let use_id = rules::use_of(table, operation.member, operation.operation)?;
+                let use_id = rules::use_of(table, operation.member, operation.operation, false)?;
                 let host = rules::host()?;
                 let caller = rules::caller(operation.caller);
                 adapter::postgres::run_operation_with(
@@ -425,9 +458,67 @@ pub mod postgres {
                 .map_err(|err| failed(table, err))
             })
         }
+
+        fn table_operation<'a>(
+            &'a self,
+            client: &'a C,
+            operation: orm::CoreTableOperation<'a>,
+        ) -> orm::postgres::CoreFuture<'a, orm::Value> {
+            Box::pin(async move {
+                let table = operation.table;
+                let transaction = orm::postgres::core_transaction(client, table)?;
+                let use_id = rules::use_of(table, operation.member, operation.operation, true)?;
+                let host = rules::host()?;
+                let caller = rules::caller(operation.caller);
+                adapter::postgres::run_table_operation(
+                    &host,
+                    transaction,
+                    &table.name,
+                    use_id,
+                    operation.operation,
+                    operation.params,
+                    caller,
+                    &adapter::ExecuteOptions::default(),
+                )
+                .await
+                .map_err(|err| failed(table, err))
+            })
+        }
     }
 
 {{end}}
+{{- range .ORM.Tables}}{{$table := .}}
+{{- range .Uses}}{{$member := .Member}}
+{{rustDoc .Doc 1}}
+    pub struct {{.Struct}}<'a, C>({{$table.Type}}Repository<'a, C>);
+
+    impl<C: {{if $.BindsRules}}CoreClient{{else}}GenericClient + Sync{{end}}> {{.Struct}}<'_, C> {
+{{- range $i, $op := .Operations}}
+{{- if $i}}
+{{end}}
+{{rustDoc $op.Doc 2}}
+        pub async fn {{$op.Fn}}(
+            &self,
+{{- if not $op.Table}}
+            key: &{{$table.KeyType}},
+{{- end}}
+            params: &{{$op.Params}},
+{{- if not $op.Table}}
+            options: &WriteOptions,
+{{- end}}
+        ) -> Result<{{$op.Result}}, orm::Error> {
+            self.0
+{{- if $op.Table}}
+                .table_operation("{{$member}}", "{{$op.Name}}", params)
+{{- else}}
+                .operation("{{$member}}", "{{$op.Name}}", key, params, options)
+{{- end}}
+                .await
+        }
+{{- end}}
+    }
+{{end}}
+{{- end}}
     /// The tables of `{{$.SchemaName}}` over `pool`, as a generated router serves
     /// its table operations from them (D106){{if .BindsRules}}, a table that composes
     /// behaviors written through the core{{end}}.
@@ -509,6 +600,15 @@ pub mod postgres {
         pub fn {{.Fn}}(&self) -> Result<{{.Type}}Repository<'_, C>, orm::Error> {
             self.0.typed("{{.Type}}")
         }
+{{- $table := .}}
+{{- range .Uses}}
+
+        /// The operations of `{{$table.Type}}`'s `{{.Member}}`, a typed method
+        /// each ([`{{.Struct}}`]).
+        pub fn {{.Fn}}(&self) -> Result<{{.Struct}}<'_, C>, orm::Error> {
+            self.{{$table.Fn}}().map({{.Struct}})
+        }
+{{- end}}
 {{end}}    }
 }
 {{- if .ORM.SQLite}}
@@ -640,7 +740,7 @@ pub mod sqlite {
                 preconditions: operation.preconditions.cloned().unwrap_or_default(),
                 ..Default::default()
             };
-            let use_id = rules::use_of(table, operation.member, operation.operation)?;
+            let use_id = rules::use_of(table, operation.member, operation.operation, false)?;
             let caller = rules::caller(operation.caller);
             adapter::sqlite::run_operation_with(
                 &rules::host()?,
@@ -655,9 +755,60 @@ pub mod sqlite {
             )
             .map_err(|err| failed(table, err))
         }
+
+        fn table_operation(
+            &self,
+            connection: &rusqlite::Connection,
+            operation: orm::CoreTableOperation<'_>,
+        ) -> Result<orm::Value, orm::Error> {
+            let table = operation.table;
+            let use_id = rules::use_of(table, operation.member, operation.operation, true)?;
+            let caller = rules::caller(operation.caller);
+            adapter::sqlite::run_table_operation(
+                &rules::host()?,
+                connection,
+                &table.name,
+                use_id,
+                operation.operation,
+                operation.params,
+                caller,
+                &adapter::ExecuteOptions::default(),
+            )
+            .map_err(|err| failed(table, err))
+        }
     }
 
 {{end}}
+{{- range .ORM.Tables}}{{$table := .}}
+{{- range .Uses}}{{$member := .Member}}
+{{rustDoc .Doc 1}}
+    pub struct {{.Struct}}<'a>({{$table.Type}}Repository<'a>);
+
+    impl {{.Struct}}<'_> {
+{{- range $i, $op := .Operations}}
+{{- if $i}}
+{{end}}
+{{rustDoc $op.Doc 2}}
+        pub fn {{$op.Fn}}(
+            &self,
+{{- if not $op.Table}}
+            key: &{{$table.KeyType}},
+{{- end}}
+            params: &{{$op.Params}},
+{{- if not $op.Table}}
+            options: &WriteOptions,
+{{- end}}
+        ) -> Result<{{$op.Result}}, orm::Error> {
+{{- if $op.Table}}
+            self.0.table_operation("{{$member}}", "{{$op.Name}}", params)
+{{- else}}
+            self.0.operation("{{$member}}", "{{$op.Name}}", key, params, options)
+{{- end}}
+        }
+{{- end}}
+    }
+{{end}}
+{{- end}}
     /// The tables of `{{$.SchemaName}}` in the file `database` holds, as a
     /// generated router serves its table operations from them (D106){{if .BindsRules}}, a
     /// table that composes behaviors written through the core{{end}}.
@@ -738,6 +889,15 @@ pub mod sqlite {
         pub fn {{.Fn}}(&self) -> Result<{{.Type}}Repository<'_>, orm::Error> {
             self.0.typed("{{.Type}}")
         }
+{{- $table := .}}
+{{- range .Uses}}
+
+        /// The operations of `{{$table.Type}}`'s `{{.Member}}`, a typed method
+        /// each ([`{{.Struct}}`]).
+        pub fn {{.Fn}}(&self) -> Result<{{.Struct}}<'_>, orm::Error> {
+            self.{{$table.Fn}}().map({{.Struct}})
+        }
+{{- end}}
 {{end}}    }
 }
 {{- end}}

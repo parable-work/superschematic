@@ -6,18 +6,18 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-staterules.json` the replayer maps and compares: 88
-/// of its 126, in the seven scenarios that compose StateRules and Workflow
-/// alone, their opens among them. Their type is named apart from its schema
-/// (schema `invoices`, type `Invoice`), as the engine's define refusals name
-/// the type and its other messages the schema, so a refused define is
-/// checked again under the type's name. The 38 it skips: the two scenarios
-/// that compose test.Recorder, which no fixture ports (its operations write
-/// the row's own fields through `update()`, which no use on the core can,
-/// D103); the two that compose Revisions, which the core does not run; and
+/// The steps of `core-staterules.json` the replayer maps and compares: 123
+/// of its 126, in its 11 scenarios, their opens among them. Their type is
+/// named apart from its schema (schema `invoices`, type `Invoice`), as the
+/// engine's define refusals name the type and its other messages the
+/// schema, so a refused define is checked again under the type's name. The
+/// two scenarios that compose test.Recorder run its port, whose operation
+/// writes the row's own fields through `update()` (D103's step 4, beside
+/// Revisions), and the two that compose Revisions run it. The 3 it skips:
 /// the define the engine's requires check refused, a type with StateRules
-/// and no Workflow, which the core refuses in its own words.
-const FLOOR: usize = 88;
+/// and no Workflow, which the core refuses in its own words, and the two
+/// tools.describe reads, which change nothing.
+const FLOOR: usize = 123;
 
 #[test]
 fn staterules_scenarios_replay_on_the_core() {

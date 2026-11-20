@@ -1,0 +1,649 @@
+{
+  "dialect": "postgres",
+  "expanded": "02cd6aba13ed5ac5b95fd279925144877ed4c615bf36f90beef425f3e57da74f",
+  "expandedModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION project_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Project.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('archived') THEN\n    RAISE EXCEPTION 'project.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status = 'active' AND NEW.status IN ('archived'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'project.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql",
+        "name": "project_status_transition_guard",
+        "origin": "Project"
+      }
+    ],
+    "rawSql": [
+      {
+        "checksum": "905823fddc01b47a348e894dab813462e7813086b6499f30c916ea1b307979b8",
+        "down": [
+          "DROP MATERIALIZED VIEW IF EXISTS project_open_tasks"
+        ],
+        "id": "project_open_tasks",
+        "origin": "Project",
+        "position": "indexes",
+        "statements": [
+          "DROP MATERIALIZED VIEW IF EXISTS project_open_tasks",
+          "CREATE MATERIALIZED VIEW IF NOT EXISTS project_open_tasks AS\n      SELECT project_id, count(*) AS open_tasks FROM task WHERE NOT done GROUP BY project_id",
+          "CREATE UNIQUE INDEX IF NOT EXISTS project_open_tasks_project ON project_open_tasks (project_id)"
+        ]
+      }
+    ],
+    "service": "tasks-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Comment.id",
+            "type": "UUID"
+          },
+          {
+            "name": "task_id",
+            "origin": "Comment.task",
+            "type": "UUID"
+          },
+          {
+            "name": "body",
+            "origin": "Comment.body",
+            "type": "TEXT"
+          },
+          {
+            "default": "'{}'",
+            "name": "mentions",
+            "origin": "Comment.mentions",
+            "type": "TEXT[]"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Comment.createdAt",
+            "type": "TIMESTAMPTZ"
+          },
+          {
+            "name": "legacy_id",
+            "nullable": true,
+            "origin": "Comment.legacyId",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "A comment on a task.",
+        "foreignKeys": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "name": "fk_comment_task_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "task"
+          }
+        ],
+        "kind": "entity",
+        "name": "comment",
+        "origin": "Comment",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "comment_pkey"
+        }
+      },
+      {
+        "checks": [
+          {
+            "column": "status",
+            "in": [
+              "active",
+              "archived"
+            ],
+            "name": "ck_project_status"
+          }
+        ],
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Project.id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Project.name",
+            "type": "VARCHAR(80)"
+          },
+          {
+            "default": "'active'",
+            "name": "status",
+            "origin": "Project.status",
+            "type": "TEXT"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Project.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "A list of tasks that belong together.",
+        "kind": "entity",
+        "name": "project",
+        "origin": "Project",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "project_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Task.id",
+            "type": "UUID"
+          },
+          {
+            "name": "project_id",
+            "origin": "Task.project",
+            "type": "UUID"
+          },
+          {
+            "name": "summary",
+            "origin": "Task.summary",
+            "type": "TEXT"
+          },
+          {
+            "name": "done",
+            "origin": "Task.done",
+            "type": "BOOLEAN"
+          },
+          {
+            "name": "due_at",
+            "nullable": true,
+            "origin": "Task.dueAt",
+            "type": "TIMESTAMPTZ"
+          },
+          {
+            "default": "'{}'",
+            "name": "remind_before",
+            "origin": "Task.remindBefore",
+            "type": "BIGINT[]"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Task.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "Something to do in a project.",
+        "foreignKeys": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "name": "fk_task_project_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "project"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "project_id",
+              "due_at"
+            ],
+            "method": "BTREE",
+            "name": "idx_task_project_due_at"
+          },
+          {
+            "columns": [
+              "summary"
+            ],
+            "expression": "lower(summary)",
+            "method": "BTREE",
+            "name": "idx_task_summary_lower"
+          }
+        ],
+        "kind": "entity",
+        "name": "task",
+        "origin": "Task",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "task_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "from": "5114b56a847c1f1aead0821a376bc6f01951f6e79419bb66fff1bec1de0dd120",
+  "hash": "ed50759b998ab1bf718e085fae9943433910f563237af7f23c33cc8f6da7f2bf",
+  "renames": [
+    "task.title=task.summary"
+  ],
+  "service": "tasks-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/task/column/summary",
+          "reason": "task.title is renamed to task.summary (Task.summary): servers built from the previous version still use the old name.",
+          "subject": "table/task/column/summary"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE task RENAME COLUMN title TO summary"
+      ],
+      "subject": "table/task/column/summary",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"comment\" ADD COLUMN mentions TEXT[] DEFAULT '{}' NOT NULL"
+      ],
+      "subject": "table/comment/column/mentions",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE project ADD COLUMN status TEXT DEFAULT 'active' NOT NULL"
+      ],
+      "subject": "table/project/column/status",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "dropNotNull",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"comment\" ALTER COLUMN legacy_id DROP NOT NULL"
+      ],
+      "subject": "table/comment/column/legacy_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/task/column/remind_before",
+          "reason": "The change rewrites task and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/task/column/remind_before"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/task/column/remind_before",
+          "reason": "Task.remindBefore changes from TEXT[] to BIGINT[]: servers built from the previous version still read and write TEXT[].",
+          "subject": "table/task/column/remind_before"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/task/column/remind_before",
+          "reason": "Task.remindBefore changes from TEXT[] to BIGINT[]: the cast fails on a value BIGINT[] cannot hold.",
+          "subject": "table/task/column/remind_before"
+        }
+      ],
+      "index": 5,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE task\n  ALTER COLUMN remind_before DROP DEFAULT,\n  ALTER COLUMN remind_before TYPE BIGINT[] USING remind_before::BIGINT[],\n  ALTER COLUMN remind_before SET DEFAULT '{}'"
+      ],
+      "subject": "table/task/column/remind_before",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_task_project_due_at"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_task_project_due_at ON task USING BTREE (project_id, due_at)"
+      ],
+      "subject": "table/task/index/idx_task_project_due_at",
+      "transactional": false
+    },
+    {
+      "index": 7,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_task_summary_lower"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_task_summary_lower ON task USING BTREE ((lower(summary)))"
+      ],
+      "subject": "table/task/index/idx_task_summary_lower",
+      "transactional": false
+    },
+    {
+      "index": 8,
+      "op": "addCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE project ADD CONSTRAINT ck_project_status CHECK (status IN ('active', 'archived')) NOT VALID"
+      ],
+      "subject": "table/project/constraint/ck_project_status",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "validateCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE project VALIDATE CONSTRAINT ck_project_status"
+      ],
+      "subject": "table/project/constraint/ck_project_status",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION project_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Project.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('archived') THEN\n    RAISE EXCEPTION 'project.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status = 'active' AND NEW.status IN ('archived'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'project.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/project_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/project_open_tasks",
+          "reason": "The raw SQL project_open_tasks (Project) runs for the first time; the planner cannot judge what it does.",
+          "subject": "rawSql/project_open_tasks"
+        }
+      ],
+      "index": 11,
+      "op": "runRawSQL",
+      "phase": "expand",
+      "statements": [
+        "DROP MATERIALIZED VIEW IF EXISTS project_open_tasks",
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS project_open_tasks AS\n      SELECT project_id, count(*) AS open_tasks FROM task WHERE NOT done GROUP BY project_id",
+        "CREATE UNIQUE INDEX IF NOT EXISTS project_open_tasks_project ON project_open_tasks (project_id)"
+      ],
+      "subject": "rawSql/project_open_tasks",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER trg_project_status_transition_guard\n  BEFORE UPDATE OF status ON project\n  FOR EACH ROW EXECUTE FUNCTION project_status_transition_guard()"
+      ],
+      "subject": "trigger/project/trg_project_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/comment/column/legacy_id",
+          "reason": "Dropping comment.legacy_id deletes the values of Comment.legacyId.",
+          "subject": "table/comment/column/legacy_id"
+        }
+      ],
+      "index": 13,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"comment\" DROP COLUMN legacy_id"
+      ],
+      "subject": "table/comment/column/legacy_id",
+      "transactional": true
+    }
+  ],
+  "to": "d719fff56003c10344b9baf6bff0a08d02ace119e4e1a1ec27224fac7f073b8a",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION project_status_transition_guard() RETURNS trigger AS $$\nBEGIN\n  -- The @stateMachine of Project.status (D118): an update that leaves the\n  -- column's value is no move, and any other must be one the machine lists.\n  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN\n    RETURN NEW;\n  END IF;\n  IF OLD.status IN ('archived') THEN\n    RAISE EXCEPTION 'project.status is terminal at %: it cannot move to %', OLD.status, NEW.status\n      USING ERRCODE = 'check_violation';\n  END IF;\n  IF (OLD.status = 'active' AND NEW.status IN ('archived'))\n  THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'project.status cannot move from % to %', OLD.status, NEW.status\n    USING ERRCODE = 'check_violation';\nEND;\n$$ LANGUAGE plpgsql",
+        "name": "project_status_transition_guard",
+        "origin": "Project"
+      }
+    ],
+    "rawSql": [
+      {
+        "checksum": "905823fddc01b47a348e894dab813462e7813086b6499f30c916ea1b307979b8",
+        "down": [
+          "DROP MATERIALIZED VIEW IF EXISTS project_open_tasks"
+        ],
+        "id": "project_open_tasks",
+        "origin": "Project",
+        "position": "indexes",
+        "statements": [
+          "DROP MATERIALIZED VIEW IF EXISTS project_open_tasks",
+          "CREATE MATERIALIZED VIEW IF NOT EXISTS project_open_tasks AS\n      SELECT project_id, count(*) AS open_tasks FROM task WHERE NOT done GROUP BY project_id",
+          "CREATE UNIQUE INDEX IF NOT EXISTS project_open_tasks_project ON project_open_tasks (project_id)"
+        ]
+      }
+    ],
+    "service": "tasks-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Comment.id",
+            "type": "UUID"
+          },
+          {
+            "name": "task_id",
+            "origin": "Comment.task",
+            "type": "UUID"
+          },
+          {
+            "name": "body",
+            "origin": "Comment.body",
+            "type": "TEXT"
+          },
+          {
+            "default": "'{}'",
+            "name": "mentions",
+            "origin": "Comment.mentions",
+            "type": "TEXT[]"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Comment.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "A comment on a task.",
+        "foreignKeys": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "name": "fk_comment_task_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "task"
+          }
+        ],
+        "kind": "entity",
+        "name": "comment",
+        "origin": "Comment",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "comment_pkey"
+        }
+      },
+      {
+        "checks": [
+          {
+            "column": "status",
+            "in": [
+              "active",
+              "archived"
+            ],
+            "name": "ck_project_status"
+          }
+        ],
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Project.id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Project.name",
+            "type": "VARCHAR(80)"
+          },
+          {
+            "default": "'active'",
+            "name": "status",
+            "origin": "Project.status",
+            "type": "TEXT"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Project.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "A list of tasks that belong together.",
+        "kind": "entity",
+        "name": "project",
+        "origin": "Project",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "project_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "origin": "Task.id",
+            "type": "UUID"
+          },
+          {
+            "name": "project_id",
+            "origin": "Task.project",
+            "type": "UUID"
+          },
+          {
+            "name": "summary",
+            "origin": "Task.summary",
+            "type": "TEXT"
+          },
+          {
+            "name": "done",
+            "origin": "Task.done",
+            "type": "BOOLEAN"
+          },
+          {
+            "name": "due_at",
+            "nullable": true,
+            "origin": "Task.dueAt",
+            "type": "TIMESTAMPTZ"
+          },
+          {
+            "default": "'{}'",
+            "name": "remind_before",
+            "origin": "Task.remindBefore",
+            "type": "BIGINT[]"
+          },
+          {
+            "default": "CURRENT_TIMESTAMP",
+            "name": "created_at",
+            "origin": "Task.createdAt",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "Something to do in a project.",
+        "foreignKeys": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "name": "fk_task_project_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "project"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "project_id",
+              "due_at"
+            ],
+            "method": "BTREE",
+            "name": "idx_task_project_due_at"
+          },
+          {
+            "columns": [
+              "summary"
+            ],
+            "expression": "lower(summary)",
+            "method": "BTREE",
+            "name": "idx_task_summary_lower"
+          }
+        ],
+        "kind": "entity",
+        "name": "task",
+        "origin": "Task",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "task_pkey"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER trg_project_status_transition_guard\n  BEFORE UPDATE OF status ON project\n  FOR EACH ROW EXECUTE FUNCTION project_status_transition_guard()",
+        "name": "trg_project_status_transition_guard",
+        "origin": "Project",
+        "refuses": true,
+        "table": "project"
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

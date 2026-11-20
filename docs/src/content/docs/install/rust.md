@@ -210,7 +210,7 @@ on `sdk.product`, so a call is `sdk.product.get_product(id, None).await`.
 
 `service_credential: Some(ServiceCredential::new(source))` is the calling
 service's own credential
-([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
 `source(fresh)` returns it, and the SDK sends `Bearer <token>` in
 `Service-Authorization`, or in each of `headers`, on every request. A 401
 whose code is `service_unauthorized` calls `source(true)` once and retries,

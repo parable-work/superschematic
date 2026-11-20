@@ -247,8 +247,10 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // the table's fields (checkSeatsConfig, D104), a Reconcile use's status
 // and unreachable to the table's Workflow (checkReconcileConfig, D104), and
 // a Schedules use's bounds, retry, status and endOn to its config and the
-// table's Workflow (checkSchedulesConfig, D104), and a Pool use's order to
-// the table's fields (checkPoolConfig, D104).
+// table's Workflow (checkSchedulesConfig, D104), a Pool use's order to
+// the table's fields (checkPoolConfig, D104), and a Rollups or
+// Dependencies use's tables, relations and fields to its database
+// (checkRollupsConfig, checkDependenciesConfig, D104's step 4).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -328,6 +330,9 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			if ref.Name == reconcileBehavior && behavior.ValidateConfig(ref.Config) == nil {
 				checkReconcileConfig(td, ref, r)
 			}
+			if ref.Name == numberingBehavior && behavior.ValidateConfig(ref.Config) == nil {
+				checkNumberingConfig(schema, td, ref, r)
+			}
 		} else {
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)
 			adder = "implements " + ref.Name + "'s"
@@ -337,6 +342,14 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			case reactionsBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
+				}
+			case rollupsBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkRollupsConfig(schema, td, ref, r)
+				}
+			case dependenciesBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkDependenciesConfig(schema, td, ref, r)
 				}
 			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior, poolBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {

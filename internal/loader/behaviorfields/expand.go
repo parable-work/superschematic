@@ -297,6 +297,9 @@ func expandStorage(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) ([
 		}
 		for _, table := range behavior.Tables {
 			sub := subTable(td, use, table)
+			if table.Shared() {
+				sub = sharedTable(td, use, table)
+			}
 			if existing := schema.Types[sub.Name]; existing != nil {
 				if existing.BehaviorTable != nil && *existing.BehaviorTable == *sub.BehaviorTable {
 					continue
@@ -563,6 +566,40 @@ func subTable(td *ir.TypeDef, use ir.BehaviorRef, table registry.BehaviorTable) 
 		})
 	}
 	return sub
+}
+
+// sharedTable is the type of the table that the use keeps for the table td
+// as a whole (D103's step 4): no row's child, so it has no relation to a
+// row (its marker's RowField is empty) and a row's delete leaves its rows;
+// keyed by the declared key alone, its primary key; and @optimistic's
+// _version, which each write through the core is held to, so two writers
+// that read one row write it one after the other (Numbering's counts).
+func sharedTable(td *ir.TypeDef, use ir.BehaviorRef, table registry.BehaviorTable) *ir.TypeDef {
+	shared := &ir.TypeDef{
+		Name:    behaviorlayout.SubTableTypeName(td.Name, use, table.Name),
+		Owner:   td.Owner,
+		Comment: table.Description,
+		Role:    ir.RoleDBTable,
+		Origin:  ir.OriginBehavior,
+		BehaviorTable: &ir.BehaviorTable{
+			Row:      td.Name,
+			Use:      use.UseID(),
+			Behavior: use.Name,
+			Table:    table.Name,
+			Key:      table.Key,
+		},
+		Optimistic: true,
+	}
+	for _, declared := range table.Fields {
+		shared.Fields = append(shared.Fields, &ir.FieldDef{
+			Name:        declared.Name,
+			Description: declared.Description,
+			TypeRef:     ir.TypeRef{Name: declared.Type},
+			Required:    declared.Name == table.Key,
+			Key:         declared.Name == table.Key,
+		})
+	}
+	return shared
 }
 
 // deadlineQueue is the queue of the deadlines td's behaviors arm (D103),

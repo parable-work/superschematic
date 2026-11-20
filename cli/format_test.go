@@ -16,7 +16,7 @@ import (
 	"github.com/parable-work/superschematic/registry"
 )
 
-var updateFormat = flag.Bool("update", false, "rewrite testdata/format")
+var updateFormat = flag.Bool("update", false, "rewrite testdata/format, and the runner's plan vectors made from documents")
 
 const tsTestdata = "../internal/loader/tsreader/testdata/services"
 
