@@ -1,0 +1,525 @@
+{
+  "dialect": "sqlite",
+  "expanded": "d709077e86ae51c5261ddbd645ac68d3022b605a4af5ddf50a9a326955e3d355",
+  "expandedModel": {
+    "dialect": "sqlite",
+    "service": "tasks-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Comment.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "task_id",
+            "origin": "Comment.task",
+            "type": "TEXT"
+          },
+          {
+            "name": "body",
+            "origin": "Comment.body",
+            "type": "TEXT"
+          },
+          {
+            "default": "'[]'",
+            "element": "TEXT",
+            "holds": "list",
+            "name": "mentions",
+            "origin": "Comment.mentions",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Comment.createdAt",
+            "type": "TEXT"
+          },
+          {
+            "name": "legacy_id",
+            "nullable": true,
+            "origin": "Comment.legacyId",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "name": "fk_comment_task_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "task"
+          }
+        ],
+        "kind": "entity",
+        "name": "comment",
+        "origin": "Comment",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "comment_pkey"
+        }
+      },
+      {
+        "checks": [
+          {
+            "column": "status",
+            "in": [
+              "active",
+              "archived"
+            ],
+            "name": "ck_project_status"
+          }
+        ],
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Project.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Project.name",
+            "type": "TEXT"
+          },
+          {
+            "default": "'active'",
+            "name": "status",
+            "origin": "Project.status",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Project.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "project",
+        "origin": "Project",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "project_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Task.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "project_id",
+            "origin": "Task.project",
+            "type": "TEXT"
+          },
+          {
+            "name": "summary",
+            "origin": "Task.summary",
+            "type": "TEXT"
+          },
+          {
+            "name": "done",
+            "origin": "Task.done",
+            "type": "INTEGER"
+          },
+          {
+            "name": "due_at",
+            "nullable": true,
+            "origin": "Task.dueAt",
+            "type": "TEXT"
+          },
+          {
+            "default": "'[]'",
+            "element": "INTEGER",
+            "holds": "list",
+            "name": "remind_before",
+            "origin": "Task.remindBefore",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Task.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "name": "fk_task_project_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "project"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "project_id",
+              "due_at"
+            ],
+            "method": "BTREE",
+            "name": "idx_task_project_due_at"
+          },
+          {
+            "columns": [
+              "summary"
+            ],
+            "expression": "lower(summary)",
+            "method": "BTREE",
+            "name": "idx_task_summary_lower"
+          }
+        ],
+        "kind": "entity",
+        "name": "task",
+        "origin": "Task",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "task_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "from": "288da563a4c63dd5f6805bd32a1509d3501ad56808f1feefc1b419c76c5190d8",
+  "hash": "6d385d9c8129d0c4610bfd0d398c1a366ef04c934eb236271030ecc396a3e1a2",
+  "renames": [
+    "task.title=task.summary"
+  ],
+  "service": "tasks-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/task/column/summary",
+          "reason": "task.title is renamed to task.summary (Task.summary): servers built from the previous version still use the old name.",
+          "subject": "table/task/column/summary"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"task\" RENAME COLUMN \"title\" TO \"summary\""
+      ],
+      "subject": "table/task/column/summary",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"project\" ADD COLUMN \"status\" TEXT DEFAULT 'active' NOT NULL CHECK (\"status\" IN ('active', 'archived'))"
+      ],
+      "subject": "table/project/column/status",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/task/column/remind_before",
+          "reason": "Task.remindBefore changes from a list of TEXT to a list of INTEGER: SQLite converts each element with a cast that never fails, so the conversion does not keep every element: text that is not a number becomes 0 and a fraction is cut toward zero.",
+          "subject": "table/task/column/remind_before"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/comment",
+          "reason": "Copying comment and task holds the database's write lock for time that grows with the tables.",
+          "subject": "table/comment"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/task/column/remind_before",
+          "reason": "Task.remindBefore changes from a list of TEXT to a list of INTEGER: servers built from the previous version still read and write a list of TEXT.",
+          "subject": "table/task/column/remind_before"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/comment",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from legacy_id in comment, nor convert the elements of remind_before in task, so the step rebuilds comment and task. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/comment"
+        }
+      ],
+      "index": 3,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_task\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"project_id\" TEXT NOT NULL,\n  \"summary\" TEXT NOT NULL,\n  \"done\" INTEGER NOT NULL,\n  \"due_at\" TEXT,\n  \"remind_before\" TEXT DEFAULT '[]' NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"project_id\") REFERENCES \"project\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_comment\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"task_id\" TEXT NOT NULL,\n  \"body\" TEXT NOT NULL,\n  \"mentions\" TEXT DEFAULT '[]' NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"legacy_id\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"task_id\") REFERENCES \"_new_task\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_task\" (\"id\", \"project_id\", \"summary\", \"done\", \"due_at\", \"remind_before\", \"created_at\")\nSELECT \"id\", \"project_id\", \"summary\", \"done\", \"due_at\", CASE WHEN \"task\".\"remind_before\" IS NOT NULL THEN (SELECT json_group_array(CAST(\"_element\".\"value\" AS INTEGER) ORDER BY \"_element\".\"key\") FROM json_each(\"task\".\"remind_before\") AS \"_element\") END, \"created_at\"\nFROM \"task\"",
+        "INSERT INTO \"_new_comment\" (\"id\", \"task_id\", \"body\", \"created_at\", \"legacy_id\")\nSELECT \"id\", \"task_id\", \"body\", \"created_at\", \"legacy_id\"\nFROM \"comment\"",
+        "DROP TABLE \"comment\"",
+        "DROP TABLE \"task\"",
+        "ALTER TABLE \"_new_task\" RENAME TO \"task\"",
+        "ALTER TABLE \"_new_comment\" RENAME TO \"comment\"",
+        "CREATE INDEX \"idx_task_project_due_at\" ON \"task\" (\"project_id\", \"due_at\")",
+        "CREATE INDEX \"idx_task_summary_lower\" ON \"task\" ((lower(summary)))"
+      ],
+      "subject": "table/comment",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createTrigger",
+      "phase": "contract",
+      "statements": [
+        "CREATE TRIGGER \"trg_project_status_transition_guard\" BEFORE UPDATE OF \"status\" ON \"project\" FOR EACH ROW\nWHEN NEW.\"status\" IS NOT OLD.\"status\" AND (\n  OLD.\"status\" IN ('archived')\n  OR NOT COALESCE(\n    (OLD.\"status\" IS 'active' AND NEW.\"status\" IN ('archived')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'project.status cannot make this move: its state machine does not list it');\nEND"
+      ],
+      "subject": "trigger/project/trg_project_status_transition_guard",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/comment/column/legacy_id",
+          "reason": "Dropping comment.legacy_id deletes the values of Comment.legacyId.",
+          "subject": "table/comment/column/legacy_id"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/comment/column/legacy_id",
+          "reason": "SQLite rewrites comment to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/comment/column/legacy_id"
+        }
+      ],
+      "index": 5,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"comment\" DROP COLUMN \"legacy_id\""
+      ],
+      "subject": "table/comment/column/legacy_id",
+      "transactional": true
+    }
+  ],
+  "to": "c0386a186512d9f720437b2b2512ae0cdac9b297981d04995a5d641ebeb9ca50",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "tasks-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Comment.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "task_id",
+            "origin": "Comment.task",
+            "type": "TEXT"
+          },
+          {
+            "name": "body",
+            "origin": "Comment.body",
+            "type": "TEXT"
+          },
+          {
+            "default": "'[]'",
+            "element": "TEXT",
+            "holds": "list",
+            "name": "mentions",
+            "origin": "Comment.mentions",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Comment.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "name": "fk_comment_task_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "task"
+          }
+        ],
+        "kind": "entity",
+        "name": "comment",
+        "origin": "Comment",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "comment_pkey"
+        }
+      },
+      {
+        "checks": [
+          {
+            "column": "status",
+            "in": [
+              "active",
+              "archived"
+            ],
+            "name": "ck_project_status"
+          }
+        ],
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Project.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "origin": "Project.name",
+            "type": "TEXT"
+          },
+          {
+            "default": "'active'",
+            "name": "status",
+            "origin": "Project.status",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Project.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "project",
+        "origin": "Project",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "project_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "origin": "Task.id",
+            "type": "TEXT"
+          },
+          {
+            "name": "project_id",
+            "origin": "Task.project",
+            "type": "TEXT"
+          },
+          {
+            "name": "summary",
+            "origin": "Task.summary",
+            "type": "TEXT"
+          },
+          {
+            "name": "done",
+            "origin": "Task.done",
+            "type": "INTEGER"
+          },
+          {
+            "name": "due_at",
+            "nullable": true,
+            "origin": "Task.dueAt",
+            "type": "TEXT"
+          },
+          {
+            "default": "'[]'",
+            "element": "INTEGER",
+            "holds": "list",
+            "name": "remind_before",
+            "origin": "Task.remindBefore",
+            "type": "TEXT"
+          },
+          {
+            "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "name": "created_at",
+            "origin": "Task.createdAt",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "name": "fk_task_project_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "project"
+          }
+        ],
+        "indexes": [
+          {
+            "columns": [
+              "project_id",
+              "due_at"
+            ],
+            "method": "BTREE",
+            "name": "idx_task_project_due_at"
+          },
+          {
+            "columns": [
+              "summary"
+            ],
+            "expression": "lower(summary)",
+            "method": "BTREE",
+            "name": "idx_task_summary_lower"
+          }
+        ],
+        "kind": "entity",
+        "name": "task",
+        "origin": "Task",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "task_pkey"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER \"trg_project_status_transition_guard\" BEFORE UPDATE OF \"status\" ON \"project\" FOR EACH ROW\nWHEN NEW.\"status\" IS NOT OLD.\"status\" AND (\n  OLD.\"status\" IN ('archived')\n  OR NOT COALESCE(\n    (OLD.\"status\" IS 'active' AND NEW.\"status\" IN ('archived')), 0))\nBEGIN\n  SELECT RAISE(ABORT, 'project.status cannot make this move: its state machine does not list it');\nEND",
+        "name": "trg_project_status_transition_guard",
+        "origin": "Project",
+        "refuses": true,
+        "table": "project"
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}
