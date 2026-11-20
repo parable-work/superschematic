@@ -282,6 +282,18 @@ const SCHEDULES_FLOOR: usize = 161;
 /// adapter's replay holds its own count to this one.
 const POOL_FLOOR: usize = 82;
 
+/// The steps `core-rollups.transcript.json` holds, of `core-rollups.json`'s
+/// 286 (D104's step 4): 72 define and publish checks and 108 creates,
+/// updates (the engine's link and unlink as updates of a relation's
+/// column), transitions, 21 of them refused, among them the gate's
+/// not_held, and a delete, in the 12 scenarios the core an adapter embeds
+/// runs. The rest of the 106 left out are opens, reads of rows, which an
+/// adapter's replay does not compute values for, and what the replay skips:
+/// the scenario whose access policy is the test's own, the two that stop at
+/// a latest rollup, and the defines that read another schema. An adapter's
+/// replay holds its own count to this one.
+const ROLLUPS_FLOOR: usize = 180;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -301,6 +313,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ("core-presence", "workqueue-presence", PRESENCE_FLOOR),
         ("core-budget", "workqueue-budget", BUDGET_FLOOR),
         ("core-retries", "workqueue-retries", RETRIES_FLOOR),
+        ("core-rollups", "core-rollups", ROLLUPS_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {

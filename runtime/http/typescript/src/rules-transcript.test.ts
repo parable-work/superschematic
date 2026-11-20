@@ -134,6 +134,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
   { file: 'core-pool', floor: 82 },
+  { file: 'core-rollups', floor: 180 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */

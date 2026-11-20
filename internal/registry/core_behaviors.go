@@ -110,7 +110,7 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Retries), then Seats and Reconcile, which D104's step 3 built on the core
 // alone (RulesPackage), so a build-time table may compose them, then
 // Schedules, D104's step 3's second part, then Pool, the rest of its step
-// 3. Of these, a table implements one that names no value field
+// 3, then Rollups, the first of D103's step 4's waves after D104's. Of these, a table implements one that names no value field
 // (implements Timers<T, C>, and Constants, StateRules and Approvals since
 // D104's step 2, Lease, Presence, Budget and Retries since its second
 // batch, Seats since its step 3, Schedules since its second part, and Pool
@@ -118,7 +118,7 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3). A
 // test holds the list to the behaviors each transcript of
 // runtime/engine/testdata/rules records.
-var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool"}
+var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool", "Rollups"}
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name
 // (RulesBehaviors).

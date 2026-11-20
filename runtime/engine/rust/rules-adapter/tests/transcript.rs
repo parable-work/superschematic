@@ -2,7 +2,8 @@
 //! `superschematic-rules-testkit` writes from `core-workflow.json`,
 //! `core-timers.json`, `core-reactions.json`,
 //! `core-reactions-changes.json`, `core-constants.json`,
-//! `core-staterules.json` and `core-approvals.json`, and from the scenarios
+//! `core-staterules.json`, `core-approvals.json` and `core-rollups.json`
+//! (D104's step 4), and from the scenarios
 //! written by hand in their format where the engine recorded none,
 //! `core-workflow-principals.json` (D104: a transition's `by`,
 //! `overridePermission`, `repeat` and `from`; D113: `finished`) and
@@ -89,7 +90,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 19] = [
+const TRANSCRIPTS: [(&str, usize); 20] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -109,6 +110,7 @@ const TRANSCRIPTS: [(&str, usize); 19] = [
     ("core-reconcile", RECONCILE_FLOOR),
     ("core-schedules", SCHEDULES_FLOOR),
     ("core-pool", POOL_FLOOR),
+    ("core-rollups", ROLLUPS_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -231,6 +233,13 @@ const SCHEDULES_FLOOR: usize = 161;
 /// ran, each emitting its event, and 22 picks, each a command without a row
 /// whose result and events the replay compares.
 const POOL_FLOOR: usize = 82;
+
+/// core-rollups' floor, as the core's milestone states it: 180 steps, 108
+/// commands (the engine's link and unlink as updates of a relation's
+/// column, and transitions the gate holds, not_held among the refusals)
+/// and 72 checks (D104's step 4); the gate reads the rows that point at the
+/// row through a linked read of the layout's relation column.
+const ROLLUPS_FLOOR: usize = 180;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

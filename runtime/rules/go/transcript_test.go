@@ -100,6 +100,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
+	{"../../engine/testdata/rules/core-rollups.transcript.json", 180},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of
