@@ -2,10 +2,11 @@
 //! file of the test's own holding the tables of
 //! `testdata/queue/create_sqlite.sql` and the descriptors of
 //! `order_placed.json` and `ping.json`: what a drain counts and when it says
-//! the next message falls due, a message spent in the unit that applies its
-//! writes, the prune's cadence, a file another connection holds, a host
-//! with no async runtime that a commit of its own process wakes, and the
-//! loop on tokio.
+//! the next message falls due, a claim and a failure by the time the drain
+//! was given, a claim a drain extends while its handler runs, a message
+//! spent in the unit that applies its writes, the prune's cadence, a file
+//! another connection holds, a host with no async runtime that a commit of
+//! its own process wakes, and the loop on tokio.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -257,18 +258,140 @@ fn a_drain_answers_when_the_next_message_falls_due() {
         "the next is the claim's expiry, seven months before: {expiry}"
     );
 
-    // A message due by the host's time that the database's clock has not
-    // reached is not claimed, and the host is sent to its next poll.
-    db.exec("UPDATE order_placed_queue SET state = 'ready', claim_token = NULL, claim_expires_at = NULL, due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+30 minutes')");
+    // A drain goes by the time it was given, not the database's clock
+    // (D116): a message due by the host's time that the database's clock
+    // has not reached is claimed, and one the database's clock has reached
+    // that the host's time has not waits for it.
+    db.exec("UPDATE order_placed_queue SET state = 'ready', claim_token = NULL, claim_expires_at = NULL, due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minutes')");
+    let behind = now - Duration::from_secs(3600);
+    let drained = worker.drain(&mut connection, behind, 10).unwrap();
+    assert_eq!(drained.ran, 0);
+    let wait = seconds_from(behind, drained.next.unwrap());
+    assert!(
+        (3500.0..=3600.0).contains(&wait),
+        "the message is due an hour after the drain's time: {wait}"
+    );
+    db.exec("UPDATE order_placed_queue SET due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+30 minutes')");
     let ahead = now + Duration::from_secs(3600);
     assert_eq!(
         worker.drain(&mut connection, ahead, 10).unwrap(),
-        Drained {
-            ran: 0,
-            next: Some(ahead + Duration::from_secs(1))
-        }
+        Drained { ran: 1, next: None }
     );
-    assert_eq!(seen.all(), [] as [u64; 0]);
+    assert_eq!(seen.all(), [1]);
+}
+
+#[test]
+fn a_claim_and_a_failure_go_by_the_time_the_drain_was_given() {
+    let db = Db::open("given");
+    let def = order_placed();
+    let expiry = Arc::new(Mutex::new(None::<String>));
+    let (read, path) = (Arc::clone(&expiry), db.path().to_path_buf());
+    let fails = Arc::new(AtomicBool::new(true));
+    let failing = Arc::clone(&fails);
+    let worker = SqliteWorker::new()
+        .queue(
+            def.clone(),
+            move |_message: Value| -> Result<(), BoxError> {
+                let reader = Connection::open(&path)?;
+                *read.lock().unwrap() = reader.query_row(
+                    "SELECT claim_expires_at FROM order_placed_queue WHERE state = 'claimed'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                if failing.load(Ordering::SeqCst) {
+                    return Err("not yet".into());
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    let mut connection = db.worker();
+    db.enqueue(&def, &an_order(1));
+
+    // A drain given a time years on claims for the queue's lease from it,
+    // two minutes, and a failure there backs off a minute from it.
+    let year_on = UNIX_EPOCH + Duration::from_secs(1_924_992_000); // 2031-01-01
+    assert_eq!(worker.drain(&mut connection, year_on, 10).unwrap().ran, 1);
+    let claimed = expiry.lock().unwrap().clone().unwrap();
+    assert!(
+        claimed.starts_with("2031-01-01T00:02:00."),
+        "the claim expires a lease from the drain's time: {claimed}"
+    );
+    let due: String = db
+        .connection(Duration::from_secs(5))
+        .query_row("SELECT due_at FROM order_placed_queue", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(
+        due.starts_with("2031-01-01T00:01:00."),
+        "the retry is due a backoff from the drain's time: {due}"
+    );
+
+    // Today the retry is not due; fifty-nine seconds on, not yet; sixty-one,
+    // it runs.
+    fails.store(false, Ordering::SeqCst);
+    assert_eq!(
+        worker
+            .drain(&mut connection, SystemTime::now(), 10)
+            .unwrap()
+            .ran,
+        0
+    );
+    let early = year_on + Duration::from_secs(59);
+    assert_eq!(worker.drain(&mut connection, early, 10).unwrap().ran, 0);
+    let late = year_on + Duration::from_secs(61);
+    assert_eq!(
+        worker.drain(&mut connection, late, 10).unwrap(),
+        Drained { ran: 1, next: None }
+    );
+    assert_eq!(db.count("order_placed_queue", "state = 'done'"), 1);
+}
+
+#[test]
+fn a_drain_extends_the_claim_of_a_handler_that_runs_long() {
+    let db = Db::open("extend");
+    // The orders' queue with a lease of one second, which the handler runs
+    // past twice over.
+    let text =
+        testdata("order_placed.json").replace("\"leaseSeconds\": 120", "\"leaseSeconds\": 1");
+    let def = QueueDefinition::parse(&text).unwrap();
+    assert_eq!(def.lease(), Duration::from_secs(1));
+    let handled = Arc::new(AtomicUsize::new(0));
+    let slow = |handled: Arc<AtomicUsize>| {
+        move |_message: Value| -> Result<(), BoxError> {
+            handled.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(2500));
+            Ok(())
+        }
+    };
+    let first = SqliteWorker::new()
+        .queue(def.clone(), slow(Arc::clone(&handled)))
+        .unwrap();
+    let second = SqliteWorker::new()
+        .queue(def.clone(), slow(Arc::clone(&handled)))
+        .unwrap();
+    db.enqueue(&def, &an_order(1));
+    let mut running = db.worker();
+    let draining = std::thread::spawn(move || {
+        let drained = first.drain(&mut running, SystemTime::now(), 10);
+        (drained, running)
+    });
+
+    // Past the lease, another worker finds the claim extended, and claims
+    // nothing; its prune aside, its drain only reads.
+    std::thread::sleep(Duration::from_millis(1600));
+    let mut other = db.worker();
+    let drained = second.drain(&mut other, SystemTime::now(), 10).unwrap();
+    assert_eq!(
+        drained.ran, 0,
+        "the message was claimed again past its lease"
+    );
+    let (drained, _) = draining.join().unwrap();
+    assert_eq!(drained.unwrap().ran, 1);
+    assert_eq!(handled.load(Ordering::SeqCst), 1);
+    // The handler's message was completed under its claim.
+    assert_eq!(db.count("order_placed_queue", "state = 'done'"), 1);
 }
 
 #[test]
@@ -365,7 +488,13 @@ fn a_message_is_spent_in_the_unit_that_applies_its_writes() {
     // A handler that fails writes nothing, and its message is failed after
     // the unit rolled back, to come again.
     db.enqueue(&def, &an_order(2));
-    assert_eq!(worker.drain(&mut connection, now, 10).unwrap().ran, 1);
+    assert_eq!(
+        worker
+            .drain(&mut connection, SystemTime::now(), 10)
+            .unwrap()
+            .ran,
+        1
+    );
     assert_eq!(db.count("applied", "quantity = 2"), 0);
     assert_eq!(
         db.row(),
@@ -436,13 +565,13 @@ fn a_drain_prunes_as_it_starts_and_every_five_minutes() {
     let worker = recording(&seen);
     let mut connection = db.worker();
     let old = "UPDATE order_placed_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 hours') WHERE state = 'done'";
-    let now = SystemTime::now();
 
     // Its first drain prunes: of the done messages, those done past the
     // queue's retention, an hour, go, and one done a minute ago stays.
     for n in 1..=3 {
         db.enqueue(&def, &an_order(n));
     }
+    let now = SystemTime::now();
     assert_eq!(worker.drain(&mut connection, now, 10).unwrap().ran, 3);
     db.exec(old);
     db.exec("UPDATE order_placed_queue SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minutes') WHERE quantity = 3");
@@ -493,6 +622,7 @@ fn a_busy_file_fails_the_drain_and_an_idle_drain_only_reads() {
     // fails: the host drains again later.
     enqueue_sqlite(&holder, &def, &an_order(1)).unwrap();
     holder.execute_batch("COMMIT; BEGIN IMMEDIATE").unwrap();
+    let now = SystemTime::now();
     let err = worker.drain(&mut connection, now, 10).unwrap_err();
     assert!(
         matches!(&err, QueueError::Failed(why) if why.contains("claim on order_placed_queue") && why.contains("locked")),

@@ -228,6 +228,12 @@ pub struct QueueDefinition {
     /// sqlite dialect, which [`SqliteQueue`] runs.
     #[serde(default)]
     pub sqlite_statements: Option<QueueStatements>,
+    /// Its statements on SQLite at a time each takes as its last
+    /// parameter, which a worker's drain runs at the time its host gave it
+    /// (D116); a descriptor written before them has none, and a drain then
+    /// goes by the database's clock.
+    #[serde(default)]
+    pub sqlite_at_statements: Option<QueueStatements>,
 }
 
 impl QueueDefinition {
@@ -276,6 +282,7 @@ impl QueueDefinition {
         for (dialect, s) in [
             ("", Some(&self.statements)),
             ("SQLite ", self.sqlite_statements.as_ref()),
+            ("SQLite at-a-time ", self.sqlite_at_statements.as_ref()),
         ] {
             let Some(s) = s else { continue };
             let statements = [

@@ -376,6 +376,49 @@ const sqliteUUID = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4
 // as text. A key's statements need no lock SQLite lacks (D80): one writer
 // at a time reads every claim of the key and every ready message of it.
 func SQLiteQueueStatements(spec QueueSpec) QueueStatements {
+	return sqliteQueueStatements(spec, sqliteClock{})
+}
+
+// SQLiteQueueStatementsAt are SQLiteQueueStatements going by a time each
+// takes, not the database's clock (D116): what a worker's drain runs, at
+// the time its host gave it. Each statement but Insert and Conflict, which
+// an enqueue runs, takes the time as its last parameter, numbered after
+// its own (Due's ?1, Expire's ?2, Claim's, Complete's, Release's and
+// Prune's ?3, Extend's ?4, Fail's ?7), as RFC 3339 text in UTC.
+func SQLiteQueueStatementsAt(spec QueueSpec) QueueStatements {
+	return sqliteQueueStatements(spec, sqliteClock{given: true})
+}
+
+// sqliteClock is the time a queue's statement on SQLite goes by: the
+// database's clock, or one given as the statement's parameter numbered n.
+type sqliteClock struct{ given bool }
+
+// now is the time, in sqliteNow's form.
+func (c sqliteClock) now(n int) string {
+	if !c.given {
+		return sqliteNow
+	}
+	return fmt.Sprintf("strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', ?%d)", n)
+}
+
+// in is the time plus the seconds expression seconds.
+func (c sqliteClock) in(n int, seconds string) string {
+	if !c.given {
+		return sqliteIn(seconds)
+	}
+	return fmt.Sprintf("strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', ?%d, '+' || (%s) || ' seconds')", n, seconds)
+}
+
+// ago is the time less the seconds expression seconds.
+func (c sqliteClock) ago(n int, seconds string) string {
+	if !c.given {
+		return sqliteAgo(seconds)
+	}
+	return fmt.Sprintf("strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', ?%d, '-' || (%s) || ' seconds')", n, seconds)
+}
+
+// sqliteQueueStatements are SQLiteQueueStatements by the clock c.
+func sqliteQueueStatements(spec QueueSpec, c sqliteClock) QueueStatements {
 	table, columns, keepDone := spec.Table, spec.Columns, spec.KeepDone
 	returned := "id, claim_token, attempts"
 	for _, c := range columns {
@@ -386,7 +429,7 @@ func SQLiteQueueStatements(spec QueueSpec) QueueStatements {
 	complete := lines("DELETE FROM "+table, claimed)
 	if keepDone {
 		complete = lines(
-			fmt.Sprintf("UPDATE %s SET state = '%s', %s, updated_at = %s", table, ir.QueueStateDone, unclaim, sqliteNow),
+			fmt.Sprintf("UPDATE %s SET state = '%s', %s, updated_at = %s", table, ir.QueueStateDone, unclaim, c.now(3)),
 			claimed,
 		)
 	}
@@ -394,15 +437,15 @@ func SQLiteQueueStatements(spec QueueSpec) QueueStatements {
 		Insert: "INSERT INTO " + table,
 		Expire: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', %s,", table, ir.QueueStateDead, unclaim),
-			"  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = "+sqliteNow,
-			fmt.Sprintf("WHERE state = '%s' AND claim_expires_at <= %s AND attempts > ?1", ir.QueueStateClaimed, sqliteNow),
+			"  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = "+c.now(2),
+			fmt.Sprintf("WHERE state = '%s' AND claim_expires_at <= %s AND attempts > ?1", ir.QueueStateClaimed, c.now(2)),
 		),
 		Claim: lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', attempts = attempts + 1, claim_token = %s,", table, ir.QueueStateClaimed, sqliteUUID),
-			"  claim_expires_at = "+sqliteIn("?2")+", updated_at = "+sqliteNow,
+			"  claim_expires_at = "+c.in(3, "?2")+", updated_at = "+c.now(3),
 			"WHERE id IN (",
 			"  SELECT id FROM "+table,
-			fmt.Sprintf("  WHERE (state = '%s' AND due_at <= %s) OR (state = '%s' AND claim_expires_at <= %s)", ir.QueueStateReady, sqliteNow, ir.QueueStateClaimed, sqliteNow),
+			fmt.Sprintf("  WHERE (state = '%s' AND due_at <= %s) OR (state = '%s' AND claim_expires_at <= %s)", ir.QueueStateReady, c.now(3), ir.QueueStateClaimed, c.now(3)),
 			"  ORDER BY due_at, id",
 			"  LIMIT ?1",
 			")",
@@ -412,40 +455,40 @@ func SQLiteQueueStatements(spec QueueSpec) QueueStatements {
 		Fail: lines(
 			"UPDATE "+table+" SET",
 			fmt.Sprintf("  state = CASE WHEN attempts > ?3 THEN '%s' ELSE '%s' END,", ir.QueueStateDead, ir.QueueStateReady),
-			fmt.Sprintf("  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE %s END,", sqliteIn(fmt.Sprintf("COALESCE(MIN(%[1]s, ?6), %[1]s)", fmt.Sprintf("?4 * (1 << MIN(attempts - 1, %d))", queueBackoffDoublings)))),
-			"  last_error = ?5, "+unclaim+", updated_at = "+sqliteNow,
+			fmt.Sprintf("  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE %s END,", c.in(7, fmt.Sprintf("COALESCE(MIN(%[1]s, ?6), %[1]s)", fmt.Sprintf("?4 * (1 << MIN(attempts - 1, %d))", queueBackoffDoublings)))),
+			"  last_error = ?5, "+unclaim+", updated_at = "+c.now(7),
 			claimed,
 			"RETURNING state",
 		),
 		Extend: lines(
-			"UPDATE "+table+" SET claim_expires_at = "+sqliteIn("?3")+", updated_at = "+sqliteNow,
+			"UPDATE "+table+" SET claim_expires_at = "+c.in(4, "?3")+", updated_at = "+c.now(4),
 			claimed,
 		),
 		Release: lines(
-			fmt.Sprintf("UPDATE %s SET state = '%s', attempts = MAX(attempts - 1, 0), %s, updated_at = %s", table, ir.QueueStateReady, unclaim, sqliteNow),
+			fmt.Sprintf("UPDATE %s SET state = '%s', attempts = MAX(attempts - 1, 0), %s, updated_at = %s", table, ir.QueueStateReady, unclaim, c.now(3)),
 			claimed,
 		),
 		Prune: lines(
 			"DELETE FROM "+table+" WHERE id IN (",
 			"  SELECT id FROM "+table,
-			fmt.Sprintf("  WHERE state = '%s' AND updated_at <= %s", ir.QueueStateDone, sqliteAgo("?1")),
+			fmt.Sprintf("  WHERE state = '%s' AND updated_at <= %s", ir.QueueStateDone, c.ago(3, "?1")),
 			"  ORDER BY updated_at",
 			"  LIMIT ?2",
 			")",
 		),
 		Due: lines(
 			"SELECT 1 FROM "+table,
-			fmt.Sprintf("WHERE (state = '%s' AND due_at <= %s) OR (state = '%s' AND claim_expires_at <= %s)", ir.QueueStateReady, sqliteNow, ir.QueueStateClaimed, sqliteNow),
+			fmt.Sprintf("WHERE (state = '%s' AND due_at <= %s) OR (state = '%s' AND claim_expires_at <= %s)", ir.QueueStateReady, c.now(1), ir.QueueStateClaimed, c.now(1)),
 			"LIMIT 1",
 		),
 	}
 	if spec.Serializes() {
 		s.Claim = lines(
 			fmt.Sprintf("UPDATE %s SET state = '%s', attempts = attempts + 1, claim_token = %s,", table, ir.QueueStateClaimed, sqliteUUID),
-			"  claim_expires_at = "+sqliteIn("?2")+", updated_at = "+sqliteNow,
+			"  claim_expires_at = "+c.in(3, "?2")+", updated_at = "+c.now(3),
 			"WHERE id IN (",
 			"  SELECT m.id FROM "+table+" AS m",
-			"  WHERE "+queueDue(spec, "m.", sqliteNow),
+			"  WHERE "+queueDue(spec, "m.", c.now(3)),
 			"  ORDER BY m.due_at, m.id",
 			"  LIMIT ?1",
 			")",
@@ -453,7 +496,7 @@ func SQLiteQueueStatements(spec QueueSpec) QueueStatements {
 		)
 		s.Due = lines(
 			"SELECT 1 FROM "+table+" AS m",
-			"WHERE "+queueDue(spec, "m.", sqliteNow),
+			"WHERE "+queueDue(spec, "m.", c.now(1)),
 			"LIMIT 1",
 		)
 	}
@@ -463,14 +506,14 @@ func SQLiteQueueStatements(spec QueueSpec) QueueStatements {
 		s.Fail = lines(
 			"UPDATE "+table+" SET",
 			fmt.Sprintf("  state = CASE WHEN attempts > ?3 THEN '%s' WHEN %s THEN '%s' ELSE '%s' END,", ir.QueueStateDead, pending, ir.QueueStateDone, ir.QueueStateReady),
-			fmt.Sprintf("  due_at = CASE WHEN attempts > ?3 OR %s THEN due_at ELSE %s END,", pending, sqliteIn(fmt.Sprintf("COALESCE(MIN(%[1]s, ?6), %[1]s)", fmt.Sprintf("?4 * (1 << MIN(attempts - 1, %d))", queueBackoffDoublings)))),
-			"  last_error = ?5, "+unclaim+", updated_at = "+sqliteNow,
+			fmt.Sprintf("  due_at = CASE WHEN attempts > ?3 OR %s THEN due_at ELSE %s END,", pending, c.in(7, fmt.Sprintf("COALESCE(MIN(%[1]s, ?6), %[1]s)", fmt.Sprintf("?4 * (1 << MIN(attempts - 1, %d))", queueBackoffDoublings)))),
+			"  last_error = ?5, "+unclaim+", updated_at = "+c.now(7),
 			claimed,
 			"RETURNING state",
 		)
 		s.Release = lines(
 			fmt.Sprintf("UPDATE %s SET state = CASE WHEN %s THEN '%s' ELSE '%s' END,", table, pending, ir.QueueStateDone, ir.QueueStateReady),
-			fmt.Sprintf("  attempts = MAX(attempts - 1, 0), %s, updated_at = %s", unclaim, sqliteNow),
+			fmt.Sprintf("  attempts = MAX(attempts - 1, 0), %s, updated_at = %s", unclaim, c.now(3)),
 			claimed,
 		)
 	}

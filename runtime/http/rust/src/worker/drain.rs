@@ -27,13 +27,23 @@
 //!
 //! A drain claims one message at a time, for its queue's lease, and runs it
 //! before it claims the next, so a claim's lease covers its own handler
-//! alone. It extends no claim: a host with no runtime has no timer to
-//! extend one with, so a handler that outlasts its queue's lease may see
-//! its message claimed again, as after any expired claim. The claims are
-//! the queue's statements on SQLite (D53, amended), which read the
-//! database's clock, the host's own on a file; `now` is the time a
-//! handler's commands run at, the time the next due time is measured from,
-//! and the time the prune's cadence goes by.
+//! alone. Its claims go by the time it was given, not the database's
+//! clock: the queue's statements on SQLite at a time (D53, amended; its
+//! descriptor's `sqliteAtStatements`) take `now`, and the time the drain
+//! has run since, as each statement's last parameter, so a message is due,
+//! a claim expires, a failure backs off and a done message ages by the
+//! host's time, a test's clock among them. A descriptor written before them
+//! goes by the database's clock. `now` is also the time a handler's
+//! commands run at, the time the next due time is measured from, and the
+//! time the prune's cadence goes by.
+//!
+//! While a [`SqliteWorker::queue`] handler runs, which holds no
+//! transaction of the connection, a thread of the drain's own extends its
+//! message's claim every half of the queue's lease, on the drain's
+//! connection, so a handler that runs past its lease keeps its message,
+//! until it answers or the claim is lost. A handler of a
+//! [`SqliteWorker::queue_in_unit`] queue needs none: its unit holds the
+//! file's write lock, which no other connection's claim passes.
 //!
 //! It prunes each queue as the claim loop prunes any (D68): at its first
 //! drain and every five minutes of the times it is given, the done messages
@@ -48,6 +58,7 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use serde::de::DeserializeOwned;
 
@@ -56,7 +67,7 @@ use super::{
     DEFAULT_PRUNE_EVERY, MAX_BACKOFF, PRUNE_BATCH,
 };
 use crate::queue::sqlite::{
-    claim_on, complete_on, fail_on, next_due_on, open_connection, prune_on, update_on,
+    claim_on, complete_on, fail_on, next_due_on, open_connection, prune_on, update_on, Clock,
 };
 use crate::queue::{Claim, QueueDefinition, QueueError};
 use crate::{BoxError, Shutdown};
@@ -139,6 +150,28 @@ impl Lend for Held<'_> {
     }
 }
 
+/// The time a drain goes by: the time its host gave it, and the time it
+/// has run since.
+#[derive(Clone, Copy, Debug)]
+struct DrainClock {
+    given: SystemTime,
+    started: Instant,
+}
+
+impl DrainClock {
+    fn new(given: SystemTime) -> Self {
+        Self {
+            given,
+            started: Instant::now(),
+        }
+    }
+
+    /// The drain's time now, as the queue's statements at a time take it.
+    fn at(&self) -> Clock {
+        Clock::At(self.given + self.started.elapsed())
+    }
+}
+
 /// A queue a worker drains.
 trait Queue: Send + Sync {
     fn definition(&self) -> &QueueDefinition;
@@ -146,10 +179,15 @@ trait Queue: Send + Sync {
     /// When the queue was last pruned, by the times its drains were given.
     fn pruned(&self) -> &Mutex<Option<SystemTime>>;
 
-    /// Claims one due message and runs it, and returns whether there was
-    /// one. An error is a claim that failed; a handler's failure is its
-    /// message's.
-    fn run_one(&self, connection: &mut Connection, now: SystemTime) -> Result<bool, QueueError>;
+    /// Claims one due message by the drain's clock and runs it, its
+    /// handler at `now`, and returns whether there was one. An error is a
+    /// claim that failed; a handler's failure is its message's.
+    fn run_one(
+        &self,
+        connection: &mut Connection,
+        now: SystemTime,
+        clock: DrainClock,
+    ) -> Result<bool, QueueError>;
 }
 
 /// A queue whose handler answers for its message, which the drain then
@@ -174,9 +212,15 @@ where
         &self.pruned
     }
 
-    fn run_one(&self, connection: &mut Connection, _now: SystemTime) -> Result<bool, QueueError> {
+    fn run_one(
+        &self,
+        connection: &mut Connection,
+        _now: SystemTime,
+        clock: DrainClock,
+    ) -> Result<bool, QueueError> {
         let definition = &self.definition;
-        let Some(claim) = claim_on::<M>(connection, definition, 1, definition.lease())?.pop()
+        let Some(claim) =
+            claim_on::<M>(connection, definition, 1, definition.lease(), clock.at())?.pop()
         else {
             return Ok(false);
         };
@@ -188,10 +232,12 @@ where
         } = claim;
         let started = Instant::now();
         let span = message_span(&definition.name, &id, attempt);
-        let outcome = span.in_scope(|| caught(|| (self.handler)(message)));
+        let outcome = extending(connection, definition, &id, &token, clock, || {
+            span.in_scope(|| caught(|| (self.handler)(message)))
+        });
         let took = started.elapsed().as_secs_f64();
         match outcome {
-            Ok(()) => match complete_on(connection, definition, &id, &token) {
+            Ok(()) => match complete_on(connection, definition, &id, &token, clock.at()) {
                 Ok(()) => tracing::info!(message = id, attempt, took, "message handled"),
                 Err(err) => tracing::error!(
                     message = id,
@@ -203,11 +249,69 @@ where
             },
             Err(cause) => {
                 message_failed(&span, &cause);
-                fail(connection, definition, &id, &token, attempt, took, &cause);
+                fail(
+                    connection, definition, &id, &token, attempt, took, &cause, clock,
+                );
             }
         }
         Ok(true)
     }
+}
+
+/// Runs `work`, a handler that holds no transaction of `connection`, and
+/// while it runs extends the claim `token` holds of message `id` every half
+/// of the queue's lease, by the drain's clock, on a thread of the drain's
+/// own over the drain's connection, which the handler does not use. It
+/// stops at the handler's answer, or at a claim it lost.
+fn extending<T>(
+    connection: &mut Connection,
+    definition: &QueueDefinition,
+    id: &str,
+    token: &str,
+    clock: DrainClock,
+    work: impl FnOnce() -> T,
+) -> T {
+    let lease = definition.lease();
+    let every = (lease / 2).max(Duration::from_millis(10));
+    let done = (Mutex::new(false), Condvar::new());
+    let done = &done;
+    let extender_connection = &mut *connection;
+    std::thread::scope(|scope| {
+        scope.spawn(move || loop {
+            let finished = held(&done.0);
+            let (finished, _) = done
+                .1
+                .wait_timeout_while(finished, every, |finished| !*finished)
+                .unwrap_or_else(PoisonError::into_inner);
+            if *finished {
+                return;
+            }
+            drop(finished);
+            let extra = Some(SqlValue::Real(lease.as_secs_f64()));
+            match update_on(
+                extender_connection,
+                definition,
+                "extend",
+                |s| &s.extend,
+                id,
+                token,
+                extra,
+                clock.at(),
+            ) {
+                Ok(()) => tracing::info!(message = id, "the claim of a running handler extended"),
+                Err(err) => {
+                    tracing::warn!(message = id, error = %err, "extending the claim of a running handler failed");
+                    if matches!(err, QueueError::ClaimLost(_)) {
+                        return;
+                    }
+                }
+            }
+        });
+        let out = work();
+        *held(&done.0) = true;
+        done.1.notify_all();
+        out
+    })
 }
 
 /// A queue whose handler completes its message itself, in the transaction
@@ -232,9 +336,15 @@ where
         &self.pruned
     }
 
-    fn run_one(&self, connection: &mut Connection, now: SystemTime) -> Result<bool, QueueError> {
+    fn run_one(
+        &self,
+        connection: &mut Connection,
+        now: SystemTime,
+        clock: DrainClock,
+    ) -> Result<bool, QueueError> {
         let definition = &self.definition;
-        let Some(claim) = claim_on::<M>(connection, definition, 1, definition.lease())?.pop()
+        let Some(claim) =
+            claim_on::<M>(connection, definition, 1, definition.lease(), clock.at())?.pop()
         else {
             return Ok(false);
         };
@@ -256,6 +366,7 @@ where
                 &id,
                 &token,
                 None,
+                clock.at(),
             );
             return Err(QueueError::Failed(format!(
                 "begin the transaction of message {id} on {}: {err}",
@@ -289,7 +400,9 @@ where
                     let _ = connection.execute_batch("ROLLBACK");
                 }
                 message_failed(&span, &cause);
-                fail(connection, definition, &id, &token, attempt, took, &cause);
+                fail(
+                    connection, definition, &id, &token, attempt, took, &cause, clock,
+                );
             }
         }
         Ok(true)
@@ -306,8 +419,9 @@ fn caught(handler: impl FnOnce() -> Result<(), BoxError>) -> Result<(), String> 
     }
 }
 
-/// Fails a message whose handler answered an error or panicked, and logs
-/// what became of it, as the claim loop does.
+/// Fails a message whose handler answered an error or panicked, by the
+/// drain's clock, and logs what became of it, as the claim loop does.
+#[allow(clippy::too_many_arguments)]
 fn fail(
     connection: &Connection,
     definition: &QueueDefinition,
@@ -316,8 +430,9 @@ fn fail(
     attempt: u32,
     took: f64,
     cause: &str,
+    clock: DrainClock,
 ) {
-    match fail_on(connection, definition, id, token, cause) {
+    match fail_on(connection, definition, id, token, cause, clock.at()) {
         Ok(true) => tracing::error!(
             message = id,
             attempt,
@@ -347,7 +462,7 @@ fn fail(
 /// is [`DEFAULT_PRUNE_EVERY`] before `now` or it has had none, a batch at a
 /// time until a batch is short, and logs how many it deleted. A failed
 /// batch ends the prune, which the next tries again.
-fn prune(queue: &dyn Queue, connection: &Connection, now: SystemTime) {
+fn prune(queue: &dyn Queue, connection: &Connection, now: SystemTime, clock: DrainClock) {
     {
         let mut pruned = held(queue.pruned());
         let due = pruned.is_none_or(|last| {
@@ -361,7 +476,7 @@ fn prune(queue: &dyn Queue, connection: &Connection, now: SystemTime) {
     }
     let mut pruned: u64 = 0;
     loop {
-        match prune_on(connection, queue.definition(), PRUNE_BATCH) {
+        match prune_on(connection, queue.definition(), PRUNE_BATCH, clock.at()) {
             Ok(n) => {
                 pruned += n;
                 if n < PRUNE_BATCH as u64 {
@@ -488,11 +603,12 @@ impl SqliteWorker {
         limit: usize,
     ) -> Result<Drained, QueueError> {
         let mut ran = 0;
+        let clock = DrainClock::new(now);
         for queue in &self.queues {
             let span = tracing::error_span!("worker", queue = queue.definition().name.as_str());
             let _entered = span.enter();
-            prune(queue.as_ref(), connection, now);
-            while ran < limit && queue.run_one(connection, now)? {
+            prune(queue.as_ref(), connection, now, clock);
+            while ran < limit && queue.run_one(connection, now, clock)? {
                 ran += 1;
             }
         }
@@ -509,8 +625,9 @@ impl SqliteWorker {
             // message since its queue was drained.
             next if next <= now && ran > 0 => now,
             // A message is due and was not claimed: one of an in-order
-            // queue behind its key's head, or one the database's clock
-            // has not reached. The next poll tries it.
+            // queue behind its key's head, or, by a descriptor with no
+            // statements at a time, one the database's clock has not
+            // reached. The next poll tries it.
             next if next <= now => now + DEFAULT_IDLE,
             next => next,
         });
@@ -667,9 +784,10 @@ impl DrainOptions {
 ///
 /// When `shutdown` is cancelled it starts no drain, and gives the running
 /// ones the grace to finish. A drain cannot be dropped: a handler that
-/// still runs when the grace is over is left to its claim's expiry, when
-/// its message is due again. It returns `Ok` once it stopped, and an error
-/// only for a worker it cannot run: one with no connection.
+/// still runs when the grace is over keeps its claim, extended while it
+/// runs, until it answers or the process ends, after which its message is
+/// due again when its claim expires. It returns `Ok` once it stopped, and
+/// an error only for a worker it cannot run: one with no connection.
 pub async fn run_drain(
     worker: Arc<SqliteWorker>,
     connections: Vec<Connection>,
@@ -774,7 +892,7 @@ async fn stop<T>(drain: &mut tokio::task::JoinHandle<T>, grace: Duration) {
     );
     if tokio::time::timeout(grace, drain).await.is_err() {
         tracing::warn!(
-            "the grace is over, and a handler still runs: its message is due again when its claim expires"
+            "the grace is over, and a handler still runs: its claim is extended while it runs, and its message is due again when its claim expires after the process ends"
         );
     }
 }
