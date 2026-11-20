@@ -1,0 +1,36 @@
+[package]
+name = "superschematic-rules-dev"
+description = "Development mode's store (D117): the handler of superschematic-rules-handler over SQLite, a file or a database in memory that goes with its process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# PgStore: the development layout in a schema of a Postgres database.
+postgres = ["dep:postgres"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order, as the core reads and writes them.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../rules" }
+superschematic-rules-behaviors = { path = "../rules-behaviors" }
+superschematic-rules-handler = { path = "../rules-handler" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The store in a Postgres schema, through the synchronous client the
+# engine's storage uses; off by default.
+postgres = { version = "0.19.14", optional = true }
+# A request's id and a create's key when it names none.
+uuid = { version = "1.28.0", features = ["v4"] }
+
+[dev-dependencies]
+# The transcripts the replay reads.
+superschematic-rules-testkit = { path = "../rules-testkit" }
+
+[lints]
+workspace = true

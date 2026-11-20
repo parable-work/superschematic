@@ -1,0 +1,25 @@
+[package]
+name = "superschematic-rules-handler"
+description = "Development mode's request handler (D117, D103's step 6): a request and its caller in, the reads it asks of the development layout, a response and a change set out, with no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Nothing here does I/O (D103): no database driver, no runtime, no clock and
+# no id source, as the core it embeds. A host answers the reads it asks of
+# the development layout and applies the units it returns.
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order, as the core reads and writes them.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../rules" }
+# The declaration files of the behaviors ported onto the core, which give
+# each owned field its type and say which may hold no value.
+superschematic-rules-behaviors = { path = "../rules-behaviors" }
+
+[lints]
+workspace = true

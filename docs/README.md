@@ -41,7 +41,7 @@ docs/
     start/                prerequisites, getting started, how it works,
                           the capability map, examples
     first-project/        the tutorial over examples/acme-shop
-    guides/               one guide per area: types, tables, routes, auth, SDKs, stacks, the engine, its behaviors, work queues and Topcoat
+    guides/               one guide per area: types, tables, routes, auth, SDKs, stacks, the engine, development mode, its behaviors, work queues and Topcoat
     install/              per-language pages (the "Languages" group)
     extending/            write an extension, stack targets
     reference/            naming file, CLI, one page per feature
