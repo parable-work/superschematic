@@ -120,15 +120,17 @@ there as RFC 3339 UTC text with microseconds
 ## `apply`
 
 ```
-superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
+superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--database-url URL]
 ```
 
-`--database-url` defaults to `$DATABASE_URL`. A `postgres://` or
-`postgresql://` URL selects Postgres; a `sqlite:` URL, a `file:` URI or a
-path selects a SQLite file; a `d1://<account id>/<database id>` URL selects
-a Cloudflare D1 database, reached through Cloudflare's REST API with the
-token in `$CLOUDFLARE_API_TOKEN`. SQLite and D1 run `sqlite` plans. The URL
-must match the plan's dialect. `--phase` defaults to `all`.
+`--plan -` reads the plan from stdin, as a runtime environment's publish
+hands it over (D117). `--database-url` defaults to `$DATABASE_URL`. A
+`postgres://` or `postgresql://` URL selects Postgres; a `sqlite:` URL, a
+`file:` URI or a path selects a SQLite file; a
+`d1://<account id>/<database id>` URL selects a Cloudflare D1 database,
+reached through Cloudflare's REST API with the token in
+`$CLOUDFLARE_API_TOKEN`. SQLite and D1 run `sqlite` plans. The URL must
+match the plan's dialect. `--phase` defaults to `all`.
 
 On D1 (D27, amended: SQLite rebuilds with foreign keys on, and the runner
 on D1):
