@@ -170,7 +170,9 @@ export function projection<TSource>(_options: ProjectionOptions): ClassDecorator
  * Adds a joined table to a @projection under `alias`. `on` maps
  * `alias.field` to `otherAlias.field` equalities (schema field names, not
  * SQL). `kind` defaults to "inner"; a "left" join makes every column read
- * through the alias nullable.
+ * through the alias nullable. An empty `on` joins every row of the table,
+ * which is allowed only when the first `where` rule binds the base table's
+ * key to a setting, so the base is one row (D122).
  */
 export function join<TTable>(
   _alias: string,

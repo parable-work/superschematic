@@ -321,8 +321,10 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			}
 			conds = append(conds, left+" = "+right)
 		}
+		// A join with no equality, which verify allows only beside a base
+		// of one row (D122), pairs that row with every joined row.
 		if len(conds) == 0 {
-			return view, fmt.Errorf("join %s has no condition", j.Alias)
+			conds = append(conds, "true")
 		}
 		kind := "INNER"
 		switch j.Kind {

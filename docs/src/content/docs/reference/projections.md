@@ -77,7 +77,7 @@ export abstract class AppPreference {
 | `where` | Row rules, all ANDed, in order. The forms are below. |
 | `collapse` | Keeps one row per key: `by` lists the `alias.field` columns of the key (`DISTINCT ON`), `order` ranks the rows that share it and the first wins. |
 | `replica` | Whether a reader may scan the view on a read replica of its database. Omitted or `true` allows it. `false` is for a view whose rows must not lag a write, such as one that hides rows a write has just withdrawn: the Arrow schema then says `false` in `projection.replica`, and a reader scans the primary (D121). |
-| `@join<Table>(alias, on, kind?)` | Another table of the schema. `on` maps `alias.field` equalities; `kind` is `"inner"` (the default) or `"left"`. A left join makes every column read through its alias nullable. |
+| `@join<Table>(alias, on, kind?)` | Another table of the schema. `on` maps `alias.field` equalities; `kind` is `"inner"` (the default) or `"left"`. A left join makes every column read through its alias nullable. An empty `on`, `{}`, joins every row of the table (`ON true`). It is allowed only when the first `where` rule binds the base table's key (its `id`, else its `@key` field) to a setting, with no `optional` and no `when`: the base is then one row, and each joined row appears once, such as a catalog listed for the one account a session reads (D122). |
 | Class fields | The view's columns, in order. Each reads `base.<field>` unless `@column` names another `alias.field`, or computes it with `{ function, args }`. |
 
 Every `alias.field` reference names a schema field (camelCase), never a

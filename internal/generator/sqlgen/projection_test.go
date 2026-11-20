@@ -143,6 +143,45 @@ func TestWriteProjectionsGolden(t *testing.T) {
 // TestMetadataKeyPrefixNamesEveryKey: every Arrow metadata key carries the
 // configured prefix and nothing else, so a deployment whose readers expect
 // another namespace changes one naming key.
+// TestJoinWithNoEqualityJoinsOnTrue: a join with no equality, which verify
+// allows beside a base of one row, renders as ON true, so the view pairs
+// that row with every joined row (D122).
+func TestJoinWithNoEqualityJoinsOnTrue(t *testing.T) {
+	schema := loadProjectionFixture(t)
+	def := schema.Types["AppPreference"].Projection
+	def.Predicates = append([]*ir.ProjectionPredicate{{Column: "base.id", Setting: "app.preference_id"}}, def.Predicates...)
+	for _, j := range def.Joins {
+		if j.Alias == "channel" {
+			j.On = nil
+		}
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := output.Projections[0]
+	var on string
+	for _, j := range view.Joins {
+		if strings.Trim(j.QuotedAlias, `"`) == "channel" {
+			on = j.On
+		}
+	}
+	if on != "true" {
+		t.Fatalf("channel join ON = %q, want true (joins: %+v)", on, view.Joins)
+	}
+	outDir := t.TempDir()
+	if err := WriteProjections(schema, output, outDir, filepath.Join(outDir, "migrations")); err != nil {
+		t.Fatal(err)
+	}
+	up, err := os.ReadFile(filepath.Join(outDir, "migrations", view.UpFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(up), " ON true") {
+		t.Fatalf("the up migration does not join channel on true:\n%s", up)
+	}
+}
+
 // TestProjectionReplicaMetadata: a projection without replica allows the
 // read replica, and `replica: false` reaches the Arrow schema as
 // projection.replica = "false", which tells a reader to scan the view on

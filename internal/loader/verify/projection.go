@@ -196,8 +196,13 @@ func resolveProjectionScope(schema *ir.Schema, td *ir.TypeDef, def *ir.Projectio
 		scope.order = append(scope.order, j.Alias)
 
 		if len(j.On) == 0 {
-			r.errorf(td.Owner, "%s: @join %s needs at least one alias.field equality", td.Name, j.Alias)
-			ok = false
+			// A join with no equality pairs every joined row with every
+			// base row, so it is allowed only beside a base of one row:
+			// one the first rule binds by its key (D122).
+			if key := baseBoundToOneRow(scope.tables[ir.ProjectionBaseAlias], def); key == "" {
+				r.errorf(td.Owner, "%s: @join %s needs at least one alias.field equality, unless the first where rule binds the base's key to a setting", td.Name, j.Alias)
+				ok = false
+			}
 			continue
 		}
 		touchesAlias := false
@@ -223,6 +228,24 @@ func resolveProjectionScope(schema *ir.Schema, td *ir.TypeDef, def *ir.Projectio
 		return nil
 	}
 	return scope
+}
+
+// baseBoundToOneRow returns the base.<key> reference the projection's first
+// row rule binds to a setting, or "" when it binds none: a required,
+// unguarded setting binding of the base table's key, its id or else its
+// @key field. Such a base is one row, so a join with no equality lists
+// each joined row once (D122).
+func baseBoundToOneRow(base *ir.TypeDef, def *ir.ProjectionDef) string {
+	key := ir.RelatedKeyField(base)
+	if key == nil || len(def.Predicates) == 0 {
+		return ""
+	}
+	first := def.Predicates[0]
+	ref := ir.ProjectionBaseAlias + "." + key.Name
+	if first == nil || first.Setting == "" || first.Optional || first.When != nil || len(first.AnyOf) > 0 || first.Column != ref {
+		return ""
+	}
+	return ref
 }
 
 // resolve splits an alias.field reference and finds the field on the

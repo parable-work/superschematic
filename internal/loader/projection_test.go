@@ -72,6 +72,36 @@ func TestProjectionReplicaFromTypeScript(t *testing.T) {
 	}
 }
 
+// TestJoinWithNoEqualityFromTypeScript: `@join<T>(alias, {})` loads beside
+// a base the first rule binds by its key, and fails the load, at the
+// projection file, beside any other base (D122).
+func TestJoinWithNoEqualityFromTypeScript(t *testing.T) {
+	const join = `@join<Channel>("channel", { "channel.id": "base.channel" })`
+	const firstRule = `{ column: "base.account", setting: "app.account_id" },`
+	dir := patchedProjection(t, join, `@join<Channel>("channel", {})`,
+		firstRule, `{ column: "base.id", setting: "app.preference_id" },`+"\n    "+firstRule)
+	schema, err := LoadService(dir)
+	if err != nil {
+		t.Fatalf("LoadService beside a base bound by its key: %v", err)
+	}
+	var channel *ir.ProjectionJoin
+	for _, j := range schema.Types["AppPreference"].Projection.Joins {
+		if j.Alias == "channel" {
+			channel = j
+		}
+	}
+	if channel == nil || len(channel.On) != 0 {
+		t.Fatalf("channel join = %+v, want one with no equality", channel)
+	}
+
+	dir = patchedProjection(t, join, `@join<Channel>("channel", {})`)
+	_, err = LoadService(dir)
+	if err == nil || !strings.Contains(err.Error(), "@join channel needs at least one alias.field equality, unless the first where rule binds the base's key to a setting") ||
+		!strings.Contains(err.Error(), "app-preference.projection.schema.ts") {
+		t.Fatalf("a join with no equality beside a base of many rows must fail at the projection file, got %v", err)
+	}
+}
+
 // TestProjectionVerifyFindingsReachTheTypeScriptAuthor: the resolution
 // checks verify owns fail the load of a TypeScript service and name the
 // projection file.

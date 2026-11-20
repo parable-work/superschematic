@@ -368,9 +368,11 @@ func applyJoin(td *ir.TypeDef, args []any) error {
 	if !ok || alias == "" {
 		return ArgErrorf(1, "@join alias must be a non-empty string literal")
 	}
+	// An empty on-object is a join with no equality, which verify allows
+	// only beside a base bound to one row (D122).
 	on, ok := args[2].(map[string]any)
-	if !ok || len(on) == 0 {
-		return ArgErrorf(2, "@join on must be a non-empty object literal of alias.field equalities")
+	if !ok {
+		return ArgErrorf(2, "@join on must be an object literal of alias.field equalities")
 	}
 	j := &ir.ProjectionJoin{Type: table, Alias: alias, Kind: "inner"}
 	// Object literal keys arrive as an unordered map; the join condition is
