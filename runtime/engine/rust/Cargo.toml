@@ -12,8 +12,10 @@ resolver = "2"
 # in-memory reference host (rules-testkit), its WebAssembly binding
 # (rules-wasm, which @superschematic/rules loads) and its adapter for a
 # hand-written Rust server over tokio-postgres or rusqlite (rules-adapter)
-# sit beside the engine until it goes.
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
+# sit beside the engine until it goes. Development mode (D117) is the pure
+# request handler over the development layout (rules-handler) and its store
+# over SQLite, a file or a database in memory (rules-dev).
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-handler", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
 version = "0.0.0"
