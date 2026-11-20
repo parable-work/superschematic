@@ -30,12 +30,22 @@ pub struct Memory {
     /// The rows of the uses' shared tables (D103's step 4), by use id,
     /// table and key, which no row's delete takes.
     pub shared: BTreeMap<(String, String, String), SharedRow>,
+    /// Rows of other types, by type and key, and their specs, which a
+    /// rule that reads another type's rows reads (Revisions' evidence).
+    pub others: BTreeMap<(String, String), Row>,
+    pub specs: BTreeMap<String, TypeSpec>,
 }
 
 impl Source for Memory {
     fn answer(&mut self, request: &ReadRequest) -> Result<Answer, Refusal> {
         match request {
-            ReadRequest::Row { key, .. } => Ok(Answer::Row(self.rows.get(key).cloned())),
+            ReadRequest::Row { type_name, key } => Ok(Answer::Row(
+                self.others
+                    .get(&(type_name.clone(), key.clone()))
+                    .or_else(|| self.rows.get(key))
+                    .cloned(),
+            )),
+            ReadRequest::Spec { type_name } => Ok(Answer::Spec(self.specs.get(type_name).cloned())),
             ReadRequest::HasRows { .. } => Ok(Answer::HasRows(!self.rows.is_empty())),
             ReadRequest::SubRows {
                 key, use_id, table, ..
