@@ -77,6 +77,14 @@
 //!   compared, and neither is one it refused for a member that is a table's
 //!   behavior's alone ([`TABLE_FORM`]: Workflow's `finished`, D113), which
 //!   the core takes and the hand-written scenarios hold.
+//! - What a table's Comments leaves out ([`TABLE_COMMENTS`], D103's step 4)
+//!   is left out of what a step expects: its fields `composing` and
+//!   `unread`, a message's `via` and a listing's `readUpTo`, and the
+//!   operations it leaves out of a declaration compared; a step that
+//!   invokes one of those operations stops the scenario. An operation beside
+//!   the row takes a caller's `expectedSeq` as a read does, which the replay
+//!   maps when the row's version is still that seq, and a read of the event
+//!   log that holds a write beside an instance is not compared.
 //! - `schemas.list`, `schemas.live` and `schemas.behaviors` are compared
 //!   by the types defined, the live version's behavior configs, and each
 //!   behavior's declared fields, operations and veto codes.

@@ -404,7 +404,11 @@ keeps as a table of its own, and 46 checks),
 `core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
 checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
 each approval an operation's write of the row's own fields, and 35
-checks); each command's
+checks); and, of Comments (D103's step 4),
+`core-comments.transcript.json`, 238 steps (203 commands, every write
+beside the row, which moves no version of it, and 35 checks), and
+`core-comments-beside.transcript.json`, 25 steps (19 commands, each
+compared with its row's `expect.version`, and 6 checks); each command's
 `expect.events` compared with what `read_queued_events` reads of every
 type's event queue after it, which it then empties; each held to a floor
 of its step count, its `expect.others` compared on every command step and
