@@ -131,6 +131,12 @@ export type MCPConfig =
       /** The tool's wire identifier: lowercase snake_case, at most 48 characters, unique in the API. */
       readonly handle: string;
       readonly hidden?: false;
+      /**
+       * The operation writes only by adding: it never changes or deletes
+       * data that exists. Its tool's annotations say destructiveHint false.
+       * Not for a read_only operation (D123).
+       */
+      readonly additive?: true;
       /** Copied into the tool's MCP _meta object as written. */
       readonly _meta?: Readonly<Record<string, unknown>>;
     })

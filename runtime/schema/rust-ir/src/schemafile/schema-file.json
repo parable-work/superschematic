@@ -5114,6 +5114,26 @@
       ],
       "type": "object"
     },
+    "MCPToolAnnotations": {
+      "additionalProperties": false,
+      "properties": {
+        "destructiveHint": {
+          "type": "boolean"
+        },
+        "idempotentHint": {
+          "type": "boolean"
+        },
+        "readOnlyHint": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "readOnlyHint",
+        "destructiveHint",
+        "idempotentHint"
+      ],
+      "type": "object"
+    },
     "MemoryStoreDeclaration": {
       "additionalProperties": false,
       "properties": {
@@ -5357,6 +5377,13 @@
         "_meta": {
           "default": {},
           "type": "object"
+        },
+        "additive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "annotations": {
+          "$ref": "#/$defs/MCPToolAnnotations"
         },
         "description": {
           "default": "",

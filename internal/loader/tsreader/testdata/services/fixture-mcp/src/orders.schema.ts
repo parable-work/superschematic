@@ -101,7 +101,7 @@ export class OrderMutations {
     idempotencyKeyPointers: ["/requestId"]
   })
   @icon("box")
-  @mcp({ handle: "open_return" })
+  @mcp({ handle: "open_return", additive: true })
   @rest(HttpMethod.POST, "returns")
   openReturn(input: ReturnRequest): Order {
     throw new Error("schema declaration only");

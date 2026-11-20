@@ -406,6 +406,12 @@ export interface MCPIcon {
   style?: string;
 }
 
+export interface MCPToolAnnotations {
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  readOnlyHint: boolean;
+}
+
 export interface MemoryStoreDeclaration {
   doc?: string;
   file?: string;
@@ -463,6 +469,8 @@ export interface OperationFilter {
 
 export interface OperationMCP {
   _meta?: { [key: string]: unknown };
+  additive?: boolean;
+  annotations?: MCPToolAnnotations;
   description?: string;
   handle?: string;
   hidden: boolean;

@@ -107,7 +107,7 @@ func docsDecorators(invocation func() ToolInvocationPolicy) []DecoratorSpec {
 	}}
 }
 
-// operationMCP reads @mcp({ handle, <policy key>?, _meta? }) for a visible
+// operationMCP reads @mcp({ handle, <policy key>?, additive?, _meta? }) for a visible
 // tool or @mcp({ hidden: true, reason }) for an operation that is not one.
 // The policy key and its values are the invocation policy's; a visible tool
 // without the key gets the policy's default.
@@ -139,6 +139,12 @@ func operationMCP(args []any, invocation ToolInvocationPolicy) (*ir.OperationMCP
 				return nil, ArgErrorf(0, "@mcp hidden must be a boolean literal")
 			}
 			out.Hidden = hidden
+		case "additive":
+			additive, ok := value.(bool)
+			if !ok {
+				return nil, ArgErrorf(0, "@mcp additive must be a boolean literal")
+			}
+			out.Additive = additive
 		case "_meta":
 			meta, ok := value.(map[string]any)
 			if !ok {

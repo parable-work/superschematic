@@ -46,6 +46,7 @@
         "handle": "order_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "order.status.transition",
@@ -89,6 +90,7 @@
         "handle": "shipment_payment_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "shipment.payment-status.transition",
@@ -132,6 +134,7 @@
         "handle": "shipment_status_transition",
         "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
         "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
         "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
       },
       "capability": "shipment.status.transition",
