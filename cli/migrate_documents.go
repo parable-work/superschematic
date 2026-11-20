@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -100,7 +100,13 @@ func runMigratePlanDocuments(cmd *cobra.Command, a *app, flags *migratePlanFlags
 // readDocumentSources reads each document the arguments name: a file, or
 // - for the documents on stdin, one JSON value after another.
 func readDocumentSources(stdin io.Reader, paths []string) ([]migrateplan.Source, error) {
-	if stdins := slices.DeleteFunc(slices.Clone(paths), func(path string) bool { return path != "-" }); len(stdins) > 1 {
+	stdins := 0
+	for _, path := range paths {
+		if path == "-" {
+			stdins++
+		}
+	}
+	if stdins > 1 {
 		return nil, errors.New("--documents names - twice; stdin is read once")
 	}
 	var sources []migrateplan.Source
@@ -189,16 +195,17 @@ func answerMigratePlanRequest(cmd *cobra.Command, a *app, flags *migratePlanFlag
 	if len(given) > 0 {
 		return nil, fmt.Errorf("the request holds the documents, the model and the plan's options; drop %s", strings.Join(given, ", "))
 	}
-	var input io.Reader = cmd.InOrStdin()
-	if flags.request != "-" {
-		file, err := os.Open(flags.request)
-		if err != nil {
+	var req *migrateplan.Request
+	var err error
+	if flags.request == "-" {
+		req, err = migrateplan.ReadRequest(cmd.InOrStdin())
+	} else {
+		var data []byte
+		if data, err = os.ReadFile(flags.request); err != nil {
 			return nil, err
 		}
-		defer file.Close()
-		input = file
+		req, err = migrateplan.ReadRequest(bytes.NewReader(data))
 	}
-	req, err := migrateplan.ReadRequest(input)
 	if err != nil {
 		return nil, err
 	}
