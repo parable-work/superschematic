@@ -89,6 +89,12 @@ pub struct Definition {
     pub dialect: Dialect,
     /// The parts of statements written around a column.
     pub clauses: Clauses,
+    /// The conditions of a JSON column's filter where they are not
+    /// [`Clauses`]': SQLite's, which compare JSON values where its text
+    /// would compare text (D116). Postgres's JSONB compares its values
+    /// itself, and carries none.
+    #[serde(default, rename = "jsonClauses")]
+    pub json_clauses: Option<JsonClauses>,
     /// The rows `find_many` and `find_page` read unless told.
     pub default_limit: u32,
     /// Who a repository opened as the system acts as (D87): the DB
@@ -194,6 +200,22 @@ pub struct Clauses {
     pub changed: String,
     pub never: String,
     pub null: String,
+}
+
+/// The conditions of a JSON column's filter, `sqlutil.JSONClauses`: `eq`
+/// and `ne` of the column `%s` and its parameter's number `%d`, `in` and
+/// `noneOf` of the column `%s` and the list `%s` of its parameters, each a
+/// `value` of the parameter numbered `%d`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct JsonClauses {
+    pub eq: String,
+    pub ne: String,
+    #[serde(rename = "in")]
+    pub in_: String,
+    pub none_of: String,
+    pub value: String,
 }
 
 /// A table's statements, `sqlutil.TableStatements`: format strings of `%s`

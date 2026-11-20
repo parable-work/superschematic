@@ -147,8 +147,12 @@ type ORMMember struct {
 // runtime's orm::Definition: the members of the TypeScript OrmDefinition
 // the Rust repositories read.
 type ormDefinition struct {
-	Dialect          string         `json:"dialect"`
-	Clauses          orderedStrings `json:"clauses"`
+	Dialect string         `json:"dialect"`
+	Clauses orderedStrings `json:"clauses"`
+	// JSONClauses are the conditions of a Generic.JSON column's filter
+	// where they are not Clauses' (sqlutil.SQLiteJSONClauses); absent on
+	// Postgres, whose JSONB column compares its values itself.
+	JSONClauses      orderedStrings `json:"jsonClauses,omitempty"`
 	DefaultLimit     int            `json:"defaultLimit"`
 	SystemActor      *ormActor      `json:"systemActor,omitempty"`
 	RequireUpdatedBy bool           `json:"requireUpdatedBy,omitempty"`
@@ -378,7 +382,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 	}
 	info := &ORMInfo{}
 	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
-	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
 	if opts.Actor.SystemSet {
 		actor := &ormActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 		postgres.SystemActor, sqlite.SystemActor = actor, actor

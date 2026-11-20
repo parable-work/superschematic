@@ -29,8 +29,11 @@ var ledgerResultsTest string
 // ORM and the TypeScript repositories statement for statement, so a call
 // that answers alike here answers on SQLite as theirs answer.
 //
-// A JSON column's eq is left out of the script: SQLite compares its text,
-// where Postgres compares the value (D116's status).
+// A JSON column's filter is in the script: its eq, ne, in and notIn compare
+// JSON values on SQLite, by the text json_tree reads of each
+// (sqlutil.SQLiteJSONClauses), as Postgres's JSONB compares them, so an
+// object whose members come in another order and a number written another
+// way are the value the row holds on both.
 //
 // It needs cargo and the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, which it skips without, and

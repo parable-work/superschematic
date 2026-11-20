@@ -254,18 +254,27 @@ impl<'a> Plan<'a> {
                 });
                 Ok(args.len())
             };
+            // A JSON column compares JSON values, by the dialect's own
+            // conditions where its column holds text (D116).
+            let json = if column.json {
+                self.definition.json_clauses.as_ref()
+            } else {
+                None
+            };
             for op in &column.filter {
                 let Some(value) = member.get(op).filter(|value| !value.is_null()) else {
                     continue;
                 };
                 match op.as_str() {
                     "eq" | "ne" | "gt" | "gte" | "lt" | "lte" => {
-                        let clause = match op.as_str() {
-                            "eq" => &c.eq,
-                            "ne" => &c.ne,
-                            "gt" => &c.gt,
-                            "gte" => &c.gte,
-                            "lt" => &c.lt,
+                        let clause = match (op.as_str(), json) {
+                            ("eq", Some(json)) => &json.eq,
+                            ("ne", Some(json)) => &json.ne,
+                            ("eq", None) => &c.eq,
+                            ("ne", None) => &c.ne,
+                            ("gt", _) => &c.gt,
+                            ("gte", _) => &c.gte,
+                            ("lt", _) => &c.lt,
                             _ => &c.lte,
                         };
                         let n = push(value, op, args)?;
@@ -297,9 +306,17 @@ impl<'a> Plan<'a> {
                         let mut placeholders = Vec::with_capacity(values.len());
                         for value in values {
                             let n = push(value, op, args)?;
-                            placeholders.push(self.placeholder(n)?);
+                            placeholders.push(match json {
+                                Some(json) => fill(&json.value, &[&n])?,
+                                None => self.placeholder(n)?,
+                            });
                         }
-                        let clause = if op == "in" { &c.in_ } else { &c.none_of };
+                        let clause = match (op == "in", json) {
+                            (true, Some(json)) => &json.in_,
+                            (false, Some(json)) => &json.none_of,
+                            (true, None) => &c.in_,
+                            (false, None) => &c.none_of,
+                        };
                         conditions.push(fill(clause, &[q, &placeholders.join(", ")])?);
                     }
                     "between" => {

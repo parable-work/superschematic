@@ -1605,7 +1605,10 @@ rows assigned to anyone else and the rows assigned to no one, as `IS
 DISTINCT FROM` does and `<>` does not, and `notIn` is `(column IN (...))
 IS NOT TRUE`. Add `isNull: false` to leave the nulls out. A `Generic.JSON` column's Go
 filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
-alike, and whose `ILike` Postgres refuses on JSONB.
+alike, and whose `ILike` Postgres refuses on JSONB. A Rust repository on a
+SQLite file compares them alike too (D116): SQLite holds the value as
+text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
+reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
 ORM does. SQLite repositories are not built.
