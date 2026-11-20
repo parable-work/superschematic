@@ -1915,6 +1915,7 @@ dependencies = [
 name = "superschematic-rules-dev"
 version = "0.0.0"
 dependencies = [
+ "postgres",
  "rusqlite",
  "serde",
  "serde_json",

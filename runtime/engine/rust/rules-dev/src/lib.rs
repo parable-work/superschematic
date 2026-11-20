@@ -20,6 +20,11 @@
 //! database's one writer from its start: every lock a behavior asks for is
 //! held from the request's start, and a request reads what the one before
 //! it committed. A unit applies in a savepoint, whole or not at all.
+//!
+//! With the `postgres` feature, `PgStore` keeps the same tables in a schema
+//! of a Postgres database. Its request's transaction takes the schema's
+//! advisory lock first, so one request at a time writes the store, as on
+//! SQLite.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -34,6 +39,11 @@ use superschematic_rules_handler::{
     QueuedChange, QueuedEvent, RanDue, Request, Store, StoreAnswer, StoreRead, StoreWrite,
     StoredRow, Unit, Version,
 };
+
+#[cfg(feature = "postgres")]
+mod pg;
+#[cfg(feature = "postgres")]
+pub use pg::PgStore;
 
 /// The version of the layout this crate writes, kept in `dev_meta`.
 pub const LAYOUT_VERSION: &str = "1";
@@ -843,13 +853,14 @@ pub enum Drain {
     WhenAsked,
 }
 
-/// The development host: the handler over a SQLite store in one process,
-/// with the core, the behaviors' declarations, a clock, and the caller the
-/// runner runs the queues as.
-pub struct Dev {
+/// The development host: the handler over a store in one process (SQLite
+/// by default, or a Postgres schema with the `postgres` feature), with the
+/// core, the behaviors' declarations, a clock, and the caller the runner
+/// runs the queues as.
+pub struct Dev<S = SqliteStore> {
     core: Core,
     declarations: Declarations,
-    store: SqliteStore,
+    store: S,
     clock: Box<dyn Fn() -> i64 + Send>,
     runner: Caller,
     drain: Drain,
@@ -863,7 +874,7 @@ fn system_millis() -> i64 {
     }
 }
 
-impl Dev {
+impl Dev<SqliteStore> {
     /// The host over a SQLite file, running the behaviors ported onto the
     /// core.
     pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
@@ -886,10 +897,27 @@ impl Dev {
             store,
         ))
     }
+}
 
+#[cfg(feature = "postgres")]
+impl Dev<PgStore> {
+    /// The host over a schema of the Postgres database a URL names,
+    /// running the behaviors ported onto the core.
+    pub fn postgres(url: &str, schema: &str) -> Result<Self, Refusal> {
+        let declarations = Declarations::ported();
+        let store = PgStore::open(url, schema, &declarations)?;
+        Ok(Self::over(
+            superschematic_rules_behaviors::core(),
+            declarations,
+            store,
+        ))
+    }
+}
+
+impl<S: Store> Dev<S> {
     /// The host over a core, the declarations of its behaviors and a store
     /// opened with them.
-    pub fn over(core: Core, declarations: Declarations, store: SqliteStore) -> Self {
+    pub fn over(core: Core, declarations: Declarations, store: S) -> Self {
         Dev {
             core,
             declarations,
@@ -918,7 +946,7 @@ impl Dev {
         self
     }
 
-    pub fn store(&mut self) -> &mut SqliteStore {
+    pub fn store(&mut self) -> &mut S {
         &mut self.store
     }
 

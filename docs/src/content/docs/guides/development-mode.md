@@ -33,10 +33,12 @@ them by path from a checkout.
   writes to apply come out. It does no I/O, as the behaviors' core it
   embeds does none.
 - `superschematic-rules-dev` is its store over SQLite: a file, or a
-  database in memory that goes with its process.
+  database in memory that goes with its process. With its `postgres`
+  feature it keeps the same tables in a schema of a Postgres database
+  (`Dev::postgres(url, schema)`).
 
-The library in each language, the prebuilt image, the event stream, MCP,
-the access policy and a Postgres store are later steps.
+The library in each language, the prebuilt image, the event stream, MCP
+and the access policy are later steps.
 
 ```rust
 use serde_json::json;
@@ -166,5 +168,5 @@ The store creates its tables when it opens, and none after:
 column, the own fields as one JSON column and the owned fields as
 another), one `dev_sub_<behavior>` per behavior that keeps sub-tables,
 `dev_deadlines`, `dev_events` and `dev_changes`. The crates' tests replay
-every recorded scenario of the ported behaviors over it, on SQLite and in
-memory.
+every recorded scenario of the ported behaviors over it, on SQLite, on
+Postgres and in memory.

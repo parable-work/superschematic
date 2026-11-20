@@ -258,6 +258,28 @@ fn the_same_requests_answer_alike_over_memory_and_over_sqlite() {
     let _ = std::fs::remove_file(path);
 }
 
+/// The same session over a Postgres schema answers as it does over memory.
+/// Skipped without `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
+#[cfg(feature = "postgres")]
+#[test]
+fn the_same_requests_answer_alike_over_memory_and_over_postgres() {
+    let Ok(url) = std::env::var("SUPERSCHEMATIC_RULES_TEST_DATABASE_URL") else {
+        println!("set SUPERSCHEMATIC_RULES_TEST_DATABASE_URL to run the session on Postgres");
+        return;
+    };
+    let declarations = Declarations::ported();
+    let schema = format!("rules_dev_{}_parity", std::process::id());
+    let mut store = superschematic_rules_dev::PgStore::open(&url, &schema, &declarations)
+        .expect("the Postgres store opens");
+    store.clear().expect("the store empties");
+    let over_postgres = run_script(&mut store);
+    let over_memory = run_script(&mut MemoryStore::new());
+    for (n, (memory, postgres)) in over_memory.iter().zip(&over_postgres).enumerate() {
+        assert_eq!(memory, postgres, "request {n} over Postgres");
+    }
+    store.drop_schema().expect("the schema drops");
+}
+
 #[test]
 fn a_file_keeps_its_versions_and_rows_across_opens() {
     let path = file("reopen");

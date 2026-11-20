@@ -66,11 +66,11 @@ fn transcript(name: &str) -> Transcript {
 /// What a store does for the replay beyond the handler's contract: a row's
 /// armed deadlines.
 trait Inspect: Store {
-    fn armed_of(&self, type_name: &str, id: &str) -> Vec<Value>;
+    fn armed_of(&mut self, type_name: &str, id: &str) -> Vec<Value>;
 }
 
 impl Inspect for MemoryStore {
-    fn armed_of(&self, type_name: &str, id: &str) -> Vec<Value> {
+    fn armed_of(&mut self, type_name: &str, id: &str) -> Vec<Value> {
         self.armed(type_name, id)
             .into_iter()
             .map(|(use_id, name, at, payload)| json!({"useId": use_id, "name": name, "at": at, "payload": payload}))
@@ -79,7 +79,7 @@ impl Inspect for MemoryStore {
 }
 
 impl Inspect for SqliteStore {
-    fn armed_of(&self, type_name: &str, id: &str) -> Vec<Value> {
+    fn armed_of(&mut self, type_name: &str, id: &str) -> Vec<Value> {
         self.armed(type_name, id)
             .expect("the deadlines read")
             .into_iter()
@@ -610,4 +610,47 @@ fn the_transcripts_replay_over_a_sqlite_file() {
         },
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(feature = "postgres")]
+impl Inspect for superschematic_rules_dev::PgStore {
+    fn armed_of(&mut self, type_name: &str, id: &str) -> Vec<Value> {
+        self.armed(type_name, id)
+            .expect("the deadlines read")
+            .into_iter()
+            .map(|(use_id, name, at, payload)| {
+                json!({"useId": use_id, "name": name, "at": at, "payload": payload})
+            })
+            .collect()
+    }
+}
+
+/// Every transcript over a Postgres schema: each scenario's databases in
+/// schemas of their own, emptied before each scenario takes one and
+/// dropped after. Skipped without `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
+#[cfg(feature = "postgres")]
+#[test]
+fn the_transcripts_replay_over_postgres() {
+    let Ok(url) = std::env::var("SUPERSCHEMATIC_RULES_TEST_DATABASE_URL") else {
+        println!(
+            "set SUPERSCHEMATIC_RULES_TEST_DATABASE_URL to replay the transcripts on Postgres"
+        );
+        return;
+    };
+    let declarations = Declarations::ported();
+    let prefix = format!("rules_dev_{}", std::process::id());
+    let n = std::cell::Cell::new(0usize);
+    replay_all("Postgres", &[], &|| {
+        n.set(n.get() + 1);
+        let schema = format!("{prefix}_t{}", n.get() % 8);
+        let mut store = superschematic_rules_dev::PgStore::open(&url, &schema, &declarations)
+            .expect("the Postgres store opens");
+        store.clear().expect("the store empties");
+        store
+    });
+    for k in 0..8 {
+        superschematic_rules_dev::PgStore::open(&url, &format!("{prefix}_t{k}"), &declarations)
+            .and_then(superschematic_rules_dev::PgStore::drop_schema)
+            .expect("the schema drops");
+    }
 }

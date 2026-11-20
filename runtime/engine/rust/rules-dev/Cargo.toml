@@ -8,6 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# PgStore: the development layout in a schema of a Postgres database.
+postgres = ["dep:postgres"]
+
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 # The engine's JSON features (D58): a number keeps its text, an object its
@@ -17,6 +22,9 @@ superschematic-rules = { path = "../rules" }
 superschematic-rules-behaviors = { path = "../rules-behaviors" }
 superschematic-rules-handler = { path = "../rules-handler" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The store in a Postgres schema, through the synchronous client the
+# engine's storage uses; off by default.
+postgres = { version = "0.19.14", optional = true }
 # A request's id and a create's key when it names none.
 uuid = { version = "1.28.0", features = ["v4"] }
 
