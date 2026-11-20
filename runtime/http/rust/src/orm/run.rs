@@ -197,9 +197,31 @@ impl<C: Client> Runner<'_, C> {
         filter: Option<&Values>,
         update: &Values,
     ) -> Result<u64, Error> {
-        self.refuse_behaviors("update_many")?;
+        // The statement first, which checks the update and the filter
+        // whatever the table.
         let statement = self.plan.update_many(filter, update)?;
-        self.execute(&statement).await
+        if self.table.behaviors.is_none() {
+            return self.execute(&statement).await;
+        }
+        // A table that composes behaviors: the core's update of each live
+        // row the filter finds, in the key's order, so each use's guards
+        // hold every row (D103, D116). A refusal of any row is the
+        // repository's, and the caller's transaction rolls back the rows
+        // before it.
+        let rows = self.rows(&self.plan.rows_of(filter)?, 0).await?;
+        let mut updated = 0;
+        for (row, _) in rows {
+            let key = row.get(&self.table.key).cloned().unwrap_or(Value::Null);
+            self.client
+                .core_update(
+                    self.plan
+                        .core_update(&key, update, &WriteOptions::default())?,
+                )
+                .await
+                .map_err(|err| self.core_miss(err, &key))?;
+            updated += 1;
+        }
+        Ok(updated)
     }
 
     pub(crate) async fn upsert_one(
@@ -209,6 +231,9 @@ impl<C: Client> Runner<'_, C> {
         update: &Values,
         options: UpsertOptions,
     ) -> Result<Upserted<Values>, Error> {
+        if self.table.behaviors.is_some() {
+            return self.core_upsert(input, on, update, options).await;
+        }
         let plan = self
             .plan
             .upsert_one(input, on, update, options.only_if_changed)?;
@@ -265,21 +290,7 @@ impl<C: Client> Runner<'_, C> {
         options: &WriteOptions,
     ) -> Result<(), Error> {
         if self.table.behaviors.is_some() {
-            let delete = self.plan.core_delete(key, options)?;
-            // A versioned table's delete records who made it, as the
-            // repository's own deletes do.
-            let actor = self.plan.core_delete_actor();
-            if let Some((set, _)) = &actor {
-                self.execute(set).await?;
-            }
-            self.client
-                .core_delete(delete)
-                .await
-                .map_err(|err| self.core_miss(err, key))?;
-            if let Some((_, clear)) = &actor {
-                self.execute(clear).await?;
-            }
-            return Ok(());
+            return self.core_delete(key, options, false).await;
         }
         self.plan.refuse_preconditions(options)?;
         let delete = self.plan.delete_one(key, options)?;
@@ -320,7 +331,17 @@ impl<C: Client> Runner<'_, C> {
     }
 
     pub(crate) async fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
-        self.refuse_behaviors("hard_delete_one")?;
+        if self.table.behaviors.is_some() {
+            // A live row is removed by the core's delete, which removes its
+            // sub-table rows and its queues' messages with it (D103). A row
+            // the repository holds deleted is none the core sees: its
+            // delete ran when the row was stamped, and the repository's own
+            // statement removes it.
+            match self.core_delete(key, &WriteOptions::default(), true).await {
+                Err(Error::NotFound(_)) if self.table.soft_delete => {}
+                done => return done,
+            }
+        }
         let delete = self.plan.hard_delete_one(key, &WriteOptions::default())?;
         let removed = self.execute(&delete.statement).await?;
         self.clear(&delete).await?;
@@ -330,14 +351,99 @@ impl<C: Client> Runner<'_, C> {
         }
     }
 
-    fn refuse_behaviors(&self, method: &str) -> Result<(), Error> {
-        if self.table.behaviors.is_none() {
-            return Ok(());
+    /// A delete of a row through the core (D103): a soft-deletable table's
+    /// live row stamped deleted unless `hard`, any other removed, with a
+    /// versioned table's history actor set around a removal, as the
+    /// repository's own deletes set it.
+    async fn core_delete(
+        &self,
+        key: &Value,
+        options: &WriteOptions,
+        hard: bool,
+    ) -> Result<(), Error> {
+        let delete = self.plan.core_delete(key, options, hard)?;
+        let actor = self.plan.core_delete_actor(hard);
+        if let Some((set, _)) = &actor {
+            self.execute(set).await?;
         }
-        Err(Error::Invalid(format!(
-            "{method} of {}: a table that composes behaviors writes its rows through the core, a row at a time (D103)",
-            self.table.name
-        )))
+        self.client
+            .core_delete(delete)
+            .await
+            .map_err(|err| self.core_miss(err, key))?;
+        if let Some((_, clear)) = &actor {
+            self.execute(clear).await?;
+        }
+        Ok(())
+    }
+
+    /// An upsert of a table that composes behaviors (D103, D116): it reads
+    /// the rows that hold the input's value of the key, then runs the
+    /// core's create of the input when none does, or the core's update of
+    /// the live row that does, so each use's initializer, validation and
+    /// guards run as a create's and an update's do. An update that sets no
+    /// field writes nothing of a row that holds the key (D105), and only if
+    /// changed, nor does one whose fields the row holds already (D89). A
+    /// deleted row that holds the key is left as it is, and the upsert is
+    /// not found.
+    async fn core_upsert(
+        &self,
+        input: &Values,
+        on: &[&str],
+        update: &Values,
+        options: UpsertOptions,
+    ) -> Result<Upserted<Values>, Error> {
+        let plan = self.plan.core_upsert(input, on, update)?;
+        let holders = match &plan.held {
+            Some(read) => self.rows(read, 0).await?,
+            None => Vec::new(),
+        };
+        if holders.is_empty() {
+            return Ok(Upserted {
+                row: self.create_one(input).await?,
+                status: UpsertStatus::Inserted,
+            });
+        }
+        let held = holders
+            .into_iter()
+            .map(|(row, _)| row)
+            .find(|row| self.live(row))
+            .ok_or_else(|| self.deleted(on))?;
+        let held = self.plan.open(held)?;
+        let key = held.get(&self.table.key).cloned().unwrap_or(Value::Null);
+        if !plan.sets || (options.only_if_changed && !self.differs(&key, &held, update).await?) {
+            return Ok(Upserted {
+                row: held,
+                status: UpsertStatus::Unchanged,
+            });
+        }
+        Ok(Upserted {
+            row: self
+                .update_one(&key, update, &WriteOptions::default())
+                .await?,
+            status: UpsertStatus::Updated,
+        })
+    }
+
+    /// Whether a field `update` sets holds another value in `held`, the
+    /// live row whose key is `key`: an encrypted one's plaintext compared
+    /// as the row opened it, and the rest as the database compares them.
+    async fn differs(&self, key: &Value, held: &Values, update: &Values) -> Result<bool, Error> {
+        for column in self.table.encrypted() {
+            let Some(wanted) = update.get(&column.name) else {
+                continue;
+            };
+            let same = match held.get(&column.name).filter(|value| !value.is_null()) {
+                None => wanted.is_null(),
+                Some(value) => value == wanted,
+            };
+            if !same {
+                return Ok(true);
+            }
+        }
+        match self.plan.changed(key, update)? {
+            Some(read) => Ok(!self.rows(&read, 0).await?.is_empty()),
+            None => Ok(false),
+        }
     }
 
     fn not_found(&self, key: &Value) -> Error {

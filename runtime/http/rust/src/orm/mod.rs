@@ -24,7 +24,10 @@
 //! ([`fieldcrypt`]), and writes a table that composes behaviors through
 //! the behaviors' core (D103): a create, an update, a delete and an
 //! operation of one of its behaviors, each run by the `Rules` of its
-//! dialect, which a generated types crate binds to the core's adapter.
+//! dialect, which a generated types crate binds to the core's adapter. An
+//! upsert of such a table reads whether a row holds the key, then runs the
+//! core's create or update; an update of many rows runs the core's update
+//! of each; and a hard delete of a live row is the core's delete.
 
 pub mod fieldcrypt;
 mod plan;

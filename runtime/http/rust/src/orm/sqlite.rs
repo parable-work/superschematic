@@ -548,7 +548,10 @@ impl Repository<'_> {
     }
 
     /// Sets the members `update` sets on the live rows `filter` finds, and
-    /// answers how many.
+    /// answers how many. On a table that composes behaviors it reads the
+    /// rows and runs the core's update of each, in the key's order, so each
+    /// behavior's guards hold every row (D103); a refusal of any is the
+    /// call's, and the caller's transaction rolls back the rows before it.
     pub fn update_many(&self, filter: Option<&Values>, update: &Values) -> Result<u64, Error> {
         finish(self.runner().update_many(filter, update))
     }
@@ -556,7 +559,10 @@ impl Repository<'_> {
     /// Inserts `input`, or, when a row already holds its value of the
     /// unique key `on`, applies `update` to that row instead (D79, D89).
     /// On a soft-deletable table a deleted row that holds the key is left
-    /// as it is, and the upsert is [`Error::NotFound`].
+    /// as it is, and the upsert is [`Error::NotFound`]. On a table that
+    /// composes behaviors it reads whether a row holds the key, then runs
+    /// the core's create of `input` or the core's update of that row
+    /// (D103), and an update that sets no field writes nothing (D105).
     pub fn upsert_one(
         &self,
         input: &Values,
@@ -574,7 +580,9 @@ impl Repository<'_> {
     }
 
     /// Removes the row whose key is `key`, deleted or not, whatever the
-    /// table; [`Error::NotFound`] when there is none.
+    /// table; [`Error::NotFound`] when there is none. On a table that
+    /// composes behaviors a live row is removed by the core's delete, with
+    /// its sub-table rows and its queues' messages (D103).
     pub fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         finish(self.runner().hard_delete_one(key))
     }
