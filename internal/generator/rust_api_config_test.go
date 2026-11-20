@@ -92,11 +92,43 @@ fn load_config_names_the_first_required_variable_it_lacks() {
 	if err := os.WriteFile(filepath.Join(apiDir, "tests", "config.rs"), []byte(test), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// LiveConfig (D129), in a test binary of its own, since it sets the
+	// environment: apply changes a Runtime<T> field, ignores a key that is
+	// not one, keeps the config in effect when it refuses a value, and
+	// reports no change when nothing changed.
+	live := `#[test]
+fn live_config_applies_runtime_fields() {
+    use ` + crate + `::config::{load_config, LiveConfig, LIVE_FIELDS};
+    use std::collections::HashMap;
+    std::env::set_var("SERVICE_NAME", "fixture");
+    std::env::set_var("SIGNING_KEY", "fake-key");
+    std::env::set_var("UPSTREAM_URL", "http://upstream.internal:9000");
+    assert_eq!(LIVE_FIELDS, &["LOG_LEVEL", "BATCH_SIZE"]);
+    let live = LiveConfig::new(load_config().unwrap());
+    assert_eq!(live.current().log_level, "info");
+    let mut receiver = live.subscribe();
+    let values = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    };
+    assert!(live.apply(&values(&[("LOG_LEVEL", "debug"), ("SERVICE_NAME", "other")])).unwrap());
+    assert_eq!(live.current().log_level, "debug");
+    assert_eq!(live.current().service_name, "fixture");
+    assert!(receiver.has_changed().unwrap());
+    receiver.mark_unchanged();
+    assert!(live.apply(&values(&[("BATCH_SIZE", "many")])).is_err());
+    assert_eq!(live.current().batch_size, 50);
+    assert!(!live.apply(&values(&[("LOG_LEVEL", "debug")])).unwrap());
+    assert!(!receiver.has_changed().unwrap());
+}
+`
+	if err := os.WriteFile(filepath.Join(apiDir, "tests", "live.rs"), []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	targetDir := os.Getenv("CARGO_TARGET_DIR")
 	if targetDir == "" {
 		targetDir = filepath.Join(t.TempDir(), "target")
 	}
-	cmd := exec.Command(cargoPath, "test", "--quiet", "--test", "config")
+	cmd := exec.Command(cargoPath, "test", "--quiet", "--test", "config", "--test", "live")
 	cmd.Dir = apiDir
 	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+targetDir)
 	if out, err := cmd.CombinedOutput(); err != nil {

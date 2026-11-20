@@ -537,6 +537,11 @@ type FieldDef struct {
 	// to clients (@secret).
 	Secret bool `json:"secret,omitempty" yaml:"secret,omitempty"`
 
+	// Runtime marks an @envVars field the service reads again while it runs
+	// (Runtime<T>): the env loaders hold it in a Live handle whose apply
+	// takes a new value with no restart (D129).
+	Runtime bool `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+
 	// TemporalFormat declares the wire encoding of a Temporal.DateTime field
 	// whose source sends a bare epoch count instead of ISO text
 	// (@temporalFormat / x-temporal-format). Values are the epoch units unix,

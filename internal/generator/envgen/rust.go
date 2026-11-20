@@ -59,6 +59,7 @@ func rustTemplateFuncs() template.FuncMap {
 		"usesRustBool":      usesRustBool,
 		"usesRustFloat":     usesRustFloat,
 		"usesRustEnum":      usesRustEnum,
+		"hasRuntime":        hasRuntime,
 	}
 }
 
@@ -117,19 +118,19 @@ func rustLoaderExpr(field ConfigField) string {
 	if field.IsEnum {
 		allowed := formatRustStrings(field.EnumValues)
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("require_enum(%s, &%s)?", keyLiteral, allowed)
+			return fmt.Sprintf("require_enum(lookup, %s, &%s)?", keyLiteral, allowed)
 		}
 		defaultLiteral := `""`
 		if field.HasDefault {
 			defaultLiteral = fmt.Sprintf("%q", field.DefaultValue)
 		}
-		return fmt.Sprintf("enum_or_default(%s, &%s, %s)?", keyLiteral, allowed, defaultLiteral)
+		return fmt.Sprintf("enum_or_default(lookup, %s, &%s, %s)?", keyLiteral, allowed, defaultLiteral)
 	}
 
 	switch loaderPrimitive(field) {
 	case "Int":
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("require_i64(%s)?", keyLiteral)
+			return fmt.Sprintf("require_i64(lookup, %s)?", keyLiteral)
 		}
 		defaultInt := int64(0)
 		if field.HasDefault {
@@ -137,10 +138,10 @@ func rustLoaderExpr(field ConfigField) string {
 				defaultInt = parsed
 			}
 		}
-		return fmt.Sprintf("i64_or_default(%s, %d)?", keyLiteral, defaultInt)
+		return fmt.Sprintf("i64_or_default(lookup, %s, %d)?", keyLiteral, defaultInt)
 	case "Boolean":
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("require_bool(%s)?", keyLiteral)
+			return fmt.Sprintf("require_bool(lookup, %s)?", keyLiteral)
 		}
 		defaultBool := false
 		if field.HasDefault {
@@ -148,10 +149,10 @@ func rustLoaderExpr(field ConfigField) string {
 				defaultBool = parsed
 			}
 		}
-		return fmt.Sprintf("bool_or_default(%s, %t)?", keyLiteral, defaultBool)
+		return fmt.Sprintf("bool_or_default(lookup, %s, %t)?", keyLiteral, defaultBool)
 	case "Float":
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("require_f64(%s)?", keyLiteral)
+			return fmt.Sprintf("require_f64(lookup, %s)?", keyLiteral)
 		}
 		defaultFloat := float64(0)
 		if field.HasDefault {
@@ -159,16 +160,16 @@ func rustLoaderExpr(field ConfigField) string {
 				defaultFloat = parsed
 			}
 		}
-		return fmt.Sprintf("f64_or_default(%s, %s)?", keyLiteral, strconv.FormatFloat(defaultFloat, 'g', -1, 64))
+		return fmt.Sprintf("f64_or_default(lookup, %s, %s)?", keyLiteral, strconv.FormatFloat(defaultFloat, 'g', -1, 64))
 	default:
 		if field.Required && !field.HasDefault {
-			return fmt.Sprintf("require_string(%s)?", keyLiteral)
+			return fmt.Sprintf("require_string(lookup, %s)?", keyLiteral)
 		}
 		defaultLiteral := `""`
 		if field.HasDefault {
 			defaultLiteral = fmt.Sprintf("%q", field.DefaultValue)
 		}
-		return fmt.Sprintf("string_or_default(%s, %s)", keyLiteral, defaultLiteral)
+		return fmt.Sprintf("string_or_default(lookup, %s, %s)", keyLiteral, defaultLiteral)
 	}
 }
 
@@ -412,4 +413,17 @@ func wrapRustDoc(text string) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// hasRuntime reports whether any field is Runtime<T>. The Rust loader then
+// writes LIVE_FIELDS and LiveConfig, which hold the config behind a tokio
+// watch channel; the API crate that includes config.rs depends on tokio
+// (D129).
+func hasRuntime(fields []ConfigField) bool {
+	for _, field := range fields {
+		if field.Runtime {
+			return true
+		}
+	}
+	return false
 }

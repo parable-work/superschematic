@@ -48,3 +48,9 @@ export type Nullable<T> = T | null;
 export type Validate<T, C extends ValidateConfig> = T & Wrapped<T> & { readonly __validate: C };
 /** A value kept out of logs: mask helpers clear it, and an `@envVars` loader marks it secret. */
 export type Secret<T> = T & Wrapped<T> & { readonly __secret: true };
+/**
+ * An `@envVars` field the service reads again while it runs: the env loaders
+ * hold it in a Live handle whose `apply` takes a new value with no restart.
+ * A `Secret<T>` field cannot be one; a credential changes with a restart.
+ */
+export type Runtime<T> = T & Wrapped<T> & { readonly __runtime: true };

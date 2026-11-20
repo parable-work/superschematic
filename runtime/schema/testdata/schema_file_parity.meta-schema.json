@@ -4813,6 +4813,10 @@
           "default": "",
           "type": "string"
         },
+        "runtime": {
+          "default": false,
+          "type": "boolean"
+        },
         "searchField": {
           "default": false,
           "type": "boolean"

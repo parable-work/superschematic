@@ -287,6 +287,7 @@ export interface FieldDef {
   required?: boolean;
   restMethod?: string;
   restPath?: string;
+  runtime?: boolean;
   searchField?: boolean;
   secret?: boolean;
   serviceCallers?: ServiceCallers;

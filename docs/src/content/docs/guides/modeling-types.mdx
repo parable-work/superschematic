@@ -434,6 +434,26 @@ export abstract class WorkerConfig implements Trait<WorkerEnv>, Trait<Partial<De
 they declare them. Only an `@envVars` class may implement a plain class
 or use `Partial<>` (D120).
 
+A field the service reads again while it runs is `Runtime<T>`, from
+`@superschematic/schema`: `LOG_LEVEL: Nullable<Runtime<Default<string, "info">>>`.
+Each loader then writes a Live handle beside it that holds the config in
+effect and changes a `Runtime<T>` field with no restart (D129):
+
+| Language | Live handle |
+| --- | --- |
+| Go | `LiveFields`, and `Live`: `NewLive(boot)`, `Current()`, `Fields()`, `Subscribe(fn)` and `Apply(values)` |
+| TypeScript | `LIVE_FIELDS`, and `Live<Config>`: `new Live<Config>(boot, env?)`, `current`, `fields`, `subscribe(listener)` and `apply(values)` |
+| Rust | `LIVE_FIELDS`, and `LiveConfig`: `new(boot)`, `current()`, `subscribe()`, a tokio watch receiver, `fields()` and `apply(&values)` |
+
+`Apply` takes new values as environment text, such as the ones a settings
+service writes. It reads each `Runtime<T>` field from them, or else from
+the environment, parses and checks them as the loader does, and leaves the
+config in effect as it was when it refuses one. Every other field keeps
+the value the loader read at start, and a key that is not a `Runtime<T>`
+field is ignored. Only a field of an `@envVars` class may be `Runtime<T>`,
+and a `Secret<T>` field may not: a credential changes with a restart.
+`values-schema.json` writes `"runtime": true` on each such field.
+
 The build writes a loader that reads and checks every variable and
 reports every one that is missing or invalid at once, never a value:
 

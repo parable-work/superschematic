@@ -79,7 +79,11 @@ type valuesSchemaEnvVar struct {
 	// Secret marks a Secret<T> field: a deployment's values bind it through
 	// a secret reference and its local tooling delivers it from a secret
 	// store, never as a literal.
-	Secret      bool   `json:"secret,omitempty"`
+	Secret bool `json:"secret,omitempty"`
+	// Runtime marks a Runtime<T> field: the service reads it again while it
+	// runs, so a deployment's change to it takes effect with no restart
+	// (D129).
+	Runtime     bool   `json:"runtime,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Derived marks a field an edge derives in a stack
 	// (docs/stack-model.md, section 3.4) with the edge's kind: sql for the
@@ -141,6 +145,7 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 			IsScalar:    field.IsScalar,
 			EnumValues:  field.EnumValues,
 			Secret:      field.Secret,
+			Runtime:     field.Runtime,
 			Description: field.Description,
 		})
 	}

@@ -9,8 +9,15 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+{{- if .HasRuntime }}
+	"reflect"
+{{- end }}
 {{- if or .HasScalars .HasNamed }}
 	"strings"
+{{- end }}
+{{- if .HasRuntime }}
+	"sync"
+	"sync/atomic"
 {{- end }}
 {{- end }}
 
@@ -56,7 +63,12 @@ type {{ .TypeName }} = types.{{ .TypeName }}
 func LoadConfig() (*{{ .TypeName }}, error) {
 	// Try to load .env file (ignore if not found)
 	_ = godotenv.Load()
+	return loadConfig(os.Getenv)
+}
 
+// loadConfig loads the configuration through lookup, which reads one
+// variable as os.Getenv does.
+func loadConfig(lookup func(string) string) (*{{ .TypeName }}, error) {
 	cfg := &types.{{ .TypeName }}{}
 	var errs []error
 
@@ -76,8 +88,8 @@ func LoadConfig() (*{{ .TypeName }}, error) {
 {{- end }}
 	}
 {{- else }}
-	if raw := os.Getenv("{{ .Key }}"); raw != "" {
-		if val, err := enumOrDefault("{{ .Key }}", {{ formatStringSlice .EnumValues }}, ""); err != nil {
+	if raw := lookup("{{ .Key }}"); raw != "" {
+		if val, err := enumOrDefault(lookup, "{{ .Key }}", {{ formatStringSlice .EnumValues }}, ""); err != nil {
 			errs = append(errs, err)
 		} else {
 			parsed := types.{{ .IRType }}(val)
@@ -164,7 +176,7 @@ func LoadConfig() (*{{ .TypeName }}, error) {
 		}
 	}
 {{- else }}
-	if val := os.Getenv("{{ .Key }}"); val != "" {
+	if val := lookup("{{ .Key }}"); val != "" {
 		parsed := types.{{ .GoType }}(val)
 		if valid, validationErrs := parsed.Validate(); !valid {
 			errs = append(errs, formatValidationError("{{ .Key }}", val, validationErrs))
@@ -184,7 +196,7 @@ func LoadConfig() (*{{ .TypeName }}, error) {
 		cfg.{{ .GoName }} = {{ primitiveAssign . "val" }}
 	}
 {{- else if .OptionalBool }}
-	if os.Getenv("{{ .Key }}") != "" {
+	if lookup("{{ .Key }}") != "" {
 		cfg.{{ .GoName }} = new({{ loaderExpr . }})
 	}
 {{- else }}
@@ -199,13 +211,124 @@ func LoadConfig() (*{{ .TypeName }}, error) {
 	return cfg, nil
 }
 
+{{- if .HasRuntime }}
+
+// ===========================================================================
+// Live: the Runtime<T> fields while the process runs (D129)
+// ===========================================================================
+
+// LiveFields are the Runtime<T> fields of {{ .TypeName }}: a deployment can
+// change them while the process runs.
+var LiveFields = []string{
+{{- range .Fields }}
+{{- if .Runtime }}
+	"{{ .Key }}",
+{{- end }}
+{{- end }}
+}
+
+// Live holds the {{ .TypeName }} in effect. Its Runtime<T> fields change when
+// Apply takes new values, such as the ones a settings watch reads. Every
+// other field keeps the value LoadConfig read at start. Read a Runtime<T>
+// field through Current where it is used, not from a copy made at start.
+type Live struct {
+	current   atomic.Pointer[{{ .TypeName }}]
+	mu        sync.Mutex
+	listeners map[uint64]func(*{{ .TypeName }})
+	next      uint64
+}
+
+// NewLive returns a Live that holds boot, the config LoadConfig returned.
+func NewLive(boot *{{ .TypeName }}) *Live {
+	live := &Live{listeners: map[uint64]func(*{{ .TypeName }}){}}
+	live.current.Store(boot)
+	return live
+}
+
+// Current returns the config in effect. Do not change it: Apply replaces it
+// and never changes the one it returned.
+func (l *Live) Current() *{{ .TypeName }} {
+	return l.current.Load()
+}
+
+// Fields returns the names of the Runtime<T> fields, LiveFields.
+func (l *Live) Fields() []string {
+	return append([]string(nil), LiveFields...)
+}
+
+// Subscribe calls fn with each config that Apply puts in effect, until the
+// returned function is called. Apply calls fn on its own goroutine, after
+// the new config is in effect.
+func (l *Live) Subscribe(fn func(*{{ .TypeName }})) (cancel func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	id := l.next
+	l.next++
+	l.listeners[id] = fn
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		delete(l.listeners, id)
+	}
+}
+
+// Apply sets each Runtime<T> field that values names to that value, given as
+// env text, and each other Runtime<T> field to its value in the environment.
+// It parses and validates the values as LoadConfig does and returns an error
+// for a refused value; the config in effect then does not change. A key that
+// is not a Runtime<T> field is ignored. It reports whether a value changed,
+// after it calls each subscriber with the new config.
+func (l *Live) Apply(values map[string]string) (bool, error) {
+	next, err := loadConfig(func(key string) string {
+		if value, ok := values[key]; ok && isLiveField(key) {
+			return value
+		}
+		return os.Getenv(key)
+	})
+	if err != nil {
+		return false, err
+	}
+	l.mu.Lock()
+	current := l.current.Load()
+	merged := *current
+{{- range .Fields }}
+{{- if .Runtime }}
+	merged.{{ .GoName }} = next.{{ .GoName }}
+{{- end }}
+{{- end }}
+	if reflect.DeepEqual(&merged, current) {
+		l.mu.Unlock()
+		return false, nil
+	}
+	l.current.Store(&merged)
+	listeners := make([]func(*{{ .TypeName }}), 0, len(l.listeners))
+	for _, fn := range l.listeners {
+		listeners = append(listeners, fn)
+	}
+	l.mu.Unlock()
+	for _, fn := range listeners {
+		fn(&merged)
+	}
+	return true, nil
+}
+
+func isLiveField(key string) bool {
+	for _, field := range LiveFields {
+		if field == key {
+			return true
+		}
+	}
+	return false
+}
+{{- end }}
+
 // ===========================================================================
 // Environment Variable Loader Functions
 // ===========================================================================
 
 // requireString requires a string environment variable to be set.
-func requireString(key string) (string, error) {
-	val := os.Getenv(key)
+func requireString(lookup func(string) string, key string) (string, error) {
+	val := lookup(key)
 	if val == "" {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -213,16 +336,16 @@ func requireString(key string) (string, error) {
 }
 
 // stringOrDefault returns the environment variable value or a default.
-func stringOrDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
+func stringOrDefault(lookup func(string) string, key, defaultVal string) string {
+	if val := lookup(key); val != "" {
 		return val
 	}
 	return defaultVal
 }
 
 // requireInt requires an integer environment variable to be set.
-func requireInt(key string) (int, error) {
-	val := os.Getenv(key)
+func requireInt(lookup func(string) string, key string) (int, error) {
+	val := lookup(key)
 	if val == "" {
 		return 0, fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -234,8 +357,8 @@ func requireInt(key string) (int, error) {
 }
 
 // intOrDefault returns the environment variable value or a default.
-func intOrDefault(key string, defaultVal int) int {
-	if val := os.Getenv(key); val != "" {
+func intOrDefault(lookup func(string) string, key string, defaultVal int) int {
+	if val := lookup(key); val != "" {
 		if i, err := strconv.Atoi(val); err == nil {
 			return i
 		}
@@ -244,8 +367,8 @@ func intOrDefault(key string, defaultVal int) int {
 }
 
 // requireBool requires a boolean environment variable to be set.
-func requireBool(key string) (bool, error) {
-	val := os.Getenv(key)
+func requireBool(lookup func(string) string, key string) (bool, error) {
+	val := lookup(key)
 	if val == "" {
 		return false, fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -257,8 +380,8 @@ func requireBool(key string) (bool, error) {
 }
 
 // boolOrDefault returns the environment variable value or a default.
-func boolOrDefault(key string, defaultVal bool) bool {
-	if val := os.Getenv(key); val != "" {
+func boolOrDefault(lookup func(string) string, key string, defaultVal bool) bool {
+	if val := lookup(key); val != "" {
 		if b, err := strconv.ParseBool(val); err == nil {
 			return b
 		}
@@ -269,8 +392,8 @@ func boolOrDefault(key string, defaultVal bool) bool {
 {{- if .HasEnums }}
 
 // requireEnum requires an enum environment variable to be set and valid.
-func requireEnum(key string, allowed []string) (string, error) {
-	val := os.Getenv(key)
+func requireEnum(lookup func(string) string, key string, allowed []string) (string, error) {
+	val := lookup(key)
 	if val == "" {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -283,8 +406,8 @@ func requireEnum(key string, allowed []string) (string, error) {
 }
 
 // enumOrDefault returns the environment variable value or a default, validating against allowed values.
-func enumOrDefault(key string, allowed []string, defaultVal string) (string, error) {
-	val := os.Getenv(key)
+func enumOrDefault(lookup func(string) string, key string, allowed []string, defaultVal string) (string, error) {
+	val := lookup(key)
 	if val == "" {
 		return defaultVal, nil
 	}

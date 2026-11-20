@@ -1253,6 +1253,7 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 		HasMany:         info.hasMany,
 		ManyToMany:      info.manyToMany,
 		Secret:          info.secret || info.encryptedAtRest,
+		Runtime:         info.runtime,
 		Encrypted:       info.encrypted,
 		EncryptedAtRest: info.encryptedAtRest,
 	}

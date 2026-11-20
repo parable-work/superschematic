@@ -164,6 +164,9 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 	case fd.Secret:
 		expr = fmt.Sprintf("%s<%s>", e.use("Secret"), expr)
 	}
+	if fd.Runtime {
+		expr = fmt.Sprintf("%s<%s>", e.use("Runtime"), expr)
+	}
 
 	wrapsArray := false
 	if fd.JsonField {

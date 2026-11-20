@@ -176,3 +176,88 @@ export function load{{ .TypeName }}(env: EnvSource = processEnv()): Loaded{{ .Ty
   }
   return Object.freeze(values) as unknown as Loaded{{ .TypeName }};
 }
+{{- if .LiveFields }}
+
+/**
+ * The Runtime<T> fields of {{ .TypeName }}: a deployment can change them
+ * while the process runs (D129).
+ */
+export const LIVE_FIELDS: readonly string[] = Object.freeze([{{ range $i, $key := .LiveFields }}{{ if $i }}, {{ end }}{{ $key }}{{ end }}]);
+
+/** Called with each {{ .TypeName }} that Live{{ .TypeName }}.apply() puts in effect. */
+export type Live{{ .TypeName }}Listener = (config: Loaded{{ .TypeName }}) => void;
+
+/**
+ * Holds the {{ .TypeName }} in effect. Its Runtime<T> fields change when
+ * apply() takes new values, such as the ones a settings watch reads. Every
+ * other field keeps the value load{{ .TypeName }} read at start. Read a
+ * Runtime<T> field through current where it is used, not from a copy made at
+ * start.
+ */
+export class Live{{ .TypeName }} {
+  /** The keys apply() reads: LIVE_FIELDS. */
+  readonly fields: readonly string[] = LIVE_FIELDS;
+  #current: Loaded{{ .TypeName }};
+  readonly #env: EnvSource;
+  readonly #listeners = new Set<Live{{ .TypeName }}Listener>();
+
+  /**
+   * boot is the config load{{ .TypeName }} returned, and env is the environment
+   * it read. A Runtime<T> field that apply() gets no value for takes its value
+   * from env.
+   */
+  constructor(boot: Loaded{{ .TypeName }}, env: EnvSource = processEnv()) {
+    this.#current = boot;
+    this.#env = env;
+  }
+
+  /** The config in effect. It is frozen: apply() replaces it and never changes it. */
+  get current(): Loaded{{ .TypeName }} {
+    return this.#current;
+  }
+
+  /** Calls listener with each config that apply() puts in effect. Returns the call that stops it. */
+  subscribe(listener: Live{{ .TypeName }}Listener): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  /**
+   * Sets each Runtime<T> field that values names to that value, given as env
+   * text, and each other Runtime<T> field to its value in env. It parses and
+   * validates the values as load{{ .TypeName }} does and throws EnvConfigError
+   * for a refused value; the config in effect then does not change. A key that
+   * is not a Runtime<T> field is ignored. It returns true when a value changed,
+   * after it calls each listener with the new config.
+   */
+  apply(values: Readonly<Record<string, string>>): boolean {
+    const env: Record<string, string | undefined> = { ...this.#env };
+    for (const key of LIVE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(values, key)) env[key] = values[key];
+    }
+    const next = load{{ .TypeName }}(env) as unknown as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...this.#current };
+    let changed = false;
+    for (const key of LIVE_FIELDS) {
+      if (merged[key] !== next[key]) {
+        merged[key] = next[key];
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    this.#current = Object.freeze(merged) as unknown as Loaded{{ .TypeName }};
+    let failure: unknown;
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener(this.#current);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure !== undefined) throw failure;
+    return true;
+  }
+}
+{{- end }}

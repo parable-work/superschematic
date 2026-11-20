@@ -5,6 +5,8 @@ import { describe, expect, test } from 'bun:test';
 import { format, inspect } from 'node:util';
 import {
   EnvConfigError,
+  LIVE_FIELDS,
+  LiveFixtureEnvConfig,
   SECRET_MASK,
   SecretValue,
   loadFixtureEnvConfig,
@@ -146,5 +148,42 @@ describe('loadFixtureEnvConfig', () => {
       }
       Object.assign(process.env, saved);
     }
+  });
+});
+
+describe('LiveFixtureEnvConfig', () => {
+  test('lists the Runtime<T> fields', () => {
+    expect([...LIVE_FIELDS]).toEqual(['LOG_LEVEL', 'BATCH_SIZE']);
+  });
+
+  test('apply changes a Runtime<T> field, ignores the rest and calls each listener', () => {
+    const env = { ...required };
+    const boot = loadFixtureEnvConfig(env);
+    expect(boot.LOG_LEVEL).toBe('info');
+    const live = new LiveFixtureEnvConfig(boot, env);
+    expect(live.current).toBe(boot);
+    const seen: string[] = [];
+    const stop = live.subscribe(config => seen.push(config.LOG_LEVEL));
+
+    expect(live.apply({ LOG_LEVEL: 'debug', SERVICE_NAME: 'other' })).toBe(true);
+    expect(live.current.LOG_LEVEL).toBe('debug');
+    expect(live.current.SERVICE_NAME).toBe('fixture');
+    expect(live.current.BATCH_SIZE).toBe(50);
+    expect(boot.LOG_LEVEL).toBe('info');
+    expect(Object.isFrozen(live.current)).toBe(true);
+    expect(seen).toEqual(['debug']);
+
+    expect(live.apply({ LOG_LEVEL: 'debug' })).toBe(false);
+    stop();
+    expect(live.apply({ BATCH_SIZE: '75' })).toBe(true);
+    expect(live.current.BATCH_SIZE).toBe(75);
+    expect(seen).toEqual(['debug']);
+  });
+
+  test('a refused value leaves the config in effect', () => {
+    const env = { ...required };
+    const live = new LiveFixtureEnvConfig(loadFixtureEnvConfig(env), env);
+    expect(() => live.apply({ BATCH_SIZE: 'many' })).toThrow(EnvConfigError);
+    expect(live.current.BATCH_SIZE).toBe(50);
   });
 });

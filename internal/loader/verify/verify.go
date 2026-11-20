@@ -253,6 +253,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkSQLNames(schema, r)
 	checkSourceProjections(schema, in, r)
 	checkTraits(schema, r)
+	checkRuntimeFields(schema, r)
 	checkVersioned(schema, r)
 	checkVersionGraphs(schema, r)
 	checkIdentity(schema, r)

@@ -37,12 +37,17 @@ type FixtureConfig = types.FixtureConfig
 func LoadConfig() (*FixtureConfig, error) {
 	// Try to load .env file (ignore if not found)
 	_ = godotenv.Load()
+	return loadConfig(os.Getenv)
+}
 
+// loadConfig loads the configuration through lookup, which reads one
+// variable as os.Getenv does.
+func loadConfig(lookup func(string) string) (*FixtureConfig, error) {
 	cfg := &types.FixtureConfig{}
 	var errs []error
 
 	// DATABASE_URL
-	if val, err := requireString("DATABASE_URL"); err != nil {
+	if val, err := requireString(lookup, "DATABASE_URL"); err != nil {
 		errs = append(errs, err)
 	} else {
 		scalar, parseErr := types.ParseNetworkUrl(val)
@@ -56,17 +61,17 @@ func LoadConfig() (*FixtureConfig, error) {
 	}
 
 	// JWT_SECRET
-	if val, err := requireString("JWT_SECRET"); err != nil {
+	if val, err := requireString(lookup, "JWT_SECRET"); err != nil {
 		errs = append(errs, err)
 	} else {
 		cfg.JwtSecret = val
 	}
 
 	// PORT
-	cfg.Port = float64(intOrDefault("PORT", 8080))
+	cfg.Port = float64(intOrDefault(lookup, "PORT", 8080))
 
 	// ENVIRONMENT
-	if val, err := enumOrDefault("ENVIRONMENT", []string{"development", "production"}, "development"); err != nil {
+	if val, err := enumOrDefault(lookup, "ENVIRONMENT", []string{"development", "production"}, "development"); err != nil {
 		errs = append(errs, err)
 	} else {
 		parsed := types.FixtureEnvironment(val)
@@ -85,8 +90,8 @@ func LoadConfig() (*FixtureConfig, error) {
 // ===========================================================================
 
 // requireString requires a string environment variable to be set.
-func requireString(key string) (string, error) {
-	val := os.Getenv(key)
+func requireString(lookup func(string) string, key string) (string, error) {
+	val := lookup(key)
 	if val == "" {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -94,16 +99,16 @@ func requireString(key string) (string, error) {
 }
 
 // stringOrDefault returns the environment variable value or a default.
-func stringOrDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
+func stringOrDefault(lookup func(string) string, key, defaultVal string) string {
+	if val := lookup(key); val != "" {
 		return val
 	}
 	return defaultVal
 }
 
 // requireInt requires an integer environment variable to be set.
-func requireInt(key string) (int, error) {
-	val := os.Getenv(key)
+func requireInt(lookup func(string) string, key string) (int, error) {
+	val := lookup(key)
 	if val == "" {
 		return 0, fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -115,8 +120,8 @@ func requireInt(key string) (int, error) {
 }
 
 // intOrDefault returns the environment variable value or a default.
-func intOrDefault(key string, defaultVal int) int {
-	if val := os.Getenv(key); val != "" {
+func intOrDefault(lookup func(string) string, key string, defaultVal int) int {
+	if val := lookup(key); val != "" {
 		if i, err := strconv.Atoi(val); err == nil {
 			return i
 		}
@@ -125,8 +130,8 @@ func intOrDefault(key string, defaultVal int) int {
 }
 
 // requireBool requires a boolean environment variable to be set.
-func requireBool(key string) (bool, error) {
-	val := os.Getenv(key)
+func requireBool(lookup func(string) string, key string) (bool, error) {
+	val := lookup(key)
 	if val == "" {
 		return false, fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -138,8 +143,8 @@ func requireBool(key string) (bool, error) {
 }
 
 // boolOrDefault returns the environment variable value or a default.
-func boolOrDefault(key string, defaultVal bool) bool {
-	if val := os.Getenv(key); val != "" {
+func boolOrDefault(lookup func(string) string, key string, defaultVal bool) bool {
+	if val := lookup(key); val != "" {
 		if b, err := strconv.ParseBool(val); err == nil {
 			return b
 		}
@@ -148,8 +153,8 @@ func boolOrDefault(key string, defaultVal bool) bool {
 }
 
 // requireEnum requires an enum environment variable to be set and valid.
-func requireEnum(key string, allowed []string) (string, error) {
-	val := os.Getenv(key)
+func requireEnum(lookup func(string) string, key string, allowed []string) (string, error) {
+	val := lookup(key)
 	if val == "" {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
@@ -162,8 +167,8 @@ func requireEnum(key string, allowed []string) (string, error) {
 }
 
 // enumOrDefault returns the environment variable value or a default, validating against allowed values.
-func enumOrDefault(key string, allowed []string, defaultVal string) (string, error) {
-	val := os.Getenv(key)
+func enumOrDefault(lookup func(string) string, key string, allowed []string, defaultVal string) (string, error) {
+	val := lookup(key)
 	if val == "" {
 		return defaultVal, nil
 	}
