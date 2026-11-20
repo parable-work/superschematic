@@ -110,7 +110,8 @@ pub enum Request {
         #[serde(default)]
         cursor: Option<String>,
     },
-    /// A use's operation of a row.
+    /// A use's operation of a row. A use id left empty names the one use
+    /// of the type whose behavior declares the operation.
     Operation {
         #[serde(rename = "type")]
         type_name: String,
@@ -123,7 +124,8 @@ pub enum Request {
         #[serde(default)]
         preconditions: Map<String, Value>,
     },
-    /// A use's operation of the table as a whole (D104).
+    /// A use's operation of the table as a whole (D104), its use resolved
+    /// as an operation's of a row is.
     TableOperation {
         #[serde(rename = "type")]
         type_name: String,
@@ -156,6 +158,12 @@ pub enum Request {
         #[serde(default)]
         seq: Option<i64>,
     },
+    /// The types with a live version the caller may read, each with its
+    /// version, in name order.
+    Types,
+    /// The tools a caller may call, made from the live types and their
+    /// uses' operations ([`crate::tools`]), as MCP lists them.
+    Tools,
 }
 
 /// What a request runs with beside itself: its caller, the time in epoch
@@ -349,7 +357,7 @@ fn refused(refusal: Refusal) -> HandlerStep {
     })
 }
 
-fn done(response: Value, writes: Vec<StoreWrite>) -> HandlerStep {
+pub(crate) fn done(response: Value, writes: Vec<StoreWrite>) -> HandlerStep {
     HandlerStep::Done(Done {
         response: Ok(response),
         unit: Unit { writes },
@@ -498,6 +506,8 @@ impl<'a> Handler<'a> {
                 change,
                 seq,
             } => self.change(type_name, id, change, *seq, context, &mut reads),
+            Request::Types => self.types(context, &mut reads),
+            Request::Tools => self.tools(context, &mut reads),
         };
         outcome.unwrap_or_else(refused)
     }
@@ -1067,6 +1077,7 @@ impl<'a> Handler<'a> {
             return Ok(take(reads).wait());
         };
         let model = live.model(type_name)?;
+        let action = self.resolve_use(model, action)?;
         self.ask_operation(model, &action, &context.caller)?;
         self.run_core(
             &live,
@@ -1313,7 +1324,7 @@ impl<'a> Handler<'a> {
 }
 
 // take moves the reads a run needs out of it, for its answer.
-fn take<'r>(reads: &mut Reads<'r>) -> Reads<'r> {
+pub(crate) fn take<'r>(reads: &mut Reads<'r>) -> Reads<'r> {
     Reads {
         answers: reads.answers,
         need: std::mem::take(&mut reads.need),

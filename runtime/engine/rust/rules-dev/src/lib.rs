@@ -22,6 +22,11 @@
 //! held from the request's start, and a request reads what the one before
 //! it committed. A unit applies in a savepoint, whole or not at all.
 //!
+//! [`Dev::http`] serves the handler's routes over HTTP with no transport
+//! under them, and with the `server` feature [`server`] is their axum
+//! binding, the event stream and the MCP endpoint among them, which the
+//! `superschematic-dev` binary serves.
+//!
 //! With the `postgres` feature, `PgStore` keeps the same tables in a schema
 //! of a Postgres database. Its request's transaction takes the schema's
 //! advisory lock first, so one request at a time writes the store, as on
@@ -38,13 +43,18 @@ use superschematic_rules::{
 };
 use superschematic_rules_handler::document::storage_key;
 use superschematic_rules_handler::{
-    run_due, serve, Armed, Context, Declarations, Draft, DueDeadline, Handler, HeldSubRow, Policy,
-    QueuedChange, QueuedEvent, RanDue, Request, Store, StoreAnswer, StoreRead, StoreWrite,
-    StoredRow, Unit, Version,
+    run_due, Armed, Declarations, Draft, DueDeadline, Handler, HeldSubRow, Policy, QueuedChange,
+    QueuedEvent, RanDue, Request, Store, StoreAnswer, StoreRead, StoreWrite, StoredRow, Unit,
+    Version,
 };
 
+mod http;
 #[cfg(feature = "postgres")]
 mod pg;
+#[cfg(feature = "server")]
+pub mod server;
+
+pub use http::Served;
 #[cfg(feature = "postgres")]
 pub use pg::PgStore;
 
@@ -1051,18 +1061,8 @@ impl<S: Store> Dev<S> {
     /// Serves one request as a caller, then, unless the host drains when
     /// asked, runs the queues.
     pub fn request(&mut self, caller: &Caller, request: &Request) -> Result<Value, Refusal> {
-        let context = Context {
-            caller: caller.clone(),
-            now: (self.clock)(),
-            request: uuid::Uuid::new_v4().to_string(),
-            id: uuid::Uuid::new_v4().as_u128(),
-        };
-        let handler = Handler::new(&self.core, &self.declarations).with_policy(&self.policy);
-        let response = serve(&handler, &mut self.store, request, &context);
-        if self.drain == Drain::AfterEachRequest {
-            self.run_due()?;
-        }
-        response
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.request_as(caller, request, &request_id)
     }
 
     /// Runs the change queue and the deadlines due by the host's clock, as

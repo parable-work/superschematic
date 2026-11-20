@@ -611,9 +611,11 @@ impl Handler<'_> {
     pub(crate) fn admit(&self, request: &Request, context: &Context) -> Result<(), Refusal> {
         let (action, type_name) = match request {
             Request::Deadline { .. } | Request::Change { .. } => return Ok(()),
-            Request::Define { .. } | Request::Operation { .. } | Request::TableOperation { .. } => {
-                (None, "")
-            }
+            Request::Define { .. }
+            | Request::Operation { .. }
+            | Request::TableOperation { .. }
+            | Request::Types
+            | Request::Tools => (None, ""),
             Request::Publish { type_name, .. } => (Some(Action::Publish), type_name.as_str()),
             Request::Describe { type_name }
             | Request::Get { type_name, .. }
