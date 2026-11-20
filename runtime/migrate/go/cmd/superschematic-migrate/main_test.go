@@ -122,6 +122,27 @@ func TestUsage(t *testing.T) {
 	}
 }
 
+// TestApplyPlanFromStdin: apply --plan - reads the plan from stdin, as a
+// runtime environment's publish hands it over (D117), and refuses to read
+// it when there is no stdin.
+func TestApplyPlanFromStdin(t *testing.T) {
+	doc, err := os.ReadFile(fixturePath(migrate.SQLite, "01-create"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := readFixture(t, migrate.SQLite, "01-create")
+	db := filepath.Join(t.TempDir(), "app.db")
+	var stdout, stderr bytes.Buffer
+	o := options{stdin: bytes.NewReader(doc), stdout: &stdout, stderr: &stderr, getenv: func(string) string { return "" }}
+	if code := runWith(context.Background(), []string{"apply", "--plan", "-", "--database-url", db}, o); code != exitOK {
+		t.Fatalf("apply --plan - exited %d\n%s%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "plan "+create.Hash+" applied") {
+		t.Fatalf("apply --plan - printed %q, want the plan applied", stdout.String())
+	}
+	invoke(t, nil, "apply", "--plan", "-", "--database-url", db).expect(t, exitFailed, "--plan -: no stdin to read the plan from")
+}
+
 // TestFailureLine: a command that fails writes its error to stderr on a
 // line that begins with the binary's name, which gcp's deploy reads from a
 // failed job's logs and reports (D46, amended).

@@ -248,6 +248,10 @@ as one line of JSON on stdout
 superschematic migrate plan --request - < request.json
 ```
 
+A request with `layout` also gets the layout document a runtime handler
+serves the documents' tables through, which a runtime environment records
+next to the model ([Runtime mode](/superschematic/guides/runtime-mode/)).
+
 A plan made elsewhere, from a model the database no longer holds, meets
 the runner's baseline check. It is refused, and the refusal names both
 models ([The baseline check](#the-baseline-check)).

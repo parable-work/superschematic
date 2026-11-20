@@ -264,6 +264,18 @@ path for when the store is unavailable.
   caller is the `X-Superschematic-Subject` header, or `--as`, and
   `--policy` takes the engine's access policy (`"permission"` or
   `{"rules": [...]}`).
+- **Schemas that change while the app runs, rows that matter?** Runtime
+  mode (D117, the Rust crate `superschematic-rules-runtime`) serves the
+  same handler over each type's own table, the table a build writes, in a
+  SQLite file or a Postgres database. A publish takes the DB service's
+  schema documents whole (`format --to=json`) and is a migration: it runs
+  `superschematic migrate plan --request` from the model the database
+  recorded, and the runner applies the plan. Plan first
+  (`{"kind": "plan", "documents": [...]}`) and read each step's hazards. A
+  publish with a `destructive` or `data-dependent` hazard is refused with
+  the hazard's id: allow a drop only when the data may go, and name a
+  rename (`task.title=task.summary`) rather than allowing the drop it
+  reads as. Never allow a hazard the person did not agree to.
 - **A `@tableOperation` documents itself.** Without `@docs` it takes its
   title from the method's name, its description from the method's
   comment and its capability from the set and the method; without `@mcp`

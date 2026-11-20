@@ -1990,6 +1990,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-migrate"
+version = "0.0.0"
+dependencies = [
+ "rusqlite",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "superschematic-rules"
 version = "0.0.0"
 dependencies = [
@@ -2054,6 +2062,23 @@ dependencies = [
  "serde_json",
  "superschematic-rules",
  "superschematic-rules-behaviors",
+]
+
+[[package]]
+name = "superschematic-rules-runtime"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "postgres",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "superschematic-migrate",
+ "superschematic-rules",
+ "superschematic-rules-adapter",
+ "superschematic-rules-behaviors",
+ "superschematic-rules-handler",
+ "uuid",
 ]
 
 [[package]]

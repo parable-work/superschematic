@@ -2,7 +2,7 @@
 // `superschematic migrate plan` wrote, and reads and records the state of a
 // database's schema. runtime/migrate/README.md describes its commands.
 //
-//	superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
+//	superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--database-url URL]
 //	superschematic-migrate status --service NAME [--model] [--database-url URL]
 //	superschematic-migrate adopt --model model.json [--database-url URL]
 //	superschematic-migrate job --job job.json|gs://bucket/job.json
@@ -47,7 +47,7 @@ const (
 )
 
 const usage = `usage:
-  superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
+  superschematic-migrate apply --plan plan.json|- [--phase expand|contract|all] [--database-url URL]
   superschematic-migrate status --service NAME [--model] [--database-url URL]
   superschematic-migrate adopt --model model.json [--diff] [--database-url URL]
   superschematic-migrate job --job job.json|gs://bucket/job.json
@@ -61,7 +61,8 @@ const usage = `usage:
 URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite;
 a d1://<account id>/<database id> URL selects a Cloudflare D1 database,
 reached with the API token in $CLOUDFLARE_API_TOKEN. SQLite and D1 run
-sqlite plans.
+sqlite plans. apply --plan - reads the plan from stdin, as a runtime
+environment's publish hands it over.
 
 adopt records a model as a database's state, which the database must
 already hold. With --diff it records nothing: it prints each way the
@@ -98,13 +99,15 @@ built by hand through it.
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, os.Getenv)
+	code := runWith(ctx, os.Args[1:], options{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, getenv: os.Getenv})
 	stop()
 	os.Exit(code)
 }
 
 // options carry what every command shares.
 type options struct {
+	// stdin is what apply --plan - reads; nil reads nothing.
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	getenv         func(string) string
 	// waits and sleep replace the runner's retry pauses in tests.
@@ -119,11 +122,6 @@ type options struct {
 	// results writes a queue operation's result where --result names it;
 	// nil is storageWriter. Tests fake it.
 	results resultWriter
-}
-
-// run runs one command and returns its exit code.
-func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	return runWith(ctx, args, options{stdout: stdout, stderr: stderr, getenv: getenv})
 }
 
 func runWith(ctx context.Context, args []string, o options) int {
@@ -260,9 +258,20 @@ func (o options) runner(driver migrate.Driver) *migrate.Runner {
 	return &migrate.Runner{Driver: driver, Log: o.stdout, Waits: o.waits, Sleep: o.sleep}
 }
 
+// readPlanDocument reads the plan at path, or the whole of stdin for -.
+func readPlanDocument(path string, o options) ([]byte, error) {
+	if path != "-" {
+		return os.ReadFile(path)
+	}
+	if o.stdin == nil {
+		return nil, errors.New("--plan -: no stdin to read the plan from")
+	}
+	return io.ReadAll(o.stdin)
+}
+
 func apply(ctx context.Context, args []string, o options) error {
 	fs, urlFlag := flags("apply", o)
-	planPath := fs.String("plan", "", "the plan `file` superschematic migrate plan wrote")
+	planPath := fs.String("plan", "", "the plan `file` superschematic migrate plan wrote, or - for stdin")
 	phase := fs.String("phase", "all", "the steps to run: expand, contract or all")
 	if err := parse(fs, args); err != nil {
 		return err
@@ -279,7 +288,7 @@ func apply(ctx context.Context, args []string, o options) error {
 	if err != nil {
 		return err
 	}
-	doc, err := os.ReadFile(*planPath)
+	doc, err := readPlanDocument(*planPath, o)
 	if err != nil {
 		return err
 	}
