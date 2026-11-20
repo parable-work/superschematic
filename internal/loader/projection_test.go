@@ -44,6 +44,34 @@ func patchedProjection(t *testing.T, replacements ...string) string {
 	return dir
 }
 
+// TestProjectionReplicaFromTypeScript: a declaration without replica leaves
+// it unset, which allows the read replica; `replica: false` reaches the IR;
+// and a value that is not a boolean is refused by the option's type (D121).
+func TestProjectionReplicaFromTypeScript(t *testing.T) {
+	schema, err := LoadService(projectionFixture)
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	def := schema.Types["AppPreference"].Projection
+	if def.Replica != nil || !def.AllowsReplica() {
+		t.Fatalf("a declaration without replica must leave it unset, got %v", def.Replica)
+	}
+
+	dir := patchedProjection(t, `migration: "20260902120000",`, `migration: "20260902120000",`+"\n  replica: false,")
+	schema, err = LoadService(dir)
+	if err != nil {
+		t.Fatalf("LoadService with replica: false: %v", err)
+	}
+	if def := schema.Types["AppPreference"].Projection; def.Replica == nil || *def.Replica || def.AllowsReplica() {
+		t.Fatalf("replica = %v, want false", def.Replica)
+	}
+
+	dir = patchedProjection(t, `migration: "20260902120000",`, `migration: "20260902120000",`+"\n  replica: \"no\",")
+	if _, err := LoadService(dir); err == nil || !strings.Contains(err.Error(), "boolean") {
+		t.Fatalf("a string replica must fail the load, got %v", err)
+	}
+}
+
 // TestProjectionVerifyFindingsReachTheTypeScriptAuthor: the resolution
 // checks verify owns fail the load of a TypeScript service and name the
 // projection file.

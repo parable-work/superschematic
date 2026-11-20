@@ -39,7 +39,12 @@ type ProjectionView struct {
 
 	// Migration is the version stamp; the file names derive from it, so a
 	// changed projection is always a new migration.
-	Migration    string
+	Migration string
+
+	// Replica is false when the declaration says replica: false: a reader
+	// must scan the view on its database's primary (D121).
+	Replica bool
+
 	UpFileName   string
 	DownFileName string
 
@@ -274,6 +279,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		QuotedName:      sqlutil.QuoteIdentifier(def.Name),
 		Relation:        def.Relation(),
 		Migration:       def.Migration,
+		Replica:         def.AllowsReplica(),
 		UpFileName:      fmt.Sprintf("%s_%s_projection.up.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		DownFileName:    fmt.Sprintf("%s_%s_projection.down.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		QuotedBaseTable: base.QuotedName,
@@ -743,7 +749,7 @@ type MetadataKeys struct {
 	// settings a reader sets before a scan.
 	ProjectionPool, ProjectionName, ProjectionRelation, ProjectionView       string
 	ProjectionSchema, ProjectionType, ProjectionMigration, ProjectionSetting string
-	ProjectionOptionalSettings, ProjectionRows                               string
+	ProjectionOptionalSettings, ProjectionRows, ProjectionReplica            string
 }
 
 // NewMetadataKeys returns the key set under prefix ("superschematic." for
@@ -772,6 +778,7 @@ func NewMetadataKeys(prefix string) MetadataKeys {
 		ProjectionSetting:          prefix + "projection.settings",
 		ProjectionOptionalSettings: prefix + "projection.optional_settings",
 		ProjectionRows:             prefix + "projection.rows",
+		ProjectionReplica:          prefix + "projection.replica",
 	}
 }
 
@@ -844,6 +851,9 @@ func ArrowSchemaJSON(schema *ir.Schema, schemaName string, view ProjectionView, 
 			// "one" when the view keeps one row per key (DISTINCT ON), "all"
 			// when it serves every admitted row.
 			keys.ProjectionRows: projectionRowsMetadata(view),
+			// "false" when a reader must scan the view on the primary,
+			// never on a read replica that may lag a write (D121).
+			keys.ProjectionReplica: strconv.FormatBool(view.Replica),
 		},
 	}
 	out, err := json.MarshalIndent(doc, "", "  ")

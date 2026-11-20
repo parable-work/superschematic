@@ -144,6 +144,13 @@ export interface ProjectionOptions {
    * `ORDER BY by, order`, so the first row in that order wins.
    */
   readonly collapse?: ProjectionCollapse;
+  /**
+   * Whether a reader may scan the view on a read replica of its database.
+   * Omit it, or pass `true`, to allow the replica. Pass `false` for a view
+   * whose rows must not lag a write: the Arrow schema then says so in
+   * `projection.replica`, and a reader scans the primary (D121).
+   */
+  readonly replica?: boolean;
 }
 
 /**

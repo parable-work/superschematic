@@ -42,7 +42,7 @@ func projectionDecorators() []DecoratorSpec {
 }
 
 // applyProjection reads @projection<Source>({ pool, name, migration,
-// where?, collapse? }). args[0] is the source class name the frontend
+// where?, collapse?, replica? }). args[0] is the source class name the frontend
 // resolved from the type argument. Joins a @join above the @projection
 // already collected are kept.
 func applyProjection(td *ir.TypeDef, args []any) error {
@@ -95,6 +95,12 @@ func applyProjection(td *ir.TypeDef, args []any) error {
 				return err
 			}
 			def.Collapse = collapse
+		case "replica":
+			b, ok := value.(bool)
+			if !ok {
+				return ArgErrorf(1, "@projection replica must be a boolean literal")
+			}
+			def.Replica = &b
 		default:
 			return ArgErrorf(1, "@projection options has unknown key %q", key)
 		}

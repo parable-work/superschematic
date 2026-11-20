@@ -143,6 +143,45 @@ func TestWriteProjectionsGolden(t *testing.T) {
 // TestMetadataKeyPrefixNamesEveryKey: every Arrow metadata key carries the
 // configured prefix and nothing else, so a deployment whose readers expect
 // another namespace changes one naming key.
+// TestProjectionReplicaMetadata: a projection without replica allows the
+// read replica, and `replica: false` reaches the Arrow schema as
+// projection.replica = "false", which tells a reader to scan the view on
+// the primary (D121).
+func TestProjectionReplicaMetadata(t *testing.T) {
+	no, yes := false, true
+	for _, tc := range []struct {
+		name    string
+		replica *bool
+		want    string
+	}{
+		{"omitted", nil, "true"},
+		{"true", &yes, "true"},
+		{"false", &no, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := loadProjectionFixture(t)
+			schema.Types["AppPreference"].Projection.Replica = tc.replica
+			output, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			arrow, err := ArrowSchemaJSON(schema, "fixture-projection", output.Projections[0], output.MetadataKeyPrefix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Meta map[string]string `json:"metadata"`
+			}
+			if err := json.Unmarshal(arrow, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if got := doc.Meta[NewMetadataKeys(output.MetadataKeyPrefix).ProjectionReplica]; got != tc.want {
+				t.Errorf("replica metadata = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMetadataKeyPrefixNamesEveryKey(t *testing.T) {
 	schema := loadProjectionFixture(t)
 	output, err := Generate(schema, Options{SchemaName: "fixture-projection", MetadataKeyPrefix: "acme."})
@@ -178,7 +217,7 @@ func TestMetadataKeyPrefixNamesEveryKey(t *testing.T) {
 	for _, f := range doc.Fields {
 		check(f.Metadata)
 	}
-	for _, suffix := range []string{"projection.source", "projection.settings", "projection.rows", "scalar.canonical_name", "enum.values"} {
+	for _, suffix := range []string{"projection.source", "projection.settings", "projection.rows", "projection.replica", "scalar.canonical_name", "enum.values"} {
 		if !seen[suffix] {
 			t.Errorf("no acme.%s key in the Arrow schema", suffix)
 		}

@@ -545,6 +545,7 @@ export interface ProjectionDef {
   name: string;
   pool?: string;
   predicates?: ProjectionPredicate[];
+  replica?: boolean;
   source: string;
 }
 

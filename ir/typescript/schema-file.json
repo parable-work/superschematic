@@ -5644,6 +5644,9 @@
           },
           "type": "array"
         },
+        "replica": {
+          "type": "boolean"
+        },
         "source": {
           "type": "string"
         }

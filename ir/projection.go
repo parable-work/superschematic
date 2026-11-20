@@ -50,6 +50,17 @@ type ProjectionDef struct {
 	// DISTINCT ON (By...) ORDER BY By..., Order..., so the first row in that
 	// order wins. Nil serves every row the predicates admit.
 	Collapse *ProjectionCollapse `json:"collapse,omitempty" yaml:"collapse,omitempty"`
+
+	// Replica says whether a reader may scan the view on a read replica of
+	// its database. Nil and true allow it. False sends the scan to the
+	// primary, for a view whose rows must not lag a write (D121).
+	Replica *bool `json:"replica,omitempty" yaml:"replica,omitempty"`
+}
+
+// AllowsReplica reports whether a reader may scan the view on a read
+// replica: true unless the declaration says replica: false.
+func (p *ProjectionDef) AllowsReplica() bool {
+	return p.Replica == nil || *p.Replica
 }
 
 // ProjectionJoin is one joined table of a projection view.

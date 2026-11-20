@@ -76,6 +76,7 @@ export abstract class AppPreference {
 | `migration` | The 14-digit version stamp of the generated migration pair. Once a build writes the pair, the stamp names those files for good: a changed declaration takes a new stamp, which `check` and `build` name ([The migration stamp](#the-migration-stamp)). |
 | `where` | Row rules, all ANDed, in order. The forms are below. |
 | `collapse` | Keeps one row per key: `by` lists the `alias.field` columns of the key (`DISTINCT ON`), `order` ranks the rows that share it and the first wins. |
+| `replica` | Whether a reader may scan the view on a read replica of its database. Omitted or `true` allows it. `false` is for a view whose rows must not lag a write, such as one that hides rows a write has just withdrawn: the Arrow schema then says `false` in `projection.replica`, and a reader scans the primary (D121). |
 | `@join<Table>(alias, on, kind?)` | Another table of the schema. `on` maps `alias.field` equalities; `kind` is `"inner"` (the default) or `"left"`. A left join makes every column read through its alias nullable. |
 | Class fields | The view's columns, in order. Each reads `base.<field>` unless `@column` names another `alias.field`, or computes it with `{ function, args }`. |
 
@@ -205,6 +206,7 @@ Every key starts with the naming file's
 | `<prefix>projection.settings` | schema | every setting the view reads, comma-separated, in first-use order |
 | `<prefix>projection.optional_settings` | schema | the subset a reader may leave unset |
 | `<prefix>projection.rows` | schema | `one` when the view collapses, `all` otherwise |
+| `<prefix>projection.replica` | schema | `false` when the declaration says `replica: false`, so a reader scans the primary; `true` otherwise |
 
 A reader sets every required setting (`SET LOCAL` or `set_config(name,
 value, true)` in the scan's transaction) before it reads the view.
