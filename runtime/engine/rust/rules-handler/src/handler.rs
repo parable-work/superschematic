@@ -29,6 +29,7 @@ use crate::store::{
 };
 use crate::validate::{self, Mode};
 use crate::values::{base62, uuid_of};
+use crate::view::{with_view, Scope};
 
 /// How long a fire a guard vetoed waits before it falls due again (D103's
 /// release): a minute.
@@ -199,7 +200,7 @@ pub(crate) struct Reads<'a> {
 }
 
 impl<'a> Reads<'a> {
-    fn ask(&mut self, read: StoreRead) -> Option<&'a StoreAnswer> {
+    pub fn ask(&mut self, read: StoreRead) -> Option<&'a StoreAnswer> {
         let answer = self.answers.get(&read);
         if answer.is_none() && !self.need.contains(&read) {
             self.need.push(read);
@@ -392,7 +393,7 @@ impl<'a> Handler<'a> {
                 crate::publish::publish(self, context, type_name, *discard, &mut reads)
             }
             Request::Describe { type_name } => self.describe(type_name, &mut reads),
-            Request::Get { type_name, id } => self.get(type_name, id, &mut reads),
+            Request::Get { type_name, id } => self.get(type_name, id, context, &mut reads),
             Request::Create {
                 type_name,
                 data,
@@ -419,8 +420,8 @@ impl<'a> Handler<'a> {
                 type_name,
                 filter,
                 sort,
-                *limit,
-                cursor.as_deref(),
+                (*limit, cursor.as_deref()),
+                context,
                 &mut reads,
             ),
             Request::Operation {
@@ -546,6 +547,7 @@ impl<'a> Handler<'a> {
         &self,
         type_name: &str,
         id: &str,
+        context: &Context,
         reads: &mut Reads<'_>,
     ) -> Result<HandlerStep, Refusal> {
         let live = self.live(reads)?;
@@ -555,7 +557,14 @@ impl<'a> Handler<'a> {
         };
         let model = live.model(type_name)?;
         let row = row.ok_or_else(|| not_found(type_name, id))?;
-        Ok(done(filter::render(model, row), Vec::new()))
+        let Some(views) = self.views(&live, model, &[row], Scope::Row, context, reads)? else {
+            return Ok(take(reads).wait());
+        };
+        let view = views.into_iter().next().unwrap_or_default();
+        Ok(done(
+            with_view(filter::render(model, row), view),
+            Vec::new(),
+        ))
     }
 
     /// The key a create writes: the one its data names, in its stored form,
@@ -957,8 +966,8 @@ impl<'a> Handler<'a> {
         type_name: &str,
         filter_given: &Value,
         sort: &[Sort],
-        limit: Option<usize>,
-        cursor: Option<&str>,
+        (limit, cursor): (Option<usize>, Option<&str>),
+        context: &Context,
         reads: &mut Reads<'_>,
     ) -> Result<HandlerStep, Refusal> {
         let Some(live) = self.live(reads)? else {
@@ -1006,7 +1015,14 @@ impl<'a> Handler<'a> {
         } else {
             None
         };
-        let items: Vec<Value> = kept.iter().map(|row| filter::render(model, row)).collect();
+        let Some(views) = self.views(&live, model, &kept, Scope::Table, context, reads)? else {
+            return Ok(take(reads).wait());
+        };
+        let items: Vec<Value> = kept
+            .iter()
+            .zip(views)
+            .map(|(row, view)| with_view(filter::render(model, row), view))
+            .collect();
         Ok(done(
             json!({"items": items, "next": next.unwrap_or(Value::Null)}),
             Vec::new(),
