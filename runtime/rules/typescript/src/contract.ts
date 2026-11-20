@@ -348,6 +348,8 @@ export interface DeclaredOperation {
   readonly resultSchema: unknown;
   readonly writes?: boolean;
   readonly scope?: 'instance' | 'schema' | 'namespace';
+  /** True for a writing operation of a row that writes beside it (D77's primitive 1, Comments'): its use's sub-tables and shared tables alone, so the row's version stays and no other use's guard is asked. */
+  readonly beside?: boolean;
   readonly [member: string]: unknown;
 }
 

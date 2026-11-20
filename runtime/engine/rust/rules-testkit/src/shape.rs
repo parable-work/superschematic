@@ -741,6 +741,18 @@ pub fn engine_error(refusal: &Refusal, type_name: &str, live_version: usize) -> 
         {
             error["message"] = Value::from(format!("{} in namespace {NAMESPACE}", refusal.message));
         }
+        // Comments' ref block names a row the caller may read, which the
+        // engine found in its namespace (D103's step 4).
+        "BehaviorVetoError"
+            if details.and_then(|details| details.get("vetoCode"))
+                == Some(&Value::from("ref_not_found")) =>
+        {
+            let suffix = format!(" in namespace {NAMESPACE}");
+            error["message"] = Value::from(format!("{}{suffix}", refusal.message));
+            if let Some(reason) = error["details"]["reason"].as_str() {
+                error["details"]["reason"] = Value::from(format!("{reason}{suffix}"));
+            }
+        }
         _ => {}
     }
     error

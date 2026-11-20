@@ -341,6 +341,25 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 /// replay holds its own count to this one.
 const REVISIONS_FLOOR: usize = 104;
 
+/// The steps `core-comments.transcript.json` holds, of
+/// `core-comments.json`'s 502 (D103's step 4): 35 define and publish checks
+/// and 203 creates, deletes and invokes, in its 24 scenarios: each
+/// message, edit and reaction a row of a sub-table of the use, each
+/// conversation's high-water marks a row of its shared table, and each
+/// write beside the row, so the row's version stays. The 264 left out are
+/// what the replay skips (streamed replies, read state, deliveries, search,
+/// anchors and attachments, the scenarios with an access policy, the reads
+/// of the event log that hold a write beside the row), opens and reads. An
+/// adapter's replay holds its own count to this one.
+const COMMENTS_FLOOR: usize = 238;
+
+/// The steps `core-comments-beside.transcript.json` holds, of the
+/// hand-written `core-comments-beside.json`'s 29 (D103's step 4): 6 define
+/// and publish checks and 19 commands, each with the row's version after
+/// it, which a write beside the row leaves where the lease's acquire put
+/// it. The 4 left out are the opens and the reads of the host.
+const COMMENTS_BESIDE_FLOOR: usize = 25;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     // Each transcript by its name, from the recording of its source's name.
@@ -369,6 +388,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
             LEASE_NUMBERING_FLOOR,
         ),
         ("core-revisions", "core-revisions", REVISIONS_FLOOR),
+        ("core-comments", "core-comments", COMMENTS_FLOOR),
     ] {
         let written = written(name, &scenario_path(source), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
@@ -420,6 +440,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-reconcile", RECONCILE_FLOOR, true),
         ("core-schedules", SCHEDULES_FLOOR, true),
         ("core-pool", POOL_FLOOR, true),
+        ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
     ] {
         let written = written(name, &hand_written_path(name), hand_written_transcript);
         let mut repeats = 0;

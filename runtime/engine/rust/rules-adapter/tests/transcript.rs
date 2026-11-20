@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 24] = [
+const TRANSCRIPTS: [(&str, usize); 26] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -116,6 +116,8 @@ const TRANSCRIPTS: [(&str, usize); 24] = [
     ("core-numbering", NUMBERING_FLOOR),
     ("core-lease-numbering", LEASE_NUMBERING_FLOOR),
     ("core-revisions", REVISIONS_FLOOR),
+    ("core-comments", COMMENTS_FLOOR),
+    ("core-comments-beside", COMMENTS_BESIDE_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -270,6 +272,17 @@ const LEASE_NUMBERING_FLOOR: usize = 14;
 /// checks, each revision and proposal a row of a sub-table of the use, and
 /// each approval an operation's write of the row's own fields.
 const REVISIONS_FLOOR: usize = 104;
+
+/// core-comments' floor (D103's step 4): 238 steps, 203 commands and 35
+/// checks, each message, edit and reaction a row of a sub-table of the use,
+/// each write beside the row, and each conversation's high-water marks a
+/// row of the use's shared table.
+const COMMENTS_FLOOR: usize = 238;
+
+/// core-comments-beside's floor (D103's step 4): 25 steps, 19 commands and
+/// 6 checks, each command's row version held to the one the lease's acquire
+/// left, which a write beside the row does not move.
+const COMMENTS_BESIDE_FLOOR: usize = 25;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;

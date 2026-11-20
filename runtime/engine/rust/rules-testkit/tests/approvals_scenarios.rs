@@ -6,21 +6,24 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-approvals.json` the replayer maps and compares: 151
+/// The steps of `core-approvals.json` the replayer maps and compares: 185
 /// of its 198. Each recorded type is given an own field createdBy, which
 /// its creates set to their caller's subject and no comparison reads, as
-/// the engine kept an instance's creator beside it. The 47 it skips: the 35
-/// steps of the scenario that composes Comments and Revisions, which the
-/// core does not run (a change of the own fields an approval's `update()`
-/// makes); 10 of the new-version scenario, from the publish that removes a
-/// gate on a type with rows, whose sign-offs the engine's afterConfigChange
-/// consumed there and the core consumes at each row's next write; a read
-/// of the event log that holds a move a Reactions rule made; and the define
-/// the engine's requires check refused, a type with Approvals and no
-/// Workflow, which the core refuses in its own words. The `open` steps that
-/// run count but compare nothing, and the `runner.runDue` that runs the
-/// Reactions rule's changes counts as checked once they answered.
-const FLOOR: usize = 151;
+/// the engine kept an instance's creator beside it. The scenario that
+/// composes Comments and Revisions runs since the core runs both (D103's
+/// step 4): a post beside the row consumes no sign-off, an update that
+/// changes nothing consumes none, and an approval's `update()` of the own
+/// fields consumes them as an update does. The 13 it skips: 10 of the
+/// new-version scenario, from the publish that removes a gate on a type
+/// with rows, whose sign-offs the engine's afterConfigChange consumed there
+/// and the core consumes at each row's next write; two reads of the event
+/// log, one that holds a move a Reactions rule made and one that holds a
+/// post beside the row; and the define the engine's requires check
+/// refused, a type with Approvals and no Workflow, which the core refuses
+/// in its own words. The `open` steps that run count but compare nothing,
+/// and the `runner.runDue` that runs the Reactions rule's changes counts as
+/// checked once they answered.
+const FLOOR: usize = 185;
 
 #[test]
 fn approvals_scenarios_replay_on_the_core() {
