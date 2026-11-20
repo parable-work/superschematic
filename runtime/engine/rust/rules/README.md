@@ -949,10 +949,11 @@ one raw write, in the 14 scenarios a core with no test fixtures runs;
 and 29 changes a runner ran, in 13 scenarios, the one whose fire a
 StateRules guard vetoes among them; `core-reactions` to 618
 steps, 114 checks and 504 commands, 266 of them changes, in 27 scenarios;
-`core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
-them changes, in 4 scenarios; `core-constants` to 39 steps, 19 checks and
-20 commands, in 4 scenarios; `core-staterules` to 76 steps, 33 checks and
-43 commands, in 7 scenarios; `core-approvals` to 122 steps, 29 checks and
+`core-reactions-changes` to 62 steps, 14 checks and 48 commands, 24 of
+them changes, in 5 scenarios; `core-constants` to 39 steps, 19 checks and
+20 commands, in 4 scenarios; `core-staterules` to 88 steps, 39 checks and
+49 commands, in 9 scenarios, the two of test.Recorder's write of the
+row's own fields and the two beside Revisions among them; `core-approvals` to 122 steps, 29 checks and
 93 commands, 71 of them operations and 5 changes, in 9 scenarios;
 `core-workflow-principals` to 101 steps,
 38 define and publish checks, fourteen of them refused, and 63 commands, five
@@ -971,7 +972,13 @@ ran, and one raw write, in 8 scenarios, each fire with the events it
 wrote (`expect.events`); and, of Rollups and Dependencies (D104's step
 4), `core-rollups` to 180 steps, 72 checks and 108 commands, in 13
 scenarios, and `core-dependencies` to 266 steps, 107 checks and 159
-commands, in 18 scenarios. Every transcript's `behaviors` lists the
+commands, in 18 scenarios; and, of Numbering and Revisions (D103's step
+4), `core-numbering` to 104 steps, 46 checks and 58 commands, in 8
+scenarios, each create's number taken from the use's shared table,
+`core-lease-numbering` (the work queue's `workqueue-lease-numbering.json`)
+to 14 steps, 6 checks and 8 commands, and `core-revisions` to 104 steps,
+35 checks and 69 commands, 44 of them operations, in 12 scenarios, each
+approval an operation's write of the row's own fields. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to

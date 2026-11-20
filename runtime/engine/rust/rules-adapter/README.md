@@ -365,10 +365,10 @@ write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
 deadlines and 29 changes, and 54 checks), the scenario whose fire StateRules
 vetoes among them; `core-reactions.transcript.json`, 618 steps (504
 commands, 266 of them changes, and 114 checks);
-`core-reactions-changes.transcript.json`, 60 steps (48 commands, 24 of them
-changes, and 12 checks); `core-constants.transcript.json`, 39 steps (20
-commands and 19 checks); `core-staterules.transcript.json`, 76 steps (43
-commands and 33 checks); `core-approvals.transcript.json`, 122 steps (93
+`core-reactions-changes.transcript.json`, 62 steps (48 commands, 24 of them
+changes, and 14 checks); `core-constants.transcript.json`, 39 steps (20
+commands and 19 checks); `core-staterules.transcript.json`, 88 steps (49
+commands and 39 checks); `core-approvals.transcript.json`, 122 steps (93
 commands, 71 of them operations and 5 changes, and 29 checks); and the
 hand-written `core-workflow-principals.transcript.json` (D104, D113), 101
 steps (63 commands, each compared with its row's `expect.version`, and 38
@@ -397,12 +397,19 @@ row's `expect.version`, 29 checks and one raw write); and, of Rollups and
 Dependencies (D104's step 4), `core-rollups.transcript.json`, 180 steps
 (108 commands and 72 checks), and `core-dependencies.transcript.json`, 266
 steps (159 commands, the blockers kept as sub-table rows, and 107 checks);
-each command's
+and, of Numbering and Revisions (D103's step 4),
+`core-numbering.transcript.json`, 104 steps (58 commands, each create's
+number taken from Numbering's shared table of counts, which the replay
+keeps as a table of its own, and 46 checks),
+`core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
+checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
+each approval an operation's write of the row's own fields, and 35
+checks); each command's
 `expect.events` compared with what `read_queued_events` reads of every
 type's event queue after it, which it then empties; each held to a floor
 of its step count, its `expect.others` compared on every command step and
 its numbers by value, 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
-schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are
-skipped without it, saying so.
+schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), each
+transcript's replay too, and are skipped without it, saying so.
