@@ -97,10 +97,11 @@ the field itself (`status`), and its other fields follow the field's name
 
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
-Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering and
-Revisions. Comments and Blueprint are not ported yet, so
-`examples/engine-notes` and `examples/engine-jobs` still run on the
-engine.
+Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
+Revisions and Comments. Blueprint is not ported yet, so
+`examples/engine-jobs` still runs on the engine, and so does
+`examples/engine-notes`, whose reads hold Comments' `composing` and
+`unread`, which wait for the core.
 
 A get and a list also show the fields a behavior computes at a read,
 which no row holds. They are named as the use's other fields are:
@@ -116,6 +117,11 @@ they stand. `describe` lists them under `computed`.
   the type's fields, relations and unique keys as an update is, so a
   patch the type refuses is kept as a proposal and its approval is
   refused with `422 invalid_instance` or `409 conflict`.
+- Comments' writes are beside the row: a post, an edit or a reaction
+  writes its messages, edits and reactions, and its conversation's row of
+  the type's shared table, and moves no version of the row. Its streamed
+  replies, read state, inbox, deliveries, search and attachments wait for
+  the core.
 
 ## Requests
 

@@ -6,8 +6,8 @@
 //! meter's scope, a link of the engine's Links, is a to-one relation on a
 //! table, whose operations run on the scope's row through `call_on`; the
 //! lease a reservation lives within is a table's Lease; and Comments,
-//! composed beside Budget only as another behavior of the scope type in
-//! the two config scenarios, is incidental (`INCIDENTAL`).
+//! composed beside Budget as another behavior of the scope type in the two
+//! config scenarios, runs on the core (D103's step 4).
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 

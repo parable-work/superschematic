@@ -291,7 +291,10 @@ type DeclaredField struct {
 // of its parameters and its result as the declaration writes them, and its
 // scope: "" or instance for one of a row, schema for one of the table as a
 // whole (D104), which runs as a command without a row, and namespace for
-// one the core runs no command for.
+// one the core runs no command for. Beside is true for a writing operation
+// of a row that writes beside it (D77's primitive 1, Comments'): its use's
+// sub-tables and shared tables alone, so the row's version stays and no
+// other use's guard is asked.
 type DeclaredOperation struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
@@ -299,4 +302,5 @@ type DeclaredOperation struct {
 	ResultSchema json.RawMessage `json:"resultSchema,omitempty"`
 	Writes       bool            `json:"writes,omitempty"`
 	Scope        string          `json:"scope,omitempty"`
+	Beside       bool            `json:"beside,omitempty"`
 }

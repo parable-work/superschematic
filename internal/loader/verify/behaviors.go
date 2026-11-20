@@ -250,7 +250,9 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // table's Workflow (checkSchedulesConfig, D104), a Pool use's order to
 // the table's fields (checkPoolConfig, D104), and a Rollups or
 // Dependencies use's tables, relations and fields to its database
-// (checkRollupsConfig, checkDependenciesConfig, D104's step 4).
+// (checkRollupsConfig, checkDependenciesConfig, D104's step 4), and a
+// Comments use's members to what the behaviors' core runs
+// (checkCommentsConfig, D103's step 4).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -350,6 +352,10 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			case dependenciesBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkDependenciesConfig(schema, td, ref, r)
+				}
+			case commentsBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkCommentsConfig(td, ref, r)
 				}
 			case constantsBehavior, stateRulesBehavior, approvalsBehavior, leaseBehavior, retriesBehavior, presenceBehavior, budgetBehavior, seatsBehavior, schedulesBehavior, poolBehavior:
 				if behavior.ValidateConfig(ref.Config) != nil {

@@ -261,11 +261,23 @@ impl TableDecl {
     }
 }
 
-/// One declared operation: its name, whether it writes, and whether it
-/// runs on the table as a whole (D104), a declaration's scope `schema`. A
-/// writing operation of a row moves the row's version; one that does not
-/// writes nothing. One of the table writes rows only through the operations
-/// of their uses and the creates it makes.
+/// One declared operation: its name, whether it writes, whether it runs on
+/// the table as a whole (D104), a declaration's scope `schema`, and whether
+/// it writes beside its row (D77's primitive 1, D103's step 4). A writing
+/// operation of a row moves the row's version; one that does not writes
+/// nothing. One of the table writes rows only through the operations of
+/// their uses and the creates it makes.
+///
+/// A writing operation beside its row (a declaration's `"beside": true`)
+/// writes only its use's sub-tables and shared tables: the row's version,
+/// its own fields and its owned fields stay as they are, no other use's
+/// guard is asked, no after-change hook runs, and no precondition but its
+/// own use's is taken, since only its use's guard reads one. What it keeps
+/// beside the row is not the row: a conversation's messages are no edit of
+/// the ticket they are on, so a busy thread moves no ETag of it and a lease
+/// another principal holds on it stops no reply (Comments). A behavior
+/// whose writes beside a row must hold to each other fences them itself,
+/// as Comments does through a shared row of its own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationDecl {
@@ -275,6 +287,10 @@ pub struct OperationDecl {
     /// [`crate::Action::TableOperation`] runs; false for one of a row.
     #[serde(default, skip_serializing_if = "is_false")]
     pub table: bool,
+    /// True for a writing operation of a row that writes beside it: its
+    /// use's sub-tables and shared tables alone.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub beside: bool,
 }
 
 impl Declaration {
@@ -355,6 +371,19 @@ impl Declaration {
             name: name.into(),
             writes,
             table: false,
+            beside: false,
+        });
+        self
+    }
+
+    /// The declaration with a writing operation of a row that writes beside
+    /// it ([`OperationDecl::beside`]).
+    pub fn beside_operation(mut self, name: impl Into<String>) -> Self {
+        self.operations.push(OperationDecl {
+            name: name.into(),
+            writes: true,
+            table: false,
+            beside: true,
         });
         self
     }
@@ -365,6 +394,7 @@ impl Declaration {
             name: name.into(),
             writes,
             table: true,
+            beside: false,
         });
         self
     }
@@ -1230,7 +1260,8 @@ mod tests {
             Some(&OperationDecl {
                 name: "pick".into(),
                 writes: false,
-                table: true
+                table: true,
+                beside: false,
             })
         );
         assert!(declaration.find_table_operation("markOut").is_none());

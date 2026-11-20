@@ -162,7 +162,18 @@ with a fallback arm.
   included.
 - `Delete { key }`.
 - `Operation { key, use_id, operation, params }`: one use's declared
-  operation.
+  operation. A writing operation whose declaration says it is beside the
+  row (`"beside": true`, `OperationDecl::beside`, D77's primitive 1:
+  Comments' writes) asks its own use's guard alone, writes no row and runs
+  no `after_change`: its change set holds its use's sub-table rows and
+  shared-table rows and no `rows` entry, so the row's version stays, and a
+  write of an own or owned field, another row, an event or a deadline is a
+  defect. It takes no precondition but its own use's: another use's entry
+  is refused (`operation post of behavior Comments is beside the instance
+  (D77) and asks only its own behavior's guard, so it takes no
+  precondition for behavior Lease`). A host applies such a change set as
+  any other; a behavior that holds its writes beside a row apart fences
+  them through a shared row of its own.
 - `TableOperation { use_id, operation, params }` (D104): one use's
   operation of the table as a whole, a declaration's `"scope": "schema"`
   (Pool's `pick`, Lease's `expireHolder`), a command without a row: no key
@@ -978,7 +989,11 @@ scenarios, each create's number taken from the use's shared table,
 `core-lease-numbering` (the work queue's `workqueue-lease-numbering.json`)
 to 14 steps, 6 checks and 8 commands, and `core-revisions` to 104 steps,
 35 checks and 69 commands, 44 of them operations, in 12 scenarios, each
-approval an operation's write of the row's own fields. Every transcript's `behaviors` lists the
+approval an operation's write of the row's own fields; and, of Comments
+(D103's step 4), `core-comments` to 238 steps, 35 checks and 203
+commands, every write beside the row, and the hand-written
+`core-comments-beside` to 25 steps, 6 checks and 19 commands, each
+command's row version held where a lease's acquire left it. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to

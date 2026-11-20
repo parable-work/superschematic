@@ -111,7 +111,8 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // alone (RulesPackage), so a build-time table may compose them, then
 // Schedules, D104's step 3's second part, then Pool, the rest of its step
 // 3, then Rollups and Dependencies, the first of D103's step 4's waves
-// after D104's, then Numbering and Revisions, its next. Of these, a table
+// after D104's, then Numbering and Revisions, its next, then Comments, the
+// wave after. Of these, a table
 // implements one that names no value field (implements Timers<T, C>, and
 // Constants, StateRules and Approvals since D104's step 2, Lease,
 // Presence, Budget and Retries since its second batch, Seats since its
@@ -120,12 +121,12 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // Workflow<C>, and observed: Reconcile<C> beside it since D104's step 3,
 // and number: Numbering<C> since D103's step 4, which ports the engine's
 // remaining behaviors in waves after them, and implements Rollups,
-// Dependencies and Revisions<T, C> since that step too). A test holds the
+// Dependencies, Revisions and Comments<T, C> since that step too). A test holds the
 // list to the behaviors each transcript of runtime/engine/testdata/rules
 // records.
 var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries", "Seats", "Reconcile", "Schedules", "Pool",
 	// D103's step 4, its later waves, in the order they were ported.
-	"Rollups", "Dependencies", "Numbering", "Revisions",
+	"Rollups", "Dependencies", "Numbering", "Revisions", "Comments",
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a
@@ -137,7 +138,64 @@ var tableLeavesOut = map[string]map[string]string{
 	"Dependencies": {
 		"listDependents": "the rows a row blocks are a query over every table's blockers, which the behaviors' core cannot enumerate, so the engine serves it alone",
 	},
+	// What a table's Comments leaves out, as the core's comments module
+	// lists it (LEFT_OUT_OPERATIONS): streamed replies wait for signals,
+	// read state for namespace operations, and code anchors for
+	// attachments (D77, D103's step 4).
+	"Comments": {
+		"begin":       commentsStreamed,
+		"appendDraft": commentsStreamed,
+		"finish":      commentsStreamed,
+		"interrupt":   commentsStreamed,
+		"markRead":    commentsReadState,
+		"follow":      commentsReadState,
+		"moveAnchor":  commentsAnchors,
+	},
 }
+
+// Why a table's Comments leaves out each part the behaviors' core cannot
+// run yet, in the core's words (D103's step 4).
+const (
+	commentsStreamed    = "a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)"
+	commentsReadState   = "read state (markRead, follow, the unread field and a listing's readUpTo), the inbox and deliveries each waits for namespace operations on the core, which the engine read them across a namespace by (D77's primitive 3)"
+	commentsAnchors     = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
+	commentsAttachments = "an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+)
+
+// RefusedMember is a member of a behavior's config that a table's use of it
+// refuses, and why.
+type RefusedMember struct {
+	Member string
+	Why    string
+}
+
+// tableRefusesMembers are the members of a behavior's config that a table's
+// use of it refuses, by behavior, in the core's order, each with why: what
+// the behaviors' core cannot run yet (D103's step 4). Per-behavior code, as
+// tableLeavesOut is, until step 5 derives it from the behavior's class.
+var tableRefusesMembers = map[string][]RefusedMember{
+	"Comments": {
+		{"composeTimeoutMs", commentsStreamed},
+		{"maxDrafts", commentsStreamed},
+		{"deliverPermission", commentsReadState},
+		{"maxAttempts", commentsReadState},
+		{"retryBackoffMs", commentsReadState},
+		{"deliveryRetentionMs", commentsReadState},
+		{"anchorPermission", commentsAnchors},
+		{"attachments", commentsAttachments},
+	},
+}
+
+// TableRefusesMembers are the members of the behavior name's config a
+// table's use of it refuses, in the core's order, each with why; none for
+// a behavior whose every member a table takes.
+func TableRefusesMembers(name string) []RefusedMember {
+	return tableRefusesMembers[name]
+}
+
+// CommentsAttachments is why a table's Comments refuses an attachment
+// block, and a config's blocks that lists one (D103's step 4).
+const CommentsAttachments = commentsAttachments
 
 // TableLeavesOut is why a table's use of the behavior name leaves its
 // operation out, or "" for one the behaviors' core runs: the layout lists

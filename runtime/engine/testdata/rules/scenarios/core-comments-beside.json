@@ -1,0 +1,1002 @@
+{
+  "name": "core-comments-beside",
+  "description": "Comments on a table, D103's step 4: every write beside the row (D77's primitive 1), so a post moves no version of the row and asks no other behavior's guard, another principal posting while one holds the row's lease, its holder posting without the token its lease requires, and a precondition presented to a post refused; a moderator editing another's message; code blocks held to their own checks and the config's kinds; and the config members a table's Comments waits for refused at define. Cases written by hand in the recorded format, since the engine's recordings hold none of a table's. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D103's step 4): runtime/engine/testdata/rules/scenarios/core-comments-beside.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Comments > a write beside the row moves no version of it and asks no other guard: another principal posts while the lease is held, its holder posts with no token, and a post takes no precondition",
+      "behaviors": [
+        "Lease",
+        "Comments"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "wren": {
+          "subject": "wren",
+          "permissions": []
+        },
+        "otto": {
+          "subject": "otto",
+          "permissions": []
+        },
+        "carol": {
+          "subject": "carol",
+          "permissions": [
+            "jobs.moderate"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Job",
+              "types": {
+                "Job": {
+                  "name": "Job",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Lease",
+                      "config": {
+                        "requireToken": true
+                      }
+                    },
+                    {
+                      "name": "Comments",
+                      "config": {
+                        "moderatePermission": "jobs.moderate"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Job",
+            "version": null,
+            "instanceType": "Job"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Job"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Job",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Job",
+            {
+              "title": "Build"
+            },
+            {
+              "id": "j1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Job",
+            "id": "j1",
+            "data": {
+              "title": "Build"
+            },
+            "behaviors": {
+              "Lease": {
+                "token": 0,
+                "active": false,
+                "expiries": 0
+              },
+              "Comments": {
+                "messages": 0,
+                "threads": {
+                  "open": 0,
+                  "resolved": 0
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "wren",
+          "args": [
+            "Job",
+            "j1",
+            "acquire",
+            {}
+          ],
+          "expect": {
+            "token": 1,
+            "expiresAt": 1060000,
+            "heartbeatMs": 20000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "otto",
+          "args": [
+            "Job",
+            "j1",
+            {
+              "title": "Mine"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Lease vetoes update of Job j1: another principal holds its lease, until 1970-01-01T00:17:40.000Z",
+            "details": {
+              "behavior": "Lease",
+              "action": "update",
+              "reason": "another principal holds its lease, until 1970-01-01T00:17:40.000Z",
+              "vetoCode": "held_by_another",
+              "vetoDetails": {
+                "expiresAt": 1060000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "otto",
+          "args": [
+            "Job",
+            "j1",
+            "post",
+            {
+              "body": "Taking over?"
+            }
+          ],
+          "expect": {
+            "id": 1,
+            "author": "otto",
+            "state": "posted",
+            "body": "Taking over?",
+            "blocks": [],
+            "mentions": [],
+            "reactions": {},
+            "createdAt": 1000000,
+            "postedAt": 1000000,
+            "stand": 1,
+            "edits": 0,
+            "pinned": false,
+            "replies": 0,
+            "participants": [
+              "otto"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "wren",
+          "args": [
+            "Job",
+            "j1",
+            "post",
+            {
+              "body": "Started.",
+              "thread": 1,
+              "quotes": 1
+            }
+          ],
+          "expect": {
+            "id": 2,
+            "thread": 1,
+            "quotes": 1,
+            "author": "wren",
+            "state": "posted",
+            "body": "Started.",
+            "blocks": [],
+            "mentions": [],
+            "reactions": {},
+            "createdAt": 1000000,
+            "postedAt": 1000000,
+            "stand": 2,
+            "edits": 0,
+            "pinned": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "wren",
+          "args": [
+            "Job",
+            "j1",
+            "post",
+            {
+              "body": "Done."
+            },
+            {
+              "preconditions": {
+                "Lease": {
+                  "token": 1
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "PreconditionsError",
+            "code": "invalid_argument",
+            "message": "preconditions of Job: /Lease: operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease",
+            "details": {
+              "issues": [
+                {
+                  "path": "/Lease",
+                  "message": "operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "otto",
+          "args": [
+            "Job",
+            "j1",
+            "react",
+            {
+              "message": 2,
+              "emoji": "eyes"
+            }
+          ],
+          "expect": {
+            "id": 2,
+            "thread": 1,
+            "quotes": 1,
+            "author": "wren",
+            "state": "posted",
+            "body": "Started.",
+            "blocks": [],
+            "mentions": [],
+            "reactions": {
+              "eyes": {
+                "count": 1,
+                "mine": true
+              }
+            },
+            "createdAt": 1000000,
+            "postedAt": 1000000,
+            "stand": 2,
+            "edits": 0,
+            "pinned": false
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "wren",
+          "args": [
+            "Job",
+            "j1",
+            "edit",
+            {
+              "message": 1,
+              "body": "Not yours."
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Comments vetoes edit of Job j1: wren is not the author of message 1 of Job j1; otto is",
+            "details": {
+              "behavior": "Comments",
+              "action": "edit",
+              "reason": "wren is not the author of message 1 of Job j1; otto is",
+              "vetoCode": "not_author",
+              "vetoDetails": {
+                "message": 1,
+                "author": "otto"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "carol",
+          "args": [
+            "Job",
+            "j1",
+            "edit",
+            {
+              "message": 1,
+              "body": "Who takes it over?",
+              "mentions": [
+                "wren"
+              ]
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "id": 1,
+            "author": "otto",
+            "state": "posted",
+            "body": "Who takes it over?",
+            "blocks": [],
+            "mentions": [
+              "wren"
+            ],
+            "reactions": {},
+            "createdAt": 1000000,
+            "postedAt": 1000000,
+            "stand": 1,
+            "editedAt": 1001000,
+            "edits": 1,
+            "pinned": false,
+            "replies": 1,
+            "lastReplyAt": 1000000,
+            "participants": [
+              "wren",
+              "otto"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "otto",
+          "args": [
+            "Job",
+            "j1",
+            "listEdits",
+            {
+              "message": 1
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "edit": 1,
+                "body": "Taking over?",
+                "blocks": [],
+                "mentions": [],
+                "by": "carol",
+                "at": 1001000
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Job",
+            "j1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Job",
+            "id": "j1",
+            "data": {
+              "title": "Build"
+            },
+            "behaviors": {
+              "Lease": {
+                "holder": "wren",
+                "token": 1,
+                "acquiredAt": 1000000,
+                "renewedAt": 1000000,
+                "expiresAt": 1060000,
+                "active": true,
+                "expiries": 0
+              },
+              "Comments": {
+                "messages": 2,
+                "lastMessageAt": 1000000,
+                "threads": {
+                  "open": 1,
+                  "resolved": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Comments > a code block is held to its lines and its path, the config's kinds and its longest body, and a table's Comments refuses the members it waits for",
+      "behaviors": [
+        "Comments"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Comments",
+                      "config": {
+                        "composeTimeoutMs": 60000
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Doc/behaviors/0/config",
+                  "message": "type Doc: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the composing field) waits for signals on the core, which the engine sent its drafts by (D77's primitive 2)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Comments",
+                      "config": {
+                        "blocks": [
+                          "code",
+                          "attachment"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Doc/behaviors/0/config: type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Doc/behaviors/0/config",
+                  "message": "type Doc: behavior Comments config: blocks lists attachment: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Doc",
+              "types": {
+                "Doc": {
+                  "name": "Doc",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Comments",
+                      "config": {
+                        "blocks": [
+                          "code",
+                          "ref"
+                        ],
+                        "maxBodyLength": 20,
+                        "editWindowMs": 60000
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Doc",
+            "version": null,
+            "instanceType": "Doc"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Doc"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Doc",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            {
+              "title": "Orders"
+            },
+            {
+              "id": "d1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Orders"
+            },
+            "behaviors": {
+              "Comments": {
+                "messages": 0,
+                "threads": {
+                  "open": 0,
+                  "resolved": 0
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "Off by one.",
+              "blocks": [
+                {
+                  "kind": "code",
+                  "repo": "github.com/acme/shop",
+                  "path": "src/orders.rs",
+                  "revision": "9c1f2e7",
+                  "lines": [
+                    48,
+                    40
+                  ],
+                  "snippet": "fn place() {"
+                }
+              ]
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation post of behavior Comments: /blocks/0/lines: must have its first line at most its last",
+            "details": {
+              "issues": [
+                {
+                  "path": "/blocks/0/lines",
+                  "message": "must have its first line at most its last"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "Off by one.",
+              "blocks": [
+                {
+                  "kind": "code",
+                  "repo": "github.com/acme/shop",
+                  "path": "src/../orders.rs",
+                  "revision": "9c1f2e7",
+                  "lines": [
+                    40,
+                    48
+                  ],
+                  "snippet": "fn place() {"
+                }
+              ]
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation post of behavior Comments: /blocks/0/path: must be a relative path: no leading or trailing /, no \\, and no empty, . or .. part",
+            "details": {
+              "issues": [
+                {
+                  "path": "/blocks/0/path",
+                  "message": "must be a relative path: no leading or trailing /, no \\, and no empty, . or .. part"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "Shot.",
+              "blocks": [
+                {
+                  "kind": "attachment",
+                  "uri": "https://files.example/a.png",
+                  "name": "a.png",
+                  "mediaType": "image/png",
+                  "bytes": 10,
+                  "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              ]
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation post of behavior Comments: /blocks/0: is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)",
+            "details": {
+              "issues": [
+                {
+                  "path": "/blocks/0",
+                  "message": "is an attachment block: an attachment block waits for attachments on the core (D77's step 5, D103's step 4)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "Ran it.",
+              "blocks": [
+                {
+                  "kind": "action",
+                  "title": "ran the tests",
+                  "status": "succeeded"
+                }
+              ]
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Comments vetoes post of Doc d1: block 0 is a action block, which Comments on Doc does not allow (it allows code, ref)",
+            "details": {
+              "behavior": "Comments",
+              "action": "post",
+              "reason": "block 0 is a action block, which Comments on Doc does not allow (it allows code, ref)",
+              "vetoCode": "block_not_allowed",
+              "vetoDetails": {
+                "block": 0,
+                "kind": "action",
+                "allowed": [
+                  "code",
+                  "ref"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "This body is longer than twenty."
+            }
+          ],
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation post of behavior Comments: /body: must NOT have more than 20 characters",
+            "details": {
+              "issues": [
+                {
+                  "path": "/body",
+                  "message": "must NOT have more than 20 characters"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "Off by one.",
+              "blocks": [
+                {
+                  "kind": "code",
+                  "repo": "github.com/acme/shop",
+                  "path": "src/orders.rs",
+                  "revision": "9c1f2e7",
+                  "lines": [
+                    40,
+                    48
+                  ],
+                  "snippet": "fn place() {"
+                }
+              ],
+              "clientId": "c1"
+            }
+          ],
+          "expect": {
+            "id": 1,
+            "author": "alice",
+            "state": "posted",
+            "body": "Off by one.",
+            "blocks": [
+              {
+                "kind": "code",
+                "repo": "github.com/acme/shop",
+                "path": "src/orders.rs",
+                "revision": "9c1f2e7",
+                "lines": [
+                  40,
+                  48
+                ],
+                "snippet": "fn place() {"
+              }
+            ],
+            "mentions": [],
+            "reactions": {},
+            "createdAt": 1000000,
+            "postedAt": 1000000,
+            "stand": 1,
+            "edits": 0,
+            "pinned": false,
+            "replies": 0,
+            "participants": [
+              "alice"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "post",
+            {
+              "body": "Again.",
+              "clientId": "c1"
+            }
+          ],
+          "expect": {
+            "id": 1,
+            "author": "alice",
+            "state": "posted",
+            "body": "Off by one.",
+            "blocks": [
+              {
+                "kind": "code",
+                "repo": "github.com/acme/shop",
+                "path": "src/orders.rs",
+                "revision": "9c1f2e7",
+                "lines": [
+                  40,
+                  48
+                ],
+                "snippet": "fn place() {"
+              }
+            ],
+            "mentions": [],
+            "reactions": {},
+            "createdAt": 1000000,
+            "postedAt": 1000000,
+            "stand": 1,
+            "edits": 0,
+            "pinned": false,
+            "replies": 0,
+            "participants": [
+              "alice"
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1",
+            "edit",
+            {
+              "message": 1,
+              "body": "Off by two."
+            }
+          ],
+          "now": 1060001,
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Comments vetoes edit of Doc d1: message 1 was posted at 1000000, more than editWindowMs (60000) ago",
+            "details": {
+              "behavior": "Comments",
+              "action": "edit",
+              "reason": "message 1 was posted at 1000000, more than editWindowMs (60000) ago",
+              "vetoCode": "edit_window_passed",
+              "vetoDetails": {
+                "message": 1,
+                "postedAt": 1000000,
+                "editWindowMs": 60000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Doc",
+            "d1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Doc",
+            "id": "d1",
+            "data": {
+              "title": "Orders"
+            },
+            "behaviors": {
+              "Comments": {
+                "messages": 1,
+                "lastMessageAt": 1000000,
+                "threads": {
+                  "open": 1,
+                  "resolved": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -371,7 +371,7 @@ soft-deleted row left out, sub-table rows with a row that has none, and
 the refusal under a lock on SQLite) and a command without a row
 (`TestATableOperationRunsWithNoRow`: a read-only one writing nothing and a
 writing one's rows fenced), on SQLite and on Postgres. `transcript_test.go`
-replays the 24 transcripts in `runtime/engine/testdata/rules` on SQLite
+replays the 26 transcripts in `runtime/engine/testdata/rules` on SQLite
 and on Postgres, as the TypeScript adapter does:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, one raw
 write); `core-timers.transcript.json`, 139 steps (85 commands, 12 of them
@@ -424,7 +424,12 @@ number taken from a shared table of counts, and 46 checks),
 `core-lease-numbering.transcript.json`, 14 steps (8 commands and 6
 checks), and `core-revisions.transcript.json`, 104 steps (69 commands,
 each approval an operation's write of the row's own fields, and 35
-checks), each command held to its
+checks); and those of Comments (D103's step 4),
+`core-comments.transcript.json`, 238 steps (203 commands, each message,
+edit and reaction a sub-table row and each write beside the row, and 35
+checks), and `core-comments-beside.transcript.json`, 25 steps (19
+commands, each compared with its row's `expect.version`, which a write
+beside the row leaves, and 6 checks), each command held to its
 `expect.events` by reading every event queue of its database back after
 it and deleting what it read; each held to a floor of its step count, its `expect.others`
 compared on every command step, with 0 mismatches each. Each command runs over a layout of every

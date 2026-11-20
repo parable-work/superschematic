@@ -77,6 +77,14 @@
 //!   compared, and neither is one it refused for a member that is a table's
 //!   behavior's alone ([`TABLE_FORM`]: Workflow's `finished`, D113), which
 //!   the core takes and the hand-written scenarios hold.
+//! - What a table's Comments leaves out ([`TABLE_COMMENTS`], D103's step 4)
+//!   is left out of what a step expects: its fields `composing` and
+//!   `unread`, a message's `via` and a listing's `readUpTo`, and the
+//!   operations it leaves out of a declaration compared; a step that
+//!   invokes one of those operations stops the scenario. An operation beside
+//!   the row takes a caller's `expectedSeq` as a read does, which the replay
+//!   maps when the row's version is still that seq, and a read of the event
+//!   log that holds a write beside an instance is not compared.
 //! - `schemas.list`, `schemas.live` and `schemas.behaviors` are compared
 //!   by the types defined, the live version's behavior configs, and each
 //!   behavior's declared fields, operations and veto codes.
@@ -129,6 +137,8 @@ use superschematic_rules::{
     Action, Caller, Code, Command, Core, Declaration, FieldSpec, Refusal, Row, TypeSpec,
 };
 
+use superschematic_rules_behaviors::comments;
+
 use crate::fixtures;
 use crate::host::{Applied, Logged, MemoryHost, Store, MAX_CHANGES};
 use crate::shape::{self, FieldDef};
@@ -169,15 +179,12 @@ pub const RUNNER_MEMBERS: [(&str, &str); 2] = [("Lease", "sweepMs"), ("Presence"
 /// with why: the replay leaves the behavior's use out of each type it
 /// defines, its members out of every record and event it compares (an
 /// event of its operation left out whole), and skips each step that calls
-/// one of its operations or whose recorded refusal names it.
-pub const INCIDENTAL: [(&str, &str, &str); 2] = [
-    ("workqueue-lease", "Comments", COMMENTS_INCIDENTAL),
-    ("workqueue-budget", "Comments", BUDGET_COMMENTS_INCIDENTAL),
-];
-
-const COMMENTS_INCIDENTAL: &str = "Comments, which the core does not run (D103, step 4), is composed beside Lease only as another behavior's writing operation Lease's guard holds: its steps, and a refusal that names it, are not compared; Workflow's transition holds the guard's rule on another behavior's operation";
-
-const BUDGET_COMMENTS_INCIDENTAL: &str = "Comments, which the core does not run (D103, step 4), is composed beside Budget only as another behavior of the scope type: its use and its members are not compared";
+/// one of its operations or whose recorded refusal names it. None since
+/// Comments runs on the core (D103's step 4), which workqueue-lease.json
+/// and workqueue-budget.json composed beside Lease and Budget: a post
+/// another principal makes while one holds the lease is beside the row, so
+/// Lease's guard is not asked.
+pub const INCIDENTAL: [(&str, &str, &str); 0] = [];
 
 /// Why an events.read that holds a write one row's operation or deadline
 /// made of another row is not compared.
@@ -194,6 +201,29 @@ const OTHER_SCHEMA_DEFINE: &str = "a define check that reads another schema, whi
 /// Why an events.read that holds the removeBlocker the engine ran on a
 /// blocker's delete is not compared.
 const BLOCKER_DELETE: &str = "a read of the engine's event log that holds the removeBlocker its Dependencies ran on each dependent when a blocker was deleted: a table's core hears no delete of another table's row through a sub-table, and a blocker that is gone neither blocks nor is listed (D104's step 4)";
+
+/// What a table's Comments leaves out of what the engine answered (D103's
+/// step 4), which the replay leaves out of what a step expects: the fields
+/// it leaves out of a table's declaration
+/// (superschematic_rules_behaviors::comments::LEFT_OUT_FIELDS: composing
+/// and unread), a message's via, the calling service, which the core's
+/// caller does not carry, and a listing's readUpTo, the caller's read
+/// marker, which waits with read state; and a step that invokes an operation
+/// it leaves out (LEFT_OUT_OPERATIONS) stops the scenario there.
+pub const TABLE_COMMENTS: &str = "a table's Comments leaves out its streamed replies, read state, deliveries, search, attachments and anchors, a message's via, and a listing's readUpTo";
+
+// without_via leaves the member via out of every object a value holds: a
+// message record's calling service.
+fn without_via(value: &mut Value) {
+    match value {
+        Value::Object(members) => {
+            members.remove("via");
+            members.values_mut().for_each(without_via);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_via),
+        _ => {}
+    }
+}
 
 // removed_on_a_delete reports whether a recorded page of events holds more
 // of Dependencies' removeBlocker than the host's log does: the ones the
@@ -360,6 +390,10 @@ const REVISIONS: &str = "Revisions";
 /// Why an events.read of a row an update that changed nothing wrote is
 /// not compared.
 const UNCHANGED_UPDATE: &str = "a read of the engine's event log after an update that changed nothing, which the engine answered with no write and no event, and the core writes as any update, its uses' rules deciding what it changes (D103)";
+
+/// Why an events.read that holds an operation beside an instance is not
+/// compared.
+const BESIDE_EVENTS: &str = "a read of the engine's event log that holds an operation beside an instance (D77's primitive 1), which the engine logged with no sequence: a table's write beside its row writes its use's tables alone, which no change queue hears and no log of the row's writes holds (D103's step 4), and a table's events reach the app through its event queue (D104)";
 
 /// Why an engine opened with a runner's depth limit is not mapped.
 const MAX_DEPTH_REASON: &str = "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)";
@@ -1053,6 +1087,18 @@ impl<'r> Run<'r> {
         if let Some(reason) = &self.engines[at].off {
             return Done::Skipped(reason.clone());
         }
+        // What a table's Comments leaves out is left out of what the step
+        // expects, and a step that calls one of the operations it leaves
+        // out stops the scenario (TABLE_COMMENTS).
+        let commented;
+        let step = match self.without_left_out(at, step) {
+            Ok(Some(adjusted)) => {
+                commented = adjusted;
+                &commented
+            }
+            Ok(None) => step,
+            Err(done) => return done,
+        };
         if call == "close" {
             return Done::Checked(Vec::new());
         }
@@ -1133,6 +1179,114 @@ impl<'r> Run<'r> {
                 "{call} is outside the reference host's surface, and the steps after it may read what it changed"
             )),
         }
+    }
+
+    // without_left_out is a step of a type that composes Comments with what
+    // a table's Comments leaves out left out of what it expects
+    // (TABLE_COMMENTS): the fields composing and unread of every record,
+    // and of a Comments operation's result each message's via and a
+    // listing's readUpTo. A step that invokes an operation a table's
+    // Comments leaves out stops the scenario, whose later steps read what it
+    // wrote. None for a step of a type that does not compose Comments.
+    fn without_left_out(&self, at: usize, step: &Value) -> Result<Option<Value>, Done> {
+        let Some(spec) = step
+            .get("args")
+            .and_then(|args| args.get(0))
+            .and_then(Value::as_str)
+            .and_then(|type_name| self.engines[at].host.store().live(type_name))
+        else {
+            return Ok(None);
+        };
+        let Some(entry) = spec
+            .uses
+            .iter()
+            .find(|entry| entry.behavior == comments::NAME)
+        else {
+            return Ok(None);
+        };
+        let operation = (call_of(step) == "instances.invoke")
+            .then(|| step.get("args").and_then(|args| args.get(2)))
+            .flatten()
+            .and_then(Value::as_str);
+        if let Some(why) = operation.and_then(|operation| {
+            comments::LEFT_OUT_OPERATIONS
+                .iter()
+                .find(|(name, _)| *name == operation)
+                .map(|(_, why)| *why)
+        }) {
+            return Err(Done::Halted(format!(
+                "{} of Comments, which a table's Comments leaves out: {why}",
+                operation.unwrap_or_default()
+            )));
+        }
+        let mut step = step.clone();
+        // An operation beside the row takes the caller's expectedSeq as a
+        // read does, and a write beside it moves no version of the row, so
+        // a seq the row's version still is is the one the caller read.
+        let beside = operation.is_some_and(|operation| {
+            self.engines[at]
+                .host
+                .core()
+                .declaration(comments::NAME)
+                .and_then(|declared| declared.find_operation(operation))
+                .is_some_and(|declared| declared.beside)
+        });
+        let version = step
+            .get("args")
+            .and_then(|args| args.get(1))
+            .and_then(Value::as_str)
+            .and_then(|key| self.engines[at].host.store().row(&spec.name, key))
+            .map(|row| row.version);
+        if let (true, Some(options)) = (
+            beside,
+            step.get_mut("args")
+                .and_then(|args| args.get_mut(4))
+                .and_then(Value::as_object_mut),
+        ) {
+            if options.get("expectedSeq").and_then(Value::as_i64).is_some()
+                && options.get("expectedSeq").and_then(Value::as_i64) == version
+            {
+                options.remove("expectedSeq");
+            }
+        }
+        let Some(expect) = step.get_mut("expect") else {
+            return Ok(Some(step));
+        };
+        let use_id = entry.id().to_owned();
+        let strip = |holder: &mut Value| {
+            if let Some(owned) = holder
+                .get_mut("behaviors")
+                .and_then(|behaviors| behaviors.get_mut(&use_id))
+                .and_then(Value::as_object_mut)
+            {
+                for (field, _) in comments::LEFT_OUT_FIELDS {
+                    owned.remove(field);
+                }
+            }
+        };
+        strip(expect);
+        for item in expect
+            .get_mut("items")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            strip(item);
+        }
+        let ours = operation.is_some_and(|operation| {
+            self.engines[at]
+                .host
+                .core()
+                .declaration(comments::NAME)
+                .is_some_and(|declared| declared.find_operation(operation).is_some())
+        });
+        if ours {
+            without_via(expect);
+            if let Some(result) = expect.as_object_mut() {
+                result.remove("readUpTo");
+            }
+        }
+        Ok(Some(step))
     }
 
     // incidental_step says why a step of an incidental behavior's
@@ -2421,6 +2575,15 @@ impl<'r> Run<'r> {
             if unmapped {
                 return Done::Skipped(EVENTS_UNMAPPED.to_owned());
             }
+            let beside = page
+                .get("events")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|event| event.get("beside") == Some(&Value::Bool(true)));
+            if beside {
+                return Done::Skipped(BESIDE_EVENTS.to_owned());
+            }
             if removed_on_a_delete(page, self.engines[cx.at].host.store()) {
                 return Done::Skipped(BLOCKER_DELETE.to_owned());
             }
@@ -3278,6 +3441,15 @@ fn computed_fields(core: &Core, spec: &TypeSpec) -> BTreeMap<String, Vec<String>
                     fields.push(field.clone());
                 }
             }
+            // The fields a table's Comments leaves out, which the engine
+            // computed (TABLE_COMMENTS).
+            if entry.behavior == comments::NAME {
+                fields.extend(
+                    comments::LEFT_OUT_FIELDS
+                        .iter()
+                        .map(|(field, _)| (*field).to_owned()),
+                );
+            }
             (!fields.is_empty()).then(|| (entry.id().to_owned(), fields))
         })
         .collect()
@@ -3473,6 +3645,15 @@ fn recorded_declaration(declaration: &Value) -> Value {
         names.sort();
         names
     };
+    let name = declaration
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    // What a table's Comments leaves out of its declaration, which the
+    // engine declared (TABLE_COMMENTS).
+    let left_out = |member: &str, listed: &[(&str, &str)]| {
+        name == comments::NAME && listed.iter().any(|(known, _)| *known == member)
+    };
     // An operation of a namespace as a whole, which the core runs no
     // command for (D104), is left out; one of the table is the core's.
     let mut operations: Vec<(String, bool)> = declaration
@@ -3487,17 +3668,14 @@ fn recorded_declaration(declaration: &Value) -> Value {
                 operation.get("writes").and_then(Value::as_bool) == Some(true),
             ))
         })
+        .filter(|(operation, _)| !left_out(operation, &comments::LEFT_OUT_OPERATIONS))
         .collect();
     operations.sort();
-    summary(
-        declaration
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-        names("fields", "name"),
-        operations,
-        names("vetoes", "code"),
-    )
+    let fields: Vec<String> = names("fields", "name")
+        .into_iter()
+        .filter(|field| !left_out(field, &comments::LEFT_OUT_FIELDS))
+        .collect();
+    summary(name, fields, operations, names("vetoes", "code"))
 }
 
 fn summary(

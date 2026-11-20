@@ -19,7 +19,8 @@
     "Rollups",
     "Dependencies",
     "Numbering",
-    "Revisions"
+    "Revisions",
+    "Comments"
   ],
   "scenarios": [
     {
@@ -5248,53 +5249,714 @@
     {
       "name": "Revisions (node) > an operation that changes no own field records no revision; one that does, through update(), records it",
       "clock": "wall",
-      "types": [],
-      "steps": [],
+      "types": [
+        {
+          "name": "Document",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "body",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Document",
+              "uses": [
+                {
+                  "behavior": "Revisions",
+                  "config": {
+                    "review": {
+                      "permission": "documents.review"
+                    }
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Comments",
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Document",
+            "uses": [
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "documents.review"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Document",
+            "uses": [
+              {
+                "behavior": "Revisions",
+                "config": {
+                  "review": {
+                    "permission": "documents.review"
+                  }
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Comments",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Document",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "d1",
+              "own": {
+                "title": "Plan"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "d1",
+            "row": {
+              "own": {
+                "title": "Plan"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Document",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Comments",
+              "operation": "post",
+              "params": {
+                "body": "Nice."
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "author": "alice",
+              "state": "posted",
+              "body": "Nice.",
+              "blocks": [],
+              "mentions": [],
+              "reactions": {},
+              "createdAt": 1767225600004,
+              "postedAt": 1767225600004,
+              "stand": 1,
+              "edits": 0,
+              "pinned": false,
+              "replies": 0,
+              "participants": [
+                "alice"
+              ]
+            },
+            "row": {
+              "own": {
+                "title": "Plan"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Nice.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1767225600004,
+                      "postedAt": 1767225600004,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Document",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Revisions",
+              "operation": "listRevisions",
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "revision": 1,
+                  "data": {
+                    "title": "Plan"
+                  },
+                  "createdBy": "alice",
+                  "createdAt": 1767225600003
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "Plan"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Nice.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1767225600004,
+                      "postedAt": 1767225600004,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Document",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wes",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Revisions",
+              "operation": "propose",
+              "params": {
+                "patch": {
+                  "body": "Proposed."
+                }
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "body": "Proposed."
+              },
+              "base": 1,
+              "state": "pending",
+              "createdBy": "wes",
+              "createdAt": 1767225600006
+            },
+            "row": {
+              "own": {
+                "title": "Plan"
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 1
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Nice.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1767225600004,
+                      "postedAt": 1767225600004,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "body": "Proposed."
+                      },
+                      "base": 1,
+                      "state": "pending",
+                      "createdBy": "wes",
+                      "createdAt": 1767225600006
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1767225600003
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Document",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "rae",
+              "permissions": [
+                "documents.review"
+              ]
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Revisions",
+              "operation": "approve",
+              "params": {
+                "proposal": 1
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "id": 1,
+              "patch": {
+                "body": "Proposed."
+              },
+              "base": 1,
+              "state": "approved",
+              "createdBy": "wes",
+              "createdAt": 1767225600006,
+              "reviewedBy": "rae",
+              "reviewedAt": 1767225600007,
+              "revision": 2
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "body": "Proposed."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Nice.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1767225600004,
+                      "postedAt": 1767225600004,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "body": "Proposed."
+                      },
+                      "base": 1,
+                      "state": "approved",
+                      "createdBy": "wes",
+                      "createdAt": 1767225600006,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 1767225600007,
+                      "revision": 2
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1767225600003
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "body": "Proposed."
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 1767225600007,
+                      "proposal": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Document",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "operation",
+              "key": "d1",
+              "useId": "Revisions",
+              "operation": "listRevisions",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "items": [
+                {
+                  "revision": 1,
+                  "data": {
+                    "title": "Plan"
+                  },
+                  "createdBy": "alice",
+                  "createdAt": 1767225600003
+                },
+                {
+                  "revision": 2,
+                  "data": {
+                    "title": "Plan",
+                    "body": "Proposed."
+                  },
+                  "createdBy": "rae",
+                  "createdAt": 1767225600007,
+                  "proposal": 1
+                }
+              ],
+              "next": null
+            },
+            "row": {
+              "own": {
+                "title": "Plan",
+                "body": "Proposed."
+              },
+              "owned": {
+                "Revisions": {
+                  "revision": 2
+                }
+              }
+            },
+            "subRows": {
+              "Comments": {
+                "messages": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "author": "alice",
+                      "state": "posted",
+                      "body": "Nice.",
+                      "blocks": [],
+                      "mentions": [],
+                      "createdAt": 1767225600004,
+                      "postedAt": 1767225600004,
+                      "stand": 1,
+                      "edits": 0,
+                      "pinned": false
+                    }
+                  }
+                ]
+              },
+              "Revisions": {
+                "proposals": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "patch": {
+                        "body": "Proposed."
+                      },
+                      "base": 1,
+                      "state": "approved",
+                      "createdBy": "wes",
+                      "createdAt": 1767225600006,
+                      "reviewedBy": "rae",
+                      "reviewedAt": 1767225600007,
+                      "revision": 2
+                    }
+                  }
+                ],
+                "revisions": [
+                  {
+                    "key": "0000000001",
+                    "values": {
+                      "data": {
+                        "title": "Plan"
+                      },
+                      "createdBy": "alice",
+                      "createdAt": 1767225600003
+                    }
+                  },
+                  {
+                    "key": "0000000002",
+                    "values": {
+                      "data": {
+                        "title": "Plan",
+                        "body": "Proposed."
+                      },
+                      "createdBy": "rae",
+                      "createdAt": 1767225600007,
+                      "proposal": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "skipped": [
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 2,
-          "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 3,
-          "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 4,
-          "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 5,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 6,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 7,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 8,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
-        },
-        {
-          "step": 9,
-          "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments"
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
         }
       ]
     },
