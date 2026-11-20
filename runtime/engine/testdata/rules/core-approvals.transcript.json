@@ -17,7 +17,9 @@
     "Schedules",
     "Pool",
     "Rollups",
-    "Dependencies"
+    "Dependencies",
+    "Numbering",
+    "Revisions"
   ],
   "scenarios": [
     {
@@ -4446,177 +4448,177 @@
         {
           "step": 1,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 2,
           "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 3,
           "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 4,
           "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 5,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 6,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 7,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 8,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 9,
           "call": "instances.update",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 10,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 11,
           "call": "instances.update",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 12,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 13,
           "call": "events.read",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 14,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 15,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 16,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 17,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 18,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 19,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 20,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 21,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 22,
           "call": "open",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 23,
           "call": "schemas.define",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 24,
           "call": "schemas.publish",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 25,
           "call": "instances.create",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 26,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 27,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 28,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 29,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 30,
           "call": "instances.update",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 31,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 32,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 33,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 34,
           "call": "instances.invoke",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         },
         {
           "step": 35,
           "call": "instances.get",
-          "reason": "it composes behaviors the core does not run: Comments, Revisions"
+          "reason": "it composes behaviors the core does not run: Comments"
         }
       ]
     },

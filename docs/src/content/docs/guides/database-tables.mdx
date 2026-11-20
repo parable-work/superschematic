@@ -1798,6 +1798,8 @@ or Seats, or types a field as a Reconcile
 or Schedules ([A row's schedules](#a-rows-schedules)), or Pool
 ([A pool of members](#a-pool-of-members)), or Rollups and Dependencies
 ([Values a row's children roll up, and blockers between rows](#values-a-rows-children-roll-up-and-blockers-between-rows)),
+or types a field as a Numbering or implements Revisions
+([A row's number and its history](#a-rows-number-and-its-history)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -3144,3 +3146,92 @@ state when absent) and `satisfiedBy` (`["success"]` when absent).
   `@behaviorOperations` leaves it out, of which the build warns.
 - Dependencies joins a table with rows, each starting with no blockers,
   and cannot leave one.
+
+### A row's number and its history
+
+A field typed `Numbering<C>` holds a number a person reads, set when the
+row is created (D56, D103). The config's `format` prints it, with
+`{seq}`, or `{seq:N}` padded to N digits, exactly once, and `{yyyy}` or
+`{yy}`, the UTC year the row was created in. `scope: { link }` counts per
+target of a required to-one relation of the table, and `reset: "yearly"`
+counts each year from 1, which needs the year in the format.
+
+```ts
+// invoices-db
+@index<Invoice>(["customer", "number"], { unique: true })
+export abstract class Invoice {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  customer: Relation<Customer>;
+  title: string;
+  createdAt: Temporal.DateTime;
+  number: Numbering<{ format: "INV-{yyyy}-{seq:4}"; scope: { link: "customer" }; reset: "yearly" }>;
+}
+```
+
+The field's column holds the label, `INV-2026-0042`, and `number_seq` the
+number in its count. The counts are a table of the use's own, kept for
+the table as a whole (`invoice_number_counts`), one row per customer and
+year. A create reads its count's row and writes it held to the version it
+read, so two creates at once never take one number, on Postgres, SQLite
+and D1 alike. A refused create takes no number. A delete leaves the
+count where it was, so a delete leaves a gap. A label is unique within
+its scope alone, and the core keeps no index of labels: the unique index
+over the customer and the number holds it. A table whose behaviors keep
+such a table has no upserts.
+
+Numbering can be added to a table with rows. Each one holds no number
+until its `number.assignNumber` gives it the next number of the year in
+its `createdAt`, or of the command's year when the table has none. On a
+numbered row it writes nothing and answers the number. While the table
+has rows, the format, the scope and the reset stay, and Numbering cannot
+be removed. A write around the core, raw SQL of the columns or of the
+counts, runs none of these rules.
+
+A table implements `Revisions` to keep every change of its rows' own
+fields (D16, D103):
+
+```ts
+// policies-db
+export abstract class Policy implements Revisions<Policy, { review: { permission: "policies.review" } }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  body: Nullable<string>;
+  updatedAt: Temporal.DateTime;
+}
+```
+
+A create keeps revision 1 of the row's own fields, and each change of
+them the next, in a sub-table of the use (`policy_revisions_revisions`).
+The owned column `revisions_revision` holds the latest number. A
+revision holds the own fields the layout gives the core, not the audit
+stamps. `revisions.listRevisions` reads them a page at a time, oldest
+first, and `revisions.getRevision` one by its number. An update that
+changes nothing keeps no revision.
+
+With `review`, `revisions.propose` keeps a merge patch of the own fields
+as a pending proposal (`policy_revisions_proposals`), after holding it to
+an update's validation and to changing the row. Nothing else changes. A
+caller who holds the permission approves it with `revisions.approve`,
+which writes the patch to the row through every rule an update meets,
+every use's guard among them, and keeps the revision it made with the
+proposal's number; or rejects it with `revisions.reject` and a reason.
+`base` names the revision a proposal was made against, so a reviewer
+sees the row moved since. `revisions.listProposals` reads them, by state
+when asked. A delete of the row deletes its revisions and its proposals.
+Revisions can be added to a table with rows, whose history starts at
+their next change, and cannot be removed from one.
+
+```ts
+await orm.policy.revisions.propose(id, { patch: { body: "Economy only." }, note: "Costs." });
+await orm.withBehaviorCaller({ subject: reviewer, permissions: ["policies.review"] })
+  .policy.revisions.approve(id, { proposal: 1 });
+```
+
+A proposal's patch is held to the behaviors' rules alone. The table's
+own validation, a required field, a length or a field the table lacks, is
+held where a request's types and the database hold it, so a patch that
+breaks it is kept and fails at its approval. A `@versioned` table keeps a
+history of its own on Postgres: Revisions adds the review step, and keeps
+its log on SQLite and D1 too.

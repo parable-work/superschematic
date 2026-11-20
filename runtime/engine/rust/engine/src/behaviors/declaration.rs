@@ -83,8 +83,15 @@ const DECLARATION_KEYS: [&str; 16] = [
     "vetoes",
 ];
 const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
-const FIELD_KEYS: [&str; 5] = ["name", "description", "volatile", "perReader", "type"];
-const TABLE_KEYS: [&str; 4] = ["name", "description", "key", "fields"];
+const FIELD_KEYS: [&str; 6] = [
+    "name",
+    "description",
+    "volatile",
+    "perReader",
+    "type",
+    "optional",
+];
+const TABLE_KEYS: [&str; 5] = ["name", "description", "key", "scope", "fields"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
 const CONTRACT_KEYS: [&str; 3] = ["name", "role", "description"];
 const OPERATION_KEYS: [&str; 10] = [
@@ -423,7 +430,7 @@ impl BehaviorDeclaration {
 
 /// A declaration without the members only a table's layout reads (D103):
 /// its `value`, its `tables`, `armsDeadlines` and `hearsChanges`, and each
-/// field's `type`,
+/// field's `type` and whether a value field is `optional` (D103's step 4),
 /// which the engine, keeping no table, never answers with, and its
 /// `contracts` (D104), which only the behaviors' core reads. It shifts them
 /// out, so the members after them keep the order the declaration writes
@@ -439,6 +446,7 @@ fn without_layout_members(mut value: Value) -> Value {
             for field in fields {
                 if let Value::Object(field) = field {
                     field.shift_remove("type");
+                    field.shift_remove("optional");
                 }
             }
         }
@@ -683,6 +691,14 @@ fn check_tables(tables: Option<&Value>, problems: &mut Vec<String>) {
         if !members.get("key").is_some_and(Value::is_string) {
             problems.push(format!("{at}.key is a string"));
         }
+        // A table kept for the table as a whole says scope schema (D103's
+        // step 4); instance, or none, keeps one per row.
+        if members
+            .get("scope")
+            .is_some_and(|scope| scope != "schema" && scope != "instance")
+        {
+            problems.push(format!("{at}.scope is \"instance\" or \"schema\""));
+        }
         check_field_list(members.get("fields"), &format!("{at}.fields"), problems);
     }
 }
@@ -718,6 +734,12 @@ fn check_field_list(fields: Option<&Value>, list: &str, problems: &mut Vec<Strin
             .is_some_and(|volatile| !volatile.is_boolean())
         {
             problems.push(format!("{at}.volatile is a boolean"));
+        }
+        if members
+            .get("optional")
+            .is_some_and(|optional| !optional.is_boolean())
+        {
+            problems.push(format!("{at}.optional is a boolean"));
         }
         match members.get("perReader") {
             None => {}

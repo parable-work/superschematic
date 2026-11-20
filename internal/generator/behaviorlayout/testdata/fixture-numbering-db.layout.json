@@ -1,0 +1,283 @@
+{
+  "types": {
+    "Invoice": {
+      "type": "Invoice",
+      "table": "invoice",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "customerId",
+          "column": "customer_id",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        }
+      ],
+      "audit": [
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "Temporal.DateTime",
+          "convert": "epochMillis"
+        }
+      ],
+      "uses": [
+        {
+          "id": "number",
+          "behavior": "Numbering",
+          "anchor": "number",
+          "member": "number",
+          "fields": [
+            {
+              "name": "seq",
+              "field": "numberSeq",
+              "column": "number_seq",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "label",
+              "field": "number",
+              "column": "number",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "assignNumber",
+              "writes": true
+            }
+          ],
+          "shared": [
+            {
+              "name": "counts",
+              "table": "invoice_number_counts",
+              "key": {
+                "name": "scope",
+                "field": "scope",
+                "column": "scope",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "last",
+                  "field": "last",
+                  "column": "last",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "counting",
+                  "field": "counting",
+                  "column": "counting",
+                  "type": "string"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Invoice",
+        "uses": [
+          {
+            "behavior": "Numbering",
+            "config": {
+              "format": "INV-{yyyy}-{seq:4}",
+              "reset": "yearly",
+              "scope": {
+                "link": "customer"
+              }
+            },
+            "anchor": {
+              "field": "number"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "customerId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "customer",
+              "type": "Customer"
+            }
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "createdAt",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          }
+        ]
+      }
+    },
+    "Ticket": {
+      "type": "Ticket",
+      "table": "ticket",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "subject",
+          "column": "subject",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "number",
+          "behavior": "Numbering",
+          "anchor": "number",
+          "member": "number",
+          "fields": [
+            {
+              "name": "seq",
+              "field": "numberSeq",
+              "column": "number_seq",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "label",
+              "field": "number",
+              "column": "number",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "assignNumber",
+              "writes": true
+            }
+          ],
+          "shared": [
+            {
+              "name": "counts",
+              "table": "ticket_number_counts",
+              "key": {
+                "name": "scope",
+                "field": "scope",
+                "column": "scope",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "last",
+                  "field": "last",
+                  "column": "last",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "counting",
+                  "field": "counting",
+                  "column": "counting",
+                  "type": "string"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        },
+        {
+          "id": "reference",
+          "behavior": "Numbering",
+          "anchor": "reference",
+          "member": "reference",
+          "fields": [
+            {
+              "name": "seq",
+              "field": "referenceSeq",
+              "column": "reference_seq",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "label",
+              "field": "reference",
+              "column": "reference",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "assignNumber",
+              "writes": true
+            }
+          ],
+          "shared": [
+            {
+              "name": "counts",
+              "table": "ticket_reference_counts",
+              "key": {
+                "name": "scope",
+                "field": "scope",
+                "column": "scope",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "last",
+                  "field": "last",
+                  "column": "last",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "counting",
+                  "field": "counting",
+                  "column": "counting",
+                  "type": "string"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Ticket",
+        "uses": [
+          {
+            "behavior": "Numbering",
+            "config": {
+              "format": "T-{seq}"
+            },
+            "anchor": {
+              "field": "number"
+            }
+          },
+          {
+            "behavior": "Numbering",
+            "config": {
+              "format": "REF-{seq:5}"
+            },
+            "anchor": {
+              "field": "reference"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "subject",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  }
+}

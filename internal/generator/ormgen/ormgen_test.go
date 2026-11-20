@@ -77,6 +77,17 @@ const poolFixture = "fixture-pool-db"
 // sub-table, and no queue.
 const stepsFixture = "fixture-steps-db"
 
+// numberingFixture is the DB fixture whose Invoice and Ticket carry
+// Numbering on fields (D103's step 4): assignNumber under Number() and
+// Reference(), each label optional, and the counts each use keeps in a
+// shared table of its own, with no repository.
+const numberingFixture = "fixture-numbering-db"
+
+// revisionsFixture is the DB fixture whose Policy and Note implement
+// Revisions (D103's step 4): its operations under Revisions(), each
+// revision and proposal a sub-table row with no repository.
+const revisionsFixture = "fixture-revisions-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -95,7 +106,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -217,6 +228,14 @@ func TestWriteORMGolden(t *testing.T) {
 		// sub-table with no repository, Batch's Rollups with no operation,
 		// and no queue.
 		{stepsFixture, []string{"repository_batch.go", "repository_step.go", "rules.go"}},
+		// Tables of Numbering (D103's step 4): assignNumber under Number()
+		// and Reference(), no repository of a shared table of counts, no
+		// upserts, and no queue.
+		{numberingFixture, []string{"repository_customer.go", "repository_invoice.go", "repository_ticket.go", "rules.go"}},
+		// Tables of Revisions (D103's step 4): its operations under
+		// Revisions(), no repository of a sub-table, no upserts, and no
+		// queue.
+		{revisionsFixture, []string{"repository_note.go", "repository_policy.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

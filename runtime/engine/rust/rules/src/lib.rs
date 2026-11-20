@@ -96,8 +96,8 @@ pub use behavior::{
     Hook, Listen, OperationDecl, Stop, TableDecl, ValidationRequest,
 };
 pub use changes::{
-    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowImage, RowRef, RowWrite, SubRowChange,
-    SubRowWrite, WriteKind,
+    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowImage, RowRef, RowWrite, SharedRowChange,
+    SharedRowWrite, SubRowChange, SubRowWrite, WriteKind,
 };
 pub use command::{Action, Caller, Command};
 pub use context::{ConfigCx, Cx, View};
@@ -105,8 +105,8 @@ pub use core::{Core, Outcome, Source, Step, MAX_ROUNDS};
 pub use patch::merge_patch;
 pub use permissions::{covers, has_any_permission, DottedPermissions, PermissionMatcher};
 pub use reads::{
-    key_of, Answer, Answered, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow,
-    TableRef, LINKED_PAGE,
+    key_of, Answer, Answered, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SharedRow,
+    SubRow, TableRef, LINKED_PAGE,
 };
 pub use refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,

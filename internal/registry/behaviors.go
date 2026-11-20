@@ -155,16 +155,38 @@ type BehaviorDeclaration struct {
 
 // BehaviorTable is a sub-table a behavior keeps per row (D103): on a table
 // that composes the behavior, a child table of the row with a foreign key
-// to it, deleted with it, holding one row per key.
+// to it, deleted with it, holding one row per key. One whose Scope is
+// TableScopeSchema is kept for the table as a whole instead (D103's step
+// 4): a table of the use's own with no relation to a row, one row per key
+// across every row of the type, each held to a version of its own, which a
+// delete of a row leaves where it was (Numbering's counts).
 type BehaviorTable struct {
 	// Name is camelCase, unique among the behavior's tables.
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	// Key names the field whose value keys a row within its row: the key a
-	// change set's sub-row write names. Its type is string.
+	// Key names the field whose value keys a row within its row (or within
+	// the table, for a shared one): the key a change set's sub-row or
+	// shared-row write names. Its type is string.
 	Key string `json:"key"`
+	// Scope is TableScopeSchema for a table kept for the table as a whole;
+	// empty or TableScopeInstance for one kept per row.
+	Scope string `json:"scope,omitempty"`
 	// Fields are the table's fields, each typed, the key among them.
 	Fields []BehaviorField `json:"fields"`
+}
+
+// The scopes a behavior's table may name (BehaviorTable.Scope), as an
+// operation's scope names them: one per row, or one for the table as a
+// whole.
+const (
+	TableScopeInstance = "instance"
+	TableScopeSchema   = "schema"
+)
+
+// Shared reports whether the table is kept for the table as a whole, its
+// rows shared by every row of the type, rather than per row.
+func (t BehaviorTable) Shared() bool {
+	return t.Scope == TableScopeSchema
 }
 
 // Table returns the behavior's sub-table named name, or false.
@@ -216,11 +238,13 @@ type BehaviorField struct {
 	// records it. Only a volatile field is per reader.
 	PerReader bool `json:"perReader,omitempty"`
 	// Optional is true for a declaration's value field the behavior does
-	// not set when a row is created (Reconcile's observed, D104): on a table
-	// its field is optional, its column takes NULL. Only the value field is:
-	// every other field a table takes is optional already. Only a behavior
-	// the behaviors' core alone implements (RulesPackage) declares it, since
-	// an engine's declaration parser refuses the key.
+	// not set on every row (Reconcile's observed, D104, absent before the
+	// first observation; Numbering's label, absent on a row made before the
+	// table composed Numbering until assignNumber numbers it, D103's step
+	// 4): on a table its field is optional, its column takes NULL. Only the
+	// value field is: every other field a table takes is optional already.
+	// An engine's declaration parser takes the key and shifts it out, as it
+	// does a field's type, since step 4.
 	Optional bool `json:"optional,omitempty"`
 }
 
@@ -499,11 +523,6 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		return err
 	}
 	if spec.Package != RulesPackage {
-		for _, field := range decl.Fields {
-			if field.Optional {
-				return fmt.Errorf("registry: behavior %s field %s is optional, which only a behavior the behaviors' core alone implements (package %s) declares: an engine's declaration parser refuses the key", decl.Name, field.Name, RulesPackage)
-			}
-		}
 		if len(decl.Events) > 0 {
 			kinds := make([]string, len(decl.Events))
 			for i, event := range decl.Events {
@@ -667,6 +686,9 @@ func checkBehaviorTables(decl BehaviorDeclaration) error {
 			return fmt.Errorf("registry: behavior %s table %s is declared twice", decl.Name, table.Name)
 		}
 		seen[table.Name] = true
+		if table.Scope != "" && table.Scope != TableScopeInstance && table.Scope != TableScopeSchema {
+			return fmt.Errorf("registry: behavior %s table %s scope %q is neither %s nor %s", decl.Name, table.Name, table.Scope, TableScopeInstance, TableScopeSchema)
+		}
 		fields := map[string]BehaviorField{}
 		for _, field := range table.Fields {
 			switch {

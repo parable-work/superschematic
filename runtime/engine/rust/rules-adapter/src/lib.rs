@@ -93,8 +93,8 @@ use serde_json::{Map, Value};
 
 pub use host::Host;
 pub use layout::{
-    Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SubTable,
-    Table, Use,
+    Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SharedTable,
+    SubTable, Table, Use,
 };
 pub use superschematic_rules::{
     Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,

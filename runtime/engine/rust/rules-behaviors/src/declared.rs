@@ -53,6 +53,10 @@ pub(crate) fn declaration(text: &str) -> Declaration {
                     .filter_map(|field| field.get("name").and_then(Value::as_str))
                     .map(str::to_owned)
                     .collect(),
+                // A table whose scope is schema is kept for the table as a
+                // whole, its rows shared by every row of the type (D103's
+                // step 4: Numbering's counts).
+                shared: table.get("scope").and_then(Value::as_str) == Some("schema"),
             });
         }
     }
@@ -183,6 +187,18 @@ mod tests {
                 .arms_deadlines()
         );
         assert!(!declaration(r#"{"name": "Tally", "armsDeadlines": "yes"}"#).arms_deadlines);
+        // A table whose scope is schema is shared by the table's rows.
+        let shared = declaration(
+            r#"{"name": "Tally",
+                "tables": [{"name": "counts", "key": "scope", "scope": "schema", "fields": [{"name": "scope", "type": "string"}, {"name": "last", "type": "Generic.Int64"}]},
+                           {"name": "notes", "key": "at", "scope": "instance", "fields": [{"name": "at", "type": "string"}]}]}"#,
+        );
+        assert_eq!(
+            shared,
+            Declaration::new("Tally")
+                .sub_table(TableDecl::new("counts", "scope", ["scope", "last"]).shared())
+                .sub_table(TableDecl::new("notes", "at", ["at"]))
+        );
         // A field with no type, or a volatile one, is computed; a file that
         // hears its row's writes says so.
         let heard = declaration(

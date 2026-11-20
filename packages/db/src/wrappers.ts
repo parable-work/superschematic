@@ -501,6 +501,56 @@ export interface ReconcileConfig {
  */
 export type Reconcile<C extends ReconcileConfig> = string | null;
 
+/** Numbering's config on a field (D56, D103's step 4). */
+export interface NumberingConfig {
+  /** How a number prints: text with {seq}, or {seq:N} zero-padded to N digits (1 to 10), exactly once, and {yyyy} or {yy}, the UTC year the row was created in, as often as wanted. No other {...} is allowed. */
+  readonly format: string;
+  /** Counts per target of a required to-one relation of the table, named by the relation's field: each target's rows are numbered 1, 2, 3, ... of their own. */
+  readonly scope?: { readonly link: string };
+  /** yearly starts the count again at 1 each UTC year, the year the row was created in; the format must then print the year. */
+  readonly reset?: "yearly";
+}
+
+/**
+ * A number a person reads on each row, set when the row is created from a
+ * count per table, per target of a relation, or per year (D56, D103's step
+ * 4): `number: Numbering<{ format: "INV-{yyyy}-{seq:4}"; scope: { link: "customer" }; reset: "yearly" }>`,
+ * INV-2026-0042. The type stays a table: the field's column holds the
+ * label, null on a row made before the table composed Numbering until
+ * assignNumber numbers it, and the number in its count takes the column
+ * named for the field (number_seq). Its counts are a table of the use's
+ * own, kept for the table as a whole (invoice_number_counts), which a
+ * delete leaves, so a delete leaves a gap and a refused create takes no
+ * number. Nothing changes a number once set: only its operation
+ * (number.assignNumber) writes it, and only on a row with none. A
+ * repository's row types the field string | null.
+ */
+export type Numbering<C extends NumberingConfig> = string | null;
+
+/** Revisions' config on a table (D16, D103's step 4): with review, a caller proposes a change of the own fields and a caller who holds the permission approves or rejects it. */
+export interface RevisionsOn {
+  /** Turns on the review step: propose, approve, reject and listProposals. */
+  readonly review?: { readonly permission: string };
+}
+
+/**
+ * The history of a table's rows' own fields, with an optional review step
+ * (D16, D103's step 4):
+ * `export abstract class Policy implements Revisions<Policy, { review: { permission: "policies.review" } }>`.
+ * The type stays a table. A create keeps revision 1 of the row's own
+ * fields, and every change of them the next, in a sub-table of the use
+ * (policy_revisions_revisions), and the owned column revisions_revision
+ * holds the latest number. With review, propose keeps a merge patch of the
+ * own fields as a pending proposal (policy_revisions_proposals), and
+ * approve applies it through every rule an update meets and records the
+ * revision it makes; reject settles it. Its operations (revisions.
+ * listRevisions, getRevision, propose, approve, reject, listProposals)
+ * read and change them. A delete of the row deletes both. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Revisions<T, C extends RevisionsOn> = NonNullable<unknown>;
+
 /** A kind of schedule (D104): after, one run a delay after it is set; every, a run at each whole interval from when it is set; cron, a run at each time a cron line names. */
 export type ScheduleKind = "after" | "every" | "cron";
 

@@ -64,10 +64,11 @@ use serde_json::{Map, Value};
 
 use crate::behavior::{
     Change, ConfigError, ConfigTarget, ContractQuery, Declaration, GuardRequest, Heard, Hook,
-    Listen, OperationDecl, Stop, ValidationRequest,
+    Listen, OperationDecl, Stop, TableDecl, ValidationRequest,
 };
 use crate::changes::{
-    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SubRowChange, SubRowWrite,
+    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SharedRowChange,
+    SharedRowWrite, SubRowChange, SubRowWrite,
 };
 use crate::command::{Action, Command};
 use crate::context::{listed, ConfigCx};
@@ -75,7 +76,8 @@ use crate::core::{Core, Outcome, Registered, Step};
 use crate::erased::{AnyConfig, Scope};
 use crate::patch::merge_patch;
 use crate::reads::{
-    key_of, Answer, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow, TableRef,
+    key_of, Answer, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SharedRow, SubRow,
+    TableRef,
 };
 use crate::refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
@@ -144,6 +146,10 @@ pub(crate) struct Touched {
     pub write: Write,
     /// The owned fields the run set, by use id.
     pub set: BTreeMap<String, Map<String, Value>>,
+    /// The own fields as the run reached the row, once an operation wrote
+    /// them ([`crate::Cx::update`]): what its after-change hooks hear as
+    /// the fields before it.
+    pub initial: Option<Map<String, Value>>,
 }
 
 impl Touched {
@@ -156,6 +162,7 @@ impl Touched {
             version: Some(row.version),
             write: Write::Read,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -168,6 +175,7 @@ impl Touched {
             version: None,
             write: Write::Create,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -180,6 +188,7 @@ impl Touched {
             version: None,
             write: Write::Gone,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -194,6 +203,7 @@ impl Touched {
             version: None,
             write: Write::Table,
             set: BTreeMap::new(),
+            initial: None,
         }
     }
 
@@ -243,10 +253,12 @@ pub(crate) struct Invoked {
 }
 
 /// The sub-table rows, events and deadlines the run builds, each naming its
-/// row.
+/// row, and the rows of the uses' shared tables it writes, each naming its
+/// type and use.
 #[derive(Clone, Default)]
 pub(crate) struct Pending {
     pub sub_rows: Vec<SubRowWrite>,
+    pub shared_rows: Vec<SharedRowWrite>,
     pub events: Vec<OutboxEvent>,
     pub deadlines: Vec<DeadlineChange>,
 }
@@ -574,6 +586,16 @@ impl<'a> Run<'a> {
                 ),
             ));
         }
+        if declaration
+            .find_table(table)
+            .is_some_and(|table| table.shared)
+        {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!("sub_rows: {table} is a shared table, read by key with shared_row"),
+            ));
+        }
         let use_id = frame.uses[index].spec.id();
         let created = self.rows.borrow()[frame.row].version.is_none();
         let mut rows: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
@@ -621,6 +643,19 @@ impl<'a> Run<'a> {
             ));
         };
         if let Some(declaration) = self.core.declaration(&entry.behavior) {
+            if declaration
+                .find_table(table)
+                .is_some_and(|table| table.shared)
+            {
+                return Err(self.defect_of(
+                    frame,
+                    index,
+                    format!(
+                        "sub_rows_of: {table} is a shared table of {}, not a sub-table of a row",
+                        entry.behavior
+                    ),
+                ));
+            }
             if !declaration.has_table(table) {
                 return Err(self.defect_of(
                     frame,
@@ -696,6 +731,138 @@ impl<'a> Run<'a> {
             .collect()
     }
 
+    /// The row of a key of one of a use's shared tables (D103's step 4), as
+    /// the run has it: the host's ([`ReadRequest::SharedRow`]), with the
+    /// run's own writes of it applied in order, an insert at version 1 and
+    /// each update one more, a null value no value. A table the use's
+    /// behavior does not declare shared is a defect. A shared table is the
+    /// type's table's as a whole, so an operation of the table reads it too.
+    pub fn shared_row(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        table: &str,
+        key: &str,
+    ) -> Hook<Option<SharedRow>> {
+        self.shared_table(frame, index, "shared_row", table)?;
+        let use_id = frame.uses[index].spec.id();
+        let request = ReadRequest::shared_row(&frame.spec.name, use_id, table, key);
+        let mut row = match self.read(&request)? {
+            Answer::SharedRow(row) => row
+                .as_ref()
+                .map(|row| SharedRow::new(row.key.clone(), row.values.clone(), row.version)),
+            _ => return Err(mismatched(&request)),
+        };
+        for write in self.pending.borrow().shared_rows.iter().filter(|write| {
+            write.type_name == frame.spec.name
+                && write.use_id == use_id
+                && write.table == table
+                && write.key == key
+        }) {
+            match &write.change {
+                SharedRowChange::Insert { values } => {
+                    row = Some(SharedRow::new(key, values.clone(), 1));
+                }
+                SharedRowChange::Update { values, .. } => {
+                    if let Some(held) = row.as_mut() {
+                        for (name, value) in values {
+                            if value.is_null() {
+                                held.values.remove(name);
+                            } else {
+                                held.values.insert(name.clone(), value.clone());
+                            }
+                        }
+                        held.version += 1;
+                    }
+                }
+            }
+        }
+        Ok(row)
+    }
+
+    /// Writes a row of one of a use's shared tables: an insert, or an update
+    /// held to the version it was read at. Its values are held to the
+    /// table's declared fields, as a sub-table row's are, and its key is a
+    /// non-empty string.
+    pub fn write_shared(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        call: &str,
+        table: &str,
+        key: &str,
+        change: SharedRowChange,
+    ) -> Hook<()> {
+        let declared = self.shared_table(frame, index, call, table)?;
+        let values = match &change {
+            SharedRowChange::Insert { values } | SharedRowChange::Update { values, .. } => values,
+        };
+        if declared.is_checked() {
+            for name in values.keys() {
+                if declared.key.as_deref() == Some(name.as_str()) {
+                    return Err(self.defect_of(
+                        frame,
+                        index,
+                        format!("{call}: {name} is the row's key, which the write names"),
+                    ));
+                }
+                if !declared.fields.contains(name) {
+                    return Err(self.defect_of(
+                        frame,
+                        index,
+                        format!(
+                            "{call}: {table} has no field {name} (its fields: {})",
+                            listed(&declared.values())
+                        ),
+                    ));
+                }
+            }
+        }
+        if key.is_empty() {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!("{call}: a row of {table} takes a key: a non-empty string"),
+            ));
+        }
+        self.pending.borrow_mut().shared_rows.push(SharedRowWrite {
+            type_name: frame.spec.name.clone(),
+            use_id: frame.uses[index].spec.id().to_owned(),
+            table: table.to_owned(),
+            key: key.to_owned(),
+            change,
+        });
+        Ok(())
+    }
+
+    // shared_table is a use's declared table of a name, which must be
+    // shared; any other is the use's defect.
+    fn shared_table<'f>(
+        &self,
+        frame: Frame<'f>,
+        index: usize,
+        call: &str,
+        table: &str,
+    ) -> Hook<&'f TableDecl> {
+        let declaration = self.declaration(frame, index);
+        match declaration.find_table(table) {
+            Some(declared) if declared.shared => Ok(declared),
+            Some(_) => Err(self.defect_of(
+                frame,
+                index,
+                format!("{call}: {table} is a sub-table of each row, not a shared table"),
+            )),
+            None => Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "{call}: {table} is not a table it declares ({})",
+                    listed(&declaration.table_names())
+                ),
+            )),
+        }
+    }
+
     /// The first write the run has made, named for a defect's message;
     /// `None` when it has made none.
     pub fn written(&self) -> Option<String> {
@@ -714,6 +881,9 @@ impl<'a> Run<'a> {
         let pending = self.pending.borrow();
         if let Some(write) = pending.sub_rows.first() {
             return Some(format!("a write of sub-table {}", write.table));
+        }
+        if let Some(write) = pending.shared_rows.first() {
+            return Some(format!("a write of shared table {}", write.table));
         }
         if let Some(event) = pending.events.first() {
             return Some(format!("emit({})", event.kind));
@@ -906,6 +1076,87 @@ impl<'a> Run<'a> {
             .entry(use_id.to_owned())
             .or_default()
             .insert(field.to_owned(), value);
+    }
+
+    /// An operation's write of its row's own fields ([`crate::Cx::update`]):
+    /// the merge patch applied to the fields as the run has them, held to an
+    /// update's validation, the core's own issue first (a field anchor's
+    /// field), then to every use's guard, handed no precondition. One that
+    /// changes nothing asks no guard and writes nothing. The row's write
+    /// carries each field the patch names at its value after it, and the
+    /// row keeps its fields from before the first such write for its
+    /// after-change hooks. Answers whether it changed the fields.
+    pub fn update_own(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        patch: &Map<String, Value>,
+    ) -> Hook<bool> {
+        let (before, after) = self.validate_own(frame, index, patch)?;
+        if after == before {
+            return Ok(false);
+        }
+        self.guards_presenting(
+            frame,
+            &GuardRequest::Update {
+                patch,
+                after: &after,
+            },
+            false,
+        )?;
+        let written: Map<String, Value> = patch
+            .keys()
+            .map(|field| {
+                let value = after.get(field).cloned().unwrap_or(Value::Null);
+                (field.clone(), value)
+            })
+            .collect();
+        let mut rows = self.rows.borrow_mut();
+        let touched = &mut rows[frame.row];
+        touched.initial.get_or_insert(before);
+        match &mut touched.write {
+            Write::Read => touched.write = Write::Update(written),
+            Write::Update(own) => own.extend(written),
+            _ => {}
+        }
+        touched.own = after;
+        Ok(true)
+    }
+
+    /// Holds a merge patch of a row's own fields to an update's validation
+    /// ([`crate::Cx::validate_update`]), the core's own issue first, and
+    /// answers the fields before and after it; it writes nothing.
+    pub fn validate_own(
+        &self,
+        frame: Frame<'_>,
+        index: usize,
+        patch: &Map<String, Value>,
+    ) -> Hook<(Map<String, Value>, Map<String, Value>)> {
+        let before = {
+            let rows = self.rows.borrow();
+            let touched = &rows[frame.row];
+            if !matches!(
+                touched.write,
+                Write::Read | Write::Create | Write::Update(_)
+            ) {
+                return Err(self.defect_of(
+                    frame,
+                    index,
+                    "the row is deleted, so a patch of its own fields changes nothing",
+                ));
+            }
+            touched.own.clone()
+        };
+        let after = merge_patch(&before, patch);
+        self.validation(
+            frame,
+            &ValidationRequest::Update {
+                before: &before,
+                after: &after,
+            },
+            anchored_writes(frame, patch),
+        )?;
+        Ok((before, after))
     }
 
     /// A key for a row a use makes: derived from the command's request id,
@@ -1133,12 +1384,14 @@ impl<'a> Run<'a> {
                         &format!("{use_id}.{operation} of {type_name} {key}"),
                     )?;
                     self.mark_updated(row);
+                    let initial = self.rows.borrow()[row].initial.clone();
                     self.after_change(
                         frame,
                         &Change::Operation {
                             use_id,
                             operation,
                             params,
+                            before: initial.as_ref(),
                         },
                         operation,
                     )?;
@@ -1417,12 +1670,14 @@ impl<'a> Run<'a> {
         // writes no row and runs no after-change hook.
         if declared.writes && !self.unchanged.get() {
             self.mark_updated(self.top.row);
+            let initial = self.rows.borrow()[self.top.row].initial.clone();
             self.after_change(
                 self.top,
                 &Change::Operation {
                     use_id,
                     operation,
                     params,
+                    before: initial.as_ref(),
                 },
                 operation,
             )?;
@@ -1621,6 +1876,7 @@ impl<'a> Run<'a> {
         ChangeSet {
             rows: rows.into_iter().filter_map(Touched::into_write).collect(),
             sub_rows: pending.sub_rows,
+            shared_rows: pending.shared_rows,
             events: pending.events,
             deadlines: pending.deadlines,
             result,
@@ -1778,6 +2034,7 @@ impl<'a> Run<'a> {
             writable,
             own: false,
             fired: false,
+            handler: false,
             precondition: None,
         }
     }
@@ -1991,7 +2248,6 @@ impl<'a> Run<'a> {
     /// command's preconditions; one asked about a create, any other
     /// `call()` or a `call_on()` is handed none (D16, D104).
     fn guards(&self, frame: Frame<'_>, request: &GuardRequest<'_>) -> Hook<()> {
-        let action = request.action();
         let presents = matches!(
             request,
             GuardRequest::Update { .. }
@@ -2002,6 +2258,18 @@ impl<'a> Run<'a> {
                     ..
                 }
         );
+        self.guards_presenting(frame, request, presents)
+    }
+
+    // guards_presenting asks every use's guard, handing each its entry of
+    // the command's preconditions when `presents`.
+    fn guards_presenting(
+        &self,
+        frame: Frame<'_>,
+        request: &GuardRequest<'_>,
+        presents: bool,
+    ) -> Hook<()> {
+        let action = request.action();
         for (index, bound) in frame.uses.iter().enumerate() {
             let precondition = if presents {
                 self.command.preconditions.get(bound.spec.id())
@@ -2113,6 +2381,7 @@ impl<'a> Run<'a> {
                 // command's own, whose unchanged() the core honors.
                 let scope = Scope {
                     own: caller.is_none(),
+                    handler: true,
                     ..self.scope(frame, index, &declared.name, declared.writes && writable)
                 };
                 let result = bound

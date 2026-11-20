@@ -112,6 +112,15 @@ func TestWriteTypesGolden(t *testing.T) {
 		// left out, its blockers in a sub-table with no repository and no
 		// upserts; Rollups, with no operation, under none; no queue.
 		{service: "fixture-steps-db", behaviors: true},
+		// Tables whose fields carry Numbering (D103's step 4): assignNumber
+		// under number and reference, each label string | null, the counts
+		// each use keeps in a shared table with no repository, no upserts,
+		// and the shared tables in the layout.
+		{service: "fixture-numbering-db", behaviors: true},
+		// Tables of Revisions (D103's step 4): its operations under
+		// revisions, its sub-tables with no repository, no upserts, and
+		// the sub-tables in the layout.
+		{service: "fixture-revisions-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},

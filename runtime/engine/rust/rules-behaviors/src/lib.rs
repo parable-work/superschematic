@@ -64,6 +64,11 @@
 //! kept in a sub-table of the dependent's. Both compute at a read through
 //! reads of other rows ([`superschematic_rules::Action::Read`]): Rollups'
 //! values and Dependencies' blocked.
+//! [`Numbering`] and [`Revisions`], the next wave of D103's step 4: a
+//! number per row printed by a format and counted per scope in a table
+//! the use keeps for the table as a whole; and the history of a row's own
+//! fields with a review step whose approval writes them through an
+//! update's rules.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -98,6 +103,7 @@ pub mod dependencies;
 mod flow;
 pub mod lease;
 mod moves;
+pub mod numbering;
 mod paging;
 mod periods;
 pub mod pool;
@@ -105,6 +111,7 @@ pub mod presence;
 pub mod reactions;
 pub mod reconcile;
 pub mod retries;
+pub mod revisions;
 pub mod rollups;
 pub mod schedules;
 mod schema;
@@ -124,6 +131,7 @@ pub use constants::{
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use lease::{Lease, LeaseConfig, HOLD_TYPES};
 pub use moves::StatusMove;
+pub use numbering::{Numbering, NumberingConfig};
 pub use pool::{Pool, PoolConfig};
 pub use presence::{Presence, PresenceConfig};
 pub use reactions::{
@@ -134,6 +142,7 @@ pub use reconcile::{Reconcile, ReconcileConfig};
 pub use retries::{
     Retries, RetriesConfig, RetriesKeepBest, RetriesWindow, RetryBackoff, RetryClass, LIMITS_TYPES,
 };
+pub use revisions::{Revisions, RevisionsConfig, RevisionsReview};
 pub use rollups::{RollupFunction, RollupSpec, Rollups, RollupsConfig, MAX_ROLLUP_READ};
 pub use schedules::{Schedules, SchedulesConfig, SchedulesKind, SchedulesRetry};
 pub use seats::{SeatRef, Seats, SeatsConfig, SeatsOnFull, SeatsSeat};
@@ -151,8 +160,9 @@ use superschematic_rules::Core;
 
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far, then the ones only the
-/// core implements (D104).
-pub const NAMES: [&str; 16] = [
+/// core implements (D104), then those D103's step 4 ports in its later
+/// waves, in the order they were ported.
+pub const NAMES: [&str; 18] = [
     workflow::NAME,
     reactions::NAME,
     constants::NAME,
@@ -169,6 +179,8 @@ pub const NAMES: [&str; 16] = [
     pool::NAME,
     rollups::NAME,
     dependencies::NAME,
+    numbering::NAME,
+    revisions::NAME,
 ];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
@@ -176,7 +188,7 @@ pub const NAMES: [&str; 16] = [
 /// a binding hands its host whole (D103), each field's column type, the
 /// value field, the sub-tables, whether it arms deadlines and whether it
 /// hears its row's writes with the rest.
-pub const DECLARATIONS: [&str; 16] = [
+pub const DECLARATIONS: [&str; 18] = [
     workflow::DECLARATION,
     reactions::DECLARATION,
     constants::DECLARATION,
@@ -193,6 +205,8 @@ pub const DECLARATIONS: [&str; 16] = [
     pool::DECLARATION,
     rollups::DECLARATION,
     dependencies::DECLARATION,
+    numbering::DECLARATION,
+    revisions::DECLARATION,
 ];
 
 /// The contracts between behaviors the core defines (D104), each a name a
@@ -221,6 +235,8 @@ pub fn core() -> Core {
         .with(Pool)
         .with(Rollups)
         .with(Dependencies)
+        .with(Numbering)
+        .with(Revisions)
 }
 
 #[cfg(test)]

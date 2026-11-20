@@ -76,13 +76,15 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   (`hearsChanges`), and the entry a caller presents it as a precondition
   (`preconditionSchema`), in the order Workflow, Reactions, Constants,
   StateRules, Approvals, Timers, Lease, Presence, Budget, Retries, Seats,
-  Reconcile, Schedules, Pool, Rollups, Dependencies. An operation the core runs on the table as
+  Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering, Revisions.
+  A sub-table kept for the table as a whole rather than per row says
+  `scope: 'schema'` (Numbering's `counts`, D103's step 4). An operation the core runs on the table as
   a whole says `scope: 'schema'` (Pool's `pick`, Lease's `expireHolder`),
   and the contracts a behavior implements or asks are its
   `contracts` (`DeclaredContract`: each its name and role, D104: Budget
   implements `Capacity`, which Pool asks). A value field the behavior does not set at a
-  create says `optional: true` (Reconcile's `observed`,
-  `DeclaredField.optional`), and its column takes NULL. A behavior that
+  create says `optional: true` (Reconcile's `observed`, Numbering's
+  `label`, `DeclaredField.optional`), and its column takes NULL. A behavior that
   emits events about a row lists them (`events`, `DeclaredEvent`: each its
   kind, description and payloadSchema, D104: Schedules' `run`), and a
   table that composes it keeps an event queue.

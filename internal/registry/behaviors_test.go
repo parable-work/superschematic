@@ -332,8 +332,6 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"optional not the value", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number"}, map[string]any{"name": "at", "type": "Temporal.DateTime", "optional": true}}, "value": "level"}), `behavior acme.Gauge field at is optional, and only its value field may be: every other field a table takes is optional already`},
 		{"optional with no value", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}}), `behavior acme.Gauge field level is optional, and only its value field may be: every other field a table takes is optional already`},
 		{"optional volatile", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "volatile": true, "optional": true}}, "value": "level"}), `behavior acme.Gauge field level is optional and volatile: only a value field the behavior keeps is optional`},
-		{"optional on an engine's behavior", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}, "value": "level"}), `registry: behavior acme.Gauge field level is optional, which only a behavior the behaviors' core alone implements (package @superschematic/rules) declares: an engine's declaration parser refuses the key`},
-		{"optional on a core behavior an engine runs", "", declaration("Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number", "optional": true}}, "value": "level"}), `registry: behavior Gauge field level is optional, which only a behavior the behaviors' core alone implements`},
 		{"type not a string", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": 1}}}), "behavior declaration of extension acme: "},
 		{"per reader not a boolean", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "volatile": true, "perReader": "yes"}}}), "behavior declaration of extension acme: "},
 		{"unlogged not beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"writes": true, "log": false})}}), `behavior acme.Chat operation mark sets "log": false and is not beside the instance: only a beside operation appends no event`},
@@ -877,6 +875,7 @@ func TestRegisterBehaviorTables(t *testing.T) {
 		{"a volatile field", []any{table("ticks", "at", field("at", "string"), map[string]any{"name": "count", "type": "number", "volatile": true})}, "registry: behavior acme.Bad table ticks field count is volatile: a sub-table's field is stored"},
 		{"a field named id", []any{table("ticks", "at", field("at", "string"), field("id", "string"))}, "registry: behavior acme.Bad table ticks declares a field id, the surrogate key the build gives every sub-table: name it otherwise"},
 		{"a field twice", []any{table("ticks", "at", field("at", "string"), field("at", "string"))}, `registry: behavior acme.Bad table ticks declares field "at" twice`},
+		{"a scope of neither", []any{map[string]any{"name": "ticks", "key": "at", "scope": "namespace", "fields": []any{field("at", "string")}}}, `registry: behavior acme.Bad table ticks scope "namespace" is neither instance nor schema`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := New(naming.Default())
@@ -891,6 +890,16 @@ func TestRegisterBehaviorTables(t *testing.T) {
 	deadlines, ok := timers.Table("deadlines")
 	if !ok || deadlines.Key != "name" || !timers.ArmsDeadlines || len(deadlines.Fields) != 7 {
 		t.Errorf("Timers = tables %+v, armsDeadlines %v", timers.Tables, timers.ArmsDeadlines)
+	}
+	// Numbering keeps its counts in a table kept for the table as a whole
+	// (D103's step 4), and its value field, the label, is optional, which an
+	// engine's parser takes and shifts out.
+	numbering, _ := core.Behavior("Numbering")
+	if counts, ok := numbering.Table("counts"); !ok || !counts.Shared() || counts.Key != "scope" || timers.Tables[0].Shared() {
+		t.Errorf("Numbering = tables %+v", numbering.Tables)
+	}
+	if numbering.Value != "label" || !numbering.Fields[1].Optional || numbering.Fields[1].Name != "label" {
+		t.Errorf("Numbering = value %q, fields %+v", numbering.Value, numbering.Fields)
 	}
 	// Timers and Reactions hear their table's writes (D103), and so does
 	// Schedules (D104), and no other core behavior does; Schedules and Pool

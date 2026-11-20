@@ -734,6 +734,31 @@ Most are load errors; knowing them saves a build round-trip:
   write of the `<table>_dependencies_blockers` sub-table is never refused
   but runs none of its checks: add and remove edges through the
   operations.
+- When a row needs a number a person reads (an invoice's INV-2026-0042,
+  a ticket's T-17), type a field as a Numbering rather than a counter
+  column of your own or a database sequence: `number: Numbering<{ format:
+  "INV-{yyyy}-{seq:4}"; scope: { link: "customer" }; reset: "yearly" }>`
+  (D56, D103). The format prints `{seq}` or `{seq:N}` exactly once, and
+  `{yyyy}` or `{yy}`; `scope.link` names a required to-one relation, and
+  `reset: "yearly"` needs the year in the format. Add `@index<T>(["customer",
+  "number"], { unique: true })` to hold a label unique within its scope:
+  the core keeps no index of labels. A create takes the next number, a
+  refused one takes none, and a delete leaves a gap. Rows made before the
+  table numbered get theirs from `number.assignNumber`, in the year of
+  their `createdAt`. While the table has rows, keep the format, the scope
+  and the reset, and keep Numbering. The table has no upserts.
+- When changes of a row's own fields must be kept, or go through a
+  reviewer, implement Revisions on the table: `implements Revisions<Policy,
+  { review: { permission: "policies.review" } }>` (D16, D103). Each create
+  and change keeps a revision (`revisions.listRevisions`,
+  `revisions.getRevision`). With `review`, a caller proposes a merge patch
+  (`revisions.propose({ patch, note?, evidence? })`) and a caller holding
+  the permission approves it (`revisions.approve({ proposal })`), which
+  writes it through every rule an update meets, or rejects it. Hold the
+  patch's own-field validation in the API or the reviewer's eyes: the core
+  holds it to the behaviors' rules alone. Revisions cannot be removed from
+  a table with rows. For history alone on Postgres, `@versioned` is the
+  lighter choice.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

@@ -17,7 +17,9 @@
     "Schedules",
     "Pool",
     "Rollups",
-    "Dependencies"
+    "Dependencies",
+    "Numbering",
+    "Revisions"
   ],
   "scenarios": [
     {

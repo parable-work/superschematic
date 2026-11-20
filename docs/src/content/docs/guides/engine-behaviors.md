@@ -1727,6 +1727,12 @@ engine.instances.list(me, "invoices", { where: { "Numbering.label": "INV-2026-00
 - **Lease.** On a type that composes `Lease`, list
   `"Numbering.assignNumber"` in its `exempt`, or a backfill of a leased
   instance is refused for anyone but its holder.
+- **On a table.** A table carries it on a field, `number:
+  Numbering<{ format, scope?, reset? }>`, whose column holds the label,
+  and keeps its counts in a table of the use's own
+  ([A row's number and its history](/superschematic/guides/database-tables/#a-rows-number-and-its-history)).
+  `Revisions` runs on a table too, its revisions and proposals in
+  sub-tables of the row.
 
 ## Timers
 

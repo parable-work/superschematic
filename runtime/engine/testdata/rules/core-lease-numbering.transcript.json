@@ -1,0 +1,1130 @@
+{
+  "file": "core-lease-numbering",
+  "source": "runtime/engine/testdata/scenarios/workqueue-lease-numbering.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool",
+    "Rollups",
+    "Dependencies",
+    "Numbering",
+    "Revisions"
+  ],
+  "scenarios": [
+    {
+      "name": "Lease beside Numbering (node) > a create is numbered under another's lease, and a backfill reaches a leased instance when Lease exempts assignNumber",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Job",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "priority",
+              "type": "object"
+            },
+            {
+              "name": "timeLimitMs",
+              "type": "object"
+            },
+            {
+              "name": "topic",
+              "type": "string"
+            },
+            {
+              "name": "urgent",
+              "type": "boolean"
+            },
+            {
+              "name": "createdAt",
+              "type": "number"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Lease",
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "timeLimitMs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "topic",
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "type": "boolean"
+                },
+                {
+                  "name": "createdAt",
+                  "type": "Temporal.DateTime",
+                  "dateTime": true
+                }
+              ]
+            },
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Lease",
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Numbering",
+                  "config": {
+                    "format": "J-{seq:3}"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "timeLimitMs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "topic",
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "type": "boolean"
+                },
+                {
+                  "name": "createdAt",
+                  "type": "Temporal.DateTime",
+                  "dateTime": true
+                }
+              ]
+            },
+            {
+              "name": "Job",
+              "uses": [
+                {
+                  "behavior": "Lease",
+                  "config": {
+                    "exempt": [
+                      "Numbering.assignNumber"
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Numbering",
+                  "config": {
+                    "format": "J-{seq:3}"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "timeLimitMs",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "topic",
+                  "type": "string"
+                },
+                {
+                  "name": "urgent",
+                  "type": "boolean"
+                },
+                {
+                  "name": "createdAt",
+                  "type": "Temporal.DateTime",
+                  "dateTime": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "j1",
+              "own": {
+                "title": "j1",
+                "createdAt": 1767225600003
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "j1",
+            "row": {
+              "own": {
+                "title": "j1",
+                "createdAt": 1767225600003
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "token": 1,
+              "expiresAt": 1767225660004,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "title": "j1",
+                "createdAt": 1767225600003
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1767225600004,
+                  "renewedAt": 1767225600004,
+                  "expiresAt": 1767225660004
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1767225660004,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "create",
+              "id": "j2",
+              "own": {
+                "title": "j2",
+                "createdAt": 1767225600005
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "j2",
+            "row": {
+              "own": {
+                "title": "j2",
+                "createdAt": 1767225600005
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "operation",
+              "key": "j2",
+              "useId": "Lease",
+              "operation": "acquire",
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "token": 1,
+              "expiresAt": 1767225660006,
+              "heartbeatMs": 20000
+            },
+            "row": {
+              "own": {
+                "title": "j2",
+                "createdAt": 1767225600005
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1767225600006,
+                  "renewedAt": 1767225600006,
+                  "expiresAt": 1767225660006
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1767225660006,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Numbering",
+                "config": {
+                  "format": "J-{seq:3}"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Job",
+                "uses": [
+                  {
+                    "behavior": "Lease",
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "priority",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "timeLimitMs",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "topic",
+                    "type": "string"
+                  },
+                  {
+                    "name": "urgent",
+                    "type": "boolean"
+                  },
+                  {
+                    "name": "createdAt",
+                    "type": "Temporal.DateTime",
+                    "dateTime": true
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "anchor": "type"
+              },
+              {
+                "behavior": "Numbering",
+                "config": {
+                  "format": "J-{seq:3}"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Job",
+                "uses": [
+                  {
+                    "behavior": "Lease",
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "priority",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "timeLimitMs",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "topic",
+                    "type": "string"
+                  },
+                  {
+                    "name": "urgent",
+                    "type": "boolean"
+                  },
+                  {
+                    "name": "createdAt",
+                    "type": "Temporal.DateTime",
+                    "dateTime": true
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "create",
+              "id": "j3",
+              "own": {
+                "title": "j3",
+                "createdAt": 1767225600009
+              },
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "key": "j3",
+            "row": {
+              "own": {
+                "title": "j3",
+                "createdAt": 1767225600009
+              },
+              "owned": {
+                "Lease": {
+                  "token": 0,
+                  "expiries": 0
+                },
+                "Numbering": {
+                  "seq": 1,
+                  "label": "J-001"
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Numbering",
+              "operation": "assignNumber",
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Lease vetoes assignNumber of Job j1: another principal holds its lease, until 2026-01-01T00:01:00.004Z",
+              "details": {
+                "behavior": "Lease",
+                "action": "assignNumber",
+                "reason": "another principal holds its lease, until 2026-01-01T00:01:00.004Z",
+                "vetoCode": "held_by_another",
+                "vetoDetails": {
+                  "expiresAt": 1767225660004
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "j1",
+                "createdAt": 1767225600003
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1767225600004,
+                  "renewedAt": 1767225600004,
+                  "expiresAt": 1767225660004
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1767225660004,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "wren",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "operation",
+              "key": "j1",
+              "useId": "Numbering",
+              "operation": "assignNumber",
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "seq": 2,
+              "label": "J-002"
+            },
+            "row": {
+              "own": {
+                "title": "j1",
+                "createdAt": 1767225600003
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1767225600004,
+                  "renewedAt": 1767225600004,
+                  "expiresAt": 1767225660004
+                },
+                "Numbering": {
+                  "seq": 2,
+                  "label": "J-002"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1767225660004,
+                "payload": null
+              }
+            ]
+          }
+        },
+        {
+          "kind": "check",
+          "step": 13,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "config": {
+                  "exempt": [
+                    "Numbering.assignNumber"
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Numbering",
+                "config": {
+                  "format": "J-{seq:3}"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Job",
+                "uses": [
+                  {
+                    "behavior": "Lease",
+                    "anchor": "type"
+                  },
+                  {
+                    "behavior": "Numbering",
+                    "config": {
+                      "format": "J-{seq:3}"
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "priority",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "timeLimitMs",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "topic",
+                    "type": "string"
+                  },
+                  {
+                    "name": "urgent",
+                    "type": "boolean"
+                  },
+                  {
+                    "name": "createdAt",
+                    "type": "Temporal.DateTime",
+                    "dateTime": true
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 14,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Job",
+            "uses": [
+              {
+                "behavior": "Lease",
+                "config": {
+                  "exempt": [
+                    "Numbering.assignNumber"
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Numbering",
+                "config": {
+                  "format": "J-{seq:3}"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "timeLimitMs",
+                "type": "Generic.Int64"
+              },
+              {
+                "name": "topic",
+                "type": "string"
+              },
+              {
+                "name": "urgent",
+                "type": "boolean"
+              },
+              {
+                "name": "createdAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600013,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Job",
+                "uses": [
+                  {
+                    "behavior": "Lease",
+                    "anchor": "type"
+                  },
+                  {
+                    "behavior": "Numbering",
+                    "config": {
+                      "format": "J-{seq:3}"
+                    },
+                    "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  },
+                  {
+                    "name": "priority",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "timeLimitMs",
+                    "type": "Generic.Int64"
+                  },
+                  {
+                    "name": "topic",
+                    "type": "string"
+                  },
+                  {
+                    "name": "urgent",
+                    "type": "boolean"
+                  },
+                  {
+                    "name": "createdAt",
+                    "type": "Temporal.DateTime",
+                    "dateTime": true
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Job",
+          "version": 2,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600014,
+            "action": {
+              "kind": "operation",
+              "key": "j2",
+              "useId": "Numbering",
+              "operation": "assignNumber",
+              "params": {}
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "seq": 3,
+              "label": "J-003"
+            },
+            "row": {
+              "own": {
+                "title": "j2",
+                "createdAt": 1767225600005
+              },
+              "owned": {
+                "Lease": {
+                  "token": 1,
+                  "expiries": 0,
+                  "holder": "wren",
+                  "acquiredAt": 1767225600006,
+                  "renewedAt": 1767225600006,
+                  "expiresAt": 1767225660006
+                },
+                "Numbering": {
+                  "seq": 3,
+                  "label": "J-003"
+                }
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Lease",
+                "name": "expire",
+                "at": 1767225660006,
+                "payload": null
+              }
+            ]
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 16,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    }
+  ]
+}

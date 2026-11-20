@@ -14,7 +14,7 @@
 use serde_json::{json, Value};
 
 use superschematic_rules::{
-    Behavior, ConfigError, ConfigTarget, Core, Cx, Declaration, GuardRequest, Hook,
+    Behavior, Change, ConfigError, ConfigTarget, Core, Cx, Declaration, GuardRequest, Hook,
     PermissionMatcher, SchemaIssue, Veto, View,
 };
 
@@ -28,6 +28,9 @@ pub fn register(file: &str, name: &str, core: &mut Core) -> bool {
         ("core-workflow-principals", "test.Gate") => core.push(Gate),
         ("workqueue-lease", "test.Gate") => core.push(LeaseGate),
         ("workqueue-lease", "test.Signal") => core.push(Signal),
+        ("core-numbering", "test.Refuser") => core.push(Refuser),
+        ("core-revisions", "test.Hold") => core.push(UpdateHold),
+        ("core-staterules", "test.Recorder") => core.push(Recorder),
         _ => return false,
     }
     true
@@ -233,6 +236,97 @@ impl Behavior for FireHold {
             Some(Value::String(title)) if title.starts_with("stuck")
         );
         Ok(held.then(|| Veto::new("the test holds it").with_code("held")))
+    }
+}
+
+/// test.Refuser (`test/core-numbering.test.ts`): refuses a create whose
+/// title is `refuse` after every use listed before it has run, as the
+/// fixture's afterChange vetoes it, so a scenario shows a refused create
+/// takes no number (`refused`).
+pub struct Refuser;
+
+impl Behavior for Refuser {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Refuser").veto("refused")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn after_change(&self, cx: &Cx<'_, ()>, change: &Change<'_>) -> Hook<()> {
+        let refused = matches!(change, Change::Create)
+            && cx.own_field("title") == Some(Value::from("refuse"));
+        if refused {
+            return Err(cx.veto(Veto::new("refused").with_code("refused")));
+        }
+        Ok(())
+    }
+}
+
+/// test.Hold of `test/core-revisions.test.ts`: once its `hold` has run,
+/// vetoes every update of its row, whoever makes it, a caller's or an
+/// approval's through `update()`, so a scenario shows an approval meets
+/// every guard. Its `held` reads false until then. The engine's test kit
+/// has no port of it; this kit calls it `UpdateHold`, beside the other
+/// test.Holds.
+pub struct UpdateHold;
+
+impl Behavior for UpdateHold {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Hold")
+            .field("held")
+            .operation("hold", true)
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn initialize(&self, cx: &Cx<'_, ()>, _params: &Value) -> Hook<()> {
+        cx.set("held", false)
+    }
+
+    fn guard(&self, view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let held = view.get("held") == Some(Value::Bool(true));
+        Ok((held && matches!(request, GuardRequest::Update { .. }))
+            .then(|| Veto::new("it is held")))
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, _params: &Value) -> Hook<Value> {
+        cx.set("held", true)?;
+        Ok(Value::Bool(true))
+    }
+}
+
+/// test.Recorder of `test/core-staterules.test.ts`: `record` writes the
+/// own fields its `patch` gives with `update()`, as a behavior applies a
+/// result on a caller's behalf, then moves Workflow to `to` when given, in
+/// the same call, so a scenario shows a transition reads the fields as the
+/// update left them and a veto undoes both.
+pub struct Recorder;
+
+impl Behavior for Recorder {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Recorder").operation("record", true)
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, params: &Value) -> Hook<Value> {
+        cx.update(params.get("patch").unwrap_or(&Value::Null))?;
+        if let Some(to) = params.get("to").filter(|to| to.is_string()) {
+            cx.call("Workflow", "transition", &json!({ "to": to }))?;
+        }
+        Ok(Value::Bool(true))
     }
 }
 

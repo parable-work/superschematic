@@ -418,7 +418,10 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			l := layout.Types[t.Type]
 			behaviors = &ormBehaviors{Owned: []string{}, NoUpsert: l.Deadlines != nil}
 			for _, use := range l.Uses {
-				if len(use.Tables) > 0 {
+				// A create that writes a sub-table's or a shared table's
+				// rows (Numbering's counts, D103's step 4) is no upsert's
+				// insert.
+				if len(use.Tables) > 0 || len(use.Shared) > 0 {
 					behaviors.NoUpsert = true
 				}
 			}

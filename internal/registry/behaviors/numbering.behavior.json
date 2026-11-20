@@ -28,8 +28,22 @@
     }
   },
   "fields": [
-    { "name": "seq", "description": "The instance's number in its count, from 1; absent until it is numbered." },
-    { "name": "label", "description": "The number as the format prints it, unique within its scope; absent until it is numbered." }
+    { "name": "seq", "description": "The instance's number in its count, from 1; absent until it is numbered.", "type": "Generic.Int64" },
+    { "name": "label", "description": "The number as the format prints it, unique within its scope; absent until it is numbered.", "type": "string", "optional": true }
+  ],
+  "value": "label",
+  "tables": [
+    {
+      "name": "counts",
+      "description": "On a table, one row per count, kept for the table as a whole: the last number it gave and the config it counted under. A delete of a row leaves it where it was, so a delete leaves a gap; a row whose config is not the use's counts from 1 again.",
+      "key": "scope",
+      "scope": "schema",
+      "fields": [
+        { "name": "scope", "description": "What the count runs per: the key of the scope relation's target and the UTC year, each the config counts by, joined with a slash, or * for a count of the whole table.", "type": "string" },
+        { "name": "last", "description": "The last number the count gave.", "type": "Generic.Int64" },
+        { "name": "counting", "description": "The format, the scope and the reset the count was made under, as JSON.", "type": "string" }
+      ]
+    }
   ],
   "operations": [
     {

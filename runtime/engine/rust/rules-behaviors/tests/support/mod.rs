@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange, Outcome,
-    ReadRequest, Refusal, Row, RowWrite, Source, SubRow, SubRowChange, TypeSpec,
+    ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange, Source, SubRow, SubRowChange,
+    TypeSpec,
 };
 
 pub const START: i64 = 1_000_000;
@@ -26,16 +27,36 @@ pub struct Memory {
     pub sub_rows: BTreeMap<(String, String, String, String), Map<String, Value>>,
     /// By row key, use id and name: the time it falls due.
     pub armed: BTreeMap<(String, String, String), i64>,
+    /// The rows of the uses' shared tables (D103's step 4), by use id,
+    /// table and key, which no row's delete takes.
+    pub shared: BTreeMap<(String, String, String), SharedRow>,
+    /// Rows of other types, by type and key, and their specs, which a
+    /// rule that reads another type's rows reads (Revisions' evidence).
+    pub others: BTreeMap<(String, String), Row>,
+    pub specs: BTreeMap<String, TypeSpec>,
 }
 
 impl Source for Memory {
     fn answer(&mut self, request: &ReadRequest) -> Result<Answer, Refusal> {
         match request {
-            ReadRequest::Row { key, .. } => Ok(Answer::Row(self.rows.get(key).cloned())),
+            ReadRequest::Row { type_name, key } => Ok(Answer::Row(
+                self.others
+                    .get(&(type_name.clone(), key.clone()))
+                    .or_else(|| self.rows.get(key))
+                    .cloned(),
+            )),
+            ReadRequest::Spec { type_name } => Ok(Answer::Spec(self.specs.get(type_name).cloned())),
             ReadRequest::HasRows { .. } => Ok(Answer::HasRows(!self.rows.is_empty())),
             ReadRequest::SubRows {
                 key, use_id, table, ..
             } => Ok(Answer::SubRows(self.table(key, use_id, table))),
+            ReadRequest::SharedRow {
+                use_id, table, key, ..
+            } => Ok(Answer::SharedRow(
+                self.shared
+                    .get(&(use_id.clone(), table.clone(), key.clone()))
+                    .cloned(),
+            )),
             other => Err(Refusal::internal(format!(
                 "this host answers no read of this kind: {other:?}"
             ))),
@@ -135,6 +156,32 @@ impl Memory {
                 other => panic!("a sub-table change this host does not take: {other:?}"),
             }
         }
+        for write in &changes.shared_rows {
+            let at = (write.use_id.clone(), write.table.clone(), write.key.clone());
+            match &write.change {
+                SharedRowChange::Insert { values } => {
+                    assert!(!self.shared.contains_key(&at), "a new shared row: {at:?}");
+                    self.shared
+                        .insert(at, SharedRow::new(&write.key, values.clone(), 1));
+                }
+                SharedRowChange::Update {
+                    expected_version,
+                    values,
+                } => {
+                    let row = self.shared.get_mut(&at).expect("the shared row it updates");
+                    assert_eq!(row.version, *expected_version, "{at:?}");
+                    for (name, value) in values {
+                        if value.is_null() {
+                            row.values.remove(name);
+                        } else {
+                            row.values.insert(name.clone(), value.clone());
+                        }
+                    }
+                    row.version += 1;
+                }
+                other => panic!("a shared-table change this host does not take: {other:?}"),
+            }
+        }
         for change in &changes.deadlines {
             let key = change.row().key.clone().expect("a keyed row");
             if deleted.contains(&key) {
@@ -217,6 +264,16 @@ impl Host {
 
     pub fn update(&mut self, caller: &Caller, key: &str, patch: Value) -> Outcome {
         self.update_at(caller, START, key, patch)
+    }
+
+    pub fn delete(&mut self, caller: &Caller, key: &str) -> Outcome {
+        self.run(
+            caller,
+            START,
+            Action::Delete {
+                key: key.to_owned(),
+            },
+        )
     }
 
     pub fn update_at(&mut self, caller: &Caller, now: i64, key: &str, patch: Value) -> Outcome {

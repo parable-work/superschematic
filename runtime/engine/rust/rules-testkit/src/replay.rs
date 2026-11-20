@@ -317,6 +317,19 @@ pub const CREATOR_READERS: [&str; 1] = ["Approvals"];
 /// The own field a table holds its row's creator in (D87).
 const CREATED_BY: &str = "createdBy";
 
+/// The behaviors whose engine read when an instance was created from its
+/// row (`created_at`), which a table holds in the own field `createdAt`, a
+/// date-time (D87): a recorded type that lists one in any version a
+/// scenario defines, and declares no such field, gets one in every version
+/// the host runs, which each create sets to its time unless it gives one,
+/// so a row made before the version that composed the behavior holds it, as
+/// the engine kept every instance's creation time, and which no comparison
+/// with the recording reads (Numbering's assignNumber, D103 step 4).
+pub const CREATION_READERS: [&str; 1] = ["Numbering"];
+
+/// The own field a table holds its row's creation time in (D87).
+const CREATED_AT: &str = "createdAt";
+
 /// The behavior whose moves the engine logged with their cause.
 const REACTIONS: &str = "Reactions";
 
@@ -340,6 +353,13 @@ const EVENTS_UNMAPPED: &str = "a read of the engine's event log that holds what 
 
 /// Why an events.read of rows a heard change wrote is not compared.
 const HEARD_WRITE: &str = "a read of the change log where a change command wrote a row it heard, a write the engine made at another event if at all: a table's change queue runs a write's rules after the commit, Timers' reconcile under the live version among them, where the engine's ran at the write or at the deadline's fire (D103)";
+
+/// The behavior whose revisions hold a row's own fields.
+const REVISIONS: &str = "Revisions";
+
+/// Why an events.read of a row an update that changed nothing wrote is
+/// not compared.
+const UNCHANGED_UPDATE: &str = "a read of the engine's event log after an update that changed nothing, which the engine answered with no write and no event, and the core writes as any update, its uses' rules deciding what it changes (D103)";
 
 /// Why an engine opened with a runner's depth limit is not mapped.
 const MAX_DEPTH_REASON: &str = "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)";
@@ -774,9 +794,10 @@ struct Engine {
     drafts: BTreeMap<String, Vec<FieldDef>>,
     /// The own fields of each type's live version.
     fields: BTreeMap<String, Vec<FieldDef>>,
-    /// The types the replay gave an own field createdBy, which the
-    /// recording's documents do not declare ([`CREATOR_READERS`]).
-    creators: BTreeSet<String>,
+    /// The types the replay gave an own field createdBy or createdAt, each
+    /// with the fields it gave, which the recording's documents do not
+    /// declare ([`CREATOR_READERS`], [`CREATION_READERS`]).
+    creators: BTreeMap<String, Vec<&'static str>>,
     /// The principal its runner runs the due deadlines as.
     runner: Caller,
     /// The uses each row predates, by its type and key: those a publish
@@ -875,6 +896,9 @@ struct Run<'r> {
     /// The operations of the file's incidental behaviors, each with why
     /// its steps are not compared ([`INCIDENTAL`]).
     incidental_ops: Vec<(String, &'static str)>,
+    /// The types any define of the scenario gives a behavior that reads
+    /// when a row was created ([`CREATION_READERS`]).
+    stamped: BTreeSet<String>,
 }
 
 impl<'r> Run<'r> {
@@ -896,6 +920,7 @@ impl<'r> Run<'r> {
             recorded: None,
             recording: false,
             incidental_ops: incidental_operations(file),
+            stamped: stamped_types(scenario),
             report: ScenarioReport {
                 name: scenario
                     .get("name")
@@ -1263,7 +1288,7 @@ impl<'r> Run<'r> {
             off,
             drafts: BTreeMap::new(),
             fields: BTreeMap::new(),
-            creators: BTreeSet::new(),
+            creators: BTreeMap::new(),
             runner,
             predates: BTreeMap::new(),
         });
@@ -1419,10 +1444,19 @@ impl<'r> Run<'r> {
             without_runner_members(&mut defined.spec);
         }
         without_incidental_uses(self.file, &mut defined.spec);
-        if self.recording && with_creator(&mut defined) {
-            self.engines[cx.at]
-                .creators
-                .insert(defined.spec.name.clone());
+        if self.recording {
+            let mut given = Vec::new();
+            if with_creator(&mut defined) {
+                given.push(CREATED_BY);
+            }
+            if self.stamped.contains(&defined.spec.name) && with_creation(&mut defined) {
+                given.push(CREATED_AT);
+            }
+            if !given.is_empty() {
+                self.engines[cx.at]
+                    .creators
+                    .insert(defined.spec.name.clone(), given);
+            }
         }
         if let Some(reason) = &defined.unmapped {
             return Done::Halted(reason.clone());
@@ -1706,17 +1740,27 @@ impl<'r> Run<'r> {
         // The creator the engine kept beside an instance, in the field the
         // replay gave its type.
         let engine = &self.engines[cx.at];
-        let creates_creator = engine.creators.contains(type_name)
-            && engine
-                .host
-                .store()
-                .live(type_name)
-                .is_some_and(|spec| spec.field(CREATED_BY).is_some());
-        if creates_creator && !own.contains_key(CREATED_BY) && !cx.caller.subject.is_empty() {
+        let gives = |field: &str| {
+            engine
+                .creators
+                .get(type_name)
+                .is_some_and(|given| given.contains(&field))
+                && engine
+                    .host
+                    .store()
+                    .live(type_name)
+                    .is_some_and(|spec| spec.field(field).is_some())
+        };
+        if gives(CREATED_BY) && !own.contains_key(CREATED_BY) && !cx.caller.subject.is_empty() {
             own.insert(
                 CREATED_BY.to_owned(),
                 Value::from(cx.caller.subject.as_str()),
             );
+        }
+        // The time the engine kept beside an instance, epoch milliseconds as
+        // the core reads a date-time.
+        if gives(CREATED_AT) && !own.contains_key(CREATED_AT) {
+            own.insert(CREATED_AT.to_owned(), Value::from(cx.now));
         }
         let mut params = options
             .get("behaviors")
@@ -2047,6 +2091,9 @@ impl<'r> Run<'r> {
         if let Some(reason) = unported {
             return Done::Skipped(reason.to_owned());
         }
+        if let Some(reason) = store_validates(cx.expected) {
+            return Done::Skipped(reason);
+        }
         let outcome = match uses.as_slice() {
             [] => Err(Refusal::not_found(format!(
                 "{type_name} has no operation {operation}"
@@ -2063,8 +2110,20 @@ impl<'r> Run<'r> {
                     },
                 )
                 .with_preconditions(preconditions_of(&options));
-                self.execute(cx.at, type_name, command)
-                    .map(|applied| applied.result().clone())
+                let revisions = self.engines[cx.at]
+                    .host
+                    .store()
+                    .live(type_name)
+                    .and_then(|spec| spec.use_of(use_id))
+                    .is_some_and(|(_, entry)| entry.behavior == REVISIONS);
+                self.execute(cx.at, type_name, command).map(|applied| {
+                    let result = applied.result().clone();
+                    if revisions {
+                        self.revision_data(cx.at, type_name, result)
+                    } else {
+                        result
+                    }
+                })
             }
             _ => {
                 return Done::Skipped(format!(
@@ -2075,6 +2134,39 @@ impl<'r> Run<'r> {
         self.judge(cx, type_name, live_version, outcome, |checks, e, a| {
             checks.eq("result", e, a);
         })
+    }
+
+    // revision_data leaves out of each revision a Revisions operation
+    // answers the own fields the replayer gives a row that the engine kept
+    // beside the instance: its links' keys and the creation time it stamps,
+    // as a record leaves them out of its own fields. A revision holds a
+    // table's own fields, which hold both there.
+    fn revision_data(&self, at: usize, type_name: &str, mut result: Value) -> Value {
+        let engine = &self.engines[at];
+        let Some(spec) = engine.host.store().live(type_name) else {
+            return result;
+        };
+        let given = engine.creators.get(type_name);
+        let strip = |data: &mut Value| {
+            let Some(own) = data.as_object() else {
+                return;
+            };
+            let mut kept = shape::without_links(spec, own);
+            for field in given.into_iter().flatten() {
+                kept.remove(*field);
+            }
+            *data = Value::Object(kept);
+        };
+        if let Some(items) = result.get_mut("items").and_then(Value::as_array_mut) {
+            for item in items {
+                if let Some(data) = item.get_mut("data") {
+                    strip(data);
+                }
+            }
+        } else if let Some(data) = result.get_mut("data") {
+            strip(data);
+        }
+        result
     }
 
     // invoke_schema runs an operation of a type as a whole as a command
@@ -2353,6 +2445,15 @@ impl<'r> Run<'r> {
         if called {
             return Done::Skipped(EVENTS_OF_CALLS.to_owned());
         }
+        let unchanged = store.log().iter().any(|logged| {
+            schema.is_none_or(|schema| logged.type_name == schema)
+                && instance.is_none_or(|key| logged.key == key)
+                && logged.unchanged
+                && matches!(logged.command.action, Action::Update { .. })
+        });
+        if unchanged {
+            return Done::Skipped(UNCHANGED_UPDATE.to_owned());
+        }
         let events: Vec<Value> = store
             .log()
             .iter()
@@ -2550,6 +2651,54 @@ fn unmapped_options(options: &Map<String, Value>, taken: &[&str]) -> Option<Stri
 // operation or deadline reached through an operation of the row (a
 // scope's reserveFor, a Lease's expire from a miss): the command runs on
 // another key.
+// The rules of the store's own-field validation, as the engine's issues
+// name them: what a field's type, its required flag and its validate
+// constraints refuse.
+const STORE_RULES: [&str; 9] = [
+    "required",
+    "unknown",
+    "type",
+    "maxLength",
+    "minLength",
+    "pattern",
+    "minimum",
+    "maximum",
+    "enum",
+];
+
+// store_validates is why an operation's refusal is not compared: the
+// engine refused it for its own-field validation alone (`invalid_instance`
+// with only the store's rules), which a patch the operation held to an
+// update's validation met, Revisions' propose's and an update() of a
+// test's fixture. Own-field validation is the store's, not the core's: on
+// a table the request's types and the database hold it.
+fn store_validates(expected: &Expected<'_>) -> Option<String> {
+    let Expected::Error(error) = expected else {
+        return None;
+    };
+    if error.get("code").and_then(Value::as_str) != Some("invalid_instance") {
+        return None;
+    }
+    let issues = error.get("details")?.get("issues")?.as_array()?;
+    let store = !issues.is_empty()
+        && issues.iter().all(|issue| {
+            issue
+                .get("rule")
+                .and_then(Value::as_str)
+                .is_some_and(|rule| STORE_RULES.contains(&rule))
+        });
+    store.then(|| {
+        let messages: Vec<&str> = issues
+            .iter()
+            .filter_map(|issue| issue.get("message").and_then(Value::as_str))
+            .collect();
+        format!(
+            "own-field validation is the store's, and it refuses the patch this operation holds to an update's validation: {}",
+            messages.join("; ")
+        )
+    })
+}
+
 fn written_by_a_call(logged: &Logged) -> bool {
     matches!(
         logged.command.action,
@@ -2868,7 +3017,7 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
 // replay gave its type left out, or null.
 fn record_of(
     host: &MemoryHost,
-    creators: &BTreeSet<String>,
+    creators: &BTreeMap<String, Vec<&'static str>>,
     type_name: &str,
     key: &str,
     now: i64,
@@ -2996,17 +3145,82 @@ fn with_creator(defined: &mut shape::Defined) -> bool {
     true
 }
 
-// without_creator is a record or an event of a type the replay gave an own
-// field createdBy with that field left out of its own fields (a record's
-// `data`, an event change's `data` and its patch's), which the recording's
-// document does not declare.
-fn without_creator(mut value: Value, creators: &BTreeSet<String>, type_name: &str) -> Value {
-    if !creators.contains(type_name) {
-        return value;
+// with_creation gives a document's type an own field createdAt, a
+// date-time, when it declares none, as the engine kept an instance's
+// creation time beside it: whether it did. The replay asks it of a type
+// that lists one of CREATION_READERS in any version its scenario defines,
+// so every version holds the field and a row made before the behavior
+// composed it holds its time.
+fn with_creation(defined: &mut shape::Defined) -> bool {
+    if defined.spec.field(CREATED_AT).is_some() {
+        return false;
     }
+    defined.spec = std::mem::replace(&mut defined.spec, TypeSpec::new(""))
+        .with_field(FieldSpec::date_time(CREATED_AT, "Temporal.DateTime"));
+    defined.fields.push(FieldDef {
+        name: CREATED_AT.to_owned(),
+        required: false,
+        json_type: "number".to_owned(),
+        type_name: "Temporal.DateTime".to_owned(),
+        date_time: true,
+    });
+    true
+}
+
+// stamped_types are the names of the types any define of a scenario gives
+// a behavior of CREATION_READERS: each document's name and each of its
+// types' names.
+fn stamped_types(scenario: &Value) -> BTreeSet<String> {
+    let mut stamped = BTreeSet::new();
+    let steps = scenario.get("steps").and_then(Value::as_array);
+    for step in steps.into_iter().flatten() {
+        if step.get("call").and_then(Value::as_str) != Some("schemas.define") {
+            continue;
+        }
+        let Some(document) = step.pointer("/args/0") else {
+            continue;
+        };
+        let types = document.get("types").and_then(Value::as_object);
+        for (name, td) in types.into_iter().flatten() {
+            let lists = td
+                .get("behaviors")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|entry| {
+                    entry
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|behavior| CREATION_READERS.contains(&behavior))
+                });
+            if lists {
+                stamped.insert(name.clone());
+                if let Some(schema) = document.get("name").and_then(Value::as_str) {
+                    stamped.insert(schema.to_owned());
+                }
+            }
+        }
+    }
+    stamped
+}
+
+// without_creator is a record or an event of a type the replay gave an own
+// field createdBy or createdAt with that field left out of its own fields
+// (a record's `data`, an event change's `data` and its patch's), which the
+// recording's document does not declare.
+fn without_creator(
+    mut value: Value,
+    creators: &BTreeMap<String, Vec<&'static str>>,
+    type_name: &str,
+) -> Value {
+    let Some(given) = creators.get(type_name) else {
+        return value;
+    };
     for path in ["/data", "/change/data", "/change/patch/data"] {
         if let Some(data) = value.pointer_mut(path).and_then(Value::as_object_mut) {
-            data.remove(CREATED_BY);
+            for field in given {
+                data.remove(*field);
+            }
         }
     }
     value

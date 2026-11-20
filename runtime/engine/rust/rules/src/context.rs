@@ -18,8 +18,11 @@
 //! A use writes only its own state: its owned fields and sub-tables, by
 //! their declared names, and its deadlines, on the row it runs on. It
 //! reaches another use's state, on its row or another, through that use's
-//! operations ([`Cx::call`], [`Cx::call_on`]). The command's own operation
-//! may write nothing at all ([`Cx::unchanged`]), as an idempotent one does.
+//! operations ([`Cx::call`], [`Cx::call_on`]). An operation's handler also
+//! writes its row's own fields, held to an update's validation and guards
+//! ([`Cx::update`], D103's step 4: Revisions' approve). The command's own
+//! operation may write nothing at all ([`Cx::unchanged`]), as an idempotent
+//! one does.
 //!
 //! An operation of the table as a whole (D104) runs on no row
 //! ([`View::on_table`]): it reads the rows of a type through
@@ -32,9 +35,11 @@ use std::ops::Deref;
 use serde_json::{Map, Value};
 
 use crate::behavior::{ContractQuery, Hook, Stop};
-use crate::changes::{DeadlineChange, OutboxEvent, SubRowChange, SubRowWrite};
+use crate::changes::{DeadlineChange, OutboxEvent, SharedRowChange, SubRowChange, SubRowWrite};
 use crate::command::Caller;
-use crate::reads::{Answer, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow, TableRef};
+use crate::reads::{
+    Answer, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SharedRow, SubRow, TableRef,
+};
 use crate::refusal::{Refusal, Veto};
 use crate::run::{Frame, Run};
 use crate::spec::{Anchor, TypeSpec};
@@ -327,6 +332,16 @@ impl<'r, C> View<'r, C> {
             .sub_rows_of(self.frame, self.index, type_name, key, use_id, table)
     }
 
+    /// The row of a key of one of the use's shared tables, kept for the
+    /// type's table as a whole ([`crate::TableDecl::shared`]): the host's
+    /// ([`ReadRequest::SharedRow`]) with the run's own writes of it applied,
+    /// with the version an update of it is held to; `None` when the table
+    /// holds none of the key. A table the declaration does not declare
+    /// shared is a defect.
+    pub fn shared_row(&self, table: &str, key: &str) -> Hook<Option<SharedRow>> {
+        self.run.shared_row(self.frame, self.index, table, key)
+    }
+
     /// A type's live version, its uses and their configs; `None` when no
     /// type has the name. The command's own type is the version the command
     /// runs on, read from no host.
@@ -380,6 +395,9 @@ pub struct Cx<'r, C> {
     /// Whether this is the handler of the command's own operation, the one
     /// whose [`Cx::unchanged`] the core honors.
     pub(crate) own: bool,
+    /// Whether this is an operation's handler, the one context that writes
+    /// its row's own fields ([`Cx::update`]).
+    pub(crate) handler: bool,
     /// Whether this is a deadline's handler, whose calls on its row a guard
     /// is told are the worker's requests ([`crate::GuardRequest`]'s
     /// `fired`).
@@ -465,6 +483,52 @@ impl<'r, C> Cx<'r, C> {
         Ok(())
     }
 
+    /// Writes the row's own fields with a JSON merge patch, from an
+    /// operation's handler (D103's step 4; the engine's `update()`): the
+    /// patch is held to an update's validation and to every use's guard,
+    /// as a caller's update of the row is, though no guard is handed a
+    /// precondition, since the command's are the operation's; and the
+    /// operation's after-change hooks hear the own fields as they were
+    /// before it ([`crate::Change::Operation`]'s `before`). A field
+    /// anchor's field is its behavior's, which no patch writes. A patch
+    /// that leaves the fields as they are asks no guard and writes nothing.
+    /// Answers whether it changed them. A patch that is not an object, and
+    /// a call from any context but an operation's handler, is a defect.
+    pub fn update(&self, patch: &Value) -> Hook<bool> {
+        self.off_table("update()")?;
+        self.writing("update()")?;
+        if !self.handler {
+            return Err(self.defect(
+                "update() is an operation's: an initializer, a deadline and an after-change hook write the use's own state alone",
+            ));
+        }
+        let Some(patch) = patch.as_object() else {
+            return Err(self.defect(
+                "update() takes a JSON merge patch of the row's own fields: a JSON object",
+            ));
+        };
+        self.view
+            .run
+            .update_own(self.view.frame, self.view.index, patch)
+    }
+
+    /// Holds a JSON merge patch of the row's own fields to an update's
+    /// validation, as [`Cx::update`] would, and writes nothing: whether a
+    /// patch kept for later would leave the row valid now (Revisions'
+    /// propose). Asks no guard. A patch that is not an object is a defect.
+    pub fn validate_update(&self, patch: &Value) -> Hook<()> {
+        self.off_table("validate_update()")?;
+        let Some(patch) = patch.as_object() else {
+            return Err(self.defect(
+                "validate_update() takes a JSON merge patch of the row's own fields: a JSON object",
+            ));
+        };
+        self.view
+            .run
+            .validate_own(self.view.frame, self.view.index, patch)
+            .map(|_| ())
+    }
+
     /// Inserts a row of one of the use's sub-tables, by a key it makes
     /// ([`Cx::new_key`]) or one the row's data gives, with its values by
     /// declared field. A sub-table declared with fields takes none other,
@@ -495,6 +559,11 @@ impl<'r, C> Cx<'r, C> {
                 listed(&declaration.table_names())
             )));
         };
+        if declared.shared {
+            return Err(self.defect(format!(
+                "{call}: {table} is a shared table, written by insert_shared and update_shared"
+            )));
+        }
         if let (true, SubRowChange::Insert { values } | SubRowChange::Update { values }) =
             (declared.is_checked(), &change)
         {
@@ -520,6 +589,51 @@ impl<'r, C> Cx<'r, C> {
             change,
         });
         Ok(())
+    }
+
+    /// Inserts a row of one of the use's shared tables by its key, with its
+    /// values by declared field: a key the table holds already inserts
+    /// nothing, and the host runs the command again from fresh state, so two
+    /// writers that both found none write one row between them. A shared
+    /// table is the type's table's as a whole, so an operation of the table
+    /// writes it too.
+    pub fn insert_shared(&self, table: &str, key: &str, values: Map<String, Value>) -> Hook<()> {
+        self.writing(&format!("a write of shared table {table}"))?;
+        let view = &self.view;
+        view.run.write_shared(
+            view.frame,
+            view.index,
+            "insert_shared",
+            table,
+            key,
+            SharedRowChange::Insert { values },
+        )
+    }
+
+    /// Sets values of the row of a key of one of the use's shared tables,
+    /// held to the version it was read at ([`View::shared_row`]); a null
+    /// clears one. A row a concurrent writer moved past that version updates
+    /// nothing, and the host runs the command again from fresh state.
+    pub fn update_shared(
+        &self,
+        table: &str,
+        key: &str,
+        expected_version: i64,
+        values: Map<String, Value>,
+    ) -> Hook<()> {
+        self.writing(&format!("a write of shared table {table}"))?;
+        let view = &self.view;
+        view.run.write_shared(
+            view.frame,
+            view.index,
+            "update_shared",
+            table,
+            key,
+            SharedRowChange::Update {
+                expected_version,
+                values,
+            },
+        )
     }
 
     /// Emits an event of the use's about its row (D104), which the host
