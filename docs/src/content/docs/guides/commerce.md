@@ -22,7 +22,11 @@ They build on [the core's behaviors](/superschematic/guides/engine-behaviors/):
 `Timers` lets a hold expire, `Approvals` gates a refund, `Numbering`
 numbers orders and refunds, `StateRules` freezes a placed order, and a
 `Reactions` rule places a checkout once it is paid. The acme shop sells
-and books through these behaviors ([acme-shop](#the-acme-shop)).
+and books through these behaviors ([acme-shop](#the-acme-shop)). The
+four commerce behaviors compose on engine types. A table numbers its rows
+with a `Numbering` field instead, `number: Numbering<{ format:
+"ORD-{yyyy}-{seq:5}"; reset: "yearly" }>`, counted in a table of its own
+([A row's number and its history](/superschematic/guides/database-tables/#a-rows-number-and-its-history)).
 
 This page assumes you know [the engine](/superschematic/guides/engine/)
 and [engine behaviors](/superschematic/guides/engine-behaviors/). The
