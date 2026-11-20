@@ -38,7 +38,7 @@ use superschematic_rules::{
 };
 use superschematic_rules_handler::document::storage_key;
 use superschematic_rules_handler::{
-    run_due, serve, Armed, Context, Declarations, Draft, DueDeadline, Handler, HeldSubRow,
+    run_due, serve, Armed, Context, Declarations, Draft, DueDeadline, Handler, HeldSubRow, Policy,
     QueuedChange, QueuedEvent, RanDue, Request, Store, StoreAnswer, StoreRead, StoreWrite,
     StoredRow, Unit, Version,
 };
@@ -940,6 +940,7 @@ pub struct Dev<S = SqliteStore> {
     clock: Box<dyn Fn() -> i64 + Send>,
     runner: Caller,
     drain: Drain,
+    policy: Policy,
 }
 
 /// The system's time in epoch milliseconds.
@@ -1001,6 +1002,7 @@ impl<S: Store> Dev<S> {
             clock: Box::new(system_millis),
             runner: Caller::new("development-runner", Vec::<String>::new()),
             drain: Drain::default(),
+            policy: Policy::default(),
         }
     }
 
@@ -1014,6 +1016,18 @@ impl<S: Store> Dev<S> {
     pub fn with_runner(mut self, runner: Caller) -> Self {
         self.runner = runner;
         self
+    }
+
+    /// The host with the access policy its handler asks before each
+    /// request (D58's form); `"allowAll"` unless given.
+    pub fn with_policy(mut self, policy: Policy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// The access policy the host's handler asks.
+    pub fn policy(&self) -> &Policy {
+        &self.policy
     }
 
     /// The host with when it runs its queues.
@@ -1043,7 +1057,7 @@ impl<S: Store> Dev<S> {
             request: uuid::Uuid::new_v4().to_string(),
             id: uuid::Uuid::new_v4().as_u128(),
         };
-        let handler = Handler::new(&self.core, &self.declarations);
+        let handler = Handler::new(&self.core, &self.declarations).with_policy(&self.policy);
         let response = serve(&handler, &mut self.store, request, &context);
         if self.drain == Drain::AfterEachRequest {
             self.run_due()?;

@@ -20,6 +20,7 @@ use superschematic_rules::{
     ValidationIssue,
 };
 
+use crate::access::{Action as AccessAction, Policy, ALLOW_ALL};
 use crate::bridge::{self, row_of, rows_of, Bridge, Ran};
 use crate::declarations::Declarations;
 use crate::document::{self, document_refusal, Kind, Model, OnDelete};
@@ -186,11 +187,13 @@ pub struct Done {
     pub unit: Unit,
 }
 
-/// The handler: the core it runs the behaviors on, and the behaviors'
-/// declarations.
+/// The handler: the core it runs the behaviors on, the behaviors'
+/// declarations, and the access policy it asks before each request a
+/// caller makes ([`crate::access`]).
 pub struct Handler<'a> {
     core: &'a Core,
     declarations: &'a Declarations,
+    policy: &'a Policy,
 }
 
 /// The reads a run has and the ones it still needs.
@@ -373,9 +376,26 @@ impl Handler<'_> {
 }
 
 impl<'a> Handler<'a> {
-    /// A handler over a core and the declarations of the behaviors it runs.
+    /// A handler over a core and the declarations of the behaviors it
+    /// runs, which allows every caller everything (`"allowAll"`).
     pub fn new(core: &'a Core, declarations: &'a Declarations) -> Self {
-        Handler { core, declarations }
+        Handler {
+            core,
+            declarations,
+            policy: &ALLOW_ALL,
+        }
+    }
+
+    /// The handler with the access policy it asks.
+    #[must_use]
+    pub fn with_policy(mut self, policy: &'a Policy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// The access policy the handler asks.
+    pub fn policy(&self) -> &Policy {
+        self.policy
     }
 
     /// Runs a request over the store's answers so far: the reads it needs,
@@ -387,6 +407,9 @@ impl<'a> Handler<'a> {
             answers,
             need: Vec::new(),
         };
+        if let Err(refusal) = self.admit(request, context) {
+            return refused(refusal);
+        }
         let outcome = match request {
             Request::Define { document } => self.define(document, context),
             Request::Publish { type_name, discard } => {
@@ -521,6 +544,7 @@ impl<'a> Handler<'a> {
 
     fn define(&self, document: &Value, context: &Context) -> Result<HandlerStep, Refusal> {
         let model = document::read(document, self.declarations)?;
+        self.ask(&context.caller, AccessAction::Define, &model.name, None)?;
         self.define_check(&model, context)?;
         Ok(done(
             json!({"type": model.name, "defined": true}),
@@ -1043,6 +1067,7 @@ impl<'a> Handler<'a> {
             return Ok(take(reads).wait());
         };
         let model = live.model(type_name)?;
+        self.ask_operation(model, &action, &context.caller)?;
         self.run_core(
             &live,
             model,
