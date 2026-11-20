@@ -798,7 +798,7 @@ of a table with `updatedBy` need an acting user too, so a nullable
 An enum column's `CHECK` says which values the column holds. It does not
 say which value may follow which. `@stateMachine`, from
 `@superschematic/schema`, declares the moves an enum field may make
-([D118](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+([D118](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)).
 On a table, the database then refuses every other move, whatever writes
 the row: a repository, a job's own SQL, a script or `psql`. The generated
 types carry the same moves in Go, TypeScript, Python and Rust, so a
@@ -1235,7 +1235,7 @@ write, as long as every writer advances the counter. One writer that
 forgets breaks every such compare, and nothing reports it. `@fenced`,
 from `@superschematic/schema`, names the counter, the fence, on a table
 of a DB schema
-([D119](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+([D119](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)).
 The database then refuses a write that does not advance it, whatever
 writes the row, and the generated repositories advance it themselves.
 
@@ -2427,7 +2427,8 @@ operations are `budget.reserve`, the read-only `checkReserve`,
   within every limit up the chain (409 `over_limit`, `{ meter, amount,
   remaining, limit, scope }`, `scope` the row whose limit refused it), and
   usage counts at each. An update of the relation while the meter holds a
-  reservation is `scope_reserved`.
+  reservation is `scope_reserved`. The core walks at most 16 scopes up a
+  chain, and the build refuses a chain that comes back to its own table.
 - **Observe.** `observe({ meter, used, limit?, resetsAt? })` records the
   usage a provider reports, which replaces what the meter counts, and its
   `limit` the meter's, until `resetsAt`, else until the meter's next

@@ -156,8 +156,8 @@ if [ -n "$shapes$generator" ]; then
 fi
 
 # The source tree's name for the scalar library, in any case and with a
-# hyphen or an underscore; here it is superscalar. docs/DECISIONS.md records
-# the renames that removed it and is the one file skipped.
+# hyphen or an underscore; here it is superscalar. docs/DECISIONS.md, which
+# recorded the renames that removed it (D4 and D8), is the one file skipped.
 scalarlib="$(scan -i 'scalar[-_]lib' . -- "${hashes[@]}" \
   | drop '^\./docs/DECISIONS\.md:[0-9]+:')"
 
@@ -197,8 +197,8 @@ fi
 # a pipeline's serving layer. A semantic-role identifier fails here in any
 # spelling (semanticRole, SemanticRole, semantic_role, x-semantic-role), and
 # so does the flag's x-exclude vendor key. The flag's IR key, exclude, is not
-# searched: @versioned({ exclude }) uses the same word. docs/DECISIONS.md
-# names the removed fields and is the one file skipped.
+# searched: @versioned({ exclude }) uses the same word. docs/DECISIONS.md,
+# which named the removed fields (D18), is the one file skipped.
 fielddirectives="$(scan '[Ss]emantic[-_]?[Rr]ole|(^|[^A-Za-z0-9_-])x-exclude([^A-Za-z0-9_-]|$)' . -- "${hashes[@]}" \
   | drop '^\./docs/DECISIONS\.md:[0-9]+:')"
 

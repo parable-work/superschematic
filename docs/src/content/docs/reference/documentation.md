@@ -475,7 +475,7 @@ A distribution's own display concepts, such as a role a UI shows a type
 to, a home page or link defaults, are its extension's: a type decorator
 of its own that writes its slot, `extensions.<name>`, as a field
 directive does, and a check over `@display` for a rule on its values
-(D18 and D10 in `docs/DECISIONS.md`).
+(D18 and D10 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)).
 
 ## Rules an extension adds
 

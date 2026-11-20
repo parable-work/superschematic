@@ -18,7 +18,7 @@ graph operation on the core over a storage adapter, and a generated facade in
 each language gives each graph typed methods over its engine.
 
 The design and the alternatives not taken are D17, D19 and D32 in
-[docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md).
+[the decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md).
 
 ## Declare a graph
 

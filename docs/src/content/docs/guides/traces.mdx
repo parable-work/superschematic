@@ -9,7 +9,7 @@ Every server, job and worker a stack generates, in Go, TypeScript and
 Rust, exports its traces over OTLP when its environment names a
 collector. Nothing about it goes in a schema: the configuration is
 OpenTelemetry's standard environment variables, and without an endpoint
-no exporter starts and nothing is sent. D67 in `docs/DECISIONS.md`
+no exporter starts and nothing is sent. D67 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)
 records the decisions, and section 8.11 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.

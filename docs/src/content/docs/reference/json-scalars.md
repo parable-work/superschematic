@@ -9,7 +9,7 @@ Most scalars hold a string or a number. Four in the core catalog hold a
 JSON value instead. superscalar's metadata gives all four the `String`
 primitive; their `json_schema` type mapping says what they hold, and every
 validator keys off that mapping, not the scalar's name
-([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-json-object-or-array-scalar-holds-that-object-or-array)).
+([D14, amended](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-amended-a-json-object-or-array-scalar-holds-that-object-or-array)).
 
 | Scalar | `json_schema` | Value on the wire |
 |--------|---------------|-------------------|
@@ -27,7 +27,7 @@ a pattern or a length, which are rules on a string, cancels `object` or
 `array`. Without one of them, the schema runtimes and the engine would
 check the scalar's values as strings, while the generated Go, TypeScript,
 Python and Rust types hold an object
-([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
+([D14, amended](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-amended-a-scalar-that-holds-json-says-which-json)).
 
 ```yaml
 scalars:
@@ -106,7 +106,7 @@ Go, TypeScript, Python and Rust validators) follows one rule:
   `Geo.Location` has exactly `lat` and `lon`, each a number in range. Each
   validator names that failure as it names any failure only the scalar
   core finds
-  ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)):
+  ([D14](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)):
   the generated Go, TypeScript and Rust validators and the TypeScript
   runtime use the core's name (`parse`, `custom`, `range`), the Go runtime
   says `pattern`, the Python runtime `custom`, and the generated Python
@@ -133,7 +133,7 @@ Null is a value of an optional single `Generic.JSON` field or argument. It
 means "set to nothing", and it stays apart from an absent key, which means
 "not present". A service can then clear a stored value through it: the
 client sends `null` to clear it and leaves the key out to keep it
-([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-an-optional-genericjson-takes-null-as-a-value)).
+([D14, amended](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-amended-an-optional-genericjson-takes-null-as-a-value)).
 Every validator accepts both, so the difference is in what the decoders
 hand over:
 
@@ -170,7 +170,7 @@ duplicate key, a member that is not a number and a degree out of range,
 and every validator hands it the value. Its
 canonical text writes each number as `JSON.stringify` does:
 `{"lat": 90.0, "lon": -180}` reads back as `{"lat":90,"lon":-180}`
-([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-geolocation-is-a-lat-lon-object)).
+([D14, amended](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-amended-geolocation-is-a-lat-lon-object)).
 
 `{"lat": 0, "lon": 0}` is a location, not a missing one. The generated Go
 types tell it apart from an absent or null value: a type's `UnmarshalJSON`

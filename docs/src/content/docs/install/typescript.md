@@ -294,7 +294,7 @@ a scalar runs its validators. An unset or empty variable takes the schema
 default, else `null`. The loader throws `EnvConfigError` naming every
 missing or invalid variable, never its value. A `Secret<T>` field prints
 as `[secret]` everywhere except `reveal()`. The loader reads no `.env`
-file ([D22](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d22-a-typescript-env-loader-in-the-typescript-types-package)).
+file ([D22](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d22-a-typescript-env-loader-in-the-typescript-types-package)).
 
 ## Consume a generated SDK
 
@@ -341,7 +341,7 @@ A value its parser refuses rejects the call with the types package's
 
 `serviceCredential: { token, headers }` is the calling service's own
 credential
-([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
 `token(fresh)` returns it, and the SDK sends `Bearer <token>` in
 `Service-Authorization`, or in each of `headers`, on every request. A 401
 whose code is `service_unauthorized` calls `token(true)` once and retries,

@@ -2075,4 +2075,4 @@ a candidate for a change with its own test.
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |
-| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15, D16) |
+| `docs/DECISIONS.md` at commit e8e685a51 | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15, D16); the file at main holds only what is not built |

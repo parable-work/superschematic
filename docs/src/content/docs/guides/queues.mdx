@@ -31,7 +31,7 @@ schema's instances into claimable work, are another thing.
 | `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
 | `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
-D53, D68, D80, D88 and D96 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
+D53, D68, D80, D88 and D96 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -205,7 +205,7 @@ declaration backfills.
 After an import, the rows already there need the work the trigger does
 for new ones: an embedding per categorized line item, say. With
 `backfill: true`
-([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)),
+([D88](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)),
 the step that creates the trigger on a table the database already has
 also inserts one message for each row that meets `when`, written as the
 trigger's insert of the row would write it and ending with the queue's

@@ -150,15 +150,15 @@ A malformed scalar element, such as `not a url` in a `Network.Url[][]`,
 is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
 `field`, and an element outside the scalar's length bounds or range is one
 `minLength`, `maxLength`, `min` or `max` error
-([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)).
+([D14](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)).
 An element of the wrong JSON type, such as a number in a `string[][]` or
 in a list of a string scalar, is one `type` error, and the field's length,
 pattern and range rules do not check it. A length counts Unicode code
 points: an emoji is one character
-([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-string-lengths-count-code-points)). A `Generic.JSON` element has no
+([D14, amended](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-amended-string-lengths-count-code-points)). A `Generic.JSON` element has no
 wrong JSON type: an object, array, string, number or boolean is valid, and
 only a null element is `required`
-([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-genericjson-is-any-json-value-but-null)).
+([D14, amended](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d14-amended-genericjson-is-any-json-value-but-null)).
 
 The same paths appear where each target checks a payload:
 
@@ -207,7 +207,7 @@ The same paths appear where each target checks a payload:
 
 The known differences between the generated validators, and the vectors
 every validator and runtime is tested against, are recorded in
-[D12 and its amendment](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d12-arrays-of-arrays-one-flag-two-levels).
+[D12 and its amendment](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d12-arrays-of-arrays-one-flag-two-levels).
 
 ## Reading the IR
 

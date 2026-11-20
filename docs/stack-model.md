@@ -2,10 +2,11 @@
 
 This is the design of the stack model: how a schema tree declares what
 runs where, how superschematic resolves the wiring between the services in
-it, and how it deploys them. The Stack IR, the resource graph, the
-registry specs and the resolver are built (section 12); the rest is design.
-D30 in `docs/DECISIONS.md` records the decisions; this document is the
-design they point at.
+it, and how it deploys them. It is built, except where a section says
+what is left (section 14 lists what has not run live). D30 records the
+decisions (in `docs/DECISIONS.md` at commit e8e685a51); this document is
+the design they point at. When this document and the code disagree, the
+code is right and this document is the defect.
 
 Cite sections by number, as source comments cite `docs/extension-model.md`.
 Add a section at the end of its group rather than renumbering.
@@ -5462,132 +5463,9 @@ the user's cache, checked against the same digests (section 8.3).
 
 ## 12. Core changes
 
-1. **IR.** The IR records the config's `authDb`, `dependencies` and
-   `calls` (`ir.Schema`'s `AuthDB`, `Dependencies` and `Calls`), so
-   generators and the resolver read every reference from it.
-   Landed: the Stack IR types, the stack (`ir/stack.go`), the resolved
-   environment (`ir/stack_environment.go`) and the resource graph
-   (`ir/resource_graph.go`). A Stack schema's class carries its
-   declaration on its `TypeDef` (`Stack`, `Server`, `Database` or
-   `Environment`), which the data forms write, and `ir.StackOf`
-   assembles a schema's declarations into its stack (section 4.1).
-   Operations and operation sets gain `ServiceCallers` (section 9.3).
-2. **Loader:**
-   - Landed: class values in the arguments of any registered decorator.
-     The argument evaluator reads a class, local or imported from another
-     service's package, as the class reference `{"class": name}`, and the
-     data forms write the same object (extension-model.md section 3.4), so
-     `settings: [{ of: Backend }]` needs no walker code of its own.
-     `@source`, `@versionGraph` and `@graphMember` stay walker-read;
-     `internal/registry/core_decorators.go` says why.
-   - Done: `ServiceHandle` typed by kind and config type
-     (`ServiceHandle<"API", ShopApiConfig>`, in
-     `packages/schema-config/src/index.ts`), written by the sentinel
-     generator (section 4.3), so TypeScript can restrict a handle argument
-     and type its settings. `@ts-expect-error` cases in
-     `packages/schema-config/src/service-handle.typecheck.ts` pin it.
-     Build-plan discovery, which `build-all` and `build --with-deps` run,
-     checks each config handle's kind against the service it names
-     (`validateHandleKinds` in `internal/buildplan/buildplan.go`).
-   - Done: references from a schema's body (D41). A service handle in a
-     decorator argument, such as `deploy` or a settings element's `of`,
-     references its service, so a stack does not restate it in
-     `dependencies`. `ir.Schema.References` records it, and the build
-     cache keys the referencing service on the sources of the referenced
-     service and of every service its config reaches, so the stack's
-     output rebuilds when any of them changes. A reference is a cache
-     edge, not a build-order edge: resolution reads the referenced
-     services' IR and configs, which a build loads from their sources,
-     and none of their outputs, so the build plan does not order them and
-     two services may name each other. A decorator declares the argument
-     paths whose handles only name a service (`DecoratorSpec.Identities`,
-     for D37's `from`): an identity adds no edge, and the cache tracks only
-     the sentinel it was imported from. Should an output compile against
-     a referenced service's generated code, such as an entrypoint that
-     imports a served API's package, that output will need a build-order
-     edge.
-3. **envgen.** The derived binding fields of section 3.4. Landed: the
-   contract of the values connectors derive, with its environment
-   variable encoding (`ir/derived_value.go`), and the resolver's check of
-   every connector's value against it. The Go loader's `EnvConfig`, with
-   a field per database and per `calls` entry named by `[derived_fields]`
-   and read through the Go HTTP runtime's `stackconfig`;
-   `values-schema.json` marking those fields derived; the loader's
-   refusal of an `@envVars` field that collides with one; and the callers
-   field of an API with a service clause, `ir.ServiceAuth` in
-   `ir/service_auth.go`, which the local and gcp connectors write and
-   `stackconfig.LoadCallers` reads (section 9.2). The TypeScript API
-   package's `loadEnvConfig()` reads them through the TypeScript HTTP
-   runtime's readers (section 8.6), and the Rust API crate's
-   `config::load_env_config()` through the Rust HTTP runtime's (D57).
-4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
-   and constructor signature, and the one-time implementation scaffold
-   (section 8.5). Landed for Go: `Deps` and `Constructor` in `deps.go`;
-   the scaffold, which a stack's build writes for each API its servers
-   serve and `build --scaffold` and `build-all --scaffold` write outside a
-   stack; and the Stack kind's `server` generator
-   (`internal/generator/servergen`), which writes each Go server's
-   entrypoint module and Dockerfile at `server/<stack>/<server>` (sections
-   8.1 and 8.2). Its clients send the D37 service credential each edge's
-   endpoint names, `serviceauth.go` builds the service authenticator of
-   each API with a service clause from its callers field, and a server
-   some environment places on Cloud SQL links the Cloud SQL connector.
-   For TypeScript, `Deps`, `Constructor` and the scaffold have landed, the
-   output root's Bun workspace holds the implementations, and the
-   `server` generator writes each TypeScript server's package, `main.ts`
-   and Dockerfile at `server/<stack>/<server>` in the pass that writes the
-   Go servers' (section 8.6). For Rust, `Deps`, `Handlers`,
-   `Implementations::new`, the scaffold at `[implementation_paths]
-   rust` and each Rust server's entrypoint crate and Dockerfile have
-   landed (D57). Every entrypoint exports its traces over OTLP when its
-   environment names a collector (D67, section 8.11).
-   `examples/acme-shop` keeps its implementations at the scaffold layout,
-   `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
-   which the entrypoints of its `shop-stack` import (section 14,
-   milestone 1, and section 8.6).
-5. **Config and build plan.** `calls` is in the schema config, beside
-   `authDb`, in the TypeScript type and the data-form schema, valid on an
-   API config and naming API services. It is a build-order edge for the
-   caller's API server only: the build plan orders outputs, so two APIs
-   may call each other, and each callee's key joins the caller's cache key
-   (section 3.3). A config imports its handles as siblings' sentinels
-   (D34): the import rule is in the static config read, and the sentinel
-   sweep runs before discovery. The naming file's `[implementation_paths]`
-   holds the implementation path templates, and `[derived_fields]` the
-   derived field names.
-6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
-   and TypeScript HTTP runtimes (section 9.5), and a service credential
-   source in the SDKs (section 9.6).
-7. **Registry.** The specs of section 6.7, and the resolver that drives
-   them (section 6.10). Landed: `internal/registry/stack.go`, the resolver
-   in `internal/stack` with its public face in `stack`, and the acceptance
-   extension `stack/stacktest`. Landed too: the core `Stack` kind with
-   `@stack`, `@server`, `@database` and `@environment`
-   (`internal/registry/core_stack.go`, authored from
-   `@superschematic/stack`), and its generator, `stack`
-   (`internal/generator/stackgen`). Its `Service` reads a service's
-   `stack.Service`, an API's operations for section 9.3's check included,
-   from the service's IR and its config's outputs, and
-   `registry.Options.LoadDependencyConfig`, which every build sets, gives
-   it each config. Landed too: the deploy seams on `TargetSpec` (`State`,
-   `Secrets`, `Bootstrap`, `Migrations` and `Builder`),
-   `ProvisionRequest.Env` for a run's credentials, and the deploy that
-   drives them in deploy order (`internal/stackdeploy`, section 11.2),
-   with the build contexts it writes and the builds it skips, which
-   `stack/stacktest`'s fake target carries too; the gcp target's
-   bootstrap, Secret Manager store and state bucket (section 7.3), its
-   image builds on Cloud Build, its migration runner, a Cloud Run job
-   that runs `superschematic-migrate job` on Cloud SQL and owns the
-   servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
-   reading the credentials a DNS platform resolves into
-   `dns.credentials`. So has the generated CI of section 11.3 (D47),
-   and the deploy lock that keeps two deploys of a run apart, a
-   `StateLocker` on the target's state store, on gcp an object of the
-   state bucket (section 11.2, D46, amended).
-8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
-   which runs Go, TypeScript and Rust servers, and `bootstrap`, `secrets
-   set`, `plan`, `deploy`, `destroy`, `outputs` and `unlock` (section
-   11).
+Built. The IR, loader, envgen, generator, registry and CLI changes this
+design needed are in the code, and the commits that made them record each
+one (`git show e8e685a51:docs/stack-model.md` has the list as it was).
 
 ## 13. Module layout
 
@@ -5661,161 +5539,48 @@ the stack targets replaced them.
 
 ## 14. Milestones
 
+Each milestone is built. What has not run live is listed under "Never run
+live" in `docs/DECISIONS.md`.
+
 1. **Wiring with no cloud.** Derived config fields, the Go entrypoint, the
-   `local` target and `stack dev`. Done when acme-shop runs end to end and
-   nothing in `examples/acme-shop` writes a connection string, a URL or a
-   port by hand. Done: `examples/acme-shop`'s `shop-stack` deploys
-   `shop-api` and `shop-orders`, each on a default Go server, and its `Dev`
-   environment is on the `local` target. Their implementations sit at
-   `go/shop-api` and `go/shop-orders` behind `Deps`, with no `main` and no
-   connection code. `TestStackDevRunsTheShop` (`examples/acme-shop/go`)
-   runs `superschematic stack dev`, which starts Postgres with `shop-db`
-   migrated and both servers on their generated entrypoints; it waits for
-   each `/readyz`, signs a user in through the ORM, calls `CreateProduct`
-   and `ListProducts` and then `PlaceOrder` through the generated Go SDKs,
-   and stops the stack with `--remove-database`. Every URL, port and
-   connection string it uses comes from the resolved `environment.json`.
-   `scripts/check.sh` runs it in the full tier. What stays hand-written
-   runs outside the stack: the Topcoat app's listen address, the Rust
-   server's (port 0, which it prints), and the in-process base URL of the
-   TypeScript storefront's tests.
-   Later, D78 made an app a deployable of the stack (section 8.6), and
-   acme-shop's `Backoffice`, a Topcoat app over `shop-stock`, runs inside
-   it under `superschematic-topcoat stack dev`, its port from the
-   environment; the Topcoat app over `shop-orders`, whose server is Go in
-   the stack, still runs under `cargo run`.
+   `local` target and `stack dev`. `TestStackDevRunsTheShop`
+   (`examples/acme-shop/go`) runs acme-shop end to end on the generated
+   entrypoints, every URL, port and connection string from the resolved
+   `environment.json`.
 2. **Model, resolver and seams.** The Stack kind, environments,
-   `environment.json`, the registry specs, and levels 1 to 3 in CI.
-   Done when a test extension adds a platform and a provisioner with no
-   core edit.
+   `environment.json`, the registry specs, and levels 1 to 3 in CI; a test
+   extension adds a platform and a provisioner with no core edit.
 3. **GCP and Pulumi.** Bootstrap, the gcp platforms and connectors, the
-   Cloud DNS and Cloudflare DNS platforms, the Pulumi provisioner, Cloud
-   Build, secrets, `plan` and `deploy`. Done when
-   a fresh project plus a project id and a region gives a live acme-shop.
-   A run from a maintainer's machine proves it, with an owner's
-   application default credentials: no CI job, no secret in CI and no
-   sandbox kept between runs. Done on 2026-10-07, from a binary built from
-   a checkout, on a fresh project in `us-central1`. acme-shop's stack took
-   a gcp environment beside `Dev` for the run only, since the example
-   builds with the core binary, which links no target but `local`. The
-   migration runner's image came from `scripts/migrate-dev-image.sh`, since
-   no release exists to build it from. `stack bootstrap` ran with
-   `--repository ""`, leaving Workload Identity Federation out, then
-   `stack plan`, `stack build` and `stack deploy`. The deploy took seven
-   minutes: Cloud SQL and the accounts, the migration job, which applied
-   shop-db's 20 expand steps as the migrator's IAM database user with
-   `cloudsqlsuperuser` and gave both servers their privileges, then both
-   Cloud Run services. A client then signed a user in through the ORM,
-   over the Cloud SQL Go connector as shop-api's IAM database user, and
-   called `CreateProduct`, `ListProducts` and `PlaceOrder` through the
-   generated Go SDKs at the `run.app` URLs, as `TestStackDevRunsTheShop`
-   does locally. A second deploy built both images inside the deploy and
-   rolled them out with no migration, and `plan` then showed no change.
-   `stack destroy` removed the run in three minutes. It left what the
-   stack's runs in the project share: bootstrap's state bucket, KMS key
-   ring and key (which Google Cloud never deletes), Artifact Registry
-   repository with the images, and its four accounts; the migration job;
-   the build contexts and job documents in the bucket; and the enabled
-   APIs. Deleting the project removes them all.
-
-   The run found five bugs, each fixed in a pull request of its own:
-   acme-shop's servers had no Dockerfile, since their runtime modules lie
-   above the example (`[paths] build_context`, D30 amended); bootstrap
-   failed on Cloud KMS until enabling its API reached every server, so it
-   retries such a refusal; the operation of a build in a region answered
-   NotFound, so the deploy polls the build by name; both Cloud Run
-   services planned an update on every preview, from a
-   `minInstanceCount` of 0 that Cloud Run does not return; and the
-   migration job reported taking back Cloud SQL's own grant to
-   `cloudsqlsuperuser`. A failed job execution failed its step with only
-   Cloud Run's "The container exited with an error", the execution's name
-   and the URL of its logs, where the runner's own error was; the deploy
-   now reads that error from Cloud Logging (D46, amended). Not run: a
-   domain, its load balancer and either DNS platform, secrets (acme-shop
-   has none), Workload Identity Federation, a parameterized environment,
-   and a calling server's network, which waits for a stack with `calls`
-   edges (milestone 4).
-4. **Service auth.** Admission and identity (section 9) on Cloud Run.
-   Built (D37, amended; D51; D57): gcp's http connector gives each
-   caller a Google ID token for its callee's audience, and the Go,
-   TypeScript and Rust servers verify it against their callers field.
-   It has not run on Cloud Run: milestone 3's run had no `calls` edge,
-   which acme-shop's stack has since gained.
-5. **Database lifecycle.** The `sqlgen` migration plan and apply step in
-   deploys, the hazard gate and the deploy manifest. Built (D45, D46):
-   each deploy plans its databases' migrations, gates their hazards,
-   records the manifest, and on gcp runs each phase as the migration
-   job, holding the run's deploy lock throughout (section 11.2).
-   Milestone 3's run applied an expand phase on Cloud SQL; no contract
-   phase has run there, nor has the lock.
-6. **CI generation and parameterized environments.** Built (D47). A
-   stack's `outputs.ci` writes its GitHub Actions workflow (section
-   11.3), which checks with no credentials, plans each cloud environment
-   as `planner`, deploys a preview member per pull request, and deploys
-   the cloud environments in declaration order behind their GitHub
-   environments' reviewers. Bootstrap records the project's number the
-   workflow signs in with. No generated workflow has run on GitHub yet.
-7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
-   and a second target (GKE or Cloudflare) added as a registration, with
-   the generic connector (section 6.2) so compute can mix. Built so far:
-   - TypeScript servers on Bun, and Rust servers (section 8.6, D51, D57);
-   - jobs and scheduled jobs, in Go, TypeScript and Rust, on the local
-     target and on gcp as Cloud Run jobs with Cloud Scheduler (section
-     8.7, D52, D65);
-   - static sites, on the local target and on gcp from a bucket behind a
-     load balancer with Cloud CDN, never run against Google Cloud
-     (section 8.10, D55);
-   - buckets, on the local target's storage emulator and on gcp in Cloud
-     Storage, never run against Google Cloud (section 8.9, D54);
-   - queues in a DB service's database, and Go, TypeScript and Rust
-     workers that handle them, on the local target and on gcp as Cloud
-     Run worker pools (section 8.8, D53, D65);
-   - the generic connector (section 6.2, D63), ahead of the second target:
-     platforms name their provider, an http or a site edge between two
-     providers falls back to it, an http one signs with a per-edge Ed25519
-     key from the Pulumi `tls` provider whose private key reaches the
-     caller through its platform's secret store, and the three runtimes
-     read the key's PEMs. Proven offline, with the fake target's edge
-     platform beside gcp; no mixed environment has deployed.
-
-   Not yet: the second target, which is Cloudflare (section 18, D64), a
-   mixed environment's deploy (section 6.2 lists what it needs), key
-   rotation, and a site's SDK clients in the browser.
-
-   The second target is done when acme-shop's storefront has run live on
-   Workers and a D1-backed TypeScript API has run live (section 18.15).
+   DNS platforms, the Pulumi provisioner, Cloud Build, secrets, `plan` and
+   `deploy`. acme-shop ran live on a fresh project in `us-central1` on
+   2026-10-07, from a binary built from a checkout. That run did not cover
+   a domain, its load balancer or either DNS platform, secrets, Workload
+   Identity Federation, a parameterized environment, or a calling server's
+   network.
+4. **Service auth.** Admission and identity (section 9) on Cloud Run
+   (D37, D51, D57). It has not run on Cloud Run.
+5. **Database lifecycle.** The migration plan and apply step in deploys,
+   the hazard gate and the deploy manifest (D45, D46). Milestone 3's run
+   applied an expand phase on Cloud SQL; no contract phase has run there,
+   nor has the deploy lock.
+6. **CI generation and parameterized environments.** A stack's
+   `outputs.ci` writes its GitHub Actions workflow (section 11.3, D47). No
+   generated workflow has run on GitHub.
+7. **Breadth.** TypeScript and Rust servers, jobs and scheduled jobs,
+   buckets, queues and workers, static sites, the generic connector
+   (section 6.2) and the cloudflare target (section 18). Not built: a
+   mixed environment's deploy (section 6.2 lists what it needs) and key
+   rotation. The second target is done when acme-shop's storefront has run
+   live on Workers and a D1-backed TypeScript API has run live (section
+   18.15).
 
 ## 15. Open questions
 
-1. **The binary.** Settled: the installed binary is a distribution of the
-   core and the official extensions, in a Go module of its own (section 13).
-2. **Environments that mix targets.** Settled. Placement is per deployable
-   in the IR from v1, and the target is the default (section 6.3). The
-   generic connector, with a key pair per edge, lands with the second
-   target (section 6.2). DNS is a platform kind from v1 (section 6.9).
-3. **Typed settings in TypeScript.** Settled: handles carry their kind and
-   config type, targets augment a `Targets` interface, and `@environment`
-   infers each settings element (section 4.3).
-4. **Shared secrets.** Settled: a secret is identified by the type that
-   declares the field and the field's name, so servers that include the
-   same declared field share one secret (section 4.2).
-5. **Where a server's implementation lives.** Settled: one implementation
-   per API service per language at a naming-file path template, scaffolded
-   once, with a generated `Deps`. `calls` moves to the API service's config
-   (sections 3.3 and 8.5).
-6. **The resource vocabulary.** Settled: Pulumi's package schemas, with
-   each pinned type's Terraform name and property renames recorded beside
-   it from v1, and a round-trip test with the first Terraform-family
-   provisioner (section 6.4).
-7. **References in `schema.config.ts`.** Settled: a config may import a
-   sibling's sentinel (`import { ShopDb } from "@acme/shop-db"`) wherever
-   a handle goes, and `service({ name, kind })` stays as the data form and
-   the fallback spelling. The import rule moves into the static read every
-   command shares, and the sentinel sweep, which reads only `name` and
-   `kind`, runs before build-plan discovery (D34). A schema file may pass
-   an imported sentinel to a decorator too: the handle references the
-   service, a cache edge that orders nothing, unless the decorator
-   declares it an identity, which adds no edge (D41).
+Settled, each in the section it names: the binary (section 13),
+environments that mix targets (sections 6.2, 6.3 and 6.9), typed settings
+in TypeScript (section 4.3), shared secrets (section 4.2), where a server's
+implementation lives (sections 3.3 and 8.5), the resource vocabulary
+(section 6.4) and references in `schema.config.ts` (D34, D41).
 
 ## 16. What the source tree taught
 

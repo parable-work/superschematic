@@ -445,7 +445,7 @@ sdk, err := catalogsdk.New(catalogsdk.SDKConfig{
 call's context, when no static token is set, and `RefreshToken` runs once
 after a 401. `SDKConfig.ServiceCredential` is the calling service's own
 credential
-([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
+([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
 its `Token(ctx, fresh)` returns it, a `serviceauth.TokenSource` of the
 HTTP runtime among others, and the SDK sends `Bearer <token>` in
 `Service-Authorization`, or in each of `Headers`, on every request. A 401

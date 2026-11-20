@@ -232,7 +232,7 @@ A server that calls another API, on its own account or for one of its
 users, is a service caller. It sends its own credential, a short-lived JWT
 in `Service-Authorization: Bearer <token>`, beside the end user's
 `Authorization`
-([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
+([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)).
 The two stay apart. The end-user authenticator never reads the service
 header, and the service authenticator never reads `Authorization`.
 Services hold no permissions: `@requirePermission` checks end users only,

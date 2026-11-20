@@ -100,7 +100,11 @@ image would be written as NULL. The graph writes the audit fields itself.
 
 ## What the ORM generates
 
-The repository of a versioned table has the ordinary methods plus:
+The repository of a versioned table has the ordinary methods plus the
+methods below. The Go history readers decode a duration in the image as
+Postgres writes it under its default `IntervalStyle`, `postgres`, as pgx
+does. A server set to another style records history rows that the readers
+refuse.
 
 | Method | Does |
 | --- | --- |

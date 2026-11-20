@@ -16,7 +16,7 @@ write receives and returns, the seams the `stack` commands and the
 generated CI deploy through, how to pin a provider's schemas, and how to
 test the result. The design is sections 6, 7 and 11 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D45, D46 and D47 in `docs/DECISIONS.md`.
+and D45, D46 and D47 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md).
 
 `extensions/gcp`, `extensions/cloudflare` and `extensions/pulumi` are the
 worked examples, and `stack/stacktest` is the smallest one: a fake target

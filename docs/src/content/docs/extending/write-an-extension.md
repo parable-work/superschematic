@@ -244,7 +244,7 @@ r.RegisterDecorator(registry.DecoratorSpec{
 
 A per-field directive that only your distribution reads is a decorator
 like this one; the core IR has no field for it (D18 in
-`docs/DECISIONS.md`). A flag is a spec without `Args`: a schema writes it
+the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). A flag is a spec without `Args`: a schema writes it
 bare (acme's `@feedKey`) and the data forms write `"feedKey": true` under
 `extensions.acme`. `format` carries the slot from TypeScript to JSON and
 YAML and between the two; the TypeScript writer cannot render extension
@@ -339,7 +339,7 @@ r.RegisterDecorator(registry.DecoratorSpec{
 
 An identity adds no edge: an edit to the named service leaves your schema
 cached, and two services may name each other. Only a change to the
-service's name or kind rebuilds it. D41 in `docs/DECISIONS.md` has the
+service's name or kind rebuilds it. D41 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) has the
 reasons.
 
 ## A scalar catalog
@@ -425,7 +425,7 @@ catalog, err := registry.ScalarCatalogWithRawBodyChecks(catalog, map[string]regi
   runs in every place the route decodes the input from JSON, including the
   `data` part of a multipart request.
 - It composes with `ScalarCatalogWithUploads` in either order. Section 3.10
-  of `docs/extension-model.md` and D24 in `docs/DECISIONS.md` have the
+  of `docs/extension-model.md` and D24 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) have the
   details.
 
 ## A document
@@ -1052,7 +1052,7 @@ three of the core's behaviors in `examples/engine-notes`.
 ## A deploy target
 
 A stack deploys a schema tree through a target, and the target's resources
-through a provisioner (D30 in `docs/DECISIONS.md`; section 6 of
+through a provisioner (D30 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md); section 6 of
 `docs/stack-model.md` is the design). The official extensions are the
 examples: `extensions/gcp` registers the `gcp` target with its platforms,
 connectors and Cloud DNS platform, `extensions/cloudflare` the

@@ -48,7 +48,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D30, D45, D46, D47 and D59 in `docs/DECISIONS.md` record the decisions.
+and D30, D45, D46, D47 and D59 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) record the decisions.
 
 ## Start a stack
 
@@ -2056,7 +2056,8 @@ Cloudflare loads the version, so a config the API refuses fails the
 upload; builds the APIs on an isolate's first request, and again after a
 failure; and gives the runtime the client's address from
 `CF-Connecting-IP`. An isolate's memory is its own, and Cloudflare runs
-many: the storefront's carts live per isolate. `bundle.ts` bundles for
+many: the storefront's carts live per isolate, and so does every rate
+limit there, login's among them. `bundle.ts` bundles for
 workerd with Bun, and fails on a `node:` import other than
 `node:async_hooks`, Bun's global, or a WebAssembly module other than
 superscalar's; `bun bundle.ts --check`,
@@ -2655,6 +2656,25 @@ the sidecar documents run in `prepare`, which has no identity token and
 no secret. A pull request from the repository can still change the
 workflow itself, so treat its author as able to act as the job's
 account; what this stops is code its dependencies bring.
+
+Each account admits only the runs of the jobs that sign in as it.
+`planner` admits pull requests when an environment without parameters is
+in the project, for its `plan` job. `deployer` admits the CI branch's push
+and dispatch deploys in the GitHub environment of each environment without
+parameters in the project. It also admits pull requests when an
+environment with one parameter shares the project, for its `preview` job.
+So bootstrap refuses an environment named `production` without parameters
+in a project that a preview deploys to. A project bootstrapped before
+these rules keeps bindings that admit every run of the repository until
+bootstrap runs again. A repository whose OIDC subject template has been
+customized signs its deploys in to nothing.
+
+The `prepared` artifact is kept one day, so a deploy whose reviewers
+approve it later than that fails to download it, and its run has to be
+started again. In CI a stack command refuses a prepared directory from
+another commit or run, or one prepared outside CI. The split between
+`prepare` and the cloud jobs holds on GitHub's runners and other
+ephemeral runners, not on a self-hosted runner that keeps its workspace.
 The provider's name holds the project's number, `projectNumber` in the
 environment's `gcp` values, which bootstrap records and you may enter by
 hand. An environment that extends another inherits it. Until it is set,

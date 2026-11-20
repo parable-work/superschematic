@@ -1394,7 +1394,7 @@ shows how a behavior of your own judges the fields a write stores.
 ## Branches
 
 `Branches` makes each instance the root of a version graph (D17, D19,
-D32 in `docs/DECISIONS.md`). Rows of the kinds its config names live on
+D32 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). Rows of the kinds its config names live on
 refs: a primary line, which each instance gets when it is created, and
 drafts of it, which only a merge brings back. A tagged commit of the
 primary line is released with `releaseCommit`, the version graph's

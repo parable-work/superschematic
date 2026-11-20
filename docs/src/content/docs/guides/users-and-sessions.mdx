@@ -14,7 +14,7 @@ grants. An API serves the routes users sign in and out with, and every
 server, Go, TypeScript or Rust, and the engine, authenticate those sessions
 the same way. [Auth and permissions](/superschematic/guides/auth-and-permissions/)
 covers what a route requires; this page covers who the caller is.
-[D50](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+[D50](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)
 records the design.
 
 ## Turn it on
@@ -203,7 +203,7 @@ with 403 `pending_approval`, so a sign-in page can say why.
 
 By default `register` signs the new user in at once. Three members of
 `@userSessions` change that
-([D81](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)),
+([D81](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)),
 each needing `register: true`:
 
 ```ts
@@ -252,7 +252,7 @@ A default role that register creates has no permissions, so a user an
 administrator approves can do nothing until someone fills the role in.
 `@seedRoles` on the `UserRole` table declares the roles every database
 holds from its first migration on
-([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)):
+([D88](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)):
 
 ```ts
 @seedRoles([{ name: "member", permissions: ["finances.read", "finances.write"] }])
