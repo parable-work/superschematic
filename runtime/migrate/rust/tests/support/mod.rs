@@ -94,8 +94,14 @@ pub fn expanded(plan: &Plan) -> &str {
         .map_or("", |model| model.hash.as_str())
 }
 
-/// The SQLite cases every checkout holds.
-pub const CASES: [&str; 3] = ["sqlite-columns", "sqlite-rebuild", "sqlite-supersede"];
+/// The SQLite cases every checkout holds: sqlite-documents is planned from
+/// schema documents (D117), the others from the compiler's schemas.
+pub const CASES: [&str; 4] = [
+    "sqlite-columns",
+    "sqlite-documents",
+    "sqlite-rebuild",
+    "sqlite-supersede",
+];
 
 /// The paths of a case's plan documents, in name order.
 pub fn case_paths(case: &str) -> Vec<PathBuf> {

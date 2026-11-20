@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -22,6 +23,12 @@ import (
 // that plan's expand steps run, and the later plan supersedes its contract
 // (D27, amended).
 const vectorsDir = "../../runtime/migrate/testdata/plans"
+
+// documentVectorCases are the cases of vectorsDir that plans from schema
+// documents make (D117), which the cli package's
+// TestPlansFromDocumentsAreRunnerVectors writes and keeps; this package
+// writes the others.
+var documentVectorCases = []string{"documents", "sqlite-documents"}
 
 // vectorPlan is one plan of a vector case: the change it makes to the
 // schema the plan before it ended at.
@@ -247,6 +254,9 @@ func TestRunnerVectors(t *testing.T) {
 				return nil
 			}
 			return err
+		}
+		if d.IsDir() && slices.Contains(documentVectorCases, d.Name()) {
+			return filepath.SkipDir
 		}
 		if !d.IsDir() && strings.HasSuffix(path, ".plan.json") {
 			rel, err := filepath.Rel(vectorsDir, path)

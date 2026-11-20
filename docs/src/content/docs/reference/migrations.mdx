@@ -24,8 +24,9 @@ The design and the alternatives not taken are D27 in
 
 ## The two versions
 
-The new version is the service directory the command is given. The
-previous version is one of:
+The new version is the service directory the command is given, or one DB
+service's schema documents ([Plans from documents](#plans-from-documents)).
+The previous version is one of:
 
 | Flag | The previous version |
 | --- | --- |
@@ -69,6 +70,8 @@ model includes the compiler's change.
 
 ```
 superschematic migrate plan <service-dir> [flags]
+superschematic migrate plan --documents <document>... [flags]
+superschematic migrate plan --request <file>
 ```
 
 The service must be a DB service. The plan goes to stdout in `--format`,
@@ -89,7 +92,9 @@ and to `--out` as JSON.
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
 | `--print-model` | false | print the new version's model as canonical JSON and plan nothing; with `--from-database`, print the file's model, with the `--rename` and `--drop` its plan is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's declared queries are prepared on ([Declared queries](#declared-queries)) |
-| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file of the new version |
+| `--documents` | false | take the new version as the arguments: one DB service's schema documents, or `-` for stdin ([Plans from documents](#plans-from-documents)) |
+| `--request` | none | answer a plan request, in this file or on stdin with `-`, with one line of JSON ([Plans from documents](#plans-from-documents)) |
+| `--naming` | `<service-dir>/../../superschematic.toml`; with `--documents`, the one found walking up from the first document | naming config file of the new version |
 
 `--format sql` prints one script for review: a header with the service, the
 dialect, the two model hashes, the hash of the model between the phases
@@ -212,6 +217,47 @@ compares the tables, their columns and the indexes.
 A SQLite file an app built by hand, before it had a schema, is adopted from
 what it holds instead, and a plan takes it to the schema
 ([A file built by hand](#a-file-built-by-hand)).
+
+## Plans from documents
+
+A runtime environment changes its schemas while it runs, with no build
+and no checkout (D117). Its database is migrated from what a publish
+carries: one DB service's schema documents, the JSON files `format
+--to=json` writes, and the model the database recorded. `migrate plan
+--documents` plans from those, with no service directory and no git ref:
+
+```sh
+superschematic-migrate status --service tasks-db --model --database-url tasks.db > applied.json
+superschematic migrate plan --documents tasks.schema.json --dialect sqlite \
+  --from applied.json --rename task.title=task.summary --out plan.json
+superschematic-migrate apply --plan plan.json --database-url tasks.db
+```
+
+The planner is the compiler's. The documents load as a service directory
+in the data form loads, and resolve to the model the service's directory
+resolves to. So the plan from a service's documents is the plan from its
+directory, step for step, in either dialect. A database's first plan
+starts from an empty database: leave out `--from`.
+
+A library that runs the binary sends the same inputs as one JSON request
+on stdin. It reads the plan, its hazards and the ids of those it refuses
+as one line of JSON on stdout
+([`migrate plan`](/superschematic/reference/cli/#migrate-plan-service-dir)):
+
+```sh
+superschematic migrate plan --request - < request.json
+```
+
+A plan made elsewhere, from a model the database no longer holds, meets
+the runner's baseline check. It is refused, and the refusal names both
+models ([The baseline check](#the-baseline-check)).
+
+What the documents cannot say is refused by name: documents of two
+services, a kind with no database, an import of another service's types,
+and on Postgres a declared query, which a plan from documents does not
+prepare ([Declared queries](#declared-queries)). The documents carry no
+config, so the model takes the `sql` options of a config that sets none,
+and no reader stands beside them.
 
 ## Phases
 
@@ -1150,3 +1196,6 @@ it alone and refuses one that does not exist.
   ([Steps](#steps)).
 - The engine's own storage is the engine's: it creates its tables and runs
   its behaviors' migrations, and no plan covers them.
+- A plan from documents takes one DB service's documents. It resolves no
+  other service's types, reads no config and prepares no declared query
+  ([Plans from documents](#plans-from-documents)).

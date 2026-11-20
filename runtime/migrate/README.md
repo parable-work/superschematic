@@ -513,7 +513,7 @@ both sides' tests read.
 | `go/internal/testdb/` | A database of its own for each test |
 | `go/internal/d1fake/` | A fake D1 REST API over a SQLite file, for the tests |
 | `go/testdata/` | Hand-written plans per dialect, and the canonical JSON vectors |
-| `testdata/plans/<case>/` | The plans the compiler writes for the runner, `NN-<name>.plan.json` |
+| `testdata/plans/<case>/` | The plans the compiler writes for the runner, `NN-<name>.plan.json`; `documents/` and `sqlite-documents/` are planned from schema documents (`migrate plan --request`) |
 | `testdata/describe/` | A describe document and its result, which the runner's and the compiler's tests both read and write |
 | `testdata/inspect/` | SQLite files built by hand, as their statements, and their inspections, which the runner's and the compiler's tests both read |
 

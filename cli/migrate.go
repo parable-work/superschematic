@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/parable-work/superschematic/internal/migrateplan"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 )
 
@@ -35,6 +36,12 @@ type migratePlanFlags struct {
 	// databaseURL names the Postgres the new version's queries are
 	// prepared on (D86).
 	databaseURL string
+	// documents takes the new version as the arguments, schema documents
+	// of one DB service, in place of a service directory (D117).
+	documents bool
+	// request names the file, or - for stdin, that holds a plan request
+	// (migrateplan.Request), which the command answers on stdout.
+	request string
 }
 
 // migratePlanInputs are the flag values migrate plan parses before it
@@ -61,7 +68,9 @@ document of ordered steps in two phases, each with its SQL and its
 hazards. superschematic-migrate (runtime/migrate) applies it.
 
 A plan starts from another version of the schema, with no database at
-hand, or from a SQLite file built by hand (--from-database).`,
+hand, or from a SQLite file built by hand (--from-database). The new
+version is a service directory, or one DB service's schema documents as
+format --to=json writes them (--documents, --request).`,
 		Args: cobra.NoArgs,
 	}
 	cmd.AddCommand(newMigratePlanCmd(a))
@@ -71,7 +80,7 @@ hand, or from a SQLite file built by hand (--from-database).`,
 func newMigratePlanCmd(a *app) *cobra.Command {
 	flags := &migratePlanFlags{}
 	cmd := &cobra.Command{
-		Use:   "plan <service-dir>",
+		Use:   "plan <service-dir> | plan --documents <document>... | plan --request <file>",
 		Short: "Plan the migration from a previous version of a DB service to this one",
 		Long: `plan compares the DB service at <service-dir> with a previous version of
 it and prints the plan that migrates a database from one to the other.
@@ -113,6 +122,26 @@ first. With --print-model, the file's model is printed, for
 superschematic-migrate adopt to record on the file before the plan is
 applied; --rename and --drop are given to both.
 
+--documents takes the new version as one DB service's schema documents,
+the JSON files format --to=json writes, in place of the service
+directory: every schema document of the service, and - reads more from
+stdin, one JSON value after another. There is no schemas root beside
+them, so the previous version is the model the database recorded (--from
+<model.json>) or an empty database, and nothing reads the database's
+tables. The documents name the service; they carry no config, so the
+plan takes the dialect from --dialect and the options a config with no
+outputs.sql options gives, and the naming from --naming, else the
+superschematic.toml found walking up from the first document, else the
+defaults. A Postgres plan of documents that declare queries (@query) is
+refused, since it would not prepare them.
+
+--request answers a plan request for a library that runs this binary: a
+JSON object, in the file it names or on stdin (-), with version (1),
+dialect, documents, from (the recorded model, or null for an empty
+database), and optional renames, failOn and allow. It prints one line of
+JSON: version, plan, hazards and refused, the ids of the hazards of a
+failOn class that allow does not name; or, exiting 1, version and error.
+
 --out writes the plan JSON the runner applies. --format prints the plan
 as json, sql or markdown. --fail-on exits non-zero, after printing, when
 the plan has a hazard of a listed class that no --allow names.
@@ -130,10 +159,35 @@ Examples:
   superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
   superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
   superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --out plan.json
-  superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --print-model > legacy-model.json`,
-		Args: cobra.ExactArgs(1),
+  superschematic migrate plan ./schemas/services/shop-db --dialect sqlite --from-database legacy.db --drop view:order_totals --print-model > legacy-model.json
+  superschematic migrate plan --documents shop.schema.json --dialect sqlite --from applied-model.json --out plan.json
+  superschematic format --to=json --stdout ./src/shop.schema.ts | superschematic migrate plan --documents - --from applied-model.json
+  superschematic migrate plan --request - < request.json > response.json`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case flags.request != "":
+				if len(args) > 0 {
+					return fmt.Errorf("--request holds the documents; give no arguments with it")
+				}
+				return nil
+			case flags.documents:
+				if len(args) == 0 {
+					return fmt.Errorf("--documents takes the schema documents of one DB service as its arguments, or - for stdin")
+				}
+				return nil
+			default:
+				return cobra.ExactArgs(1)(cmd, args)
+			}
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMigratePlan(cmd, a, flags, args[0])
+			switch {
+			case flags.request != "":
+				return runMigratePlanRequest(cmd, a, flags)
+			case flags.documents:
+				return runMigratePlanDocuments(cmd, a, flags, args)
+			default:
+				return runMigratePlan(cmd, a, flags, args[0])
+			}
 		},
 	}
 	cmd.Flags().StringVar(&flags.from, "from", "", "the previous version: another checkout of the service directory, or a model JSON file")
@@ -148,7 +202,9 @@ Examples:
 	cmd.Flags().StringSliceVar(&flags.failOn, "fail-on", nil, "exit non-zero when the plan has a hazard of these classes that --allow does not name (comma-separated; all for every class)")
 	cmd.Flags().StringArrayVar(&flags.allow, "allow", nil, "a hazard id --fail-on lets pass (repeatable)")
 	cmd.Flags().BoolVar(&flags.printModel, "print-model", false, "print the new version's model, or with --from-database the file's, as canonical JSON and plan nothing")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml; with --documents, the one found walking up from the first document)")
+	cmd.Flags().BoolVar(&flags.documents, "documents", false, "take the new version as the arguments: one DB service's schema documents as format --to=json writes them, or - for stdin")
+	cmd.Flags().StringVar(&flags.request, "request", "", "answer the plan request in this file, or - for stdin, with one line of JSON on stdout")
 	cmd.Flags().StringVar(&flags.databaseURL, "database-url", "", "a Postgres server whose role may create a database, which the new version's queries are prepared on (default $"+QueriesDatabaseEnv+", else Postgres in Docker)")
 	return cmd
 }
@@ -157,6 +213,9 @@ Examples:
 // before anything loads.
 func (f *migratePlanFlags) parse(cmd *cobra.Command) (migratePlanInputs, error) {
 	var in migratePlanInputs
+	if err := f.checkDocumentsFlags(cmd); err != nil {
+		return in, err
+	}
 	if f.printModel {
 		// The file's model follows the renames and the drops the plan from
 		// it is given (D116), so --print-model takes them with the file.
@@ -199,9 +258,8 @@ func (f *migratePlanFlags) parse(cmd *cobra.Command) (migratePlanInputs, error) 
 	}
 	in.failOn = classes
 	for _, id := range f.allow {
-		class, _, ok := strings.Cut(id, ":")
-		if !ok || !slices.Contains(sqlmigrate.HazardClasses, sqlmigrate.HazardClass(class)) {
-			return in, fmt.Errorf("--allow %q is not a hazard id: want <class>:<subject>, as the plan lists it", id)
+		if err := migrateplan.CheckHazardID(id); err != nil {
+			return in, fmt.Errorf("--allow %w", err)
 		}
 	}
 	return in, nil
@@ -210,30 +268,9 @@ func (f *migratePlanFlags) parse(cmd *cobra.Command) (migratePlanInputs, error) 
 // parseHazardClasses reads --fail-on: hazard class names, or all for
 // every class. The result follows sqlmigrate.HazardClasses' order.
 func parseHazardClasses(values []string) ([]sqlmigrate.HazardClass, error) {
-	want := map[sqlmigrate.HazardClass]bool{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "all" {
-			for _, class := range sqlmigrate.HazardClasses {
-				want[class] = true
-			}
-			continue
-		}
-		class := sqlmigrate.HazardClass(value)
-		if !slices.Contains(sqlmigrate.HazardClasses, class) {
-			names := make([]string, 0, len(sqlmigrate.HazardClasses))
-			for _, class := range sqlmigrate.HazardClasses {
-				names = append(names, string(class))
-			}
-			return nil, fmt.Errorf("--fail-on %q is not a hazard class: want %s, or all", value, strings.Join(names, ", "))
-		}
-		want[class] = true
-	}
-	var classes []sqlmigrate.HazardClass
-	for _, class := range sqlmigrate.HazardClasses {
-		if want[class] {
-			classes = append(classes, class)
-		}
+	classes, err := migrateplan.ParseHazardClasses(values)
+	if err != nil {
+		return nil, fmt.Errorf("--fail-on %w", err)
 	}
 	return classes, nil
 }
