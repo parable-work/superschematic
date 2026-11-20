@@ -1792,7 +1792,8 @@ or Lease, Retries, Presence and Budget
 or Seats, or types a field as a Reconcile
 ([A row's seats, and a field that follows observations](#a-rows-seats-and-a-field-that-follows-observations)),
 or Schedules ([A row's schedules](#a-rows-schedules)), or Pool
-([A pool of members](#a-pool-of-members)),
+([A pool of members](#a-pool-of-members)), or Rollups and Dependencies
+([Values a row's children roll up, and blockers between rows](#values-a-rows-children-roll-up-and-blockers-between-rows)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -3034,3 +3035,101 @@ row's; one that writes no row applies nothing, and one that only reads,
 as `pick`, writes nothing in your transaction. An operation a behavior
 declares on a namespace as a whole (Comments') is left out:
 `@behaviorOperations` warns of it.
+
+### Values a row's children roll up, and blockers between rows
+
+A table implements `Rollups` and `Dependencies` as it implements Pool
+(D104's step 4). A rollup reads the rows that point at a row through a
+to-one relation of theirs: the rows a `HasMany` of the table lists. A
+dependency is an edge from a row to a row that blocks it.
+
+```ts
+// steps-db
+export abstract class Batch
+  implements
+    Rollups<Batch, {
+      rollups: {
+        done: { schema: "Step"; link: "batch"; function: "all"; outcomes: ["success"]; gatedStates: ["done"] };
+        steps: { schema: "Step"; link: "batch"; function: "count" };
+        byStatus: { schema: "Step"; link: "batch"; function: "countBy"; field: "status" };
+        estimate: { schema: "Step"; link: "batch"; function: "sum"; field: "estimate" };
+      };
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  status: Workflow<{ /* running, done, failed */ }>;
+  steps: HasMany<Step>;
+}
+
+export abstract class Step implements Dependencies<Step, { gatedStates: ["doing", "done"] }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  estimate?: Generic.Int64;
+  batch: Relation<Batch>;
+  status: Workflow<{ /* todo, doing, done, failed */ }>;
+}
+```
+
+Above, a batch is done only once every step that points at it is done
+with a success, and a step starts and finishes only once the steps it
+comes after are done.
+
+A rollup names its table (`schema`) and that table's to-one relation to
+this one (`link`), and a function:
+
+| Function | Value | Over no row |
+| --- | --- | --- |
+| `count` | how many rows point here | `0` |
+| `countBy` | `{ <value>: count }` over a string, enum or boolean field, or `Workflow.status`; a bare name that is a Workflow field of the table reads its status | `{}` |
+| `sum` | the sum of a number field | `0` |
+| `min`, `max` | the least or greatest value | absent |
+| `all` | whether every row is in a terminal state of its table's Workflow, or one its `finished` names, with an outcome `outcomes` lists when given | `true` |
+| `any` | whether some row is | `false` |
+
+- The build refuses a rollup whose table is no table of the database,
+  whose table composes no behavior (the behaviors' core holds only the
+  rows of a table that composes one), whose `link` is no to-one relation
+  of it to this table, and a field a function cannot read. `latest` waits
+  for a later step: the core reads no time a row was created at.
+- `gatedStates` names states of the table's one Workflow. A transition
+  into one is refused as `not_held` until every rollup that gates it
+  holds, whoever asks, with the rollup and its counts in the veto's
+  details. A rollup reads one page of 500 rows; past it the value is
+  `{ "over": true }` and its gate does not hold.
+- Rollups keeps no column. A read of the row computes its values through
+  the core; no repository, route or SDK serves that read yet. Rollups
+  joins and leaves a table with rows.
+
+Dependencies keeps a row's edges in a sub-table,
+`<table>_dependencies_blockers`, each keyed by its number on the row, with
+the blocker's table and key and who added it when. Its config is
+`schemas`, the tables a blocker may be a row of, each composing one
+Workflow (the table itself when absent), `gatedStates` (every terminal
+state when absent) and `satisfiedBy` (`["success"]` when absent).
+
+- `addBlocker({ schema?, id })`, `removeBlocker({ schema?, id })` and
+  `listBlockers({ limit?, cursor? })` are its operations, under the
+  member `dependencies`: `orm.step.dependencies.addBlocker(key, { id })`
+  in TypeScript, `db.GetStepRepository().Dependencies().AddBlocker(ctx,
+  id, orm.StepDependenciesAddBlockerParams{...})` in Go, and the route
+  `POST step/{id}/dependencies/add-blocker`. A create gives blockers in
+  its parameters too, each held to `addBlocker`'s checks.
+- A transition into a gated state while a blocker is open is refused as
+  `blocked`, the open blockers in the veto's details. A blocker is
+  finished in a terminal state, or one its Workflow's `finished` names,
+  whose outcome `satisfiedBy` lists; a reopened one blocks again, and a
+  dependent that went through its gate meanwhile stays where it is.
+- `addBlocker` refuses the row itself, a table the config does not list,
+  a row that does not exist, one already there (`already_blocking`), an
+  edge that would close a cycle through any table (`cycle`), and an open
+  blocker of a row in a gated state no transition leaves (`gated`).
+- A blocker that is gone neither blocks nor is listed; its edge stays
+  until `removeBlocker` takes it, and deleting a dependent deletes its
+  edges. `listDependents` is an engine type's alone: on a table the rows
+  a row blocks are a query over every table's blockers, and
+  `@behaviorOperations` leaves it out, of which the build warns.
+- Dependencies joins a table with rows, each starting with no blockers,
+  and cannot leave one.

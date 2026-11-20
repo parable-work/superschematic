@@ -952,6 +952,10 @@ engine.instances.get(alice, 'Task', 't1')?.behaviors;
   `removeBlocker` event, as the caller who deleted it.
 - Blockers are read as the caller. A caller who may not read a blocker's
   schema cannot read `blocked` on what it blocks.
+- A DB table implements Dependencies too, `implements Dependencies<Task,
+  { ... }>`, its edges a sub-table of its own and `listDependents` left
+  out
+  ([Database tables](/superschematic/guides/database-tables/#values-a-rows-children-roll-up-and-blockers-between-rows)).
 
 ## Links
 
@@ -1051,6 +1055,10 @@ they ended.
   `{ "over": true }`, and a gate on it does not hold.
 - A misconfigured rollup (an unknown link, a `sum` over a text field) is
   refused when the schema is defined, as `invalid_schema`.
+- A DB table implements Rollups too, `implements Rollups<Project, { ...
+  }>`, over the rows a `HasMany` of it lists, its link their to-one
+  relation; `latest` waits there
+  ([Database tables](/superschematic/guides/database-tables/#values-a-rows-children-roll-up-and-blockers-between-rows)).
 
 ## Search
 

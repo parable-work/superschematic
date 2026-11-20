@@ -2494,7 +2494,8 @@ with a path parameter in a segment's place (`account/{id}/pick` matching
 `account/pool/pick`), so no router's precedence decides: rename one, or
 serve the table's operations from code of your own. An operation a
 behavior declares on a namespace as a whole (Comments') is not served,
-and the build warns of it.
+and the build warns of it, and neither is one a table leaves out
+(Dependencies' `listDependents`, D104's step 4, an engine type's alone).
 
 ## OpenAPI
 

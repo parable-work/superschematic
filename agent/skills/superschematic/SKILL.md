@@ -699,6 +699,28 @@ Most are load errors; knowing them saves a build round-trip:
   rules and re-arms no recheck: repair with `markOut` and `reportRoom`
   where you can. Pool is the behaviors' core's alone: no engine type
   composes it.
+- When a row waits for the rows that point at it (a batch done once its
+  steps are, a barrier released once every agent is ready, D104),
+  implement Rollups on the table rather than a count column you keep by
+  hand: `implements Rollups<Batch, { rollups: { done: { schema: "Step";
+  link: "batch"; function: "all"; outcomes: ["success"]; gatedStates:
+  ["done"] } } }>`, `schema` the table that points here and `link` its
+  `Relation<Batch>`, the rows `steps: HasMany<Step>` lists. A transition
+  into a gated state is refused as `not_held` until the rollup holds;
+  the table that points here must compose a behavior (Workflow for `all`
+  and `any`), and `latest` is not yet taken on a table. No column holds a
+  value and no route reads one yet.
+- When rows wait for other rows (a step after the steps before it),
+  implement Dependencies on the table, beside its Workflow, rather than a
+  `blocked_by` column: `implements Dependencies<Step, { gatedStates:
+  ["doing", "done"] }>`. Add an edge with `dependencies.addBlocker(key,
+  { id })` (`POST /api/step/{id}/dependencies/add-blocker`), or in a
+  create's parameters; a move into a gated state is refused as `blocked`
+  while a blocker is not done with an outcome `satisfiedBy` lists, and a
+  cycle as `cycle`. `listDependents` is an engine type's alone. A raw SQL
+  write of the `<table>_dependencies_blockers` sub-table is never refused
+  but runs none of its checks: add and remove edges through the
+  operations.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the
