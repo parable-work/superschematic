@@ -260,8 +260,8 @@ mod tests {
     }
 
     /// Schedules declares the event it emits (D104), with its payloadSchema,
-    /// which a binding hands its host whole; Pool, the last, its operation of
-    /// the table as a whole and the contract it asks.
+    /// which a binding hands its host whole; Pool its operation of the table
+    /// as a whole and the contract it asks.
     #[test]
     fn schedules_declares_the_event_it_emits() {
         let (out, ok) = run_json(Op::Declarations, b"");
@@ -274,8 +274,7 @@ mod tests {
                 .unwrap()
                 .clone()
         };
-        let pool = files.as_array().and_then(|files| files.last()).unwrap();
-        assert_eq!(pool["name"], "Pool");
+        let pool = named("Pool");
         assert_eq!(pool["operations"][2]["scope"], "schema");
         assert_eq!(pool["contracts"][0]["role"], "asks");
         assert_eq!(pool["events"][0]["kind"], "recheck");

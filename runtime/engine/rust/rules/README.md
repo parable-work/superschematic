@@ -941,8 +941,8 @@ writes (`UPDATE_TRANSCRIPTS=1` rewrites them), and holds each to a floor:
 one raw write, in the 14 scenarios a core with no test fixtures runs;
 `core-timers` to 139 steps, 54 checks and 85 commands, 12 of them deadlines
 and 29 changes a runner ran, in 13 scenarios, the one whose fire a
-StateRules guard vetoes among them; `core-reactions` to 586
-steps, 110 checks and 476 commands, 252 of them changes, in 26 scenarios;
+StateRules guard vetoes among them; `core-reactions` to 618
+steps, 114 checks and 504 commands, 266 of them changes, in 27 scenarios;
 `core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
 them changes, in 4 scenarios; `core-constants` to 39 steps, 19 checks and
 20 commands, in 4 scenarios; `core-staterules` to 76 steps, 33 checks and
@@ -962,7 +962,10 @@ Reconcile are anchored on fields, and `core-schedules` to 161 steps, 29
 checks, 13 of them refused defines, 131 commands, 10 of them repeats and
 late reports answered unchanged, 19 deadlines and 10 changes a runner
 ran, and one raw write, in 8 scenarios, each fire with the events it
-wrote (`expect.events`). Every transcript's `behaviors` lists the
+wrote (`expect.events`); and, of Rollups and Dependencies (D104's step
+4), `core-rollups` to 180 steps, 72 checks and 108 commands, in 13
+scenarios, and `core-dependencies` to 266 steps, 107 checks and 159
+commands, in 18 scenarios. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to
