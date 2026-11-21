@@ -153,7 +153,7 @@ affects; a check of what only a generator finds (a worker whose queue is
 no `@queue` class); an editor integration over `--json`.
 
 **D73** (L 9887). Derived inputs from linked instances. Derived's `from`
-takes own fields only.
+takes own fields only, on the engine and on a table.
 
 **D74** (L 10738, 10794).
 - Go derivers, a deriver over an HTTP engine, a model-label construct, a
@@ -632,11 +632,16 @@ own fields (`Cx::update`, held to an update's validation and guards);
 and of Comments, its messages, edits and reactions sub-tables of the row
 and its conversation's marks a shared table, with the core's operation
 beside its row (`"beside": true`), which asks only its own use's guard
-and writes no row, so a post leaves the row's version as it was.
-Development mode runs all nineteen. Left: the rest of step 4 (Derived,
-Provenance, Holds, Stock, Calendar and Payments, each held to the test,
-and the folded Links, Search, Queue and Branches removed), and steps 5 to
-7, whose step 6 D117 renames development mode. What the built steps left follows. The
+and writes no row, so a post leaves the row's version as it was; and of
+Derived (each field's source, override, attempts and failure a sub-table
+of the row, settled by table operations a deriver calls) and Provenance
+(who wrote each field, by which behavior and with what confidence, and a
+review that gates the Workflow), with the core's attributed write
+(`Cx::update_attributed`), a caller's `actingFor` and a field's schema.
+Development mode runs all twenty-one. Left: the rest of step 4
+(Holds, Stock, Calendar and Payments, each held to the test, and the
+folded Links, Search, Queue and Branches removed), and steps 5 to 7, whose
+step 6 D117 renames development mode. What the built steps left follows. The
 names and rules are reversible until the first release.
 
 Four of step 4's ports met the test as follows, and each waits on a choice:
@@ -698,7 +703,19 @@ a conversation by page, where every operation reads its sub-tables
 whole; a beside write that races its row's delete, which fails on the
 foreign key as a database error rather than `not_found`; and the
 declaration's descriptions, which still describe the engine's features.
-`examples/engine-notes` waits for streamed replies and read state.
+`examples/engine-notes` waits for streamed replies and read state. The core's caller now carries `actingFor`, so a message's `for` can be recorded.
+
+What Derived and Provenance left: a deriver deployable over a table that
+implements Derived (`internal/stack` takes a `@deriver` over such a table,
+the TypeScript and Rust deriver entrypoints open the database's
+repository as the deriver, a `DerivationSource` maps to the table's
+operations, and its answers are typed from the table's own fields); an
+index for a deriver's pull, which scans rows a page at a time until a
+declaration may list a column (step 7); raw writes, which neither hears;
+the computed `fields` and `stale` served by the repositories and the API;
+a server that sets `actingFor` from its principal; an extraction schema
+for an object or JSON field; `usage`, which is taken and not stored; and
+a `status` member for a table with several Workflows.
 
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are

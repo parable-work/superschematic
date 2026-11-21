@@ -884,8 +884,8 @@ jobs:
           # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
           # Postgres above too, each in a schema of its own, deadlines,
           # change queues and event queues, the read across a table and a
-          # command without a row among them, and the core's nineteen
-          # transcripts replayed there as on bun:sqlite.
+          # command without a row among them, and every transcript of the
+          # core replayed there as on bun:sqlite.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           bun install --frozen-lockfile
