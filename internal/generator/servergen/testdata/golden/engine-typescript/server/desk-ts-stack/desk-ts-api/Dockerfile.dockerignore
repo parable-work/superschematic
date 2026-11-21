@@ -7,7 +7,9 @@
 !runtime/engine-workqueue/rust
 !runtime/engine/rust
 !runtime/engine/typescript
+!runtime/http/rust
 !runtime/http/typescript
+!runtime/migrate/rust
 !runtime/schema/rust
 !runtime/schema/rust-ir
 !runtime/versiongraph/rust

@@ -8,6 +8,8 @@
 !runtime/engine-workqueue/rust
 !runtime/engine/rust
 !runtime/http/go
+!runtime/http/rust
+!runtime/migrate/rust
 !runtime/rules/go
 !runtime/schema/rust
 !runtime/schema/rust-ir
