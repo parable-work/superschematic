@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D119 is the highest so far.
+  the highest number any branch has used. D131 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -1296,3 +1296,14 @@ and an embedded environment is compiled.
    the recorded model, and D103's step 7.
 
 The names and rules are reversible until the first release.
+
+## D123. `@mcp` says `additive: true` for a tool that only adds, and each visible tool's record carries its MCP annotations from its replay mode and that flag (D93 amended)
+
+Built: the `additive` key and its refusals, and the resolved annotations
+in each visible tool's record in `tools/schema.json`
+(`ir.ResolveMCPToolAnnotations`, `docs/src/content/docs/reference/mcp-tools.md`).
+The commit that built it names D123.
+
+Left: an API's MCP endpoint, in the Go, TypeScript and Rust servers, and
+the engine's still list `annotations.readOnlyHint` alone. They take
+`destructiveHint` and `idempotentHint` when they read the resolved record.
