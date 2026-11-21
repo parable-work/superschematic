@@ -149,6 +149,11 @@ pub mod scalars {
         if length > 40 {
             errors.push(ValidationError::new("maxLength", "must be at most 40 characters"));
         }
+        // The scalar core checks the rules above again, so it runs only when
+        // they pass: one failing value, one error.
+        if errors.is_empty() {
+            return core_check("Temporal.Date", value);
+        }
         if errors.is_empty() {
             Ok(())
         } else {

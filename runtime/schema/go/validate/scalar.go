@@ -149,7 +149,7 @@ func isJSONValue(value any, depth int) bool {
 // HasCustomValidate, its result is returned as-is. [DefaultRegistry]
 // registers the linked scalar core's dispatch for every name it knows,
 // which carries the deep custom validators (Embedding.Vector /
-// Generic.StringMap deep serde, Asset.FilePath / Text.Markdown min_length 1)
+// Generic.StringMap deep serde, Asset.FilePath min_length 1)
 // that the IR constraints cannot express. The core checks the IR
 // constraints again, so running it only after they pass reports one error
 // per failing value. An injected registry decides the set for itself; the

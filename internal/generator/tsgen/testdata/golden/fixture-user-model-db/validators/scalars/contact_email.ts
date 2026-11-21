@@ -10,8 +10,6 @@ import { validateContactEmail as validateContactEmailFromLib, normalizeContactEm
 // amended; D100).
 export { parseContactEmailStrict, normalizeContactEmailStrict } from 'superscalar/scalars';
 
-const ContactEmailPattern = new RegExp("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", "u");
-
 /**
  * Validates a Contact.Email value
  */
@@ -38,10 +36,6 @@ export function validateContactEmail(
 
   if (length > 255) {
     errors.push({ validator: "maxLength", message: "must be at most 255 characters" });
-  }
-
-  if (!ContactEmailPattern.test(s)) {
-    errors.push({ validator: "pattern", message: "invalid format" });
   }
 
   // The scalar core checks the rules above again, so it runs only when they

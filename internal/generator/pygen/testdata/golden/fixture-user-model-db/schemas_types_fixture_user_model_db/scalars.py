@@ -96,7 +96,6 @@ ContactEmail = Annotated[
     Field(
         description="An email address",
         max_length=255,
-        pattern=re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", re.ASCII),
     ),
     BeforeValidator(_custom_normalize_contact_email),
     AfterValidator(_custom_validate_contact_email),

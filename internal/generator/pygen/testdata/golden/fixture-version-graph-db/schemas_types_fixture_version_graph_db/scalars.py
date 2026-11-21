@@ -27,6 +27,8 @@ try:
 
         parse_identity_user_id,
 
+        validate_temporal_date,
+
         parse_temporal_date_time,
 
         normalize_temporal_duration,
@@ -128,6 +130,19 @@ def _custom_normalize_temporal_duration(v: Any) -> Any:
     except Exception as e:
         raise ValueError(str(e))
     return normalized
+
+def _custom_validate_temporal_date(v: Any) -> Any:
+    """Custom validation wrapper for Temporal.Date.
+
+    Wraps the scalar library validator that returns list[ValidationError]
+    to the Pydantic-compatible pattern that raises ValueError.
+    """
+    if not _SCALAR_MODULE_AVAILABLE:
+        return v
+    errors = validate_temporal_date(str(v))
+    if errors:
+        raise ValueError("; ".join([e.message for e in errors]))
+    return v
 
 def _custom_validate_temporal_duration(v: Any) -> Any:
     """Custom validation wrapper for Temporal.Duration.
@@ -265,15 +280,6 @@ IdentityUserID = Annotated[
 
 # Temporal.Date - Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).
 
-def _validate_temporal_date_length(v: Any) -> Any:
-    """Validate Temporal.Date length constraints."""
-    if v is None:
-        return v
-    s = str(v)
-    if len(s) > 40:
-        raise ValueError("must be at most 40 characters")
-    return v
-
 # Standard scalar type
 TemporalDate = Annotated[
     str,
@@ -281,7 +287,7 @@ TemporalDate = Annotated[
         description="Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
         max_length=40,
     ),
-    AfterValidator(_validate_temporal_date_length),
+    AfterValidator(_custom_validate_temporal_date),
 ]
 
 # Temporal.DateTime - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
@@ -327,7 +333,7 @@ TemporalDuration = Annotated[
     AfterValidator(_custom_validate_temporal_duration),
 ]
 
-# Temporal.Time - Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+# Temporal.Time - Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.
 _TemporalTime_pattern = re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$", re.ASCII)
 
 def _validate_temporal_time_pattern(v: Any) -> Any:
@@ -343,7 +349,7 @@ def _validate_temporal_time_pattern(v: Any) -> Any:
 TemporalTime = Annotated[
     str,
     Field(
-        description="Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+        description="Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
         pattern=re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$", re.ASCII),
     ),
     AfterValidator(_validate_temporal_time_pattern),

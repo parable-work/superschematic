@@ -2,6 +2,8 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+import { validateTemporalDate as validateTemporalDateFromLib } from 'superscalar/scalars';
+
 // The constructors of TemporalDate, the scalar library's own, which the
 // package hands out beside the type: each returns the value as
 // TemporalDate and throws on a value Temporal.Date refuses (D25,
@@ -34,6 +36,15 @@ export function validateTemporalDate(
 
   if (length > 40) {
     errors.push({ validator: "maxLength", message: "must be at most 40 characters" });
+  }
+
+  // The scalar core checks the rules above again, so it runs only when they
+  // pass: one failing value, one error.
+  if (errors.length === 0) {
+    const [isValid, customErrors] = validateTemporalDateFromLib(value as string);
+    if (!isValid && customErrors) {
+      errors.push(...customErrors);
+    }
   }
 
   return errors.length > 0 ? [false, errors] : [true, null];

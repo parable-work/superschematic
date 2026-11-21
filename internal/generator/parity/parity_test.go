@@ -831,11 +831,12 @@ var vectors = []parityVector{
 		want:    map[string][]string{"url": {"pattern"}},
 	},
 	{
-		// Contact.Email is checked by its pattern and by the scalar core's
-		// custom validator; the value is still reported once.
+		// Contact.Email declares no pattern: the scalar core's own email
+		// grammar refuses the value, and only the core finds the failure.
 		name:    "email_bad_format",
 		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "email": "not an email"}`,
-		want:    map[string][]string{"email": {"pattern"}},
+		want:    map[string][]string{"email": {"parse"}},
+		core:    []string{"email"},
 	},
 	{
 		name:    "req_scalar_list_bad_format",
