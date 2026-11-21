@@ -324,6 +324,8 @@ fn the_engines_tools_carry_the_invocation_policy_acmes_binary_registers() {
         .expect("the OperationMCP record");
     let own = [
         "_meta",
+        "additive",
+        "annotations",
         "description",
         "handle",
         "hidden",
