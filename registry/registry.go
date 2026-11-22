@@ -52,6 +52,9 @@ type (
 	ToolHook = registry.ToolHook
 	// RateLimitKey is a principal @rateLimit key an extension names (D131).
 	RateLimitKey = apigen.RateLimitKey
+	// PackageDir is an extension generator's output directory that holds
+	// one package per service, which build-all's dependency graph reads.
+	PackageDir   = registry.PackageDir
 	ToolSet      = apigen.ToolSet
 	Tool         = apigen.Tool
 	ToolKeys     = apigen.ToolKeys
